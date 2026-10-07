@@ -14,8 +14,8 @@ namespace Spire.Logic;
 /// adapter reports a decision point.
 ///
 /// This is the same model on every build. Under NativeAOT-LLVM on WASI there
-/// are no threads at all; CoreLib's own single-threaded thread pool and timer
-/// queue run when the adapter yields to the event loop (<see cref="Settle"/>).
+/// are no threads and no event loop: everything runs from this queue, and
+/// nothing may block (<see cref="Settle"/>).
 /// </summary>
 public static class Sched
 {
@@ -129,20 +129,36 @@ public static class Sched
         System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(inner).Throw();
     }
 
+    /// <summary>Thread-pool work items seen pending while settling (diagnostic:
+    /// the WASI build has no thread pool that runs on its own).</summary>
+    public static long PoolWorkSeen;
+
     /// <summary>
-    /// Lets work that left the queue context (thread-pool items, timers,
-    /// ConfigureAwait(false) continuations) run, then drains the queue again,
-    /// until both are idle. Awaited only by the top-level command loop.
+    /// Drains the queue until it stays empty. Synchronous: nothing here relies
+    /// on a runtime event loop (NativeAOT-LLVM on wasip1 has none, and its
+    /// blocking waits throw PlatformNotSupportedException). On the JIT build
+    /// thread-pool work that the game queued runs on real threads; settling
+    /// waits briefly for it, and counts it so the WASI build's assumption
+    /// (the game queues none once patched) stays checked.
     /// </summary>
-    public static async Task Settle(int maxRounds = 10_000)
+    public static void Settle(int maxRounds = 10_000)
     {
         int idleRounds = 0;
         for (int round = 0; round < maxRounds; round++)
         {
             int ran = Pump();
-            await ThreadPoolYield.Instance;
-            bool poolIdle = ThreadPool.PendingWorkItemCount == 0;
-            if (ran == 0 && Context.IsEmpty && poolIdle)
+            long pending = ThreadPool.PendingWorkItemCount;
+            if (pending > 0)
+            {
+                PoolWorkSeen += pending;
+                if (OperatingSystem.IsWasi())
+                {
+                    Log.Error($"Sched.Settle: {pending} thread-pool item(s) pending on a runtime without threads");
+                    return;
+                }
+                Thread.Sleep(0);
+            }
+            if (ran == 0 && Context.IsEmpty && pending == 0)
             {
                 if (++idleRounds >= 2)
                     return;
@@ -188,19 +204,5 @@ public static class Sched
         {
             lock (_lock) return _queue.TryDequeue(out work);
         }
-    }
-
-    /// <summary>
-    /// Awaitable that resumes on the thread pool regardless of the current
-    /// context (Task.Yield would post back to the queue context).
-    /// </summary>
-    private sealed class ThreadPoolYield : INotifyCompletion
-    {
-        public static readonly ThreadPoolYield Instance = new();
-        public ThreadPoolYield GetAwaiter() => this;
-        public bool IsCompleted => false;
-        public void OnCompleted(Action continuation) =>
-            ThreadPool.UnsafeQueueUserWorkItem(static c => ((Action)c!)(), continuation);
-        public void GetResult() { }
     }
 }

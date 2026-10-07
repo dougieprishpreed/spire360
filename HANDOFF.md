@@ -24,21 +24,27 @@ PowerPC (qemu), Win32 backend (wine).
 - Runs on the player's real localization tables (from their pck): 25/25 and
   10/10 `--tank`; UTF-8 protocol verified with Japanese tables.
 
-**XDK spike (M0): mostly answered (user's XDK + Xenia).**
+**XDK spike (M0): done (user's XDK, run in Xenia).**
 - hello: all checks pass (big-endian, `_MSC_VER` 1600, `lwbrx` incl.
   unaligned, 64 MB reserve+commit, D3D device).
 - bigcode: 64 MB of code (37,400 functions) links and runs: PASS. The build
   took 2.5 h on one core; `/MP` is now on.
 - probe: VS2010 PPC compiler, strict C89 (docs/CODING_RULES.md).
-- selftest/bench: round 2 failed on `<intrin.h>` (w2c2's MSVC atomics) and
-  would next have hit MSVC 2010's missing C99 math; both fixed (PATCHES.md
-  5, 6, 7). Waiting for round 3.
+- selftest: everything right except `stat` size right after an append
+  (Xenia: 11 for a 12-byte file); stat now asks an open handle (fixed, to
+  re-check).
+- bench: all checks identical to PC; 2.40 s vs 0.63 s on the PC (3.8x), in
+  Xenia (not hardware).
 
-**Logic as wasm (M1): built on the user's PC.** `logic.wasm` 50.7 MB core
-module -> 77 C files. The first build had 1,473 "will always throw" methods
-from stub metadata mismatches; fixed (DECISIONS D9). Imports: 35 missing are
-`wasi:http/*` + `wasi:io/streams|error` (HTTP client, never called; trap
-stubs) and `fd_advise` (implemented; its symbol length was wrong).
+**Logic as wasm (M1): wasm -> C -> native PC works.** The user's
+`logic.wasm` (50.7 MB) translated here to 309 MB of C (77 files), compiled
+with gcc -O1 in 5 min to an 82 MB program; the .NET runtime boots inside it
+and prints `ready`. It then hit `Task.Wait` (async `Main`): NativeAOT-LLVM on
+wasip1 has no event loop and blocking waits throw. The command loop is now
+synchronous (Sched drives everything; measured: the game queues no
+thread-pool work, traces unchanged). Needs a rebuild of the wasm to confirm.
+Earlier: 1,473 always-throwing methods from stub metadata mismatches, fixed
+(DECISIONS D9).
 
 **Converter: started.** `converter/pck_tool.py` reads Godot 4 packs; works on
 the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
@@ -54,11 +60,12 @@ holds, for the converter:
 
 ## Waiting on the user
 
-1. M0 round 3: `xdk\build.cmd` (selftest, bench); run them in Xenia.
-2. M1 again (stub fixes): `build_logic.py` all stages + `--stage native`, then
-   `random_runs.py` against `out/logic/native/logic_host`.
-3. Optional: upload `out/logic/logic.wasm` (zipped) so the translated logic
-   can be tested here on x86 and big-endian PowerPC (qemu).
+1. Rebuild the wasm (stub fixes + synchronous Main) and upload logic.wasm;
+   or allow pkgs.dev.azure.com, *.vsblob.vsassets.io, github.com,
+   objects.githubusercontent.com, release-assets.githubusercontent.com in the
+   environment's network settings so the wasm can be built here.
+2. selftest once more in Xenia (stat fix); bench/selftest on hardware when
+   convenient (Xenia timings are not the console's).
 
 ## Next (agent)
 

@@ -14,13 +14,13 @@ namespace Spire.Logic;
 /// </summary>
 internal static class SelfPlay
 {
-    public static async Task<Dictionary<string, object?>> Run(RunDriver driver, string character, string seed, int maxSteps, bool tank)
+    public static Dictionary<string, object?> Run(RunDriver driver, string character, string seed, int maxSteps, bool tank)
     {
         var rng = new Random(StableHash(seed));
         var total = Stopwatch.StartNew();
         var sw = Stopwatch.StartNew();
         var state = driver.StartRun(character, 0, seed, "en");
-        await Sched.Settle();
+        Sched.Settle();
         double startMs = sw.Elapsed.TotalMilliseconds;
         if (tank) driver.SetPlayerHp(999, 999);
 
@@ -50,7 +50,7 @@ internal static class SelfPlay
             sw.Restart();
             state = driver.ExecuteAction(action, args);
             long before = Sched.CallbacksRun;
-            await Sched.Settle();
+            Sched.Settle();
             if (Sched.CallbacksRun != before && Str(state, "type") == "decision")
                 state = driver.CurrentDecision();
             Steps.Drain();
@@ -90,6 +90,7 @@ internal static class SelfPlay
                 }),
             ["gc_heap_bytes"] = GC.GetTotalMemory(false),
             ["gc_collections"] = GC.CollectionCount(0),
+            ["pool_work_seen"] = Sched.PoolWorkSeen,
         };
     }
 

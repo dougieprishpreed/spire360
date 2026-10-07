@@ -230,6 +230,23 @@ int srt_plat_stat(const char* path, srt_stat* st) {
     st->type = (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? SRT_FT_DIRECTORY : SRT_FT_REGULAR;
     st->size = ((srt_u64)a.nFileSizeHigh << 32) | a.nFileSizeLow;
     st->mtime_ns = srt_filetime_ns(&a.ftLastWriteTime);
+    if (st->type == SRT_FT_REGULAR) {
+        /* The size by path can be stale right after a write (Xenia reported
+         * 11 bytes for a 12-byte file just appended to); a handle's size is
+         * current. */
+        HANDLE h = CreateFileA(wp, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) {
+            DWORD high = 0;
+            DWORD low;
+            SetLastError(ERROR_SUCCESS);
+            low = GetFileSize(h, &high);
+            if (!(low == INVALID_FILE_SIZE && GetLastError() != ERROR_SUCCESS)) {
+                st->size = ((srt_u64)high << 32) | low;
+            }
+            CloseHandle(h);
+        }
+    }
     return 0;
 }
 

@@ -1,8 +1,9 @@
 // Command router ported from sts2-cli's Program.cs
 // (https://github.com/Garglemesh/sts2-cli, MIT, (c) 2025 Hao Wu).
 //
-// Spire360 changes: async Main (on WASI this is CoreLib's single-threaded
-// event loop), every response gets the animation "steps" recorded while it
+// Spire360 changes: a synchronous command loop (NativeAOT-LLVM on wasip1 has
+// no event loop and no blocking waits; Sched drives all async game code),
+// every response gets the animation "steps" recorded while it
 // was computed, nested decisions for synchronous game prompts, and no
 // assembly-resolve hook (the game assemblies are referenced directly).
 using System.Text.Json;
@@ -14,7 +15,7 @@ internal static class Program
 {
     public const string Version = "0.1.0";
 
-    private static async Task<int> Main(string[] args)
+    private static int Main(string[] args)
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             Log.Error($"Unhandled: {e.ExceptionObject}");
@@ -56,7 +57,7 @@ internal static class Program
             {
                 if (Protocol.Str(cmd.Value, "cmd") == "selfplay")
                 {
-                    result = await SelfPlay.Run(driver,
+                    result = SelfPlay.Run(driver,
                         Protocol.Str(cmd.Value, "character", "Ironclad")!,
                         Protocol.Str(cmd.Value, "seed", "selfplay")!,
                         Protocol.Int(cmd.Value, "steps", 3000),
@@ -74,7 +75,7 @@ internal static class Program
             // Let thread-pool work and timers that left the queue finish; if
             // that changed the game, the decision point may have moved on.
             long afterHandle = Sched.CallbacksRun;
-            await Sched.Settle();
+            Sched.Settle();
             if (Sched.CallbacksRun != afterHandle && result != null
                 && result.TryGetValue("type", out var t) && (t as string) == "decision")
             {
@@ -215,6 +216,8 @@ internal static class Program
                     ["type"] = "pong",
                     ["callbacks_run"] = Sched.CallbacksRun,
                     ["gc_heap_bytes"] = GC.GetTotalMemory(false),
+                    ["pool_work_seen"] = Sched.PoolWorkSeen,
+                    ["pool_work_completed"] = ThreadPool.CompletedWorkItemCount,
                 };
 
             default:

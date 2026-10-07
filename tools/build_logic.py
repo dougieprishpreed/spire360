@@ -263,6 +263,12 @@ def stage_native(a):
     cdir = os.path.join(OUT, "c")
     if not os.path.isdir(cdir):
         sys.exit("run the c stage first")
+    wasm = os.path.join(OUT, "logic.wasm")
+    if os.path.exists(wasm) and os.path.getmtime(wasm) > os.path.getmtime(os.path.join(cdir, "logic.h")):
+        print("WARNING: logic.wasm is newer than out/logic/c: run the c stage first")
+    # Stubs for whatever the runtime still lacks, against the runtime as it is now.
+    run([sys.executable, os.path.join(ROOT, "tools", "w2c2_imports.py"), os.path.join(cdir, "logic.h"),
+         "--stubs", os.path.join(cdir, "logic_stubs.c")], check=False, stdout=subprocess.DEVNULL)
     build = os.path.join(OUT, "native")
     objdir = os.path.join(build, "obj")
     os.makedirs(objdir, exist_ok=True)
@@ -327,6 +333,11 @@ def main():
     ap.add_argument("--native-opt", default="1", help="optimisation level for the native stage (0, 1, 2)")
     ap.add_argument("--jobs", type=int, help="parallel compiles for the native stage (default: all cores)")
     a = ap.parse_args()
+    # Visual Studio developer prompts set Platform=x64, which MSBuild reads as
+    # a property (wasi-wasm publish fails with NETSDK1032).
+    for k in [k for k in os.environ if k.lower() == "platform"]:
+        print(f"(ignoring environment variable {k}={os.environ[k]})")
+        del os.environ[k]
     stages = DEFAULT_STAGES if a.stage == "all" else a.stage.split(",")
     if "copy" in stages and not a.game_dir:
         sys.exit("--game-dir is required for the copy stage")
