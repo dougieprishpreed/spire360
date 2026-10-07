@@ -10,7 +10,8 @@ Value encoding (JSON):
     constructors  {"t": "Vector2", "v": [1, 2]}
     NodePath      {"np": "a/b"}
     StringName    plain string
-    ExtResource   {"ext": "<pack name>", "type": "Texture2D"}  (null name if unresolved)
+    ExtResource   {"ext": "<pack name>", "type": "Texture2D"}
+                  ({"ext": null, "type", "path": "res://..."} if not in the pack, e.g. scripts)
     SubResource   {"sub": "<id>"}
 
 Scene JSON: {"kind": "scene"|"resource", "type", "ext": {id: {...}},
@@ -38,7 +39,9 @@ def _value(v, ext_names):
     if isinstance(v, variant.Ref):
         if v.kind == "SubResource":
             return {"sub": v.id}
-        name, type_ = ext_names.get(v.id, (None, None))
+        name, type_, path = ext_names.get(v.id, (None, None, None))
+        if name is None:
+            return {"ext": None, "type": type_, "path": path}  # not in the pack (scripts): keep the res:// path
         return {"ext": name, "type": type_}
     if isinstance(v, variant.Ctor):
         return {"t": v.name, "v": [_value(a, ext_names) for a in v.args]}
@@ -67,7 +70,7 @@ def to_json(tr, res):
     ext = {}
     for id_, e in tr.ext_resources.items():
         name = pack_name_for(res, e.get("path", ""), e.get("uid"))
-        ext_names[id_] = (name, e.get("type"))
+        ext_names[id_] = (name, e.get("type"), e.get("path"))
         ext[id_] = {"type": e.get("type"), "name": name, "path": e.get("path")}
     out = {
         "kind": "scene" if tr.is_scene else "resource",

@@ -1,0 +1,641 @@
+#include "controls.h"
+
+#include "canvas.h"
+#include "value.h"
+
+#include <math.h>
+
+namespace spire {
+
+static Texture2DRes* as_texture(Resource* r) { return r && r->is_texture() ? (Texture2DRes*)r : NULL; }
+
+/* ---- TextureRect ---- */
+
+bool TextureRect::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "texture") texture = as_texture(ctx.resource(v));
+    else if (key == "expand_mode") expand_mode = v.i();
+    else if (key == "expand") expand_mode = v.b() ? EXPAND_IGNORE_SIZE : EXPAND_KEEP_SIZE; /* Godot 3 name */
+    else if (key == "stretch_mode") stretch_mode = v.i();
+    else if (key == "flip_h") flip_h = v.b();
+    else if (key == "flip_v") flip_v = v.b();
+    else return Control::set(key, v, ctx);
+    return true;
+}
+
+Vec2 TextureRect::get_minimum_size() {
+    if (!texture) return Vec2();
+    Vec2 ts = texture->size();
+    switch (expand_mode) {
+    case EXPAND_KEEP_SIZE: return ts;
+    case EXPAND_IGNORE_SIZE: return Vec2();
+    case EXPAND_FIT_WIDTH: return Vec2(size.y, 0);
+    case EXPAND_FIT_WIDTH_PROPORTIONAL: return Vec2(size.y * (ts.x / ts.y), 0);
+    case EXPAND_FIT_HEIGHT: return Vec2(0, size.x);
+    case EXPAND_FIT_HEIGHT_PROPORTIONAL: return Vec2(0, size.x * (ts.y / ts.x));
+    }
+    return Vec2();
+}
+
+void TextureRect::draw(Canvas& c) {
+    if (!texture) return;
+    Vec2 sz, ofs;
+    Rect2 region;
+    bool tile = false, has_region = false;
+    Vec2 ts = texture->size();
+    switch (stretch_mode) {
+    case STRETCH_SCALE: sz = size; break;
+    case STRETCH_TILE:
+        sz = size;
+        tile = true;
+        break;
+    case STRETCH_KEEP: sz = ts; break;
+    case STRETCH_KEEP_CENTERED:
+        ofs = (size - ts) * 0.5f;
+        sz = ts;
+        break;
+    case STRETCH_KEEP_ASPECT_CENTERED:
+    case STRETCH_KEEP_ASPECT: {
+        sz = size;
+        int tw = (int)(ts.x * sz.y / ts.y);
+        int th = (int)sz.y;
+        if (tw > sz.x) {
+            tw = (int)sz.x;
+            th = (int)(ts.y * tw / ts.x);
+        }
+        if (stretch_mode == STRETCH_KEEP_ASPECT_CENTERED) {
+            ofs.x += (sz.x - tw) / 2;
+            ofs.y += (sz.y - th) / 2;
+        }
+        sz = Vec2((float)tw, (float)th);
+        break;
+    }
+    case STRETCH_KEEP_ASPECT_COVERED: {
+        sz = size;
+        Vec2 sc(sz.x / ts.x, sz.y / ts.y);
+        float s = sc.x > sc.y ? sc.x : sc.y;
+        Vec2 scaled = ts * s;
+        Vec2 d = (scaled - sz) / s;
+        region.pos = Vec2(fabsf(d.x) / 2.0f, fabsf(d.y) / 2.0f);
+        region.size = sz / s;
+        has_region = region.has_area();
+        break;
+    }
+    }
+    if (flip_h) sz.x = -sz.x;
+    if (flip_v) sz.y = -sz.y;
+    if (has_region) c.draw_texture_rect_region(texture, Rect2(ofs, sz), region);
+    else c.draw_texture_rect(texture, Rect2(ofs, sz), tile);
+}
+
+/* ---- NinePatchRect ---- */
+
+bool NinePatchRect::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "texture") texture = as_texture(ctx.resource(v));
+    else if (key == "draw_center") draw_center = v.b(true);
+    else if (key == "region_rect") jv_rect2(v, region_rect);
+    else if (key == "patch_margin_left") margin[SIDE_LEFT] = jv_float(v);
+    else if (key == "patch_margin_top") margin[SIDE_TOP] = jv_float(v);
+    else if (key == "patch_margin_right") margin[SIDE_RIGHT] = jv_float(v);
+    else if (key == "patch_margin_bottom") margin[SIDE_BOTTOM] = jv_float(v);
+    else if (key == "axis_stretch_horizontal") axis_h = v.i();
+    else if (key == "axis_stretch_vertical") axis_v = v.i();
+    else return Control::set(key, v, ctx);
+    return true;
+}
+
+void NinePatchRect::draw(Canvas& c) {
+    if (!texture) return;
+    c.draw_nine_patch(texture, Rect2(Vec2(0, 0), size), region_rect, margin, axis_h, axis_v, draw_center, Color());
+}
+
+/* ---- ColorRect, Panel ---- */
+
+bool ColorRect::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "color") jv_color(v, color);
+    else return Control::set(key, v, ctx);
+    return true;
+}
+
+void ColorRect::draw(Canvas& c) { c.draw_rect(Rect2(Vec2(0, 0), size), color); }
+
+void Panel::draw(Canvas& c) {
+    StyleBoxRes* sb = theme_stylebox("panel");
+    if (sb) sb->draw(c, Rect2(Vec2(0, 0), size));
+}
+
+/* ---- Container ---- */
+
+Control* Container::sortable(Node* n) {
+    if (!n->is_control()) return NULL;
+    Control* c = (Control*)n;
+    if (c->top_level || !c->visible) return NULL;
+    return c;
+}
+
+void Container::fit_child_in_rect(Control* child, const Rect2& p_rect) {
+    Vec2 m = child->combined_minimum_size();
+    Rect2 r = p_rect;
+    if (!(child->size_flags_h & SIZE_FILL)) {
+        r.size.x = m.x;
+        if (child->size_flags_h & SIZE_SHRINK_END) r.pos.x += p_rect.size.x - m.x;
+        else if (child->size_flags_h & SIZE_SHRINK_CENTER) r.pos.x += floorf((p_rect.size.x - m.x) / 2);
+    }
+    if (!(child->size_flags_v & SIZE_FILL)) {
+        r.size.y = m.y;
+        if (child->size_flags_v & SIZE_SHRINK_END) r.pos.y += p_rect.size.y - m.y;
+        else if (child->size_flags_v & SIZE_SHRINK_CENTER) r.pos.y += floorf((p_rect.size.y - m.y) / 2);
+    }
+    child->set_rect(r);
+    child->rotation = 0;
+    child->scale = Vec2(1, 1);
+}
+
+/* ---- BoxContainer ---- */
+
+bool BoxContainer::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "alignment") alignment = v.i();
+    else if (key == "vertical") vertical = v.b();
+    else return Container::set(key, v, ctx);
+    return true;
+}
+
+Vec2 BoxContainer::get_minimum_size() {
+    int sep = theme_constant("separation");
+    int mw = 0, mh = 0;
+    bool first = true;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 s = c->combined_minimum_size();
+        int w = (int)s.x, h = (int)s.y;
+        if (vertical) {
+            if (w > mw) mw = w;
+            mh += h + (first ? 0 : sep);
+        } else {
+            if (h > mh) mh = h;
+            mw += w + (first ? 0 : sep);
+        }
+        first = false;
+    }
+    return Vec2((float)mw, (float)mh);
+}
+
+struct MinSizeCache {
+    Control* c;
+    int min_size;
+    bool will_stretch;
+    int final_size;
+};
+
+void BoxContainer::sort_children() {
+    int sep = theme_constant("separation");
+    int nw = (int)size.x, nh = (int)size.y;
+    std::vector<MinSizeCache> cache;
+    int stretch_min = 0, stretch_avail = 0;
+    float ratio_total = 0;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 s = c->combined_minimum_size();
+        MinSizeCache m;
+        m.c = c;
+        m.min_size = vertical ? (int)s.y : (int)s.x;
+        m.will_stretch = ((vertical ? c->size_flags_v : c->size_flags_h) & SIZE_EXPAND) != 0;
+        stretch_min += m.min_size;
+        if (m.will_stretch) {
+            stretch_avail += m.min_size;
+            ratio_total += c->stretch_ratio;
+        }
+        m.final_size = m.min_size;
+        cache.push_back(m);
+    }
+    int count = (int)cache.size();
+    if (!count) return;
+    int stretch_max = (vertical ? nh : nw) - (count - 1) * sep;
+    int stretch_diff = stretch_max - stretch_min;
+    if (stretch_diff < 0) stretch_diff = 0;
+    stretch_avail += stretch_diff;
+
+    bool has_stretched = false;
+    while (ratio_total > 0) {
+        has_stretched = true;
+        bool refit_ok = true;
+        float error = 0;
+        for (int i = 0; i < count; ++i) {
+            MinSizeCache& m = cache[i];
+            if (!m.will_stretch) continue;
+            float final_px = stretch_avail * m.c->stretch_ratio / ratio_total;
+            error += final_px - (int)final_px;
+            if (final_px < m.min_size) {
+                m.will_stretch = false;
+                ratio_total -= m.c->stretch_ratio;
+                refit_ok = false;
+                stretch_avail -= m.min_size;
+                m.final_size = m.min_size;
+                break;
+            }
+            m.final_size = (int)final_px;
+            if (error >= 1) {
+                m.final_size += 1;
+                error -= 1;
+            }
+        }
+        if (refit_ok) break;
+    }
+
+    int ofs = 0;
+    if (!has_stretched) {
+        if (alignment == ALIGN_CENTER) ofs = stretch_diff / 2;
+        else if (alignment == ALIGN_END) ofs = stretch_diff;
+    }
+    for (int i = 0; i < count; ++i) {
+        MinSizeCache& m = cache[i];
+        if (i > 0) ofs += sep;
+        int from = ofs, to = ofs + m.final_size;
+        if (m.will_stretch && i == count - 1) to = vertical ? nh : nw;
+        int sz = to - from;
+        Rect2 r = vertical ? Rect2(0, (float)from, (float)nw, (float)sz) : Rect2((float)from, 0, (float)sz, (float)nh);
+        fit_child_in_rect(m.c, r);
+        ofs = to;
+    }
+}
+
+/* ---- MarginContainer ---- */
+
+Vec2 MarginContainer::get_minimum_size() {
+    Vec2 mx;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 s = c->combined_minimum_size();
+        mx = Vec2(maxf(mx.x, s.x), maxf(mx.y, s.y));
+    }
+    mx.x += theme_constant("margin_left") + theme_constant("margin_right");
+    mx.y += theme_constant("margin_top") + theme_constant("margin_bottom");
+    return mx;
+}
+
+void MarginContainer::sort_children() {
+    int ml = theme_constant("margin_left"), mt = theme_constant("margin_top");
+    int mr = theme_constant("margin_right"), mb = theme_constant("margin_bottom");
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        int w = (int)(size.x - ml - mr), h = (int)(size.y - mt - mb);
+        fit_child_in_rect(c, Rect2((float)ml, (float)mt, (float)w, (float)h));
+    }
+}
+
+/* ---- PanelContainer ---- */
+
+Vec2 PanelContainer::get_minimum_size() {
+    Vec2 ms;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 s = c->combined_minimum_size();
+        ms = Vec2(maxf(ms.x, s.x), maxf(ms.y, s.y));
+    }
+    StyleBoxRes* sb = theme_stylebox("panel");
+    if (sb) ms = ms + sb->minimum_size();
+    return ms;
+}
+
+void PanelContainer::sort_children() {
+    Vec2 sz = size, ofs;
+    StyleBoxRes* sb = theme_stylebox("panel");
+    if (sb) {
+        sz = sz - sb->minimum_size();
+        ofs = sb->offset();
+    }
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (c) fit_child_in_rect(c, Rect2(ofs, sz));
+    }
+}
+
+void PanelContainer::draw(Canvas& c) {
+    StyleBoxRes* sb = theme_stylebox("panel");
+    if (sb) sb->draw(c, Rect2(Vec2(0, 0), size));
+}
+
+/* ---- CenterContainer ---- */
+
+bool CenterContainer::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "use_top_left") use_top_left = v.b();
+    else return Container::set(key, v, ctx);
+    return true;
+}
+
+Vec2 CenterContainer::get_minimum_size() {
+    if (use_top_left) return Vec2();
+    Vec2 ms;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 s = c->combined_minimum_size();
+        ms = Vec2(maxf(ms.x, s.x), maxf(ms.y, s.y));
+    }
+    return ms;
+}
+
+void CenterContainer::sort_children() {
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 m = c->combined_minimum_size();
+        Vec2 ofs = use_top_left ? Vec2(floorf(-m.x * 0.5f), floorf(-m.y * 0.5f))
+                                : Vec2(floorf((size.x - m.x) / 2.0f), floorf((size.y - m.y) / 2.0f));
+        fit_child_in_rect(c, Rect2(ofs, m));
+    }
+}
+
+/* ---- GridContainer ---- */
+
+bool GridContainer::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "columns") columns = v.i() < 1 ? 1 : v.i();
+    else return Container::set(key, v, ctx);
+    return true;
+}
+
+Vec2 GridContainer::get_minimum_size() {
+    std::map<int, int> colw, rowh;
+    int max_row = 0, max_col = 0, idx = 0;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        int row = idx / columns, col = idx % columns;
+        ++idx;
+        Vec2 s = c->combined_minimum_size();
+        colw[col] = colw.count(col) ? (colw[col] > (int)s.x ? colw[col] : (int)s.x) : (int)s.x;
+        rowh[row] = rowh.count(row) ? (rowh[row] > (int)s.y ? rowh[row] : (int)s.y) : (int)s.y;
+        if (col > max_col) max_col = col;
+        if (row > max_row) max_row = row;
+    }
+    Vec2 ms;
+    for (std::map<int, int>::iterator it = colw.begin(); it != colw.end(); ++it) ms.x += it->second;
+    for (std::map<int, int>::iterator it = rowh.begin(); it != rowh.end(); ++it) ms.y += it->second;
+    ms.y += (float)(theme_constant("v_separation") * max_row);
+    ms.x += (float)(theme_constant("h_separation") * max_col);
+    return ms;
+}
+
+void GridContainer::sort_children() {
+    int hsep = theme_constant("h_separation"), vsep = theme_constant("v_separation");
+    std::map<int, int> colw, rowh;
+    std::vector<bool> col_exp(columns, false);
+    std::map<int, bool> row_exp;
+    int idx = 0;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        int row = idx / columns, col = idx % columns;
+        ++idx;
+        Vec2 s = c->combined_minimum_size();
+        colw[col] = colw.count(col) ? (colw[col] > (int)s.x ? colw[col] : (int)s.x) : (int)s.x;
+        rowh[row] = rowh.count(row) ? (rowh[row] > (int)s.y ? rowh[row] : (int)s.y) : (int)s.y;
+        if (c->size_flags_h & SIZE_EXPAND) col_exp[col] = true;
+        if (c->size_flags_v & SIZE_EXPAND) row_exp[row] = true;
+    }
+    int max_col = idx < columns ? idx : columns;
+    int max_row = (int)ceilf((float)idx / (float)columns);
+    for (int i = idx; i < columns; ++i) col_exp[i] = true;
+    float rw = size.x, rh = size.y;
+    for (std::map<int, int>::iterator it = colw.begin(); it != colw.end(); ++it)
+        if (!col_exp[it->first]) rw -= it->second;
+    for (std::map<int, int>::iterator it = rowh.begin(); it != rowh.end(); ++it)
+        if (!row_exp[it->first]) rh -= it->second;
+    rh -= vsep * (max_row - 1 > 0 ? max_row - 1 : 0);
+    rw -= hsep * (max_col - 1 > 0 ? max_col - 1 : 0);
+
+    /* Drop the widest expanded column (tallest row) while the space does not fit. */
+    for (;;) {
+        int n = 0, maxi = -1;
+        bool fit = true;
+        for (int c = 0; c < columns; ++c) {
+            if (!col_exp[c]) continue;
+            ++n;
+            if (maxi < 0 || colw[c] > colw[maxi]) maxi = c;
+        }
+        if (!n) break;
+        for (int c = 0; c < columns; ++c)
+            if (col_exp[c] && rw / n < colw[c]) fit = false;
+        if (fit) break;
+        col_exp[maxi] = false;
+        rw -= colw[maxi];
+    }
+    for (;;) {
+        int n = 0, maxi = -1;
+        bool fit = true;
+        for (std::map<int, bool>::iterator it = row_exp.begin(); it != row_exp.end(); ++it) {
+            if (!it->second) continue;
+            ++n;
+            if (maxi < 0 || rowh[it->first] > rowh[maxi]) maxi = it->first;
+        }
+        if (!n) break;
+        for (std::map<int, bool>::iterator it = row_exp.begin(); it != row_exp.end(); ++it)
+            if (it->second && rh / n < rowh[it->first]) fit = false;
+        if (fit) break;
+        row_exp[maxi] = false;
+        rh -= rowh[maxi];
+    }
+    int ncol = 0, nrow = 0;
+    for (int c = 0; c < columns; ++c) ncol += col_exp[c] ? 1 : 0;
+    for (std::map<int, bool>::iterator it = row_exp.begin(); it != row_exp.end(); ++it) nrow += it->second ? 1 : 0;
+    int col_expand = 0, col_rem = 0, row_expand = 0, row_rem = 0;
+    if (ncol) {
+        col_expand = (int)(rw / ncol);
+        col_rem = (int)(rw - ncol * col_expand);
+    }
+    if (nrow) {
+        row_expand = (int)(rh / nrow);
+        row_rem = (int)(rh - nrow * row_expand);
+    }
+    int col_rem_idx = 0, row_rem_idx = 0;
+    for (int i = 0; i < max_col && col_rem; ++i)
+        if (col_exp[i]) {
+            col_rem_idx = i + 1;
+            --col_rem;
+        }
+    for (int i = 0; i < max_row && row_rem; ++i)
+        if (row_exp[i]) {
+            row_rem_idx = i + 1;
+            --row_rem;
+        }
+    int col_ofs = 0, row_ofs = 0;
+    idx = 0;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        int row = idx / columns, col = idx % columns;
+        ++idx;
+        if (col == 0) {
+            col_ofs = 0;
+            if (row > 0) {
+                row_ofs += (row_exp[row - 1] ? row_expand : rowh[row - 1]) + vsep;
+                if (row_exp[row - 1] && row - 1 < row_rem_idx) ++row_ofs;
+            }
+        }
+        Vec2 s((float)(col_exp[col] ? col_expand : colw[col]), (float)(row_exp[row] ? row_expand : rowh[row]));
+        if (col_exp[col] && col < col_rem_idx) s.x += 1;
+        if (row_exp[row] && row < row_rem_idx) s.y += 1;
+        fit_child_in_rect(c, Rect2(Vec2((float)col_ofs, (float)row_ofs), s));
+        col_ofs += (int)s.x + hsep;
+    }
+}
+
+/* ---- FlowContainer (last_wrap_alignment: inherit) ---- */
+
+bool FlowContainer::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "alignment") alignment = v.i();
+    else if (key == "vertical") vertical = v.b();
+    else if (key == "reverse_fill") reverse_fill = v.b();
+    else return Container::set(key, v, ctx);
+    return true;
+}
+
+Vec2 FlowContainer::get_minimum_size() {
+    Vec2 m;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 s = c->combined_minimum_size();
+        if (vertical) {
+            m.y = maxf(m.y, (float)(int)s.y);
+            m.x = cached_size;
+        } else {
+            m.x = maxf(m.x, (float)(int)s.x);
+            m.y = cached_size;
+        }
+    }
+    return m;
+}
+
+struct FlowLine {
+    int child_count, min_line_height, line_length, stretch_avail;
+    float stretch_ratio_total;
+};
+
+void FlowContainer::sort_children() {
+    if (!is_visible_in_tree()) return;
+    int hsep = theme_constant("h_separation"), vsep = theme_constant("v_separation");
+    std::vector<FlowLine> lines;
+    std::vector<Control*> kids;
+    std::vector<Vec2> mins;
+    int ox = 0, oy = 0, line_height = 0, in_line = 0;
+    float ratio = 0;
+    int container = vertical ? (int)size.y : (int)size.x;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Control* c = sortable(children[i]);
+        if (!c) continue;
+        Vec2 ms = c->combined_minimum_size();
+        int mw = (int)ms.x, mh = (int)ms.y;
+        int& along = vertical ? oy : ox;
+        int& across = vertical ? ox : oy;
+        int sep_along = vertical ? vsep : hsep, sep_across = vertical ? hsep : vsep;
+        int len = vertical ? mh : mw, thick = vertical ? mw : mh;
+        if (in_line > 0) along += sep_along;
+        if (along + len > container) {
+            FlowLine l;
+            l.child_count = in_line;
+            l.min_line_height = line_height;
+            l.line_length = along - sep_along;
+            l.stretch_avail = container - l.line_length;
+            l.stretch_ratio_total = ratio;
+            lines.push_back(l);
+            across += line_height + sep_across;
+            along = 0;
+            line_height = 0;
+            ratio = 0;
+            in_line = 0;
+        }
+        if (thick > line_height) line_height = thick;
+        if ((vertical ? c->size_flags_v : c->size_flags_h) & SIZE_EXPAND) ratio += c->stretch_ratio;
+        along += len;
+        kids.push_back(c);
+        mins.push_back(Vec2((float)mw, (float)mh));
+        ++in_line;
+    }
+    FlowLine last;
+    last.child_count = in_line;
+    last.min_line_height = line_height;
+    last.line_length = vertical ? oy : ox;
+    last.stretch_avail = container - last.line_length;
+    last.stretch_ratio_total = ratio;
+    lines.push_back(last);
+
+    int li = 0, in_idx = 0;
+    ox = oy = 0;
+    for (size_t k = 0; k < kids.size(); ++k) {
+        Control* c = kids[k];
+        Vec2 cs = mins[k];
+        FlowLine ld = lines[li];
+        if (in_idx >= ld.child_count) {
+            ++li;
+            in_idx = 0;
+            if (vertical) {
+                ox += ld.min_line_height + hsep;
+                oy = 0;
+            } else {
+                ox = 0;
+                oy += ld.min_line_height + vsep;
+            }
+            ld = lines[li];
+        }
+        if (in_idx == 0 && ld.stretch_ratio_total == 0) {
+            int a = 0;
+            if (alignment == ALIGN_CENTER) a = (int)(ld.stretch_avail * 0.5f);
+            else if (alignment == ALIGN_END) a = ld.stretch_avail;
+            if (vertical) oy += a;
+            else ox += a;
+        }
+        if (vertical) {
+            if (c->size_flags_h & (SIZE_FILL | SIZE_SHRINK_CENTER | SIZE_SHRINK_END)) cs.x = (float)ld.min_line_height;
+            if (c->size_flags_v & SIZE_EXPAND) cs.y += (float)(int)(ld.stretch_avail * c->stretch_ratio / ld.stretch_ratio_total);
+        } else {
+            if (c->size_flags_v & (SIZE_FILL | SIZE_SHRINK_CENTER | SIZE_SHRINK_END)) cs.y = (float)ld.min_line_height;
+            if (c->size_flags_h & SIZE_EXPAND) cs.x += (float)(int)(ld.stretch_avail * c->stretch_ratio / ld.stretch_ratio_total);
+        }
+        Rect2 r(Vec2((float)ox, (float)oy), cs);
+        if (reverse_fill && !vertical) r.pos.y = size.y - r.pos.y - r.size.y;
+        if (reverse_fill && vertical) r.pos.x = size.x - r.pos.x - r.size.x;
+        fit_child_in_rect(c, r);
+        if (vertical) oy += (int)cs.y + vsep;
+        else ox += (int)cs.x + hsep;
+        ++in_idx;
+    }
+    cached_size = (float)((vertical ? ox : oy) + line_height);
+}
+
+/* ---- Sprite2D ---- */
+
+bool Sprite2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "texture") texture = as_texture(ctx.resource(v));
+    else if (key == "centered") centered = v.b(true);
+    else if (key == "offset") jv_vec2(v, offset);
+    else if (key == "flip_h") flip_h = v.b();
+    else if (key == "flip_v") flip_v = v.b();
+    else if (key == "region_enabled") region_enabled = v.b();
+    else if (key == "region_rect") jv_rect2(v, region_rect);
+    else if (key == "hframes") hframes = v.i() < 1 ? 1 : v.i();
+    else if (key == "vframes") vframes = v.i() < 1 ? 1 : v.i();
+    else if (key == "frame") frame = v.i();
+    else return Node2D::set(key, v, ctx);
+    return true;
+}
+
+void Sprite2D::draw(Canvas& c) {
+    if (!texture) return;
+    Rect2 base = region_enabled ? region_rect : Rect2(Vec2(0, 0), texture->size());
+    Vec2 fs(base.size.x / hframes, base.size.y / vframes);
+    Vec2 fo((float)(frame % hframes) * fs.x, (float)(frame / hframes) * fs.y);
+    Rect2 src(base.pos + fo, fs);
+    Vec2 d = offset;
+    if (centered) d = d - fs * 0.5f;
+    Rect2 dst(d, fs);
+    if (flip_h) dst.size.x = -dst.size.x;
+    if (flip_v) dst.size.y = -dst.size.y;
+    c.draw_texture_rect_region(texture, dst, src);
+}
+
+} /* namespace spire */

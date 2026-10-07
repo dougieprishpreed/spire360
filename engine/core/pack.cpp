@@ -103,6 +103,23 @@ bool Pack::read(const PackEntry* e, std::vector<u8>& out) const {
     return e->size == 0 || fread(&out[0], 1, e->size, f_) == e->size;
 }
 
+bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
+    if (!e || !f_) return false;
+    if (len > e->size) len = e->size;
+    out.resize(len);
+    if (!seek64(f_, e->offset)) return false;
+    return len == 0 || fread(&out[0], 1, len, f_) == len;
+}
+
+bool Pack::parse_texture_size(const std::vector<u8>& d, int* w, int* h, int* ow, int* oh) {
+    if (d.size() < 12) return false;
+    *w = be16(&d[4]);
+    *h = be16(&d[6]);
+    *ow = be16(&d[8]);
+    *oh = be16(&d[10]);
+    return true;
+}
+
 bool Pack::read(const char* name, std::vector<u8>& out) const {
     return read(find(name), out);
 }

@@ -21,14 +21,14 @@ public:
     virtual void destroy_texture(Texture* t);
     virtual void begin(int width, int height, const Color& clear);
     virtual void set_clip(const Rect2* clip);
-    virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend);
+    virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags);
     virtual void end() {}
 
     const Image& framebuffer() const { return fb_; }
     long triangles_drawn() const { return tris_; }
 
 private:
-    void triangle(SwTexture* tex, const Vertex& a, const Vertex& b, const Vertex& c, BlendMode blend);
+    void triangle(SwTexture* tex, const Vertex& a, const Vertex& b, const Vertex& c, BlendMode blend, int flags);
     Image fb_;
     bool clip_on_;
     int cx0_, cy0_, cx1_, cy1_;

@@ -40,6 +40,8 @@ public:
     const PackEntry* find(const char* name) const;
     bool read(const PackEntry* e, std::vector<u8>& out) const;
     bool read(const char* name, std::vector<u8>& out) const;
+    /* The first bytes of an entry (headers). */
+    bool read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const;
     const char* name_of(const PackEntry* e) const;
     size_t count() const { return entries_.size(); }
     const PackEntry& entry(size_t i) const { return entries_[i]; }
@@ -47,6 +49,8 @@ public:
     bool texture_little_endian() const { return (flags_ & 1) != 0; }
 
     static bool parse_texture(const std::vector<u8>& payload, TextureData& out);
+    /* Stored and layout sizes from the first 12 bytes of a texture entry. */
+    static bool parse_texture_size(const std::vector<u8>& head, int* w, int* h, int* orig_w, int* orig_h);
 
 private:
     FILE* f_;

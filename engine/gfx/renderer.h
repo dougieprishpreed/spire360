@@ -10,6 +10,9 @@ namespace spire {
 
 enum BlendMode { BLEND_MIX, BLEND_ADD, BLEND_SUB, BLEND_MUL, BLEND_PREMULT_ALPHA };
 
+/* draw_triangles flags */
+enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2 };
+
 class Texture {
 public:
     Texture() : width(0), height(0), orig_width(0), orig_height(0) {}
@@ -34,8 +37,8 @@ public:
     virtual void begin(int width, int height, const Color& clear) = 0;
     /* Screen-space scissor; NULL disables. */
     virtual void set_clip(const Rect2* clip) = 0;
-    /* count is a multiple of 3. tex NULL = white. */
-    virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend) = 0;
+    /* count is a multiple of 3. tex NULL = white. flags: DRAW_*. */
+    virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) = 0;
     virtual void end() = 0;
 };
 

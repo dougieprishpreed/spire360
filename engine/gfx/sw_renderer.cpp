@@ -46,16 +46,31 @@ void SwRenderer::set_clip(const Rect2* r) {
     }
 }
 
-void SwRenderer::draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend) {
-    for (int i = 0; i + 2 < count; i += 3) triangle((SwTexture*)tex, v[i], v[i + 1], v[i + 2], blend);
+void SwRenderer::draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) {
+    for (int i = 0; i + 2 < count; i += 3) triangle((SwTexture*)tex, v[i], v[i + 1], v[i + 2], blend, flags);
 }
 
-/* Bilinear, premultiplied, clamp to edge; returns 0..1 floats. */
-static void sample(const Image& img, float u, float v, float out[4]) {
+static int wrap(int i, int n) {
+    i %= n;
+    return i < 0 ? i + n : i;
+}
+
+/* Bilinear (or nearest), premultiplied, clamp to edge or repeat; returns 0..1 floats. */
+static void sample(const Image& img, float u, float v, int flags, float out[4]) {
     float x = u * img.w - 0.5f, y = v * img.h - 0.5f;
+    if (flags & DRAW_NEAREST) {
+        x = floorf(x + 0.5f);
+        y = floorf(y + 0.5f);
+    }
     int x0 = (int)floorf(x), y0 = (int)floorf(y);
     float fx = x - x0, fy = y - y0;
     int x1 = x0 + 1, y1 = y0 + 1;
+    if (flags & DRAW_REPEAT) {
+        x0 = wrap(x0, img.w);
+        x1 = wrap(x1, img.w);
+        y0 = wrap(y0, img.h);
+        y1 = wrap(y1, img.h);
+    }
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 < 0) x1 = 0;
@@ -75,7 +90,7 @@ static void sample(const Image& img, float u, float v, float out[4]) {
     }
 }
 
-void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, const Vertex& C, BlendMode blend) {
+void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, const Vertex& C, BlendMode blend, int flags) {
     float area = (B.pos.x - A.pos.x) * (C.pos.y - A.pos.y) - (C.pos.x - A.pos.x) * (B.pos.y - A.pos.y);
     if (fabsf(area) < 1e-6f) return;
     ++tris_;
@@ -93,19 +108,19 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
         if (x1 > cx1_) x1 = cx1_;
         if (y1 > cy1_) y1 = cy1_;
     }
-    float inv = 1.0f / area;
+    /* Coverage is tested at the pixel centre nudged by a tiny odd offset, so a
+     * point never lies exactly on an edge: triangles sharing an edge (the two
+     * halves of a quad) cover each pixel exactly once. */
+    double inv = 1.0 / area;
     for (int y = y0; y < y1; ++y) {
-        float py = y + 0.5f;
+        double py = y + 0.5 + 0.000713;
         for (int x = x0; x < x1; ++x) {
-            float px = x + 0.5f;
-            /* Barycentrics with a top-left style tie break on shared edges. */
-            float w0 = ((B.pos.x - px) * (C.pos.y - py) - (C.pos.x - px) * (B.pos.y - py)) * inv;
-            float w1 = ((C.pos.x - px) * (A.pos.y - py) - (A.pos.x - px) * (C.pos.y - py)) * inv;
-            float w2 = 1.0f - w0 - w1;
-            if (w0 < 0 || w1 < 0 || w2 < 0) {
-                const float e = -1e-6f;
-                if (w0 < e || w1 < e || w2 < e) continue;
-            }
+            double px = x + 0.5 + 0.001371;
+            double d0 = ((B.pos.x - px) * (C.pos.y - py) - (C.pos.x - px) * (B.pos.y - py)) * inv;
+            double d1 = ((C.pos.x - px) * (A.pos.y - py) - (A.pos.x - px) * (C.pos.y - py)) * inv;
+            double d2 = ((A.pos.x - px) * (B.pos.y - py) - (B.pos.x - px) * (A.pos.y - py)) * inv;
+            if (d0 < 0 || d1 < 0 || d2 < 0) continue;
+            float w0 = (float)d0, w1 = (float)d1, w2 = (float)d2;
             float col[4];
             col[0] = A.color.r * w0 + B.color.r * w1 + C.color.r * w2;
             col[1] = A.color.g * w0 + B.color.g * w1 + C.color.g * w2;
@@ -115,7 +130,7 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
             if (tex) {
                 float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
                 float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
-                sample(tex->img, u, v, s);
+                sample(tex->img, u, v, flags, s);
             } else {
                 s[0] = s[1] = s[2] = s[3] = 1.0f;
             }
