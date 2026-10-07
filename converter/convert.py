@@ -10,6 +10,13 @@
   convert.py texture <pck | dir> <res://path.png> <out.png> [--level N]
       Decodes one texture to a PNG (to check the decoder by eye).
 
+  convert.py bundle <pck> <out.zip> [scene res paths...] [--max-mb 45]
+      A scene and everything it references (recursively: scenes, resources,
+      textures with their .import stubs, fonts, Spine data), plus project
+      settings and English localization, as a zip laid out like the pack.
+      For developing the engine against real layouts. Defaults to the main
+      menu, combat room, card, creature, hand, top bar, map and rewards.
+
   convert.py build <pck | dir> <out_dir> [--scale 0.6667] [--only GLOB]... [--jobs N]
       Writes <out_dir>/pack.s3p (textures as DXT at the console's scale,
       scenes and resources as JSON, fonts, Spine data, audio streams) and
@@ -225,6 +232,70 @@ def cmd_texture(a):
     print(f"{a.res_path} -> {real}: {t.width}x{t.height} {t.format_name}, {len(t.levels)} level(s) -> {a.out}")
 
 
+# ---- bundle ----
+
+DEFAULT_BUNDLE = [
+    "scenes/screens/main_menu.tscn", "scenes/rooms/combat_room.tscn", "scenes/cards/card.tscn",
+    "scenes/combat/creature.tscn", "scenes/combat/player_hand.tscn", "scenes/ui/top_bar.tscn",
+    "scenes/screens/map/map_screen.tscn", "scenes/screens/rewards_screen.tscn",
+]
+
+
+def dependencies(src, res, roots):
+    """Pack paths needed to load the given res paths: the files themselves,
+    .import stubs and their imported data, and everything scenes/resources
+    reference, recursively."""
+    seen, out = set(), []
+    stack = [resources.strip_res(r) for r in roots]
+    while stack:
+        p = stack.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        if src.exists(p + ".import"):
+            out.append(p + ".import")
+        real = res.resolve(p)
+        if real is None:
+            continue
+        out.append(real)
+        if real.endswith((".tscn", ".tres")):
+            try:
+                tr = variant.parse_text(src.read(real).decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            for e in tr.ext_resources.values():
+                path = e.get("path", "")
+                if e.get("uid"):
+                    path = res.uid_path(e["uid"]) or path
+                if path and not path.endswith((".cs", ".gd")):
+                    stack.append(resources.strip_res(path))
+    return out
+
+
+def cmd_bundle(a):
+    import zipfile
+    src = open_source(a.pack)
+    res = resources.Resources(src)
+    roots = a.scenes or DEFAULT_BUNDLE
+    files = dependencies(src, res, roots)
+    extra = [f for f in ("project.binary", ".godot/uid_cache.bin") if src.exists(f)]
+    extra += [f for f in src.list() if f.startswith("localization/eng/")]
+    budget = a.max_mb * 1024 * 1024
+    total = 0
+    skipped = []
+    with zipfile.ZipFile(a.out, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in extra + sorted(set(files), key=lambda x: (x.startswith(".godot/imported"), src.size(x))):
+            size = src.size(f)
+            if total + size > budget and f.startswith(".godot/imported"):
+                skipped.append(f)
+                continue
+            z.writestr(f, src.read(f))
+            total += size
+        z.writestr("bundle_info.json", json.dumps({"roots": roots, "skipped": skipped}, indent=1))
+    print(f"{len(files)} files for {len(roots)} scene(s); {human(total)} written to {a.out}"
+          + (f"; {len(skipped)} largest imported files left out (over --max-mb)" if skipped else ""))
+
+
 # ---- build ----
 
 _worker = {}
@@ -370,6 +441,11 @@ def main():
     t.add_argument("res_path")
     t.add_argument("out")
     t.add_argument("--level", type=int, default=0)
+    bu = sub.add_parser("bundle")
+    bu.add_argument("pack")
+    bu.add_argument("out")
+    bu.add_argument("scenes", nargs="*")
+    bu.add_argument("--max-mb", type=float, default=45)
     b = sub.add_parser("build")
     b.add_argument("pack")
     b.add_argument("out")
@@ -378,7 +454,7 @@ def main():
     b.add_argument("--jobs", type=int)
     a = ap.parse_args()
     try:
-        {"survey": cmd_survey, "texture": cmd_texture, "build": cmd_build}[a.cmd](a)
+        {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build}[a.cmd](a)
     except KeyboardInterrupt:
         sys.exit(1)
     except Exception:  # noqa: BLE001
