@@ -1,0 +1,10 @@
+echo hi there
+math
+env
+time
+dir
+file
+escape
+grow 64
+p2
+bogus
