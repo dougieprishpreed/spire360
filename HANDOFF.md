@@ -21,26 +21,34 @@ Why things are the way they are: [docs/DECISIONS.md](docs/DECISIONS.md).
 **Runtime: verified.** `runtime/tests/run_tests.py`: x86-64, big-endian
 PowerPC (qemu), Win32 backend (wine).
 
-**XDK spike: ready to build (user).** `xdk/README.md` has the commands.
+- Runs on the player's real localization tables (from their pck): 25/25 and
+  10/10 `--tank`; UTF-8 protocol verified with Japanese tables.
 
-**Converter: started.** `converter/pck_tool.py` reads Godot 4 packs (tested
-on a Godot 4.5 export).
+**XDK spike: ready to build (user).** `xdk\build.cmd` from the Xbox 360
+Command Prompt (it adds the .NET 4.0 MSBuild to PATH; the prompt does not).
+
+**Converter: started.** `converter/pck_tool.py` reads Godot 4 packs; works on
+the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
+holds, for the converter:
+- textures: 3,555 `.ctex` under `.godot/imported`: 2,311 plain (PNG/WebP
+  inside, 294 MB), 540 S3TC (207 MB, usable as DXT after a byte swap), 704
+  BPTC/BC7 (671 MB: the 360 has no BC7, decode and re-encode to DXT).
+- scenes are text `.tscn` (1,037) and `.tres` (2,296), not binary RSRC.
+- localization: `localization/<lang>/*.json`, 3-letter folders (eng, deu,
+  jpn, ...): the layout the logic reads.
+- Spine (164 `.spskel` / 170 `.spatlas`), 12 FMOD banks (301 MB), 20
+  `.fontdata` (371 MB, mostly CJK), 100 shaders.
 
 ## Waiting on the user
 
-1. M0: build and run `xdk/` (hello, selftest, bench, bigcode, probe); send the
-   result files and any build errors.
-2. M1: on the PC with the dotnet-experimental feed and wasi-sdk 29:
-   `python tools/build_logic.py --game-dir <install> --stage copy,patch,wasm,c`
-   and send the output (wasm size, import audit).
-3. `python converter/pck_tool.py info <SlayTheSpire2.pck>` output, plus
-   `pck_tool.py list` (as a file) and a `pck_tool.py sample` zip if small
-   enough to attach.
+1. M0: `xdk\build.cmd`, run the XEXs; send `xdk\build_logs\*.log` and the
+   result files.
+2. M1: the Windows walkthrough in docs/LOGIC_BUILD.md; send `build_logic.log`.
 
 ## Next (agent)
 
-- Converter: localization extraction (unblocks running the logic from the
-  player's own files), textures (.ctex), scenes (binary RSRC), pack writer.
+- Converter: textures (.ctex: plain, S3TC, BC7 -> DXT), text scene/resource
+  parser (.tscn/.tres), pack writer.
 - M2 runner: `xdk/logic_runner` generated from `out/logic/c` (selfplay on the
   console, timing to the result file).
 - Fidelity gaps in DECISIONS D6 (rewards screen choice first).

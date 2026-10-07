@@ -20,3 +20,8 @@ packs/
 __pycache__/
 *.pyc
 .vs/
+# player data extracted from the game (pck_tool extract)
+data/
+# XDK build logs
+xdk/build_logs/
+xdk/probe/probe_results.txt

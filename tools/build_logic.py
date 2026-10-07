@@ -32,6 +32,8 @@ LOGIC = os.path.join(ROOT, "logic")
 LIB_GAME = os.path.join(LOGIC, "lib", "game")
 LIB_PATCHED = os.path.join(LOGIC, "lib", "patched")
 OUT = os.path.join(ROOT, "out", "logic")
+# Where converter/pck_tool.py extracts the localization tables by default.
+DEFAULT_DATA = os.path.join(ROOT, "data")
 
 GAME_DLLS = [
     "sts2.dll", "SmartFormat.dll", "SmartFormat.ZString.dll", "Sentry.dll",
@@ -39,12 +41,15 @@ GAME_DLLS = [
     "0Harmony.dll", "System.IO.Hashing.dll",
 ]
 STAGES = ["copy", "stubs", "patch", "jit", "smoke", "aot", "wasm", "c"]
-DEFAULT_STAGES = ["copy", "patch", "jit", "smoke", "aot", "wasm", "c"]
+# "aot" (a NativeAOT build for this PC) is a diagnostic; on Windows it needs
+# the VS 2022 C++ tools, so it is opt-in.
+DEFAULT_STAGES = ["copy", "patch", "jit", "smoke", "wasm", "c"]
 
 
 def run(cmd, **kw):
     print("+", " ".join(str(c) for c in cmd), flush=True)
-    return subprocess.run(cmd, check=True, **kw)
+    kw.setdefault("check", True)
+    return subprocess.run(cmd, **kw)
 
 
 def sha256(path):
@@ -132,8 +137,10 @@ def stage_smoke(a):
         json.dumps({"cmd": "get_map"}),
         json.dumps({"cmd": "quit"}),
     ]) + "\n"
-    env = dict(os.environ, SPIRE_DATA=a.data_dir) if a.data_dir else None
-    r = subprocess.run(["dotnet", exe], input=script, capture_output=True, text=True, timeout=600, env=env)
+    data = a.data_dir or (DEFAULT_DATA if os.path.isdir(os.path.join(DEFAULT_DATA, "localization")) else None)
+    env = dict(os.environ, SPIRE_DATA=data) if data else None
+    r = subprocess.run(["dotnet", exe], input=script, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=600, env=env)
     print(r.stderr[-4000:])
     lines = [l for l in r.stdout.splitlines() if l.strip()]
     for l in lines:
@@ -151,30 +158,75 @@ def stage_aot(a):
 
 
 def stage_wasm(a):
-    if not os.environ.get("WASI_SDK_PATH"):
-        sys.exit("set WASI_SDK_PATH to a wasi-sdk 29 install")
+    sdk = os.environ.get("WASI_SDK_PATH")
+    if not sdk:
+        sys.exit("set WASI_SDK_PATH to a wasi-sdk 29 install (the folder that contains bin/ and share/)")
+    clang = os.path.join(sdk, "bin", "clang" + (".exe" if os.name == "nt" else ""))
+    if not os.path.exists(clang):
+        sys.exit(f"WASI_SDK_PATH={sdk} has no bin/{os.path.basename(clang)}; point it at the extracted wasi-sdk folder")
     out = os.path.join(OUT, "wasm")
+    # A wasm-tools / wasi-experimental workload would otherwise take over the
+    # wasi-wasm RID from the ILCompiler.LLVM packages.
+    env = dict(os.environ, MSBuildEnableWorkloadResolver="false")
     # Global properties win over the SDK's own defaults: a core module that
     # imports WASI preview1 (+ CoreLib's few preview2 clock/poll functions),
     # not a preview2 component.
     run(["dotnet", "publish", os.path.join(LOGIC, "Spire.Logic"), "-c", "Release", "-r", "wasi-wasm",
          "-p:SpireWasm=true", "-p:IlcLlvmTarget=wasm32-unknown-wasip1", "-p:LinkerFlavor=lld",
          "-p:DebugType=none", "-o", out, "-nologo",
-         "-p:RestoreConfigFile=" + os.path.join(LOGIC, "wasm-nuget.config")] + (["-p:SpireIlcLlvmVersion=" + a.ilc_version] if a.ilc_version else []))
-    wasm = os.path.join(out, "Spire.Logic.wasm")
+         "-p:RestoreConfigFile=" + os.path.join(LOGIC, "wasm-nuget.config")]
+        + (["-p:SpireIlcLlvmVersion=" + a.ilc_version] if a.ilc_version else []), env=env)
+    found = [os.path.join(d, f) for d, _, fs in os.walk(out) for f in fs if f.endswith(".wasm")]
+    if not found:
+        sys.exit(f"publish succeeded but no .wasm under {out}")
+    wasm = max(found, key=os.path.getsize)
     shutil.copy2(wasm, os.path.join(OUT, "logic.wasm"))
-    print("logic.wasm:", os.path.getsize(wasm) // 1024, "KB")
+    with open(wasm, "rb") as f:
+        head = f.read(8)
+    kind = {b"\x01\x00\x00\x00": "core module (good)", b"\x0d\x00\x01\x00": "COMPONENT (wrong: w2c2 needs a core module)"}
+    print("logic.wasm:", os.path.getsize(wasm) // 1024, "KB,", kind.get(head[4:8], "version " + head[4:8].hex()))
+
+
+def build_w2c2():
+    """Builds third_party/w2c2 once: CMake if present, else one compiler call."""
+    exe = "w2c2" + (".exe" if os.name == "nt" else "")
+    build = os.path.join(OUT, "w2c2-build")
+    for cand in (os.path.join(build, exe), os.path.join(build, "Release", exe)):
+        if os.path.exists(cand):
+            return cand
+    src = os.path.join(ROOT, "third_party", "w2c2", "w2c2")
+    os.makedirs(build, exist_ok=True)
+    if shutil.which("cmake"):
+        run(["cmake", "-S", src, "-B", build, "-DCMAKE_BUILD_TYPE=Release"])
+        run(["cmake", "--build", build, "--config", "Release", "--target", "w2c2"])
+        for cand in (os.path.join(build, exe), os.path.join(build, "Release", exe)):
+            if os.path.exists(cand):
+                return cand
+        sys.exit("cmake built w2c2 but the executable was not found in " + build)
+    # Plain C89 with no configuration needed (no pthreads: single-threaded
+    # translation, the same output).
+    sources = sorted(os.path.join(src, f) for f in os.listdir(src)
+                     if f.endswith(".c") and not f.endswith("_test.c") and f != "test.c")
+    out_exe = os.path.join(build, exe)
+    cl = shutil.which("cl")
+    xedk = os.environ.get("XEDK")
+    if cl and xedk and os.path.normcase(os.path.abspath(cl)).startswith(os.path.normcase(os.path.abspath(xedk))):
+        sys.exit("the cl on PATH is the XDK's PowerPC compiler: run this from the Visual Studio command "
+                 "prompt instead of the Xbox 360 one")
+    if cl:
+        run([cl, "/nologo", "/O2", "/D_CRT_SECURE_NO_DEPRECATE", "/Fe" + out_exe, "/Fo" + build + os.sep] + sources)
+    else:
+        cc = next((c for c in ("cc", "gcc", "clang") if shutil.which(c)), None)
+        if not cc:
+            sys.exit("no C compiler for w2c2: run from a Visual Studio command prompt (cl), install CMake, "
+                     "or pass --w2c2 <path to a built w2c2>")
+        posix = [] if os.name == "nt" else ["-DHAS_UNISTD=1", "-DHAS_GETOPT=1", "-DHAS_LIBGEN=1", "-DHAS_GLOB=1"]
+        run([cc, "-O2"] + posix + ["-o", out_exe] + sources + ([] if os.name == "nt" else ["-lm"]))
+    return out_exe
 
 
 def stage_c(a):
-    w2c2 = a.w2c2 or shutil.which("w2c2")
-    if not w2c2:
-        build = os.path.join(OUT, "w2c2-build")
-        run(["cmake", "-S", os.path.join(ROOT, "third_party", "w2c2", "w2c2"), "-B", build, "-DCMAKE_BUILD_TYPE=Release"])
-        run(["cmake", "--build", build, "--config", "Release", "--target", "w2c2"])
-        w2c2 = os.path.join(build, "w2c2") + (".exe" if os.name == "nt" else "")
-        if not os.path.exists(w2c2):
-            w2c2 = os.path.join(build, "Release", "w2c2.exe")
+    w2c2 = a.w2c2 or shutil.which("w2c2") or build_w2c2()
     cdir = os.path.join(OUT, "c")
     shutil.rmtree(cdir, ignore_errors=True)
     os.makedirs(cdir)
@@ -192,7 +244,7 @@ def main():
     ap.add_argument("--game-dir", help="Slay the Spire 2 install folder (needed for 'copy')")
     ap.add_argument("--stage", default="all", help="all, or a comma list of: " + ",".join(STAGES))
     ap.add_argument("--character", default="Ironclad")
-    ap.add_argument("--data-dir", help="SPIRE_DATA for the smoke run (localization tables)")
+    ap.add_argument("--data-dir", help="SPIRE_DATA for the smoke run (localization tables; default ./data if present)")
     ap.add_argument("--rid", help="RID for the aot stage")
     ap.add_argument("--ilc-version", help="pin Microsoft.DotNet.ILCompiler.LLVM version")
     ap.add_argument("--w2c2", help="path to a built w2c2")

@@ -27,7 +27,12 @@ internal static class Program
         // IL-patch handlers must exist before any game code runs.
         Hooks.Install();
 
-        var proto = new Protocol(Console.In, Console.Out);
+        // UTF-8 both ways whatever the platform's console code page is
+        // (Windows would otherwise use the OEM code page for redirected pipes).
+        var utf8 = new System.Text.UTF8Encoding(false);
+        var proto = new Protocol(
+            new StreamReader(Console.OpenStandardInput(), utf8),
+            new StreamWriter(Console.OpenStandardOutput(), utf8));
         var driver = new RunDriver();
         Hooks.Driver = driver;
         Steps.Attach(driver.LocalPlayer);

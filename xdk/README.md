@@ -12,24 +12,35 @@ big-endian PowerPC under qemu before being committed.
 
 ## Build
 
-From the **Xbox 360 Command Prompt** (or any prompt where `msbuild` and the
-XDK are set up), in the repository root:
+Open the **Xbox 360 Command Prompt** and run:
 
 ```
-msbuild xdk\hello\hello.vcxproj       /p:Configuration=Release /p:Platform="Xbox 360"
-msbuild xdk\selftest\selftest.vcxproj /p:Configuration=Release /p:Platform="Xbox 360"
-msbuild xdk\bench\bench.vcxproj       /p:Configuration=Release /p:Platform="Xbox 360"
-
-python xdk\bigcode\gen_bigcode.py --mb 64
-msbuild xdk\bigcode\bigcode.vcxproj   /p:Configuration=Release /p:Platform="Xbox 360"
-
-xdk\probe\probe.cmd
+cd /d F:\downloads\temp\python\hermes\spire360
+xdk\build.cmd
 ```
 
-Each XEX lands in `xdk\<project>\Release\`. If a build fails, the error
-output is exactly what I need: library names in `xdk/common/spire360.props`
-(`xinput2.lib`, `xaudio2.lib`, ...) and the project keyword are best guesses
-from the XDK's conventions and may need adjusting for your XDK version.
+That prompt sets up the XDK compiler but does not put `msbuild` on PATH;
+`build.cmd` adds the .NET 4.0 MSBuild that Visual Studio 2010 uses
+(`%WINDIR%\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe`), builds hello,
+selftest, bench and bigcode (generating the 64 MB of bigcode sources first;
+needs `python` on PATH), runs the probe, and prints one line per project.
+`xdk\build.cmd hello` builds one project. Build logs land in
+`xdk\build_logs\<project>.log`.
+
+By hand, the same thing is:
+
+```
+set PATH=%PATH%;%WINDIR%\Microsoft.NET\Framework\v4.0.30319
+msbuild xdk\hello\hello.vcxproj /p:Configuration=Release /p:Platform="Xbox 360"
+```
+
+(Do not run `vsvars32.bat` in the same prompt: it puts the x86 `cl` ahead of
+the XDK's PowerPC `cl`, which breaks the probe.)
+
+Each XEX lands in `xdk\<project>\Release\`. If a build fails, send the log.
+Library names in `xdk/common/spire360.props` (`xinput2.lib`, `xaudio2.lib`,
+...) and the project keyword are best guesses from the XDK's conventions and
+may need adjusting for your XDK version.
 
 ## Run and collect
 

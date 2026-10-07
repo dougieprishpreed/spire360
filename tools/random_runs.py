@@ -30,7 +30,8 @@ class Session:
         self.log_path = (trace_path[:-6] + ".log") if trace_path else os.devnull
         self.log = open(self.log_path, "w", encoding="utf-8")
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=self.log, text=True, bufsize=1, env=env)
+                                     stderr=self.log, text=True, encoding="utf-8",
+                                     errors="replace", bufsize=1, env=env)
         self.trace = open(trace_path, "w", encoding="utf-8", buffering=1) if trace_path else None
         self.verbose = verbose
 
