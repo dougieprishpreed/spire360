@@ -30,21 +30,30 @@ PowerPC (qemu), Win32 backend (wine).
 - bigcode: 64 MB of code (37,400 functions) links and runs: PASS. The build
   took 2.5 h on one core; `/MP` is now on.
 - probe: VS2010 PPC compiler, strict C89 (docs/CODING_RULES.md).
-- selftest: everything right except `stat` size right after an append
-  (Xenia: 11 for a 12-byte file); stat now asks an open handle (fixed, to
-  re-check).
+- selftest: PASS (after the stat-by-handle fix).
 - bench: all checks identical to PC; 2.40 s vs 0.63 s on the PC (3.8x), in
   Xenia (not hardware).
 
-**Logic as wasm (M1): wasm -> C -> native PC works.** The user's
-`logic.wasm` (50.7 MB) translated here to 309 MB of C (77 files), compiled
-with gcc -O1 in 5 min to an 82 MB program; the .NET runtime boots inside it
-and prints `ready`. It then hit `Task.Wait` (async `Main`): NativeAOT-LLVM on
-wasip1 has no event loop and blocking waits throw. The command loop is now
-synchronous (Sched drives everything; measured: the game queues no
-thread-pool work, traces unchanged). Needs a rebuild of the wasm to confirm.
-Earlier: 1,473 always-throwing methods from stub metadata mismatches, fixed
-(DECISIONS D9).
+**Logic as wasm (M1): done and verified.** The whole pipeline runs in
+this environment now (network open; wasi-sdk 29 in the scratchpad, set
+WASI_SDK_PATH): `build_logic.py --stage patch,wasm,c,native`.
+- 25 seeded runs on x86-64 native and 25 on big-endian PowerPC (qemu-ppc,
+  `--native-cc powerpc-linux-gnu-gcc --native-tag ppc`) give traces
+  byte-identical to the .NET JIT build. The user's PC: native build plays a
+  full run too.
+- Code size: 33.5 -> 27.8 MB (wasm code), logic.wasm 46.8 MB, C 279 MB,
+  x86 binary 75 MB; PPC text was 119 MB before the cut (64 MB proven to
+  link on the 360). Cuts: `ui.strip` (Godot UI bodies -> throw) and
+  `mods.no_harmony.*`. Slimmer build re-verified: 20/20 native traces
+  identical when paused (PPC rebuild of it was in progress).
+- Next size ideas: `IlcOptimizationPreference=Size` (measure speed too);
+  shared throw helper for stripped bodies.
+
+**M2 (console logic run): ready to build.** `xdk\build.cmd logic_runner`
+after `build_logic.py` (stages up to `c`), with `data\localization` copied
+to `<xex folder>\spire360_logic\data\localization`. Writes the selfplay
+timing report to `game:\spire360_logic\result.txt`. Not yet run; expect a
+long XDK compile (279 MB of C; /MP on).
 
 **Converter: started.** `converter/pck_tool.py` reads Godot 4 packs; works on
 the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
@@ -60,12 +69,8 @@ holds, for the converter:
 
 ## Waiting on the user
 
-1. Rebuild the wasm (stub fixes + synchronous Main) and upload logic.wasm;
-   or allow pkgs.dev.azure.com, *.vsblob.vsassets.io, github.com,
-   objects.githubusercontent.com, release-assets.githubusercontent.com in the
-   environment's network settings so the wasm can be built here.
-2. selftest once more in Xenia (stat fix); bench/selftest on hardware when
-   convenient (Xenia timings are not the console's).
+1. Nothing blocking. Later: `xdk\build.cmd logic_runner` in Xenia (M2), and
+   hardware runs when the results are needed.
 
 ## Next (agent)
 
