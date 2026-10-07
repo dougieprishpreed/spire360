@@ -126,6 +126,14 @@ class Pck:
         self.f.seek(e.offset)
         return self.f.read(e.size)
 
+    def read_head(self, path, n):
+        """The first n bytes of a file (headers without reading the whole file)."""
+        e = self.entries[path]
+        if e.encrypted:
+            raise PckError(f"{path} is encrypted")
+        self.f.seek(e.offset)
+        return self.f.read(min(n, e.size))
+
     def verify(self, path):
         """True if the file's MD5 matches the directory (all-zero MD5 = not recorded)."""
         e = self.entries[path]
