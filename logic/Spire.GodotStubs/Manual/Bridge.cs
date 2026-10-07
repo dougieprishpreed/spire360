@@ -2,9 +2,9 @@
 // See THIRD_PARTY.md. Local changes are marked "Spire360:".
 namespace Godot.Bridge;
 
-public static class ScriptManagerBridge
+public static partial class ScriptManagerBridge
 {
     public static void FrameworkGetGodotMethodList(IntPtr handle) { }
 }
 
-public static class CSharpInstanceBridge { }
+public static partial class CSharpInstanceBridge { }

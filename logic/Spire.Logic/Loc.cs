@@ -246,9 +246,12 @@ internal static class LocSetup
             tablesField!.SetValue(instance, tables);
 
             try { typeof(LocManager).GetProperty("Language", Inst)?.SetValue(instance, loc.GameLanguage); } catch { }
-            try { typeof(LocManager).GetProperty("CultureInfo", Inst)?.SetValue(instance, System.Globalization.CultureInfo.InvariantCulture); } catch { }
+            // A named culture, so SmartFormat picks the right plural rules (the
+            // invariant culture reports language "iv", which it does not know).
+            try { typeof(LocManager).GetProperty("CultureInfo", Inst)?.SetValue(instance, CultureFor(loc.GameLanguage)); } catch { }
 
             InitSmartFormatter(instance);
+            MapInvariantPluralRule(loc.GameLanguage);
 
             try { typeof(LocManager).GetField("_engTables", Inst)?.SetValue(instance, tables); } catch { }
             Log.Info("LocManager initialized");
@@ -257,6 +260,40 @@ internal static class LocSetup
         {
             Log.Warn($"InitLocManager failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// With InvariantGlobalization every culture reports its language as "iv",
+    /// which SmartFormat has no plural rule for. Point "iv" at the rule of the
+    /// language actually being shown.
+    /// </summary>
+    private static void MapInvariantPluralRule(string gameLang)
+    {
+        try
+        {
+            var rules = SmartFormat.Utilities.PluralRules.IsoLangToDelegate;
+            var iso = CultureFor(gameLang).Name.Split('-')[0];
+            if (rules.TryGetValue(iso, out var rule) || rules.TryGetValue("en", out rule))
+                rules["iv"] = rule;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"plural rules: {ex.Message}");
+        }
+    }
+
+    /// <summary>The game's language folder name to a .NET culture.</summary>
+    internal static System.Globalization.CultureInfo CultureFor(string gameLang)
+    {
+        var name = gameLang switch
+        {
+            "eng" => "en-US", "zhs" => "zh-CN", "zht" => "zh-TW", "deu" => "de-DE", "fra" => "fr-FR",
+            "ita" => "it-IT", "jpn" => "ja-JP", "kor" => "ko-KR", "pol" => "pl-PL", "ptb" => "pt-BR",
+            "rus" => "ru-RU", "spa" => "es-ES", "esp" => "es-419", "tha" => "th-TH", "tur" => "tr-TR",
+            _ => "en-US",
+        };
+        try { return System.Globalization.CultureInfo.GetCultureInfo(name); }
+        catch { return System.Globalization.CultureInfo.InvariantCulture; }
     }
 
     private static void InitSmartFormatter(object instance)

@@ -11,6 +11,17 @@
     <Version>4.5.1.0</Version>
     <AssemblyVersion>4.5.1.0</AssemblyVersion>
     <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);CS0067;CS0108;CS0114;CS8618;CS8625;CS8603</NoWarn>
   </PropertyGroup>
+  <!--
+    Manual/    hand-written stubs, with real behaviour where the game logic needs it.
+    Generated/ every other GodotSharp member the game references, generated from
+               the real GodotSharp.dll by Spire.ApiDump in gen-stubs mode
+               (build_logic.py, stage "stubs"). SpireManualOnly=true builds
+               Manual/ alone, which the generator compares against.
+  -->
+  <ItemGroup Condition="'$(SpireManualOnly)' == 'true'">
+    <Compile Remove="Generated/**" />
+  </ItemGroup>
 </Project>

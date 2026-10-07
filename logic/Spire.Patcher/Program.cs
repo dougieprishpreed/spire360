@@ -16,6 +16,18 @@
 //   call_after             before every ret: Hooks.After(id, new object[] { this?, args... }, result)
 //   replace_calls          every call to the target method anywhere in the assembly
 //                          becomes (T)Hooks.Invoke(id, new object[] { args... })
+//   redirect_calls_into    every call from code outside the given namespaces to a
+//                          method declared inside them becomes
+//                          Hooks.Invoke("<id>|<Type>::<Method>", { this?, args... })
+//                          followed by a safe default of the return type (completed
+//                          Task, empty sequence, default value). Used to cut the game
+//                          logic off from its Godot UI layer while recording what it
+//                          asked the UI to do.
+//   null_safe_calls_into   every instance call from code outside the given namespaces
+//                          to a class method declared inside them checks its receiver:
+//                          null -> skip the call and use the same safe default;
+//                          otherwise call as before. Used for Godot engine objects
+//                          (scenes, tweens, nodes) that do not exist without the engine.
 //
 // A patch whose target is missing fails the run unless it is "optional".
 using System.Text.Json;
@@ -37,6 +49,7 @@ internal sealed class PatchSpec
     public bool Enabled = true;
     public JsonElement? Value;
     public string? Note;
+    public List<string>? NamespacePrefixes;
 
     public static PatchSpec From(JsonElement e)
     {
@@ -44,8 +57,8 @@ internal sealed class PatchSpec
         {
             Id = e.GetProperty("id").GetString()!,
             Action = e.GetProperty("action").GetString()!,
-            Type = e.GetProperty("type").GetString()!,
-            Method = e.GetProperty("method").GetString()!,
+            Type = e.TryGetProperty("type", out var ty) ? ty.GetString()! : "",
+            Method = e.TryGetProperty("method", out var me) ? me.GetString()! : "",
         };
         if (e.TryGetProperty("params", out var ps) && ps.ValueKind == JsonValueKind.Array)
             p.Params = ps.EnumerateArray().Select(x => x.GetString()!).ToList();
@@ -54,6 +67,8 @@ internal sealed class PatchSpec
         if (e.TryGetProperty("enabled", out var en)) p.Enabled = en.GetBoolean();
         if (e.TryGetProperty("value", out var v)) p.Value = v.Clone();
         if (e.TryGetProperty("note", out var n)) p.Note = n.GetString();
+        if (e.TryGetProperty("namespaces", out var ns) && ns.ValueKind == JsonValueKind.Array)
+            p.NamespacePrefixes = ns.EnumerateArray().Select(x => x.GetString()!).ToList();
         return p;
     }
 }
@@ -190,6 +205,10 @@ internal sealed class Patcher
         {
             if (spec.Action == "replace_calls")
                 return ReplaceCalls(spec, result);
+            if (spec.Action == "redirect_calls_into")
+                return RedirectCallsInto(spec, result);
+            if (spec.Action == "null_safe_calls_into")
+                return NullSafeCallsInto(spec, result);
 
             var targets = FindMethods(spec, out var why);
             if (targets.Count == 0)
@@ -590,6 +609,291 @@ internal sealed class Patcher
             il.InsertAfter(anchor, seq[k]);
             anchor = seq[k];
         }
+    }
+
+    private static bool InNamespaces(TypeReference t, List<string> prefixes)
+    {
+        while (t.IsNested) t = t.DeclaringType;
+        var ns = t.Namespace ?? "";
+        return prefixes.Any(p => ns == p || ns.StartsWith(p + ".", StringComparison.Ordinal));
+    }
+
+    private PatchResult RedirectCallsInto(PatchSpec spec, PatchResult result)
+    {
+        var prefixes = spec.NamespacePrefixes ?? throw new InvalidOperationException("redirect_calls_into needs \"namespaces\"");
+        int count = 0;
+        var callers = new HashSet<string>();
+        foreach (var type in _module.GetTypes())
+        {
+            if (InNamespaces(type, prefixes)) continue;
+            foreach (var method in type.Methods.Where(mm => mm.HasBody))
+            {
+                var body = method.Body;
+                bool changed = false;
+                for (int idx = 0; idx < body.Instructions.Count; idx++)
+                {
+                    var ins = body.Instructions[idx];
+                    if ((ins.OpCode != OpCodes.Call && ins.OpCode != OpCodes.Callvirt) || ins.Operand is not MethodReference target)
+                        continue;
+                    if (!InNamespaces(target.DeclaringType, prefixes)) continue;
+                    if (target.Name == ".ctor") continue;
+                    if (target.DeclaringType.IsValueType) continue;
+                    if (ins.Previous != null && ins.Previous.OpCode == OpCodes.Constrained) continue;
+                    if (target.Parameters.Any(p => p.ParameterType.IsByReference || p.ParameterType.IsPointer)) continue;
+                    if (target.ReturnType.IsByReference || target.ReturnType.IsPointer) continue;
+                    if (!changed)
+                    {
+                        body.SimplifyMacros();
+                        changed = true;
+                    }
+                    var name = spec.Id + "|" + target.DeclaringType.GetElementType().FullName + "::" + target.Name;
+                    ReplaceCallWithDefault(method, ins, target, name);
+                    count++;
+                    callers.Add(method.FullName);
+                }
+                if (changed) body.OptimizeMacros();
+            }
+        }
+        result.Count = count;
+        result.Targets.AddRange(callers.OrderBy(x => x).Take(50));
+        if (callers.Count > 50) result.Targets.Add($"... and {callers.Count - 50} more methods");
+        result.Status = count > 0 ? "applied" : "missing";
+        return result;
+    }
+
+    private PatchResult NullSafeCallsInto(PatchSpec spec, PatchResult result)
+    {
+        var prefixes = spec.NamespacePrefixes ?? throw new InvalidOperationException("null_safe_calls_into needs \"namespaces\"");
+        int count = 0;
+        var callers = new HashSet<string>();
+        foreach (var type in _module.GetTypes())
+        {
+            if (InNamespaces(type, prefixes)) continue;
+            foreach (var method in type.Methods.Where(mm => mm.HasBody))
+            {
+                var body = method.Body;
+                bool changed = false;
+                for (int idx = 0; idx < body.Instructions.Count; idx++)
+                {
+                    var ins = body.Instructions[idx];
+                    if (ins.OpCode != OpCodes.Callvirt || ins.Operand is not MethodReference target) continue;
+                    if (!target.HasThis || !InNamespaces(target.DeclaringType, prefixes)) continue;
+                    if (target.DeclaringType.IsValueType) continue;
+                    if (ins.Previous != null && ins.Previous.OpCode == OpCodes.Constrained) continue;
+                    if (target.Parameters.Any(p => p.ParameterType.IsByReference || p.ParameterType.IsPointer)) continue;
+                    if (target.ReturnType.IsByReference || target.ReturnType.IsPointer) continue;
+                    if (!changed)
+                    {
+                        body.SimplifyMacros();
+                        changed = true;
+                    }
+                    // Skip past the inserted sequence (it contains a new callvirt
+                    // to the same target, which must not be guarded again).
+                    idx += GuardReceiver(method, ins, target) - 1;
+                    count++;
+                    callers.Add(method.FullName);
+                }
+                if (changed) body.OptimizeMacros();
+            }
+        }
+        result.Count = count;
+        result.Targets.AddRange(callers.OrderBy(x => x).Take(50));
+        if (callers.Count > 50) result.Targets.Add($"... and {callers.Count - 50} more methods");
+        result.Status = count > 0 ? "applied" : "missing";
+        return result;
+    }
+
+    /// <summary>
+    /// [recv, a0..an] callvirt M  ->  store all; if recv == null: safe default
+    /// else: reload and callvirt M. The original instruction becomes the first
+    /// store, so branches into the call site still land at its start.
+    /// </summary>
+    private int GuardReceiver(MethodDefinition caller, Instruction call, MethodReference target)
+    {
+        var il = caller.Body.GetILProcessor();
+        var self = new VariableDefinition(_module.ImportReference(target.DeclaringType));
+        caller.Body.Variables.Add(self);
+        var locals = new List<VariableDefinition>();
+        foreach (var p in target.Parameters)
+        {
+            var v = new VariableDefinition(_module.ImportReference(Concrete(p.ParameterType, target)));
+            caller.Body.Variables.Add(v);
+            locals.Add(v);
+        }
+        var ret = _module.ImportReference(Concrete(target.ReturnType, target));
+        var realCall = il.Create(OpCodes.Callvirt, target);
+        var end = il.Create(OpCodes.Nop);
+        var callPath = il.Create(OpCodes.Ldloc, self);
+
+        var seq = new List<Instruction>();
+        for (int i = locals.Count - 1; i >= 0; i--)
+            seq.Add(il.Create(OpCodes.Stloc, locals[i]));
+        seq.Add(il.Create(OpCodes.Stloc, self));
+        seq.Add(il.Create(OpCodes.Ldloc, self));
+        seq.Add(il.Create(OpCodes.Brtrue, callPath));
+        seq.AddRange(SafeDefault(il, caller, ret));
+        seq.Add(il.Create(OpCodes.Br, end));
+        seq.Add(callPath);
+        foreach (var v in locals) seq.Add(il.Create(OpCodes.Ldloc, v));
+        seq.Add(realCall);
+        seq.Add(end);
+
+        var first = seq[0];
+        call.OpCode = first.OpCode;
+        call.Operand = first.Operand;
+        var anchor = call;
+        for (int k = 1; k < seq.Count; k++)
+        {
+            il.InsertAfter(anchor, seq[k]);
+            anchor = seq[k];
+        }
+        return seq.Count;
+    }
+
+    /// <summary>Resolves !0 / !!0 in a member reference's signature to concrete types.</summary>
+    private TypeReference Concrete(TypeReference t, MethodReference m)
+    {
+        if (t is GenericParameter gp)
+        {
+            if (gp.Type == GenericParameterType.Method && m is GenericInstanceMethod gim)
+                return gim.GenericArguments[gp.Position];
+            if (gp.Type == GenericParameterType.Type && m.DeclaringType is GenericInstanceType git)
+                return git.GenericArguments[gp.Position];
+            return t;
+        }
+        if (t is GenericInstanceType inst && inst.GenericArguments.Any(a => a.ContainsGenericParameter))
+        {
+            var copy = new GenericInstanceType(inst.ElementType);
+            foreach (var a in inst.GenericArguments) copy.GenericArguments.Add(Concrete(a, m));
+            return copy;
+        }
+        if (t is ArrayType at && at.ElementType.ContainsGenericParameter)
+            return new ArrayType(Concrete(at.ElementType, m), at.Rank);
+        return t;
+    }
+
+    private void ReplaceCallWithDefault(MethodDefinition caller, Instruction call, MethodReference target, string id)
+    {
+        var il = caller.Body.GetILProcessor();
+        var locals = new List<VariableDefinition>();
+        if (target.HasThis)
+        {
+            var self = new VariableDefinition(_module.TypeSystem.Object);
+            caller.Body.Variables.Add(self);
+            locals.Add(self);
+        }
+        foreach (var p in target.Parameters)
+        {
+            var v = new VariableDefinition(_module.ImportReference(Concrete(p.ParameterType, target)));
+            caller.Body.Variables.Add(v);
+            locals.Add(v);
+        }
+        var seq = new List<Instruction>();
+        for (int i = locals.Count - 1; i >= 0; i--)
+            seq.Add(il.Create(OpCodes.Stloc, locals[i]));
+        seq.Add(il.Create(OpCodes.Ldstr, id));
+        seq.Add(il.Create(OpCodes.Ldc_I4, locals.Count));
+        seq.Add(il.Create(OpCodes.Newarr, _module.TypeSystem.Object));
+        for (int i = 0; i < locals.Count; i++)
+        {
+            seq.Add(il.Create(OpCodes.Dup));
+            seq.Add(il.Create(OpCodes.Ldc_I4, i));
+            seq.Add(il.Create(OpCodes.Ldloc, locals[i]));
+            var t = locals[i].VariableType;
+            if (t.IsValueType || t.IsGenericParameter) seq.Add(il.Create(OpCodes.Box, t));
+            seq.Add(il.Create(OpCodes.Stelem_Ref));
+        }
+        seq.Add(il.Create(OpCodes.Call, _invoke));
+        seq.Add(il.Create(OpCodes.Pop));
+        var ret = _module.ImportReference(Concrete(target.ReturnType, target));
+        seq.AddRange(SafeDefault(il, caller, ret));
+
+        var first = seq[0];
+        call.OpCode = first.OpCode;
+        call.Operand = first.Operand;
+        var anchor = call;
+        for (int k = 1; k < seq.Count; k++)
+        {
+            il.InsertAfter(anchor, seq[k]);
+            anchor = seq[k];
+        }
+    }
+
+    private static readonly HashSet<string> SequenceInterfaces = new()
+    {
+        "System.Collections.Generic.IEnumerable`1", "System.Collections.Generic.IReadOnlyList`1",
+        "System.Collections.Generic.IReadOnlyCollection`1", "System.Collections.Generic.IList`1",
+        "System.Collections.Generic.ICollection`1",
+    };
+
+    /// <summary>A value of the given type that callers can use without crashing.</summary>
+    private List<Instruction> SafeDefault(ILProcessor il, MethodDefinition caller, TypeReference ret)
+    {
+        var seq = new List<Instruction>();
+        if (ret.MetadataType == MetadataType.Void) return seq;
+        var elementName = ret.GetElementType().FullName;
+        var taskDef = _module.ImportReference(typeof(Task)).Resolve();
+        if (ret.FullName == "System.Threading.Tasks.Task")
+        {
+            seq.Add(il.Create(OpCodes.Call, _module.ImportReference(taskDef.Properties.Single(p => p.Name == "CompletedTask").GetMethod)));
+            return seq;
+        }
+        if (elementName == "System.Threading.Tasks.Task`1" && ret is GenericInstanceType tgit)
+        {
+            var fromResult = new GenericInstanceMethod(_module.ImportReference(taskDef.Methods.Single(mm => mm.Name == "FromResult" && mm.HasGenericParameters)));
+            fromResult.GenericArguments.Add(tgit.GenericArguments[0]);
+            seq.AddRange(PlainDefault(il, caller, tgit.GenericArguments[0]));
+            seq.Add(il.Create(OpCodes.Call, fromResult));
+            return seq;
+        }
+        if (ret is ArrayType at && at.Rank == 1)
+        {
+            seq.Add(il.Create(OpCodes.Ldc_I4_0));
+            seq.Add(il.Create(OpCodes.Newarr, at.ElementType));
+            return seq;
+        }
+        if (SequenceInterfaces.Contains(elementName) && ret is GenericInstanceType sgit)
+        {
+            var arrayDef = _module.ImportReference(typeof(Array)).Resolve();
+            var empty = new GenericInstanceMethod(_module.ImportReference(arrayDef.Methods.Single(mm => mm.Name == "Empty")));
+            empty.GenericArguments.Add(sgit.GenericArguments[0]);
+            seq.Add(il.Create(OpCodes.Call, empty));
+            return seq;
+        }
+        // Awaitables the game awaits (Godot.SignalAwaiter): a fresh one is completed.
+        if (!ret.IsValueType && ret.Name.EndsWith("Awaiter", StringComparison.Ordinal))
+        {
+            var def = ret.Resolve();
+            var ctor = def?.Methods.FirstOrDefault(m => m.IsConstructor && !m.IsStatic && m.Parameters.Count == 0 && m.IsPublic);
+            if (ctor != null)
+            {
+                seq.Add(il.Create(OpCodes.Newobj, _module.ImportReference(ctor)));
+                return seq;
+            }
+        }
+        seq.AddRange(PlainDefault(il, caller, ret));
+        return seq;
+    }
+
+    private List<Instruction> PlainDefault(ILProcessor il, MethodDefinition caller, TypeReference t)
+    {
+        var seq = new List<Instruction>();
+        if (t.MetadataType == MetadataType.String)
+        {
+            seq.Add(il.Create(OpCodes.Ldstr, ""));
+            return seq;
+        }
+        if (!t.IsValueType && !t.IsGenericParameter)
+        {
+            seq.Add(il.Create(OpCodes.Ldnull));
+            return seq;
+        }
+        var v = new VariableDefinition(t);
+        caller.Body.Variables.Add(v);
+        seq.Add(il.Create(OpCodes.Ldloca, v));
+        seq.Add(il.Create(OpCodes.Initobj, t));
+        seq.Add(il.Create(OpCodes.Ldloc, v));
+        return seq;
     }
 
     private static TypeReference ResolveGenericArg(TypeReference t, MethodReference m)

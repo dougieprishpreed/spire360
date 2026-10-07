@@ -1002,7 +1002,7 @@ public partial class RunDriver
             Sched.Pump();
             Log($"Bought card: {entry.CreationResult?.Card?.GetType().Name ?? "?"} for {entry.Cost}g");
         }
-        catch (Exception ex) { return Error($"Buy card failed: {ex.Message}"); }
+        catch (Exception ex) { return ErrorWithTrace("Buy card failed", ex); }
 
         return DetectDecisionPoint();
     }
@@ -1028,17 +1028,20 @@ public partial class RunDriver
             // Adroit, #80). The purchase runs until it awaits the selector's TCS; it then
             // resumes when select_cards completes that TCS.
             var inv = merchantRoom.GetLocalInventory();
+            // The entry forgets its model once bought; name it first.
+            var relicName = entry.Model?.GetType().Name ?? "?";
+            var cost = entry.Cost;
             // Single-threaded: runs until it completes or waits on a selection.
             Sched.Run(() => entry.OnTryPurchaseWrapper(inv));
             if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
             {
-                Log($"Buy relic {entry.Model.GetType().Name}: yielded for pending selection");
+                Log($"Buy relic {relicName}: yielded for pending selection");
                 return DetectDecisionPoint();
             }
             Sched.Pump();
-            Log($"Bought relic: {entry.Model.GetType().Name} for {entry.Cost}g");
+            Log($"Bought relic: {relicName} for {cost}g");
         }
-        catch (Exception ex) { return Error($"Buy relic failed: {ex.Message}"); }
+        catch (Exception ex) { return ErrorWithTrace("Buy relic failed", ex); }
 
         return DetectDecisionPoint();
     }
@@ -1094,7 +1097,7 @@ public partial class RunDriver
             Sched.Pump();
             Log($"Removed card for {removal.Cost}g");
         }
-        catch (Exception ex) { return Error($"Remove card failed: {ex.Message}"); }
+        catch (Exception ex) { return ErrorWithTrace("Remove card failed", ex); }
 
         return DetectDecisionPoint();
     }
@@ -1299,7 +1302,7 @@ public partial class RunDriver
             }
             catch (Exception ex)
             {
-                Log($"Rest site ChooseLocalOption failed: {ex.Message}");
+                Log($"Rest site ChooseLocalOption failed: {ex}");
             }
 
             // After non-Smith rest site options (HEAL, etc.), the options may not clear.
@@ -1341,7 +1344,7 @@ public partial class RunDriver
                         }
                         Sched.Pump();
                     }
-                    catch (Exception ex) { Log($"Event choose: {ex.Message}"); }
+                    catch (Exception ex) { Log($"Event choose: {ex}"); }
                 }
 
                 // Note: do NOT force-finish on `optCountAfter == optCountBefore`. Events can
@@ -2831,9 +2834,19 @@ public partial class RunDriver
             Console.Error.WriteLine($"[WARN] PlatformUtil init: {ex.Message}");
         }
 
+        // Saves go to <data>/user through our own ISaveStore (the game's
+        // GodotFileIo needs Godot's FileAccess). forceSynchronous: one thread.
+        try
+        {
+            var store = new FileStore(Path.Combine(DataDir.Root, "user"));
+            SaveManager.MockInstanceForTesting(new SaveManager(store, forceSynchronous: true));
+            Log($"Saves in {store.Root}");
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager store: {ex.Message}"); }
+
         // Initialize SaveManager with a dummy profile for save/load support
         try { SaveManager.Instance.InitProfileId(0); }
-        catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager.InitProfileId: {ex.Message}"); }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager.InitProfileId: {(Spire.Logic.Log.Verbose ? ex.ToString() : ex.Message)}"); }
 
         // Initialize PrefsSave (FastMode etc.). build 23372702 reads PrefsSave.FastMode
         // from many gameplay paths (e.g. Slice.OnPlay anim delay); without this the
@@ -2872,6 +2885,16 @@ public partial class RunDriver
             }
         }
         Console.Error.WriteLine($"[INFO] ModelDb: {registered} registered, {failed} failed out of {subtypes.Count}");
+
+        // v0.111.0: ContentSorter (used by the serialization cache) requires
+        // AssemblyInfo, which the game initializes during its normal boot.
+        try { MegaCrit.Sts2.Core.Modding.AssemblyInfo.Init(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] AssemblyInfo.Init: {ex.Message}"); }
+
+        // v0.111.0: progress data resolves character models, so load it again
+        // now that ModelDb is populated (the earlier call fails on a fresh profile).
+        try { SaveManager.Instance.InitProgressData(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitProgressData (after ModelDb): {(Spire.Logic.Log.Verbose ? ex.ToString() : ex.Message)}"); }
 
         // Initialize net ID serialization cache (needed for combat actions)
         try

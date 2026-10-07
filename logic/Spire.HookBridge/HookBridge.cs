@@ -26,8 +26,18 @@ public static class Hooks
     {
         if (Handlers.TryGetValue(id, out var h))
             return h(args);
+        // "prefix|detail" ids (redirect_calls_into) go to the prefix's handler,
+        // which receives the full id as an extra first argument.
+        var bar = id.IndexOf('|');
+        if (bar > 0 && PrefixHandlers.TryGetValue(id[..bar], out var ph))
+            return ph(id, args);
         throw new InvalidOperationException($"Spire hook '{id}' has no registered handler");
     }
+
+    private static readonly Dictionary<string, Func<string, object?[], object?>> PrefixHandlers = new();
+
+    /// <summary>Handler for every "prefix|..." id, e.g. all redirected UI calls.</summary>
+    public static void RegisterPrefix(string prefix, Func<string, object?[], object?> handler) => PrefixHandlers[prefix] = handler;
 
     /// <summary>Called at every return of a method patched with "call_after".</summary>
     public static void After(string id, object?[] args, object? result)

@@ -2,6 +2,120 @@
   "comment": "Static IL patches applied to the player's sts2.dll by Spire.Patcher (tools/build_logic.py). Each replaces a Harmony patch from sts2-cli; handlers for 'redirect' ids are in logic/Spire.Logic/Hooks.cs. A missing non-optional target fails the build: that is the signal the game API moved (see docs/LOGIC_BUILD.md).",
   "patches": [
     {
+      "id": "ui",
+      "action": "redirect_calls_into",
+      "namespaces": [
+        "MegaCrit.Sts2.Core.Nodes"
+      ],
+      "note": "Cuts the game logic off from its Godot UI layer: every call from logic into MegaCrit.Sts2.Core.Nodes.* becomes a recorded presentation cue (sound, VFX, speech, music) with a safe default result. Replaces per-method fixes such as monster death VFX NREs."
+    },
+    {
+      "id": "godot.null_safe",
+      "action": "null_safe_calls_into",
+      "namespaces": [
+        "Godot"
+      ],
+      "note": "Game logic calls into Godot engine objects (scenes from the asset cache, tweens, nodes) that are null without the engine. A null receiver now skips the call with a safe default; non-null receivers (stub objects) behave as before."
+    },
+    {
+      "id": "sentry.auto_init",
+      "action": "return_default",
+      "type": "SentryAutoInit",
+      "method": "Init",
+      "optional": true,
+      "note": "v0.111.0+: the module initializer starts Sentry crash reporting through Sentry.Godot. No crash reporting off the PC game."
+    },
+    {
+      "id": "sentry.Shutdown",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "Shutdown",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.SetTag",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "SetTag",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.SetExtra",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "SetExtra",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.InitializeForTesting",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "InitializeForTesting",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.Initialize",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "Initialize",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.DisableSentryIfModded",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "DisableSentryIfModded",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.CaptureMessage",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "CaptureMessage",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.CaptureException",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "CaptureException",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.AfterGameInit",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "AfterGameInit",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
+      "id": "sentry.AddBreadcrumb",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Debug.SentryService",
+      "method": "AddBreadcrumb",
+      "all_overloads": true,
+      "optional": true,
+      "note": "v0.111.0+: crash reporting through Sentry.Godot; nothing to report to off the PC game."
+    },
+    {
       "id": "cmd.wait",
       "action": "return_completed_task",
       "type": "MegaCrit.Sts2.Core.Commands.Cmd",
@@ -15,7 +129,8 @@
       "type": "MegaCrit.Sts2.Core.Commands.TalkCmd",
       "method": "Play",
       "all_overloads": true,
-      "note": "Speech-bubble VFX NREs without the UI and breaks enemy moves (sts2-cli issue #64). Return value is ignored by callers."
+      "note": "Superseded by the 'ui' patch (speech bubbles become ui cues). Re-enable if TalkCmd.Play fails for non-UI reasons.",
+      "enabled": false
     },
     {
       "id": "queue.wait_until_empty",
@@ -30,7 +145,9 @@
       "action": "redirect",
       "type": "MegaCrit.Sts2.Core.Localization.LocTable",
       "method": "GetRawText",
-      "params": ["System.String"],
+      "params": [
+        "System.String"
+      ],
       "note": "Returns the table text, or the key when missing (the original throws)."
     },
     {
@@ -62,7 +179,8 @@
       "value": true,
       "type": "MegaCrit.Sts2.Core.Localization.LocString",
       "method": "Exists",
-      "optional": true
+      "optional": true,
+      "all_overloads": true
     },
     {
       "id": "loc.get_loc_strings_with_prefix",

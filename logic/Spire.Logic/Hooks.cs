@@ -84,6 +84,15 @@ internal static class Hooks
             return Task.FromResult<IEnumerable<CardModel>>(bundles.Count > 0 ? bundles[0] : Array.Empty<CardModel>());
         });
 
+        // Every call from game logic into the UI layer (redirect_calls_into "ui"):
+        // nothing runs, the call is recorded as a presentation cue. The patched
+        // call site supplies a safe default return value itself.
+        Spire.HookBridge.Hooks.RegisterPrefix("ui", (id, a) =>
+        {
+            Steps.Ui(id, a);
+            return null;
+        });
+
         // Neutralize.OnPlay(choiceContext, cardPlay): sts2-cli's safe re-implementation
         // (the original NREs inside DamageCmd.Attack().Execute() without the UI).
         // Disabled in patches.json by default; enable only if that NRE reproduces.
@@ -101,8 +110,7 @@ internal static class Hooks
     {
         try
         {
-            await CreatureCmd.Damage(ctx, play.Target!, card.DynamicVars.Damage.BaseValue,
-                MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, card);
+            await CreatureCmd.Damage(ctx, play.Target!, card.DynamicVars.Damage, card, play);
             await PowerCmd.Apply<WeakPower>(ctx, play.Target!, card.DynamicVars["WeakPower"].BaseValue,
                 card.Owner.Creature, card, false);
         }

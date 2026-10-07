@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Models;
 
 namespace Spire.Logic;
 
@@ -43,6 +44,47 @@ internal static class Steps
         Sched.AfterCallback = Capture;
     }
 
+    private static readonly List<Dictionary<string, object?>> _pendingUi = new();
+    public static bool RecordUi = Environment.GetEnvironmentVariable("SPIRE_UI_EVENTS") != "0";
+
+    /// <summary>
+    /// A call the game logic made into its UI layer ("ui|Namespace.Type::Method").
+    /// Property reads and singleton lookups are not cues and are skipped.
+    /// </summary>
+    public static void Ui(string id, object?[] args)
+    {
+        if (!Enabled || !RecordUi) return;
+        var sep = id.LastIndexOf("::", StringComparison.Ordinal);
+        if (sep < 0) return;
+        var method = id[(sep + 2)..];
+        if (method.StartsWith("get_", StringComparison.Ordinal) || method.StartsWith("set_", StringComparison.Ordinal)
+            || method.StartsWith("add_", StringComparison.Ordinal) || method.StartsWith("remove_", StringComparison.Ordinal))
+            return;
+        var typeFull = id[(id.IndexOf('|') + 1)..sep];
+        var type = typeFull[(typeFull.LastIndexOf('.') + 1)..];
+        var outArgs = new List<object?>();
+        // args[0] is the receiver for instance calls; it is null here (no UI), skip it.
+        foreach (var a in args)
+        {
+            switch (a)
+            {
+                case null: continue;
+                case string str: outArgs.Add(str); break;
+                case bool or int or long or float or double or decimal: outArgs.Add(a); break;
+                case Enum e: outArgs.Add(e.ToString()); break;
+                case MegaCrit.Sts2.Core.Models.AbstractModel m: outArgs.Add(m.Id.ToString()); break;
+                case Creature c: outArgs.Add(c.IsPlayer ? "player" : "e" + IdOf(c)); break;
+                default:
+                    var tn = a.GetType().Name;
+                    if (tn.StartsWith("N", StringComparison.Ordinal)) continue; // UI node receivers
+                    outArgs.Add(tn);
+                    break;
+            }
+        }
+        if (_pendingUi.Count < 500)
+            _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });
+    }
+
     /// <summary>Called after each queued continuation.</summary>
     public static void Capture()
     {
@@ -52,12 +94,23 @@ internal static class Steps
         catch { return; }
         if (now == null)
         {
+            // Outside combat the cues still matter (event sounds, map music).
+            if (_pendingUi.Count > 0 && _steps.Count < MaxStepsPerResponse)
+            {
+                _steps.Add(new List<Dictionary<string, object?>>(_pendingUi));
+                _pendingUi.Clear();
+            }
             _last = null;
             return;
         }
         if (_last != null && _steps.Count < MaxStepsPerResponse)
         {
             var diff = Diff(_last, now);
+            if (_pendingUi.Count > 0)
+            {
+                diff.InsertRange(0, _pendingUi);
+                _pendingUi.Clear();
+            }
             if (diff.Count > 0) _steps.Add(diff);
         }
         _last = now;

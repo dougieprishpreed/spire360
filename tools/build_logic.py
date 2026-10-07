@@ -3,6 +3,8 @@
 
 Stages (each can be run alone with --stage):
   copy     copy the game's managed DLLs into logic/lib/game/ and record hashes
+  stubs    regenerate logic/Spire.GodotStubs/Generated/ from the game's real
+           GodotSharp.dll (only needed after a game update)
   patch    apply logic/patches.json with Spire.Patcher -> logic/lib/patched/
   jit      dotnet build of Spire.Logic (the oracle; quick to iterate on)
   smoke    run the JIT build: start a run, play to the first decision, quit
@@ -36,7 +38,8 @@ GAME_DLLS = [
     "Steamworks.NET.dll", "MonoMod.Backports.dll", "MonoMod.ILHelpers.dll",
     "0Harmony.dll", "System.IO.Hashing.dll",
 ]
-STAGES = ["copy", "patch", "jit", "smoke", "aot", "wasm", "c"]
+STAGES = ["copy", "stubs", "patch", "jit", "smoke", "aot", "wasm", "c"]
+DEFAULT_STAGES = ["copy", "patch", "jit", "smoke", "aot", "wasm", "c"]
 
 
 def run(cmd, **kw):
@@ -72,6 +75,12 @@ def stage_copy(a):
             print(f"  copied {name}")
         else:
             print(f"  (missing {name})")
+    # The real GodotSharp.dll is only read (by the stub generator); the build
+    # uses Spire.GodotStubs in its place.
+    real_godot = os.path.join(src, "GodotSharp.dll")
+    if os.path.exists(real_godot):
+        shutil.copy2(real_godot, os.path.join(LIB_GAME, "GodotSharp.real.dll"))
+        manifest["files"]["GodotSharp.dll"] = sha256(real_godot)
     for cand in (os.path.join(src, "release_info.json"), os.path.join(a.game_dir, "release_info.json")):
         if os.path.exists(cand):
             with open(cand, encoding="utf-8") as f:
@@ -80,6 +89,17 @@ def stage_copy(a):
     with open(os.path.join(LIB_GAME, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
     print("  game version:", manifest.get("release_info", {}).get("version", "unknown"))
+
+
+def stage_stubs(a):
+    tools = os.path.join(OUT, "apidump")
+    manual = os.path.join(OUT, "stubs-manual")
+    run(["dotnet", "build", os.path.join(LOGIC, "Spire.ApiDump"), "-c", "Release", "-o", tools, "-nologo", "-v", "q"])
+    run(["dotnet", "build", os.path.join(LOGIC, "Spire.GodotStubs"), "-c", "Release", "-p:SpireManualOnly=true",
+         "-o", manual, "-nologo", "-v", "q"])
+    run(["dotnet", os.path.join(tools, "Spire.ApiDump.dll"), "--gen-stubs", os.path.join(LIB_GAME, "sts2.dll"),
+         os.path.join(manual, "GodotSharp.dll"), os.path.join(LIB_GAME, "GodotSharp.real.dll"),
+         os.path.join(LOGIC, "Spire.GodotStubs", "Generated", "GodotApi.g.cs")])
 
 
 def stage_patch(a):
@@ -177,7 +197,7 @@ def main():
     ap.add_argument("--w2c2", help="path to a built w2c2")
     ap.add_argument("--funcs-per-file", type=int, default=2000)
     a = ap.parse_args()
-    stages = STAGES if a.stage == "all" else a.stage.split(",")
+    stages = DEFAULT_STAGES if a.stage == "all" else a.stage.split(",")
     if "copy" in stages and not a.game_dir:
         sys.exit("--game-dir is required for the copy stage")
     for s in stages:

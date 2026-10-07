@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 namespace Godot;
 
 // StringName - wraps string (must be a class, not struct, to match real Godot's type signature)
-public sealed class StringName : IDisposable
+public sealed partial class StringName : IDisposable
 {
     private readonly string? _name;
     public StringName() => _name = "";
@@ -26,7 +26,7 @@ public sealed class StringName : IDisposable
 }
 
 // NodePath (must be a class to match real Godot's type signature)
-public sealed class NodePath : IDisposable
+public sealed partial class NodePath : IDisposable
 {
     private readonly string _path;
     public NodePath() => _path = "";
@@ -38,7 +38,7 @@ public sealed class NodePath : IDisposable
 }
 
 // Variant - can hold any type
-public struct Variant
+public partial struct Variant
 {
     public enum Type
     {
@@ -66,16 +66,16 @@ public struct Variant
     public static implicit operator Variant(Vector2 v) => new(v);
     public static implicit operator Variant(Color v) => new(v);
 
-    public static implicit operator bool(Variant v) => v._value is bool b ? b : false;
-    public static implicit operator int(Variant v) => v._value is int i ? i : 0;
-    public static implicit operator long(Variant v) => v._value is long l ? l : 0;
-    public static implicit operator float(Variant v) => v._value is float f ? f : 0f;
-    public static implicit operator double(Variant v) => v._value is double d ? d : 0;
-    public static implicit operator string(Variant v) => v._value?.ToString() ?? "";
+    public static explicit operator bool(Variant v) => v._value is bool b ? b : false;
+    public static explicit operator int(Variant v) => v._value is int i ? i : 0;
+    public static explicit operator long(Variant v) => v._value is long l ? l : 0;
+    public static explicit operator float(Variant v) => v._value is float f ? f : 0f;
+    public static explicit operator double(Variant v) => v._value is double d ? d : 0;
+    public static explicit operator string(Variant v) => v._value?.ToString() ?? "";
 }
 
 // Callable - wraps a delegate
-public struct Callable
+public partial struct Callable
 {
     private readonly Delegate? _delegate;
     public Callable(Delegate? d) => _delegate = d;
@@ -84,29 +84,29 @@ public struct Callable
     public static Callable From<T>(Action<T> action) => new(action);
     public static Callable From<T1, T2>(Action<T1, T2> action) => new(action);
 
-    public void Call(params Variant[] args) => (_delegate as Action)?.Invoke();
+    public Variant Call(params Variant[] args) { (_delegate as Action)?.Invoke(); return default; }
     public void CallDeferred(params Variant[] args) => Call(args);
 }
 
 // Signal-related
 [AttributeUsage(AttributeTargets.Delegate)]
-public class SignalAttribute : Attribute { }
+public partial class SignalAttribute : Attribute { }
 
 // IAwaiter - interface referenced by sts2.dll for async/await patterns
-public interface IAwaiter : INotifyCompletion
+public partial interface IAwaiter : INotifyCompletion
 {
     bool IsCompleted { get; }
     void GetResult();
 }
 
-public interface IAwaiter<out T> : INotifyCompletion
+public partial interface IAwaiter<out T> : INotifyCompletion
 {
     bool IsCompleted { get; }
     T GetResult();
 }
 
 // SignalAwaiter - awaitable (must implement IAwaiter<Variant[]> to match real Godot)
-public class SignalAwaiter : IAwaiter<Variant[]>
+public partial class SignalAwaiter : IAwaiter<Variant[]>
 {
     private bool _completed = true;
     private Action? _continuation;
@@ -148,35 +148,35 @@ public enum PropertyUsageFlags
 public enum MethodFlags { Normal, Editor, Virtual }
 
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
-public class ExportAttribute : Attribute
+public partial class ExportAttribute : Attribute
 {
     public ExportAttribute() { }
     public ExportAttribute(PropertyHint hint, string hintString = "") { }
 }
 
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
-public class ExportGroupAttribute : Attribute
+public partial class ExportGroupAttribute : Attribute
 {
     public ExportGroupAttribute(string name, string prefix = "") { }
 }
 
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field)]
-public class ExportCategoryAttribute : Attribute
+public partial class ExportCategoryAttribute : Attribute
 {
     public ExportCategoryAttribute(string name) { }
 }
 
 [AttributeUsage(AttributeTargets.Class)]
-public class ScriptPathAttribute : Attribute
+public partial class ScriptPathAttribute : Attribute
 {
     public ScriptPathAttribute(string path) { }
 }
 
 [AttributeUsage(AttributeTargets.Class)]
-public class GlobalClassAttribute : Attribute { }
+public partial class GlobalClassAttribute : Attribute { }
 
 // PropertyInfo for Godot bridge methods
-public struct PropertyInfo
+public partial struct PropertyInfo
 {
     public Variant.Type Type;
     public StringName Name;
@@ -193,7 +193,7 @@ public struct PropertyInfo
 }
 
 // MethodInfo for Godot bridge methods
-public struct MethodInfo
+public partial struct MethodInfo
 {
     public StringName Name;
     public PropertyInfo ReturnVal;
@@ -210,7 +210,7 @@ public struct MethodInfo
 }
 
 // GodotSerializationInfo
-public class GodotSerializationInfo
+public partial class GodotSerializationInfo
 {
     public void AddProperty(string name, Variant value) { }
     public bool TryGetProperty(string name, out Variant value) { value = default; return false; }

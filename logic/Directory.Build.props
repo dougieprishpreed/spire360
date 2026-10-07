@@ -13,5 +13,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The game creates named cultures (e.g. for SmartFormat); in invariant mode
+         they behave like the invariant culture instead of throwing. -->
+    <PredefinedCulturesOnly>false</PredefinedCulturesOnly>
   </PropertyGroup>
 </Project>
