@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../MockSts2/MockSts2.csproj" />
+    <ProjectReference Include="../../Spire.HookBridge/Spire.HookBridge.csproj" />
+  </ItemGroup>
+</Project>

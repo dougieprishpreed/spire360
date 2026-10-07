@@ -1,0 +1,38 @@
+namespace Spire.HookBridge;
+
+/// <summary>
+/// The only thing the IL patcher makes the game assembly reference.
+///
+/// A patched method's body becomes "box the arguments, call Invoke(id, args),
+/// unbox the result". The adapter (which references the game assembly) registers
+/// the handler for each id at startup. Keeping this assembly free of any game
+/// reference avoids a circular reference between the game and the adapter.
+/// </summary>
+public static class Hooks
+{
+    private static readonly Dictionary<string, Func<object?[], object?>> Handlers = new();
+    private static readonly Dictionary<string, Action<object?[], object?>> AfterHandlers = new();
+
+    /// <summary>Handler for a "redirect" patch: receives (this?, args...) and returns the result.</summary>
+    public static void Register(string id, Func<object?[], object?> handler) => Handlers[id] = handler;
+
+    /// <summary>Handler for a "call_after" patch: receives (this?, args...) and the return value.</summary>
+    public static void RegisterAfter(string id, Action<object?[], object?> handler) => AfterHandlers[id] = handler;
+
+    public static bool IsRegistered(string id) => Handlers.ContainsKey(id) || AfterHandlers.ContainsKey(id);
+
+    /// <summary>Called from redirected method bodies.</summary>
+    public static object? Invoke(string id, object?[] args)
+    {
+        if (Handlers.TryGetValue(id, out var h))
+            return h(args);
+        throw new InvalidOperationException($"Spire hook '{id}' has no registered handler");
+    }
+
+    /// <summary>Called at every return of a method patched with "call_after".</summary>
+    public static void After(string id, object?[] args, object? result)
+    {
+        if (AfterHandlers.TryGetValue(id, out var h))
+            h(args, result);
+    }
+}

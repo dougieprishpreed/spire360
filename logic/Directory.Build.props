@@ -1,0 +1,17 @@
+<Project>
+  <!--
+    Shared settings for the Spire360 logic projects.
+
+    Sts2LibDir: folder holding the player's (patched) sts2.dll and its managed
+    dependencies. tools/build_logic.py fills logic/lib/ from the Steam install
+    and the patcher; override with /p:Sts2LibDir=... for experiments.
+  -->
+  <PropertyGroup>
+    <Sts2LibDir Condition="'$(Sts2LibDir)' == ''">$(MSBuildThisFileDirectory)lib/patched/</Sts2LibDir>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+</Project>

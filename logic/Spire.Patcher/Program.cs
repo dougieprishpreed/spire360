@@ -1,0 +1,601 @@
+// Spire.Patcher - static IL patches for the player's game assembly.
+//
+// Replaces the runtime Harmony patches sts2-cli uses (Harmony cannot work
+// under NativeAOT) with edits made once, on the player's PC, before the
+// assembly is compiled to WebAssembly.
+//
+//   Spire.Patcher --in <sts2.dll> --out <dir> --config <patches.json>
+//                 --hookbridge <Spire.HookBridge.dll> [--search <dir>]...
+//                 [--report <report.json>]
+//
+// Patch actions (see logic/patches.json for the live list):
+//   return_default         body = return default(T)
+//   return_completed_task  body = return Task.CompletedTask / Task.FromResult(default)
+//   return_const           body = return <bool|int|string value>
+//   redirect               body = return (T)Hooks.Invoke(id, new object[] { this?, args... })
+//   call_after             before every ret: Hooks.After(id, new object[] { this?, args... }, result)
+//   replace_calls          every call to the target method anywhere in the assembly
+//                          becomes (T)Hooks.Invoke(id, new object[] { args... })
+//
+// A patch whose target is missing fails the run unless it is "optional".
+using System.Text.Json;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
+using Mono.Cecil.Rocks;
+
+namespace Spire.Patcher;
+
+internal sealed class PatchSpec
+{
+    public string Id = "";
+    public string Action = "";
+    public string Type = "";
+    public string Method = "";
+    public List<string>? Params;
+    public bool AllOverloads;
+    public bool Optional;
+    public bool Enabled = true;
+    public JsonElement? Value;
+    public string? Note;
+
+    public static PatchSpec From(JsonElement e)
+    {
+        var p = new PatchSpec
+        {
+            Id = e.GetProperty("id").GetString()!,
+            Action = e.GetProperty("action").GetString()!,
+            Type = e.GetProperty("type").GetString()!,
+            Method = e.GetProperty("method").GetString()!,
+        };
+        if (e.TryGetProperty("params", out var ps) && ps.ValueKind == JsonValueKind.Array)
+            p.Params = ps.EnumerateArray().Select(x => x.GetString()!).ToList();
+        if (e.TryGetProperty("all_overloads", out var ao)) p.AllOverloads = ao.GetBoolean();
+        if (e.TryGetProperty("optional", out var op)) p.Optional = op.GetBoolean();
+        if (e.TryGetProperty("enabled", out var en)) p.Enabled = en.GetBoolean();
+        if (e.TryGetProperty("value", out var v)) p.Value = v.Clone();
+        if (e.TryGetProperty("note", out var n)) p.Note = n.GetString();
+        return p;
+    }
+}
+
+internal sealed class PatchResult
+{
+    public string Id = "";
+    public string Status = "";   // applied | skipped | missing | disabled | error
+    public int Count;
+    public List<string> Targets = new();
+    public string? Message;
+}
+
+internal static class Program
+{
+    private static int Main(string[] args)
+    {
+        string? input = null, outDir = null, config = null, hookBridge = null, report = null;
+        var search = new List<string>();
+        for (int i = 0; i < args.Length; i++)
+        {
+            string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{args[i]} needs a value");
+            switch (args[i])
+            {
+                case "--in": input = Next(); break;
+                case "--out": outDir = Next(); break;
+                case "--config": config = Next(); break;
+                case "--hookbridge": hookBridge = Next(); break;
+                case "--search": search.Add(Next()); break;
+                case "--report": report = Next(); break;
+                default:
+                    Console.Error.WriteLine($"unknown argument {args[i]}");
+                    return 2;
+            }
+        }
+        if (input == null || outDir == null || config == null || hookBridge == null)
+        {
+            Console.Error.WriteLine("usage: Spire.Patcher --in sts2.dll --out DIR --config patches.json --hookbridge Spire.HookBridge.dll [--search DIR]... [--report FILE]");
+            return 2;
+        }
+
+        var specs = JsonDocument.Parse(File.ReadAllText(config)).RootElement
+            .GetProperty("patches").EnumerateArray().Select(PatchSpec.From).ToList();
+
+        var resolver = new DefaultAssemblyResolver();
+        resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(input))!);
+        resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(hookBridge))!);
+        foreach (var s in search) resolver.AddSearchDirectory(s);
+
+        using var module = ModuleDefinition.ReadModule(input, new ReaderParameters
+        {
+            AssemblyResolver = resolver,
+            ReadingMode = ReadingMode.Immediate,
+            InMemory = true,
+        });
+        using var bridgeModule = ModuleDefinition.ReadModule(hookBridge);
+        var patcher = new Patcher(module, bridgeModule);
+
+        var results = new List<PatchResult>();
+        bool failed = false;
+        foreach (var spec in specs)
+        {
+            var r = patcher.Apply(spec);
+            results.Add(r);
+            var line = $"  [{r.Status,-8}] {spec.Id}: {r.Count} site(s)" + (r.Message != null ? $" - {r.Message}" : "");
+            Console.WriteLine(line);
+            if (r.Status == "error" || (r.Status == "missing" && !spec.Optional))
+                failed = true;
+        }
+
+        Directory.CreateDirectory(outDir);
+        var outPath = Path.Combine(outDir, Path.GetFileName(input));
+        module.Write(outPath);
+        Console.WriteLine($"wrote {outPath}");
+
+        if (report != null)
+        {
+            using var fs = File.Create(report);
+            using var w = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = true });
+            w.WriteStartObject();
+            w.WriteString("input", Path.GetFullPath(input));
+            w.WriteString("input_sha256", Sha256(input));
+            w.WriteStartArray("patches");
+            foreach (var r in results)
+            {
+                w.WriteStartObject();
+                w.WriteString("id", r.Id);
+                w.WriteString("status", r.Status);
+                w.WriteNumber("count", r.Count);
+                w.WriteStartArray("targets");
+                foreach (var t in r.Targets) w.WriteStringValue(t);
+                w.WriteEndArray();
+                if (r.Message != null) w.WriteString("message", r.Message);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
+        return failed ? 1 : 0;
+    }
+
+    private static string Sha256(string path)
+    {
+        using var f = File.OpenRead(path);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)).ToLowerInvariant();
+    }
+}
+
+internal sealed class Patcher
+{
+    private readonly ModuleDefinition _module;
+    private readonly MethodReference _invoke;
+    private readonly MethodReference _after;
+
+    public Patcher(ModuleDefinition module, ModuleDefinition bridge)
+    {
+        _module = module;
+        var hooks = bridge.GetType("Spire.HookBridge.Hooks")
+            ?? throw new InvalidOperationException("Spire.HookBridge.Hooks not found");
+        _invoke = module.ImportReference(hooks.Methods.Single(m => m.Name == "Invoke"));
+        _after = module.ImportReference(hooks.Methods.Single(m => m.Name == "After"));
+    }
+
+    public PatchResult Apply(PatchSpec spec)
+    {
+        var result = new PatchResult { Id = spec.Id };
+        if (!spec.Enabled)
+        {
+            result.Status = "disabled";
+            result.Message = spec.Note;
+            return result;
+        }
+        try
+        {
+            if (spec.Action == "replace_calls")
+                return ReplaceCalls(spec, result);
+
+            var targets = FindMethods(spec, out var why);
+            if (targets.Count == 0)
+            {
+                result.Status = "missing";
+                result.Message = why;
+                return result;
+            }
+            foreach (var m in targets)
+            {
+                if (!m.HasBody)
+                    throw new InvalidOperationException($"{m.FullName} has no body");
+                switch (spec.Action)
+                {
+                    case "return_default": ReplaceBody(m, il => EmitDefault(il, m.ReturnType)); break;
+                    case "return_completed_task": ReplaceBody(m, il => EmitCompletedTask(il, m.ReturnType)); break;
+                    case "return_const": ReplaceBody(m, il => EmitConst(il, m.ReturnType, spec.Value)); break;
+                    case "redirect": ReplaceBody(m, il => EmitRedirect(il, m, spec.Id)); break;
+                    case "call_after": InsertCallAfter(m, spec.Id); break;
+                    default: throw new InvalidOperationException($"unknown action '{spec.Action}'");
+                }
+                result.Targets.Add(m.FullName);
+                result.Count++;
+            }
+            result.Status = "applied";
+        }
+        catch (Exception ex)
+        {
+            result.Status = "error";
+            result.Message = ex.Message;
+        }
+        return result;
+    }
+
+    // ---- lookup ----
+
+    private TypeDefinition? FindType(string fullName)
+    {
+        // Nested types use '/' (Cecil) or '+' (reflection).
+        var parts = fullName.Replace('+', '/').Split('/');
+        var t = _module.GetType(parts[0]);
+        for (int i = 1; t != null && i < parts.Length; i++)
+            t = t.NestedTypes.FirstOrDefault(n => n.Name == parts[i]);
+        return t;
+    }
+
+    private List<MethodDefinition> FindMethods(PatchSpec spec, out string? why)
+    {
+        why = null;
+        if (spec.Type == "*")
+        {
+            // Any type: used when only the method name is stable across builds.
+            var all = _module.GetTypes().SelectMany(t => t.Methods)
+                .Where(m => m.Name == spec.Method && (spec.Params == null || ParamsMatch(m, spec.Params)))
+                .ToList();
+            if (all.Count == 0) why = $"no method named {spec.Method} in any type";
+            else if (all.Count > 1 && !spec.AllOverloads)
+                throw new InvalidOperationException($"{all.Count} methods named {spec.Method}; add \"all_overloads\": true");
+            return all;
+        }
+        var type = FindType(spec.Type);
+        if (type == null)
+        {
+            why = $"type {spec.Type} not found";
+            return new();
+        }
+        var candidates = type.Methods.Where(m => m.Name == spec.Method).ToList();
+        if (spec.Params != null)
+            candidates = candidates.Where(m => ParamsMatch(m, spec.Params)).ToList();
+        if (candidates.Count == 0)
+        {
+            var have = string.Join(", ", type.Methods.Where(m => m.Name == spec.Method)
+                .Select(m => "(" + string.Join(",", m.Parameters.Select(p => p.ParameterType.FullName)) + ")"));
+            why = $"method {spec.Type}::{spec.Method} not found" + (have.Length > 0 ? $"; overloads: {have}" : "");
+            return candidates;
+        }
+        if (candidates.Count > 1 && !spec.AllOverloads)
+        {
+            why = $"{candidates.Count} overloads match; add \"params\" or \"all_overloads\": true";
+            throw new InvalidOperationException(why);
+        }
+        return candidates;
+    }
+
+    private static bool ParamsMatch(MethodReference m, List<string> want)
+    {
+        if (m.Parameters.Count != want.Count) return false;
+        for (int i = 0; i < want.Count; i++)
+        {
+            var have = m.Parameters[i].ParameterType;
+            if (have.FullName != want[i] && have.Name != want[i]) return false;
+        }
+        return true;
+    }
+
+    // ---- body emission ----
+
+    private static void ReplaceBody(MethodDefinition m, Action<ILProcessor> emit)
+    {
+        var body = m.Body;
+        body.Instructions.Clear();
+        body.ExceptionHandlers.Clear();
+        body.Variables.Clear();
+        body.InitLocals = true;
+        var il = body.GetILProcessor();
+        emit(il);
+        il.Emit(OpCodes.Ret);
+        body.Optimize();
+    }
+
+    private void EmitDefault(ILProcessor il, TypeReference type)
+    {
+        if (type.MetadataType == MetadataType.Void) return;
+        if (!type.IsValueType && !type.IsGenericParameter)
+        {
+            il.Emit(OpCodes.Ldnull);
+            return;
+        }
+        var v = new VariableDefinition(type);
+        il.Body.Variables.Add(v);
+        il.Emit(OpCodes.Ldloca, v);
+        il.Emit(OpCodes.Initobj, type);
+        il.Emit(OpCodes.Ldloc, v);
+    }
+
+    private void EmitCompletedTask(ILProcessor il, TypeReference ret)
+    {
+        var name = ret.Namespace + "." + ret.Name;
+        if (name == "System.Threading.Tasks.Task")
+        {
+            var taskDef = _module.ImportReference(typeof(Task)).Resolve();
+            var getter = taskDef.Properties.Single(p => p.Name == "CompletedTask").GetMethod;
+            il.Emit(OpCodes.Call, _module.ImportReference(getter));
+            return;
+        }
+        if (name == "System.Threading.Tasks.Task`1" && ret is GenericInstanceType git)
+        {
+            // Task.FromResult<T>(default(T))
+            var taskDef = _module.ImportReference(typeof(Task)).Resolve();
+            var fromResult = taskDef.Methods.Single(mm => mm.Name == "FromResult" && mm.HasGenericParameters);
+            var inst = new GenericInstanceMethod(_module.ImportReference(fromResult));
+            inst.GenericArguments.Add(git.GenericArguments[0]);
+            EmitDefault(il, git.GenericArguments[0]);
+            il.Emit(OpCodes.Call, inst);
+            return;
+        }
+        if (name == "System.Threading.Tasks.ValueTask" || name == "System.Threading.Tasks.ValueTask`1")
+        {
+            // default(ValueTask) / default(ValueTask<T>) are completed.
+            EmitDefault(il, ret);
+            return;
+        }
+        throw new InvalidOperationException($"return_completed_task on a method returning {ret.FullName}");
+    }
+
+    private void EmitConst(ILProcessor il, TypeReference ret, JsonElement? value)
+    {
+        if (value == null) throw new InvalidOperationException("return_const needs \"value\"");
+        var v = value.Value;
+        switch (ret.MetadataType)
+        {
+            case MetadataType.Boolean:
+                il.Emit(v.GetBoolean() ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0);
+                break;
+            case MetadataType.Int32:
+            case MetadataType.UInt32:
+            case MetadataType.Int16:
+            case MetadataType.UInt16:
+            case MetadataType.Byte:
+            case MetadataType.SByte:
+                il.Emit(OpCodes.Ldc_I4, v.GetInt32());
+                break;
+            case MetadataType.Int64:
+                il.Emit(OpCodes.Ldc_I8, v.GetInt64());
+                break;
+            case MetadataType.String:
+                if (v.ValueKind == JsonValueKind.Null) il.Emit(OpCodes.Ldnull);
+                else il.Emit(OpCodes.Ldstr, v.GetString());
+                break;
+            default:
+                throw new InvalidOperationException($"return_const does not support {ret.FullName}");
+        }
+    }
+
+    /// <summary>Pushes object[] { this?, arg0, ... } with every value boxed.</summary>
+    private void EmitArgsArray(ILProcessor il, MethodDefinition m)
+    {
+        int extra = m.HasThis ? 1 : 0;
+        int n = m.Parameters.Count + extra;
+        il.Emit(OpCodes.Ldc_I4, n);
+        il.Emit(OpCodes.Newarr, _module.TypeSystem.Object);
+        for (int i = 0; i < n; i++)
+        {
+            il.Emit(OpCodes.Dup);
+            il.Emit(OpCodes.Ldc_I4, i);
+            if (m.HasThis && i == 0)
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                var declaring = SelfType(m);
+                if (declaring.IsValueType)
+                {
+                    il.Emit(OpCodes.Ldobj, declaring);
+                    il.Emit(OpCodes.Box, declaring);
+                }
+            }
+            else
+            {
+                var p = m.Parameters[i - extra];
+                if (p.ParameterType.IsByReference)
+                    throw new InvalidOperationException($"{m.FullName}: by-ref parameter '{p.Name}' is not supported");
+                il.Emit(OpCodes.Ldarg, p);
+                EmitBoxIfNeeded(il, p.ParameterType);
+            }
+            il.Emit(OpCodes.Stelem_Ref);
+        }
+    }
+
+    private static TypeReference SelfType(MethodDefinition m)
+    {
+        TypeReference t = m.DeclaringType;
+        if (m.DeclaringType.HasGenericParameters)
+        {
+            var git = new GenericInstanceType(m.DeclaringType);
+            foreach (var gp in m.DeclaringType.GenericParameters) git.GenericArguments.Add(gp);
+            t = git;
+        }
+        return t;
+    }
+
+    private static void EmitBoxIfNeeded(ILProcessor il, TypeReference t)
+    {
+        if (t.IsValueType || t.IsGenericParameter)
+            il.Emit(OpCodes.Box, t);
+    }
+
+    private static void EmitUnboxResult(ILProcessor il, TypeReference ret)
+    {
+        if (ret.MetadataType == MetadataType.Void)
+        {
+            il.Emit(OpCodes.Pop);
+        }
+        else if (ret.IsValueType || ret.IsGenericParameter)
+        {
+            il.Emit(OpCodes.Unbox_Any, ret);
+        }
+        else
+        {
+            il.Emit(OpCodes.Castclass, ret);
+        }
+    }
+
+    private void EmitRedirect(ILProcessor il, MethodDefinition m, string id)
+    {
+        il.Emit(OpCodes.Ldstr, id);
+        EmitArgsArray(il, m);
+        il.Emit(OpCodes.Call, _invoke);
+        EmitUnboxResult(il, m.ReturnType);
+    }
+
+    private void InsertCallAfter(MethodDefinition m, string id)
+    {
+        var body = m.Body;
+        body.SimplifyMacros();
+        var il = body.GetILProcessor();
+        var rets = body.Instructions.Where(i => i.OpCode == OpCodes.Ret).ToList();
+        bool hasResult = m.ReturnType.MetadataType != MetadataType.Void;
+        VariableDefinition? resultVar = null;
+        if (hasResult)
+        {
+            resultVar = new VariableDefinition(m.ReturnType);
+            body.Variables.Add(resultVar);
+        }
+        foreach (var ret in rets)
+        {
+            // [result on stack] -> stloc r; ldstr id; args[]; ldloc r; box; call After; ldloc r; ret
+            var seq = new List<Instruction>();
+            if (hasResult) seq.Add(il.Create(OpCodes.Stloc, resultVar!));
+            seq.Add(il.Create(OpCodes.Ldstr, id));
+            var argsIl = new List<Instruction>();
+            var tmp = new MethodBody(m);
+            var tmpIl = tmp.GetILProcessor();
+            EmitArgsArray(tmpIl, m);
+            seq.AddRange(tmp.Instructions);
+            if (hasResult)
+            {
+                seq.Add(il.Create(OpCodes.Ldloc, resultVar!));
+                if (m.ReturnType.IsValueType || m.ReturnType.IsGenericParameter)
+                    seq.Add(il.Create(OpCodes.Box, m.ReturnType));
+            }
+            else
+            {
+                seq.Add(il.Create(OpCodes.Ldnull));
+            }
+            seq.Add(il.Create(OpCodes.Call, _after));
+            if (hasResult) seq.Add(il.Create(OpCodes.Ldloc, resultVar!));
+
+            // Insert before ret; branches that targeted ret must now target the
+            // first inserted instruction, so swap the ret instruction's content.
+            var first = seq[0];
+            var retCopy = il.Create(OpCodes.Ret);
+            ret.OpCode = first.OpCode;
+            ret.Operand = first.Operand;
+            var anchor = ret;
+            for (int k = 1; k < seq.Count; k++)
+            {
+                il.InsertAfter(anchor, seq[k]);
+                anchor = seq[k];
+            }
+            il.InsertAfter(anchor, retCopy);
+        }
+        body.OptimizeMacros();
+    }
+
+    // ---- replace_calls ----
+
+    private PatchResult ReplaceCalls(PatchSpec spec, PatchResult result)
+    {
+        int count = 0;
+        foreach (var type in _module.GetTypes())
+        {
+            foreach (var method in type.Methods.Where(mm => mm.HasBody))
+            {
+                var body = method.Body;
+                bool changed = false;
+                for (int idx = 0; idx < body.Instructions.Count; idx++)
+                {
+                    var ins = body.Instructions[idx];
+                    if ((ins.OpCode != OpCodes.Call && ins.OpCode != OpCodes.Callvirt) || ins.Operand is not MethodReference target)
+                        continue;
+                    var declName = target.DeclaringType.FullName;
+                    if ((declName != spec.Type && target.DeclaringType.Name != spec.Type) || target.Name != spec.Method)
+                        continue;
+                    if (spec.Params != null && !ParamsMatch(target, spec.Params))
+                        continue;
+                    if (target.HasThis)
+                        throw new InvalidOperationException($"replace_calls only supports static targets ({target.FullName})");
+                    if (!changed)
+                    {
+                        body.SimplifyMacros();
+                        changed = true;
+                    }
+                    ReplaceCallSite(method, ins, target, spec.Id);
+                    count++;
+                    if (!result.Targets.Contains(method.FullName))
+                        result.Targets.Add(method.FullName);
+                }
+                if (changed) body.OptimizeMacros();
+            }
+        }
+        result.Count = count;
+        result.Status = count > 0 ? "applied" : "missing";
+        if (count == 0) result.Message = $"no calls to {spec.Type}::{spec.Method}";
+        return result;
+    }
+
+    private void ReplaceCallSite(MethodDefinition caller, Instruction call, MethodReference target, string id)
+    {
+        // Arguments are on the stack. Store them to fresh locals (last first),
+        // then build the object[] and call Hooks.Invoke.
+        var il = caller.Body.GetILProcessor();
+        var locals = new List<VariableDefinition>();
+        foreach (var p in target.Parameters)
+        {
+            var pt = ResolveGenericArg(p.ParameterType, target);
+            var v = new VariableDefinition(_module.ImportReference(pt));
+            caller.Body.Variables.Add(v);
+            locals.Add(v);
+        }
+        var seq = new List<Instruction>();
+        for (int i = locals.Count - 1; i >= 0; i--)
+            seq.Add(il.Create(OpCodes.Stloc, locals[i]));
+        seq.Add(il.Create(OpCodes.Ldstr, id));
+        seq.Add(il.Create(OpCodes.Ldc_I4, locals.Count));
+        seq.Add(il.Create(OpCodes.Newarr, _module.TypeSystem.Object));
+        for (int i = 0; i < locals.Count; i++)
+        {
+            seq.Add(il.Create(OpCodes.Dup));
+            seq.Add(il.Create(OpCodes.Ldc_I4, i));
+            seq.Add(il.Create(OpCodes.Ldloc, locals[i]));
+            var t = locals[i].VariableType;
+            if (t.IsValueType || t.IsGenericParameter) seq.Add(il.Create(OpCodes.Box, t));
+            seq.Add(il.Create(OpCodes.Stelem_Ref));
+        }
+        seq.Add(il.Create(OpCodes.Call, _invoke));
+        var ret = _module.ImportReference(ResolveGenericArg(target.ReturnType, target));
+        if (ret.MetadataType == MetadataType.Void) seq.Add(il.Create(OpCodes.Pop));
+        else if (ret.IsValueType || ret.IsGenericParameter) seq.Add(il.Create(OpCodes.Unbox_Any, ret));
+        else seq.Add(il.Create(OpCodes.Castclass, ret));
+
+        // Reuse the call instruction as the first of the sequence so branch
+        // targets and exception-handler boundaries stay valid.
+        var first = seq[0];
+        call.OpCode = first.OpCode;
+        call.Operand = first.Operand;
+        var anchor = call;
+        for (int k = 1; k < seq.Count; k++)
+        {
+            il.InsertAfter(anchor, seq[k]);
+            anchor = seq[k];
+        }
+    }
+
+    private static TypeReference ResolveGenericArg(TypeReference t, MethodReference m)
+    {
+        if (t is GenericParameter gp && gp.Type == GenericParameterType.Method && m is GenericInstanceMethod gim)
+            return gim.GenericArguments[gp.Position];
+        return t;
+    }
+}

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Replacement for GodotSharp.dll: no-op Godot types that satisfy the game
+    assembly's references so its logic runs without the engine.
+    Forked from sts2-cli's GodotStubs (MIT).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Godot</RootNamespace>
+    <AssemblyName>GodotSharp</AssemblyName>
+    <Version>4.5.1.0</Version>
+    <AssemblyVersion>4.5.1.0</AssemblyVersion>
+    <IsAotCompatible>true</IsAotCompatible>
+    <NoWarn>$(NoWarn);CS0067;CS0108;CS0114;CS8618;CS8625;CS8603</NoWarn>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,15 @@
+{
+  "patches": [
+    {"id": "cmd-wait", "action": "return_completed_task", "type": "MegaCrit.Sts2.Core.Commands.Cmd", "method": "Wait", "all_overloads": true},
+    {"id": "talk", "action": "return_default", "type": "MegaCrit.Sts2.Core.Commands.TalkCmd", "method": "Play"},
+    {"id": "loc.raw", "action": "redirect", "type": "MegaCrit.Sts2.Core.Localization.LocTable", "method": "GetRawText", "params": ["System.String"]},
+    {"id": "loc.has", "action": "return_const", "type": "MegaCrit.Sts2.Core.Localization.LocTable", "method": "HasEntry", "value": true},
+    {"id": "wait-queue", "action": "return_default", "type": "*", "method": "WaitUntilQueueIsEmptyOrWaitingOnNonPlayerDrivenAction"},
+    {"id": "after-exec", "action": "call_after", "type": "MegaCrit.Sts2.Core.GameActions.ActionExecutor", "method": "Execute"},
+    {"id": "coord.sum", "action": "redirect", "type": "MegaCrit.Sts2.Core.GameActions.Coord", "method": "Sum"},
+    {"id": "echo", "action": "redirect", "type": "MegaCrit.Sts2.Core.GameActions.ActionExecutor", "method": "Echo"},
+    {"id": "delay", "action": "replace_calls", "type": "System.Threading.Tasks.Task", "method": "Delay", "params": ["System.Int32"]},
+    {"id": "absent", "action": "return_default", "type": "Nope.Missing", "method": "Gone", "optional": true},
+    {"id": "off", "action": "return_default", "type": "Nope.Missing", "method": "Gone", "enabled": false, "note": "disabled on purpose"}
+  ]
+}

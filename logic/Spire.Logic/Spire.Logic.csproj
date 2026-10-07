@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The game-logic host: drives the player's (patched) sts2.dll and speaks the
+    line-based JSON protocol on stdin/stdout.
+
+    Three ways to build it (tools/build_logic.py runs them):
+      dotnet run                                  JIT, for debugging and as the oracle
+      dotnet publish -r linux-x64|win-x64 -p:PublishAot=true
+                                                  NativeAOT smoke test (finds AOT problems fast)
+      dotnet publish -r wasi-wasm -p:SpireWasm=true
+                                                  NativeAOT-LLVM -> logic.wasm for w2c2 / the console
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Spire.Logic</RootNamespace>
+    <AssemblyName>Spire.Logic</AssemblyName>
+    <RollForward>LatestMajor</RollForward>
+    <!-- The game drives everything through reflection-discovered models. -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <NoWarn>$(NoWarn);IL2026;IL2072;IL2075;IL3050;IL2104;IL3053;CS8600;CS8602;CS8604</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Spire.GodotStubs/Spire.GodotStubs.csproj" />
+    <ProjectReference Include="../Spire.HookBridge/Spire.HookBridge.csproj" />
+  </ItemGroup>
+
+  <!-- The player's game assemblies (copied and patched by tools/build_logic.py). -->
+  <ItemGroup>
+    <Reference Include="sts2"><HintPath>$(Sts2LibDir)sts2.dll</HintPath></Reference>
+    <Reference Include="SmartFormat"><HintPath>$(Sts2LibDir)SmartFormat.dll</HintPath></Reference>
+    <Reference Include="SmartFormat.ZString" Condition="Exists('$(Sts2LibDir)SmartFormat.ZString.dll')"><HintPath>$(Sts2LibDir)SmartFormat.ZString.dll</HintPath></Reference>
+    <Reference Include="Sentry" Condition="Exists('$(Sts2LibDir)Sentry.dll')"><HintPath>$(Sts2LibDir)Sentry.dll</HintPath></Reference>
+    <Reference Include="Steamworks.NET" Condition="Exists('$(Sts2LibDir)Steamworks.NET.dll')"><HintPath>$(Sts2LibDir)Steamworks.NET.dll</HintPath></Reference>
+    <Reference Include="MonoMod.Backports" Condition="Exists('$(Sts2LibDir)MonoMod.Backports.dll')"><HintPath>$(Sts2LibDir)MonoMod.Backports.dll</HintPath></Reference>
+    <Reference Include="MonoMod.ILHelpers" Condition="Exists('$(Sts2LibDir)MonoMod.ILHelpers.dll')"><HintPath>$(Sts2LibDir)MonoMod.ILHelpers.dll</HintPath></Reference>
+    <Reference Include="0Harmony" Condition="Exists('$(Sts2LibDir)0Harmony.dll')"><HintPath>$(Sts2LibDir)0Harmony.dll</HintPath></Reference>
+    <Reference Include="System.IO.Hashing" Condition="Exists('$(Sts2LibDir)System.IO.Hashing.dll')"><HintPath>$(Sts2LibDir)System.IO.Hashing.dll</HintPath></Reference>
+  </ItemGroup>
+
+  <!-- Any AOT build: keep every type and member of the game reachable by reflection. -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' or '$(SpireWasm)' == 'true'">
+    <TrimmerRootAssembly Include="sts2" />
+    <TrimmerRootAssembly Include="SmartFormat" />
+    <TrimmerRootAssembly Include="GodotSharp" />
+    <TrimmerRootAssembly Include="Spire.Logic" />
+  </ItemGroup>
+
+  <!-- NativeAOT-LLVM to a WASI preview1 core module (see docs/LOGIC_BUILD.md). -->
+  <PropertyGroup Condition="'$(SpireWasm)' == 'true'">
+    <PublishTrimmed>true</PublishTrimmed>
+    <SelfContained>true</SelfContained>
+    <MSBuildEnableWorkloadResolver>false</MSBuildEnableWorkloadResolver>
+    <!-- No native wasm EH: the "emulated" model is plain MVP control flow, which w2c2 supports. -->
+    <WasmEnableExceptionHandling>false</WasmEnableExceptionHandling>
+    <IlcLlvmExceptionHandlingModel>emulated</IlcLlvmExceptionHandlingModel>
+    <!-- 4 MB shadow stack: the game has deep async chains. -->
+    <IlcWasmStackSize>4194304</IlcWasmStackSize>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <IlcTreatWarningsAsErrors>false</IlcTreatWarningsAsErrors>
+    <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(SpireWasm)' == 'true'">
+    <PackageReference Include="Microsoft.DotNet.ILCompiler.LLVM" Version="$(SpireIlcLlvmVersion)" />
+    <PackageReference Include="runtime.$(NETCoreSdkPortableRuntimeIdentifier).Microsoft.DotNet.ILCompiler.LLVM" Version="$(SpireIlcLlvmVersion)" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(SpireWasm)' == 'true' and '$(SpireIlcLlvmVersion)' == ''">
+    <SpireIlcLlvmVersion>10.0.0-*</SpireIlcLlvmVersion>
+  </PropertyGroup>
+</Project>

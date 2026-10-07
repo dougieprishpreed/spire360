@@ -1,0 +1,90 @@
+{
+  "comment": "Static IL patches applied to the player's sts2.dll by Spire.Patcher (tools/build_logic.py). Each replaces a Harmony patch from sts2-cli; handlers for 'redirect' ids are in logic/Spire.Logic/Hooks.cs. A missing non-optional target fails the build: that is the signal the game API moved (see docs/LOGIC_BUILD.md).",
+  "patches": [
+    {
+      "id": "cmd.wait",
+      "action": "return_completed_task",
+      "type": "MegaCrit.Sts2.Core.Commands.Cmd",
+      "method": "Wait",
+      "all_overloads": true,
+      "note": "UI animation delays. Without a scene tree they never complete (sts2-cli: PatchCmdWait)."
+    },
+    {
+      "id": "talk.play",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Commands.TalkCmd",
+      "method": "Play",
+      "all_overloads": true,
+      "note": "Speech-bubble VFX NREs without the UI and breaks enemy moves (sts2-cli issue #64). Return value is ignored by callers."
+    },
+    {
+      "id": "queue.wait_until_empty",
+      "action": "return_completed_task",
+      "type": "*",
+      "method": "WaitUntilQueueIsEmptyOrWaitingOnNonPlayerDrivenAction",
+      "all_overloads": true,
+      "note": "sts2-cli setup.sh patch 2. Try disabling once the adapter runs: on one thread the real wait may now work and would be more faithful."
+    },
+    {
+      "id": "loc.get_raw_text",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Localization.LocTable",
+      "method": "GetRawText",
+      "params": ["System.String"],
+      "note": "Returns the table text, or the key when missing (the original throws)."
+    },
+    {
+      "id": "loc.get_loc_string",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Localization.LocTable",
+      "method": "GetLocString",
+      "optional": true
+    },
+    {
+      "id": "loc.has_entry",
+      "action": "return_const",
+      "value": true,
+      "type": "MegaCrit.Sts2.Core.Localization.LocTable",
+      "method": "HasEntry",
+      "optional": true
+    },
+    {
+      "id": "loc.is_local_key",
+      "action": "return_const",
+      "value": true,
+      "type": "MegaCrit.Sts2.Core.Localization.LocTable",
+      "method": "IsLocalKey",
+      "optional": true
+    },
+    {
+      "id": "loc.exists",
+      "action": "return_const",
+      "value": true,
+      "type": "MegaCrit.Sts2.Core.Localization.LocString",
+      "method": "Exists",
+      "optional": true
+    },
+    {
+      "id": "loc.get_loc_strings_with_prefix",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Localization.LocTable",
+      "method": "GetLocStringsWithPrefix",
+      "optional": true
+    },
+    {
+      "id": "cardselect.choose_bundle",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromChooseABundleScreen",
+      "note": "Scroll Boxes bundle choice becomes a bundle_select decision."
+    },
+    {
+      "id": "neutralize.on_play",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Models.Cards.Neutralize",
+      "method": "OnPlay",
+      "enabled": false,
+      "note": "sts2-cli replaces Neutralize's effect because DamageCmd.Attack().Execute() NREd headless. That changes game behaviour, so it is off; enable only if the NRE reproduces, and then find its real cause."
+    }
+  ]
+}
