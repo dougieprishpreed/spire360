@@ -134,12 +134,9 @@ class Resources:
         p = strip_res(path)
         remap = self.import_info(p)
         if remap is not None:
-            for fmt in self.texture_formats:
-                key = "path." + fmt
-                if key in remap:
+            for key in ["path." + fmt for fmt in self.texture_formats] + ["path"]:
+                if key in remap and self.src.exists(strip_res(remap[key])):
                     return strip_res(remap[key])
-            if "path" in remap:
-                return strip_res(remap["path"])
             return None
         rm = p + ".remap"
         if self.src.exists(rm):

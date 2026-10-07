@@ -55,7 +55,12 @@ to `<xex folder>\spire360_logic\data\localization`. Writes the selfplay
 timing report to `game:\spire360_logic\result.txt`. Not yet run; expect a
 long XDK compile (279 MB of C; /MP on).
 
-**Converter: started.** `converter/pck_tool.py` reads Godot 4 packs; works on
+**Converter (M3): reads everything, builds the pack; needs the user's pack
+to run at full scale.** `converter/convert.py survey|texture|build`
+(requirements.txt). Decoders tested against Godot 4.5.1 output (12 tests).
+Not yet: fonts -> glyph atlases, FMOD banks, Spine runtime on the console.
+
+**Converter (older notes):** `converter/pck_tool.py` reads Godot 4 packs; works on
 the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
 holds, for the converter:
 - textures: 3,555 `.ctex` under `.godot/imported`: 2,311 plain (PNG/WebP
@@ -74,8 +79,9 @@ holds, for the converter:
 
 ## Next (agent)
 
-- Converter: textures (.ctex: plain, S3TC, BC7 -> DXT), text scene/resource
-  parser (.tscn/.tres), pack writer.
+- User: `convert.py survey <pck> --out survey.txt` and send it (texture
+  budget, scene parse check on all 1,037 scenes), then `build`.
+- Engine skeleton (task 6): presentation core + PC viewer of pack.s3p.
 - M2 runner: `xdk/logic_runner` from `out/logic/c` (selfplay on the console,
   timing to the result file), after the native PC run works.
 - Fidelity gaps in DECISIONS D6 (rewards screen choice first).

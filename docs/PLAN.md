@@ -32,8 +32,9 @@ then fix what the build and the regression report.
 ```
 
 **Logic** (`logic/`, `runtime/`, `third_party/w2c2`). The real game code,
-unmodified except for documented IL patches, runs single-threaded on CoreLib's
-own WASI event loop. It speaks sts2-cli's line-based JSON protocol, extended
+unmodified except for documented IL patches, runs single-threaded; the
+adapter's own queue drives every async continuation (no runtime event loop,
+no blocking waits). It speaks sts2-cli's line-based JSON protocol, extended
 with `steps`: every intermediate state change (damage, block, card moves,
 powers, intents) and every *UI cue* the game logic issued (sound, VFX, speech,
 music parameters, through the `ui` patch), in the order the game produced them.

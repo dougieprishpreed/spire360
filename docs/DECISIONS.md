@@ -114,3 +114,24 @@ ILVerify (`dotnet tool install -g dotnet-ilverify`) is the local stand-in
 for NativeAOT-LLVM's strictness: StackUnexpected errors went 35,382 -> 2
 (both in compiler-generated code real compilers accept). Game behaviour
 was unchanged: 25 seeded runs produced byte-identical traces.
+
+## D10. Converter: Python with four wheels; pack.s3p; textures at 2/3
+
+The converter runs once on the player's PC. It uses Pillow (PNG/WebP),
+texture2ddecoder (BC1-BC7 decode), etcpak (DXT encode; on a photo it matches
+the quality of the game's own S3TC imports) and zstandard (Godot's compressed
+resources). All have prebuilt wheels.
+
+The game is laid out for 1920x1080 with `canvas_items` stretch; the console
+renders 1280x720, so textures are stored at 2/3 of their size and drawn at
+their original size in layout units. Opaque -> DXT1, alpha -> DXT5, tiny ->
+ARGB8; resampling on premultiplied alpha. Texture data stays in PC block
+order: the console swaps and tiles it for Xenos when creating the texture
+(XGEndianSwapSurface/XGTileTextureLevel), which keeps one pack readable by
+the PC viewer too.
+
+pack.s3p is one big-endian file: a directory sorted by FNV-1a 64 of the res
+path (binary search on the console), CRC32 per entry, 4 KB aligned texture
+payloads. Scenes and .tres resources go in as JSON with references already
+resolved to pack names. Godot formats are decoded from their source layout
+and tested against files Godot 4.5.1 itself produced (tests/fixtures).

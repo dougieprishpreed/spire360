@@ -10,6 +10,12 @@
   convert.py texture <pck | dir> <res://path.png> <out.png> [--level N]
       Decodes one texture to a PNG (to check the decoder by eye).
 
+  convert.py build <pck | dir> <out_dir> [--scale 0.6667] [--only GLOB]... [--jobs N]
+      Writes <out_dir>/pack.s3p (textures as DXT at the console's scale,
+      scenes and resources as JSON, fonts, Spine data, audio streams) and
+      <out_dir>/data/localization (the tables the logic reads), plus
+      <out_dir>/pack_report.json. --only limits it to matching res paths.
+
 Needs Python 3.9+, numpy, Pillow, texture2ddecoder (converter/requirements.txt).
 """
 import argparse
@@ -21,7 +27,7 @@ import time
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from spire_convert import ctex, godot_binary, resources, variant  # noqa: E402
+from spire_convert import ctex, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
 from spire_convert.pck import Pck  # noqa: E402
 
 # 1920x1080 design resolution -> 1280x720 on the console.
@@ -219,6 +225,139 @@ def cmd_texture(a):
     print(f"{a.res_path} -> {real}: {t.width}x{t.height} {t.format_name}, {len(t.levels)} level(s) -> {a.out}")
 
 
+# ---- build ----
+
+_worker = {}
+
+
+def _worker_init(pack_path, scale):
+    _worker["src"] = open_source(pack_path)
+    _worker["res"] = resources.Resources(_worker["src"])
+    _worker["scale"] = scale
+
+
+def _convert_texture(name):
+    try:
+        src, res = _worker["src"], _worker["res"]
+        t = ctex.load(src.read(res.resolve(name)))
+        out = texture.convert(t, _worker["scale"])
+        return name, s3p.texture_payload(out), {"src": t.format_name, "fmt": texture.FORMAT_NAMES[out.format],
+                                                "w": out.width, "h": out.height, "ow": out.orig_width,
+                                                "oh": out.orig_height, "levels": len(out.levels)}, None
+    except Exception as e:  # noqa: BLE001
+        return name, None, None, f"{type(e).__name__}: {e}"
+
+
+def cmd_build(a):
+    import fnmatch
+    import multiprocessing
+    t0 = time.time()
+    src = open_source(a.pack)
+    res = resources.Resources(src)
+    files = src.list()
+    os.makedirs(a.out, exist_ok=True)
+
+    def wanted(name):
+        return not a.only or any(fnmatch.fnmatchcase(name, g) for g in a.only)
+
+    version = ""
+    rel = [f for f in files if f.endswith("release_info.json")]
+    if rel:
+        try:
+            version = json.loads(src.read(rel[0])).get("version", "")
+        except Exception:  # noqa: BLE001
+            pass
+
+    textures, fonts, spine, audio, text = [], [], [], [], []
+    for f in files:
+        if f.endswith(".import"):
+            p = f[:-7]
+            if not wanted(p):
+                continue
+            imp = res.importer(p)
+            if not imp:
+                continue
+            importer, type_ = imp
+            if importer in ("texture",) and res.resolve(p):
+                textures.append(p)
+            elif type_ == "FontFile" and res.resolve(p):
+                fonts.append(p)
+            elif type_ in ("SpineSkeletonFileResource", "SpineAtlasResource") and res.resolve(p):
+                spine.append(p)
+            elif type_ and type_.startswith("AudioStream") and res.resolve(p):
+                audio.append(p)
+        elif f.endswith((".tscn", ".tres")) and wanted(f):
+            text.append(f)
+    print(f"build: {len(textures)} textures, {len(text)} scenes/resources, {len(fonts)} fonts, "
+          f"{len(spine)} spine files, {len(audio)} audio streams -> {a.out}", flush=True)
+
+    report = {"version": version, "scale": a.scale, "entries": {}, "errors": {}}
+    sizes = collections.Counter()
+    with s3p.Writer(os.path.join(a.out, "pack.s3p"), version) as w:
+        def add(name, type_, payload, info=None):
+            w.add(name, type_, payload)
+            sizes[s3p.TYPE_NAMES[type_]] += len(payload)
+            report["entries"][name] = dict(info or {}, type=s3p.TYPE_NAMES[type_], bytes=len(payload))
+
+        # Textures, in parallel.
+        jobs = a.jobs or max(1, (os.cpu_count() or 2) - 1)
+        done = 0
+        with multiprocessing.Pool(jobs, _worker_init, (a.pack, a.scale)) as pool:
+            for name, payload, info, err in pool.imap_unordered(_convert_texture, textures, chunksize=4):
+                done += 1
+                if err:
+                    report["errors"][name] = err
+                else:
+                    add(name, s3p.TYPE_TEXTURE, payload, info)
+                if done % 200 == 0 or done == len(textures):
+                    print(f"  textures {done}/{len(textures)} ({time.time() - t0:.0f} s)", flush=True)
+
+        for f in text:
+            try:
+                tr = variant.parse_text(src.read(f).decode("utf-8"))
+                add(f, s3p.TYPE_SCENE, json.dumps(scenes.to_json(tr, res), separators=(",", ":")).encode("utf-8"))
+            except Exception as e:  # noqa: BLE001
+                report["errors"][f] = f"{type(e).__name__}: {e}"
+        for p in fonts:
+            try:
+                r = godot_binary.parse_rsrc(src.read(res.resolve(p)))
+                main = r["resources"][-1]["props"]
+                add(p, s3p.TYPE_FONT, main["data"], {"font": main.get("font_name"), "style": main.get("style_name")})
+            except Exception as e:  # noqa: BLE001
+                report["errors"][p] = f"{type(e).__name__}: {e}"
+        for p in spine:
+            add(p, s3p.TYPE_BLOB, src.read(res.resolve(p)))
+        for p in audio:
+            try:
+                raw = src.read(res.resolve(p))
+                r = godot_binary.parse_rsrc(raw)
+                main = r["resources"][-1]
+                add(p, s3p.TYPE_AUDIO, main["props"].get("data") or b"",
+                    {"stream": main["type"], **{k: v for k, v in main["props"].items()
+                                                if k in ("format", "mix_rate", "stereo", "loop", "bpm")}})
+            except Exception as e:  # noqa: BLE001
+                report["errors"][p] = f"{type(e).__name__}: {e}"
+
+    # Localization for the logic (data/localization/<lang>/*.json).
+    loc = [f for f in files if f.startswith("localization/") and f.endswith(".json")]
+    for f in loc:
+        dest = os.path.join(a.out, "data", *f.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(src.read(f))
+
+    report["sizes"] = dict(sizes)
+    with open(os.path.join(a.out, "pack_report.json"), "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=1, default=str)
+    total = os.path.getsize(os.path.join(a.out, "pack.s3p"))
+    print(f"pack.s3p {human(total)}: " + ", ".join(f"{k} {human(v)}" for k, v in sizes.most_common()))
+    print(f"{len(loc)} localization files -> {os.path.join(a.out, 'data')}")
+    print(f"{len(report['errors'])} errors" + (" (see pack_report.json)" if report["errors"] else ""))
+    for k, v in list(report["errors"].items())[:10]:
+        print(f"  {k}: {v}")
+    print(f"build took {time.time() - t0:.0f} s")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -231,9 +370,15 @@ def main():
     t.add_argument("res_path")
     t.add_argument("out")
     t.add_argument("--level", type=int, default=0)
+    b = sub.add_parser("build")
+    b.add_argument("pack")
+    b.add_argument("out")
+    b.add_argument("--scale", type=float, default=CONSOLE_SCALE)
+    b.add_argument("--only", action="append", help="res path glob (repeatable), e.g. 'images/cards/*'")
+    b.add_argument("--jobs", type=int)
     a = ap.parse_args()
     try:
-        {"survey": cmd_survey, "texture": cmd_texture}[a.cmd](a)
+        {"survey": cmd_survey, "texture": cmd_texture, "build": cmd_build}[a.cmd](a)
     except KeyboardInterrupt:
         sys.exit(1)
     except Exception:  # noqa: BLE001
