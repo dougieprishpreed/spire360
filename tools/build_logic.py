@@ -125,6 +125,8 @@ def stage_patch(a):
          "--hookbridge", os.path.join(tmp, "Spire.HookBridge.dll"),
          "--search", tmp, "--search", LIB_GAME,
          "--report", os.path.join(LIB_PATCHED, "patch_report.json")])
+    run(["dotnet", "build", os.path.join(LOGIC, "Spire.ApiDump"), "-c", "Release", "-o", os.path.join(OUT, "apidump"),
+         "-nologo", "-v", "q"])
     check_stubs(os.path.join(tmp, "GodotSharp.dll"))
 
 
@@ -136,7 +138,6 @@ def check_stubs(stub_dll):
         print("  (no GodotSharp.real.dll: run the copy stage to check the stubs)")
         return
     tools = os.path.join(OUT, "apidump")
-    run(["dotnet", "build", os.path.join(LOGIC, "Spire.ApiDump"), "-c", "Release", "-o", tools, "-nologo", "-v", "q"])
     r = run(["dotnet", os.path.join(tools, "Spire.ApiDump.dll"), "--check-stubs", stub_dll, real], check=False)
     if r.returncode != 0:
         sys.exit("stub check failed: fix logic/Spire.GodotStubs (see docs/LOGIC_BUILD.md)")
@@ -269,7 +270,7 @@ def stage_native(a):
     # Stubs for whatever the runtime still lacks, against the runtime as it is now.
     run([sys.executable, os.path.join(ROOT, "tools", "w2c2_imports.py"), os.path.join(cdir, "logic.h"),
          "--stubs", os.path.join(cdir, "logic_stubs.c")], check=False, stdout=subprocess.DEVNULL)
-    build = os.path.join(OUT, "native")
+    build = os.path.join(OUT, "native" + ("-" + a.native_tag if a.native_tag else ""))
     objdir = os.path.join(build, "obj")
     os.makedirs(objdir, exist_ok=True)
     rt = os.path.join(ROOT, "runtime")
@@ -278,8 +279,8 @@ def stage_native(a):
     sources += [os.path.join(rt, "src", f) for f in ("srt_core.c", "srt_wasi.c", "srt_wasi_p2.c", plat)]
     sources.append(os.path.join(rt, "hosts", "logic_host.c"))
     incs = [os.path.join(rt, "include"), os.path.join(rt, "src"), os.path.join(ROOT, "third_party", "w2c2", "w2c2"), cdir]
-    cl = shutil.which("cl") if os.name == "nt" else None
-    cc = None if cl else next((c for c in ("cc", "gcc", "clang") if shutil.which(c)), None)
+    cl = shutil.which("cl") if os.name == "nt" and not a.native_cc else None
+    cc = a.native_cc or (None if cl else next((c for c in ("cc", "gcc", "clang") if shutil.which(c)), None))
     if not cl and not cc:
         sys.exit("no C compiler: run from a Visual Studio x64 command prompt, or install gcc/clang")
     opt = a.native_opt
@@ -316,7 +317,7 @@ def stage_native(a):
             f.write("\n".join('"%s"' % o for o in objs))
         run([link, "/nologo", "/STACK:16777216", "/OUT:" + exe, "@" + rsp])
     else:
-        run([cc, "-o", exe] + objs + ["-lm", "-lpthread"])
+        run([cc, "-o", exe] + objs + ["-lm", "-lpthread"] + (["-static"] if a.native_cc else []))
     print(f"{exe} ({os.path.getsize(exe) // 1024} KB), {__import__('time').time() - t0:.0f} s")
 
 
@@ -331,6 +332,9 @@ def main():
     ap.add_argument("--w2c2", help="path to a built w2c2")
     ap.add_argument("--funcs-per-file", type=int, default=2000)
     ap.add_argument("--native-opt", default="1", help="optimisation level for the native stage (0, 1, 2)")
+    ap.add_argument("--native-cc", help="native stage: another C compiler, e.g. powerpc-linux-gnu-gcc "
+                    "(big-endian check under qemu-ppc; links statically)")
+    ap.add_argument("--native-tag", help="native stage: output to out/logic/native-<tag>")
     ap.add_argument("--jobs", type=int, help="parallel compiles for the native stage (default: all cores)")
     a = ap.parse_args()
     # Visual Studio developer prompts set Platform=x64, which MSBuild reads as

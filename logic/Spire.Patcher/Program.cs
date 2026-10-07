@@ -16,6 +16,8 @@
 //   call_after             before every ret: Hooks.After(id, new object[] { this?, args... }, result)
 //   replace_calls          every call to the target method anywhere in the assembly
 //                          becomes (T)Hooks.Invoke(id, new object[] { args... })
+//   strip_bodies           every non-constructor method of Godot-derived types in
+//                          the given namespaces throws NotSupportedException("headless: ...")
 //   redirect_calls_into    every call from code outside the given namespaces to a
 //                          method declared inside them becomes
 //                          Hooks.Invoke("<id>|<Type>::<Method>", { this?, args... })
@@ -211,6 +213,8 @@ internal sealed class Patcher
                 return RedirectCallsInto(spec, result);
             if (spec.Action == "null_safe_calls_into")
                 return NullSafeCallsInto(spec, result);
+            if (spec.Action == "strip_bodies")
+                return StripBodies(spec, result);
 
             var targets = FindMethods(spec, out var why);
             if (targets.Count == 0)
@@ -683,6 +687,43 @@ internal sealed class Patcher
         result.Count = count;
         result.Targets.AddRange(callers.OrderBy(x => x).Take(50));
         if (callers.Count > 50) result.Targets.Add($"... and {callers.Count - 50} more methods");
+        result.Status = count > 0 ? "applied" : "missing";
+        return result;
+    }
+
+    /// <summary>
+    /// Every method (constructors aside) of every Godot-derived type in the
+    /// given namespaces throws NotSupportedException("headless: Type::Method"). For code the
+    /// headless logic never runs (the Godot UI, which the 'ui' patch already cut
+    /// off): the AOT builds then compile a throw instead of the body.
+    /// </summary>
+    private PatchResult StripBodies(PatchSpec spec, PatchResult result)
+    {
+        var prefixes = spec.NamespacePrefixes ?? throw new InvalidOperationException("strip_bodies needs \"namespaces\"");
+        var ctor = _module.ImportReference(typeof(NotSupportedException).GetConstructor(new[] { typeof(string) }));
+        int count = 0;
+        foreach (var type in _module.GetTypes())
+        {
+            if (!InNamespaces(type, prefixes)) continue;
+            // Only Godot objects (nodes, resources) and what is nested in them:
+            // plain helpers in these namespaces (EpochComparer, sorting saved
+            // epochs) are used by the logic.
+            if (!DerivesFromGodot(type)) continue;
+            foreach (var m in type.Methods)
+            {
+                if (!m.HasBody || m.IsConstructor) continue;
+                var body = m.Body;
+                body.Instructions.Clear();
+                body.ExceptionHandlers.Clear();
+                body.Variables.Clear();
+                var il = body.GetILProcessor();
+                il.Emit(OpCodes.Ldstr, "headless: " + type.FullName + "::" + m.Name);
+                il.Emit(OpCodes.Newobj, ctor);
+                il.Emit(OpCodes.Throw);
+                count++;
+            }
+        }
+        result.Count = count;
         result.Status = count > 0 ? "applied" : "missing";
         return result;
     }

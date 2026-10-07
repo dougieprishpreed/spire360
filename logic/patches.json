@@ -12,6 +12,15 @@
       "godot_subclasses": true
     },
     {
+      "id": "ui.strip",
+      "action": "strip_bodies",
+      "namespaces": [
+        "MegaCrit.Sts2.Core.Nodes",
+        "MegaCrit.sts2.Core.Nodes"
+      ],
+      "note": "The Godot UI layer never runs headless (the 'ui' patch redirects every call into it). Method bodies of the Godot-derived classes there (nodes, and what is nested in them) become a throw so the AOT builds do not compile the UI (console code size). Constructors stay, and plain helper classes in those namespaces (EpochComparer) are untouched. A 'headless: ...' NotSupportedException in a log means the logic reached UI code."
+    },
+    {
       "id": "godot.null_safe",
       "action": "null_safe_calls_into",
       "namespaces": [
@@ -212,6 +221,33 @@
       "method": "OnPlay",
       "enabled": false,
       "note": "sts2-cli replaces Neutralize's effect because DamageCmd.Attack().Execute() NREd headless. That changes game behaviour, so it is off; enable only if the NRE reproduces, and then find its real cause."
+    },
+    {
+      "id": "mods.no_harmony.TryLoadMod",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Modding.ModManager",
+      "method": "TryLoadMod",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Mods are not loaded on the console. These are the only game methods that use Harmony (0Harmony); without them the AOT builds do not compile Harmony and its embedded Mono.Cecil (~1.3 MB of code)."
+    },
+    {
+      "id": "mods.no_harmony.HandleAssemblyResolveFailure",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Modding.ModManager",
+      "method": "HandleAssemblyResolveFailure",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Mods are not loaded on the console. These are the only game methods that use Harmony (0Harmony); without them the AOT builds do not compile Harmony and its embedded Mono.Cecil (~1.3 MB of code)."
+    },
+    {
+      "id": "mods.no_harmony.HasHarmonyPatches",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Modding.ModManager",
+      "method": "HasHarmonyPatches",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Mods are not loaded on the console. These are the only game methods that use Harmony (0Harmony); without them the AOT builds do not compile Harmony and its embedded Mono.Cecil (~1.3 MB of code)."
     }
   ]
 }

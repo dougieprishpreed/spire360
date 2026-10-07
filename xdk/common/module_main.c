@@ -9,6 +9,10 @@
  *   SPIRE_SCRIPT        string fed to the module's stdin
  *   SPIRE_EXPECTED      optional: exact expected stdout; PASS/FAIL is reported
  *   SPIRE_SETUP_DATA    optional: create <root>/data/{one,two,three.bin} first
+ *   SPIRE_SCRIPT_FILE   optional: file whose contents replace SPIRE_SCRIPT if present
+ *   SPIRE_ENV           optional: the guest's one environment variable ("K=V")
+ *   SPIRE_MEMORY_MB     guest linear memory limit (default 256)
+ *   SPIRE_STACK_KB      native stack of the guest thread (default: platform's)
  *
  * Output goes to the debug output (Xenia's log), to <root>/log.txt and,
  * with the verdict and timing, to <root>/result.txt.
@@ -38,9 +42,19 @@
 #ifndef SPIRE_SCRIPT
 #define SPIRE_SCRIPT ""
 #endif
+#ifndef SPIRE_ENV
+#define SPIRE_ENV "SPIRE_TEST=yes"
+#endif
+#ifndef SPIRE_MEMORY_MB
+#define SPIRE_MEMORY_MB 256
+#endif
+#ifndef SPIRE_STACK_KB
+#define SPIRE_STACK_KB 0
+#endif
 
 static MOD_INSTANCE instance;
 static char output[65536];
+static char script_buf[65536];
 static size_t output_len = 0;
 
 static void run_start(void* p) {
@@ -60,6 +74,23 @@ static void write_file(const char* path, const char* text) {
     }
 }
 
+/* The script to feed the guest: SPIRE_SCRIPT_FILE if it exists, else SPIRE_SCRIPT. */
+static const char* load_script(void) {
+#ifdef SPIRE_SCRIPT_FILE
+    srt_file* f;
+    size_t got = 0;
+    if (srt_plat_open(SPIRE_SCRIPT_FILE, SRT_OPEN_READ, &f) == 0) {
+        srt_plat_read(f, script_buf, sizeof(script_buf) - 1, &got);
+        srt_plat_close(f);
+        script_buf[got] = '\0';
+        if (got > 0) {
+            return script_buf;
+        }
+    }
+#endif
+    return SPIRE_SCRIPT;
+}
+
 #ifdef SPIRE_SETUP_DATA
 static void setup_data(void) {
     static const char* const names[3] = { "one", "two", "three.bin" };
@@ -76,7 +107,8 @@ static void setup_data(void) {
 static int run(void) {
     srt_config cfg;
     static const char* const guest_argv[2] = { "guest", "alpha" };
-    static const char* const guest_env[1] = { "SPIRE_TEST=yes" };
+    static const char* const guest_env[1] = { SPIRE_ENV };
+    const char* script;
     char line[4096];
     char summary[512];
     srt_u64 t0;
@@ -98,7 +130,7 @@ static int run(void) {
     cfg.envc = 1;
     cfg.envp = guest_env;
     cfg.virtual_timers = 1;
-    cfg.memory_limit = (srt_u64)256 * 1024 * 1024;
+    cfg.memory_limit = (srt_u64)SPIRE_MEMORY_MB * 1024 * 1024;
     if (srt_init(&cfg) != 0) {
         say("[spire360] srt_init failed\n");
         return 2;
@@ -108,11 +140,12 @@ static int run(void) {
     MOD_INSTANTIATE(&instance, NULL);
     srt_set_memory(MOD_MEMORY(&instance));
     /* Hardware thread 2 = core 1, thread 0: where the game logic will run. */
-    if (srt_guest_start(run_start, &instance, 0, 2) != 0) {
+    script = load_script();
+    if (srt_guest_start(run_start, &instance, (size_t)SPIRE_STACK_KB * 1024, 2) != 0) {
         say("[spire360] guest thread failed\n");
         return 2;
     }
-    srt_stdin_write(SPIRE_SCRIPT, strlen(SPIRE_SCRIPT));
+    srt_stdin_write(script, strlen(script));
     srt_stdin_close();
 
     for (;;) {

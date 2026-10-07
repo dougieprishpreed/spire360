@@ -40,7 +40,12 @@
     <Reference Include="System.IO.Hashing" Condition="Exists('$(Sts2LibDir)System.IO.Hashing.dll')"><HintPath>$(Sts2LibDir)System.IO.Hashing.dll</HintPath></Reference>
   </ItemGroup>
 
-  <!-- Any AOT build: keep every type and member of the game reachable by reflection. -->
+  <!-- Any AOT build: keep every type and member of the game reachable by
+       reflection (models are discovered that way). The Godot UI part of sts2
+       is stripped to throws by the patcher (patches.json "ui.strip"), so this
+       does not compile it. (A per-type descriptor instead of the whole
+       assembly was tried: it adds more reflection and generic code than the
+       UI it drops.) -->
   <ItemGroup Condition="'$(PublishAot)' == 'true' or '$(SpireWasm)' == 'true'">
     <TrimmerRootAssembly Include="sts2" />
     <TrimmerRootAssembly Include="SmartFormat" />

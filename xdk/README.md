@@ -69,6 +69,22 @@ total      625047 us
 The `check` values must match exactly on the 360; the time ratio gives the
 Xenon/PC factor for translated code.
 
+## logic_runner (milestone M2): the game logic on the console
+
+Builds the translated game logic (`out/logic/c`, from
+`tools/build_logic.py`, stages up to `c`) with the same runtime as selftest:
+
+```
+xdk\build.cmd logic_runner
+```
+
+Copy the localization tables next to the XEX:
+`<xex folder>\spire360_logic\data\localization\eng\*.json` (from `data\localization`).
+It plays a seeded self-play session and writes the timing report (start-up,
+per-action average/p95/max, GC heap) to `game:\spire360_logic\result.txt`.
+A `spire360_logic\script.txt` (one JSON command per line) replaces the
+default commands.
+
 ## What each one tells us
 
 - **hello**: compiler version and type sizes; whether `lwbrx` byte-reversed
