@@ -85,6 +85,14 @@ internal static class Steps
             _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });
     }
 
+    /// <summary>A pacing delay the game asked for (Cmd.Wait / Task.Delay).</summary>
+    public static void Wait(int ms, string source)
+    {
+        if (!Enabled || !RecordUi || ms <= 0) return;
+        if (_pendingUi.Count < 500)
+            _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "wait", ["ms"] = ms, ["src"] = source });
+    }
+
     /// <summary>Called after each queued continuation.</summary>
     public static void Capture()
     {

@@ -5,9 +5,11 @@
       "id": "ui",
       "action": "redirect_calls_into",
       "namespaces": [
-        "MegaCrit.Sts2.Core.Nodes"
+        "MegaCrit.Sts2.Core.Nodes",
+        "MegaCrit.sts2.Core.Nodes"
       ],
-      "note": "Cuts the game logic off from its Godot UI layer: every call from logic into MegaCrit.Sts2.Core.Nodes.* becomes a recorded presentation cue (sound, VFX, speech, music) with a safe default result. Replaces per-method fixes such as monster death VFX NREs."
+      "note": "Cuts the game logic off from its Godot UI layer: every call from logic into a UI class (namespace MegaCrit.Sts2.Core.Nodes.*, or any game class deriving from a Godot class, e.g. NDebugAudioManager) becomes a recorded presentation cue (sound, VFX, speech, music) with a safe default result.",
+      "godot_subclasses": true
     },
     {
       "id": "godot.null_safe",
@@ -16,6 +18,13 @@
         "Godot"
       ],
       "note": "Game logic calls into Godot engine objects (scenes from the asset cache, tweens, nodes) that are null without the engine. A null receiver now skips the call with a safe default; non-null receivers (stub objects) behave as before."
+    },
+    {
+      "id": "task.delay",
+      "action": "replace_calls",
+      "type": "System.Threading.Tasks.Task",
+      "method": "Delay",
+      "note": "Game code awaits Task.Delay for pacing (e.g. Amalgamator). A real timer would leave the adapter reporting a decision mid-effect; every call completes at once and records a 'wait' cue instead."
     },
     {
       "id": "sentry.auto_init",
@@ -117,11 +126,11 @@
     },
     {
       "id": "cmd.wait",
-      "action": "return_completed_task",
+      "action": "redirect",
       "type": "MegaCrit.Sts2.Core.Commands.Cmd",
       "method": "Wait",
       "all_overloads": true,
-      "note": "UI animation delays. Without a scene tree they never complete (sts2-cli: PatchCmdWait)."
+      "note": "UI animation delays. Completes at once (no scene tree) and records a 'wait' cue with the duration, which the presentation uses for pacing (sts2-cli: PatchCmdWait)."
     },
     {
       "id": "talk.play",

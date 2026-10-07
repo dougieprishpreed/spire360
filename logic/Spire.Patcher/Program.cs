@@ -50,6 +50,7 @@ internal sealed class PatchSpec
     public JsonElement? Value;
     public string? Note;
     public List<string>? NamespacePrefixes;
+    public bool GodotSubclasses;
 
     public static PatchSpec From(JsonElement e)
     {
@@ -67,6 +68,7 @@ internal sealed class PatchSpec
         if (e.TryGetProperty("enabled", out var en)) p.Enabled = en.GetBoolean();
         if (e.TryGetProperty("value", out var v)) p.Value = v.Clone();
         if (e.TryGetProperty("note", out var n)) p.Note = n.GetString();
+        if (e.TryGetProperty("godot_subclasses", out var gs)) p.GodotSubclasses = gs.GetBoolean();
         if (e.TryGetProperty("namespaces", out var ns) && ns.ValueKind == JsonValueKind.Array)
             p.NamespacePrefixes = ns.EnumerateArray().Select(x => x.GetString()!).ToList();
         return p;
@@ -618,14 +620,38 @@ internal sealed class Patcher
         return prefixes.Any(p => ns == p || ns.StartsWith(p + ".", StringComparison.Ordinal));
     }
 
+    private readonly Dictionary<TypeDefinition, bool> _godotDerived = new();
+
+    /// <summary>True for classes of this module that derive (transitively) from a Godot class.</summary>
+    private bool DerivesFromGodot(TypeReference t)
+    {
+        if (t.Module != _module && t.Scope != _module) return false;
+        TypeDefinition? def;
+        try { def = t.Resolve(); } catch { return false; }
+        if (def == null || def.Module != _module) return false;
+        if (_godotDerived.TryGetValue(def, out var known)) return known;
+        _godotDerived[def] = false;
+        bool result = false;
+        var b = def.BaseType;
+        if (b != null)
+        {
+            var ns = b.GetElementType().Namespace ?? "";
+            result = ns == "Godot" || ns.StartsWith("Godot.", StringComparison.Ordinal) || DerivesFromGodot(b);
+        }
+        if (!result && def.IsNested) result = DerivesFromGodot(def.DeclaringType);
+        _godotDerived[def] = result;
+        return result;
+    }
+
     private PatchResult RedirectCallsInto(PatchSpec spec, PatchResult result)
     {
         var prefixes = spec.NamespacePrefixes ?? throw new InvalidOperationException("redirect_calls_into needs \"namespaces\"");
+        bool IsUi(TypeReference t) => InNamespaces(t, prefixes) || (spec.GodotSubclasses && DerivesFromGodot(t.GetElementType()));
         int count = 0;
         var callers = new HashSet<string>();
         foreach (var type in _module.GetTypes())
         {
-            if (InNamespaces(type, prefixes)) continue;
+            if (IsUi(type)) continue;
             foreach (var method in type.Methods.Where(mm => mm.HasBody))
             {
                 var body = method.Body;
@@ -635,7 +661,7 @@ internal sealed class Patcher
                     var ins = body.Instructions[idx];
                     if ((ins.OpCode != OpCodes.Call && ins.OpCode != OpCodes.Callvirt) || ins.Operand is not MethodReference target)
                         continue;
-                    if (!InNamespaces(target.DeclaringType, prefixes)) continue;
+                    if (!IsUi(target.DeclaringType)) continue;
                     if (target.Name == ".ctor") continue;
                     if (target.DeclaringType.IsValueType) continue;
                     if (ins.Previous != null && ins.Previous.OpCode == OpCodes.Constrained) continue;

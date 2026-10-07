@@ -159,7 +159,8 @@ def stage_wasm(a):
     # not a preview2 component.
     run(["dotnet", "publish", os.path.join(LOGIC, "Spire.Logic"), "-c", "Release", "-r", "wasi-wasm",
          "-p:SpireWasm=true", "-p:IlcLlvmTarget=wasm32-unknown-wasip1", "-p:LinkerFlavor=lld",
-         "-p:DebugType=none", "-o", out, "-nologo"] + (["-p:SpireIlcLlvmVersion=" + a.ilc_version] if a.ilc_version else []))
+         "-p:DebugType=none", "-o", out, "-nologo",
+         "-p:RestoreConfigFile=" + os.path.join(LOGIC, "wasm-nuget.config")] + (["-p:SpireIlcLlvmVersion=" + a.ilc_version] if a.ilc_version else []))
     wasm = os.path.join(out, "Spire.Logic.wasm")
     shutil.copy2(wasm, os.path.join(OUT, "logic.wasm"))
     print("logic.wasm:", os.path.getsize(wasm) // 1024, "KB")

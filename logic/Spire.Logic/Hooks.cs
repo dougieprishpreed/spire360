@@ -84,6 +84,19 @@ internal static class Hooks
             return Task.FromResult<IEnumerable<CardModel>>(bundles.Count > 0 ? bundles[0] : Array.Empty<CardModel>());
         });
 
+        // Cmd.Wait(seconds...) and every Task.Delay(...) in game code: finish at
+        // once, record the pacing for the presentation.
+        Bridge.Register("cmd.wait", a =>
+        {
+            Steps.Wait(a.Length > 0 ? WaitMs(a[0]) : 0, "cmd");
+            return Task.CompletedTask;
+        });
+        Bridge.Register("task.delay", a =>
+        {
+            Steps.Wait(a.Length > 0 ? WaitMs(a[0]) : 0, "delay");
+            return Task.CompletedTask;
+        });
+
         // Every call from game logic into the UI layer (redirect_calls_into "ui"):
         // nothing runs, the call is recorded as a presentation cue. The patched
         // call site supplies a safe default return value itself.
@@ -105,6 +118,16 @@ internal static class Hooks
             return NeutralizeSafe(card, ctx, play);
         });
     }
+
+    private static int WaitMs(object? arg) => arg switch
+    {
+        float f => (int)(f * 1000),
+        double d => (int)(d * 1000),
+        int i => i,
+        long l => (int)l,
+        TimeSpan t => (int)t.TotalMilliseconds,
+        _ => 0,
+    };
 
     private static async Task NeutralizeSafe(CardModel card, PlayerChoiceContext ctx, CardPlay play)
     {
