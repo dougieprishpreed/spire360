@@ -140,6 +140,7 @@ typedef WasmPtr WasmMemoryAddress;
 /* Detect with architecture and operating system macros */
 #elif defined(__sparc) || defined(__sparc__) \
     || defined(_POWER) || defined(__powerpc__) || defined(__ppc__) || defined(_POWER) \
+    || defined(_M_PPC) || defined(_M_PPCBE) || defined(_XBOX) \
     || defined(__hpux) || defined(__hppa) || defined(__hppa__) \
     || defined(_MIPSEB) || defined(__MIPSEB) || defined(__MIPSEB__) \
     || defined(__AARCH64EB__) || defined(__THUMBEB__) || defined(__ARMEB__) || defined(__ARM_BIG_ENDIAN) \

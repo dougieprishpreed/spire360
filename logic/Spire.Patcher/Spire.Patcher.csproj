@@ -2,7 +2,7 @@
   <!-- PC-only tool: applies logic/patches.json to the player's sts2.dll. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
   <ItemGroup>

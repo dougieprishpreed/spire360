@@ -80,4 +80,4 @@ Xenon/PC factor for translated code.
 - **bench**: speed of w2c2 output on Xenon vs PC.
 - **bigcode**: whether the XDK linker handles code beyond the +-32 MB branch
   range (the game logic will be tens of MB). Try `--mb 32`, `64`, `96`.
-- **probe**: C and C++ features of the XDK compiler, for CODING_RULES.md.
+- **probe**: C and C++ features of the XDK compiler (results in docs/CODING_RULES.md).

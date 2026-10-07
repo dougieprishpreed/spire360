@@ -16,5 +16,8 @@ WASI layer in `runtime/`).
    `_byteswap_ushort/_ulong/_uint64` instead of mask-and-shift.
 4. `w2c2/w2c2_base.h`, `W2C2_XBOX_BYTEREVERSE` (opt-in, off by default): memory
    loads and stores use the Xenon byte-reversed load/store intrinsics.
+5. `w2c2/w2c2_base.h`: endianness detection knows MSVC's PowerPC macros
+   (`_M_PPC`, `_M_PPCBE`) and `_XBOX`; the XDK compiler defines none of the
+   GCC-style ones.
 
 Keep this list in sync when re-vendoring.

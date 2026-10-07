@@ -24,8 +24,11 @@ PowerPC (qemu), Win32 backend (wine).
 - Runs on the player's real localization tables (from their pck): 25/25 and
   10/10 `--tank`; UTF-8 protocol verified with Japanese tables.
 
-**XDK spike: ready to build (user).** `xdk\build.cmd` from the Xbox 360
-Command Prompt (it adds the .NET 4.0 MSBuild to PATH; the prompt does not).
+**XDK spike: first build round done (user).** `hello` builds to a XEX. The
+probe ran (results in docs/CODING_RULES.md: VS2010 PPC compiler, strict C89).
+Fixed after round 1: the selftest/bench `gen/` sources were not committed
+(git-ignored), the platform compiled `.c` as C++ (`/TP`), and w2c2 did not
+recognise `_M_PPC` as big-endian. Run `xdk\build.cmd` again.
 
 **Converter: started.** `converter/pck_tool.py` reads Godot 4 packs; works on
 the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
@@ -44,6 +47,8 @@ holds, for the converter:
 1. M0: `xdk\build.cmd`, run the XEXs; send `xdk\build_logs\*.log` and the
    result files.
 2. M1: the Windows walkthrough in docs/LOGIC_BUILD.md; send `build_logic.log`.
+   Round 1 failed at restore (NU1100: no package source); fixed with a repo
+   `nuget.config` and every project on net10.0.
 
 ## Next (agent)
 

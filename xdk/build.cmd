@@ -44,7 +44,7 @@ for %%P in (%PROJECTS%) do (
       )
     )
     echo Building %%P...
-    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal"
+    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:Rebuild /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal"
     if errorlevel 1 (set SUMMARY=!SUMMARY! %%P:FAILED) else (set SUMMARY=!SUMMARY! %%P:ok)
   )
 )

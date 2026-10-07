@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Stand-in for the game assembly, used only to test Spire.Patcher. -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>sts2</AssemblyName>
   </PropertyGroup>
 </Project>

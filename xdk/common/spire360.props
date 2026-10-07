@@ -13,6 +13,10 @@
     <ClCompile>
       <PreprocessorDefinitions>_XBOX;W2C2_HOST_MEMORY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(SpireRoot)runtime\include;$(SpireRoot)runtime\src;$(SpireRoot)third_party\w2c2\w2c2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- By extension: .c as C, .cpp as C++. The Xbox 360 platform default is
+           /TP (everything as C++), which gives file-scope consts internal
+           linkage and breaks the C runtime and translated code. -->
+      <CompileAs>Default</CompileAs>
       <WarningLevel>Level3</WarningLevel>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
