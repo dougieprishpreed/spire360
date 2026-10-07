@@ -1,0 +1,61 @@
+/* pack.s3p reader (format: converter/spire_convert/s3p.py, docs/PACK_FORMAT.md). */
+#ifndef SPIRE_PACK_H
+#define SPIRE_PACK_H
+
+#include "base.h"
+
+#include <stdio.h>
+
+namespace spire {
+
+enum PackEntryType { PACK_TEXTURE = 1, PACK_BLOB = 2, PACK_SCENE = 3, PACK_FONT = 4, PACK_AUDIO = 5 };
+enum TexFormat { TEX_DXT1 = 1, TEX_DXT5 = 2, TEX_ARGB8 = 3 };
+
+struct PackEntry {
+    u64 hash;
+    u64 offset;
+    u32 size;
+    u16 type;
+    u16 flags;
+    u32 name_offset;
+    u32 crc;
+};
+
+struct TextureData {
+    int format;            /* TexFormat */
+    int width, height;     /* stored size */
+    int orig_width, orig_height; /* size in layout units */
+    std::vector<std::vector<u8> > levels;
+};
+
+u64 fnv1a64(const char* s);
+
+class Pack {
+public:
+    Pack();
+    ~Pack();
+    bool open(const char* path, std::string* error);
+    void close();
+
+    const PackEntry* find(const char* name) const;
+    bool read(const PackEntry* e, std::vector<u8>& out) const;
+    bool read(const char* name, std::vector<u8>& out) const;
+    const char* name_of(const PackEntry* e) const;
+    size_t count() const { return entries_.size(); }
+    const PackEntry& entry(size_t i) const { return entries_[i]; }
+    const std::string& game_version() const { return game_version_; }
+    bool texture_little_endian() const { return (flags_ & 1) != 0; }
+
+    static bool parse_texture(const std::vector<u8>& payload, TextureData& out);
+
+private:
+    FILE* f_;
+    u32 flags_;
+    std::string game_version_;
+    std::vector<PackEntry> entries_; /* sorted by hash */
+    std::vector<char> names_;
+};
+
+} /* namespace spire */
+
+#endif
