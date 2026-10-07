@@ -2,3 +2,4 @@ numpy>=1.24
 Pillow>=10
 texture2ddecoder>=1.0.5
 etcpak>=0.9.8
+zstandard>=0.22
