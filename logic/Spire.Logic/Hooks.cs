@@ -103,6 +103,7 @@ internal static class Hooks
         Spire.HookBridge.Hooks.RegisterPrefix("ui", (id, a) =>
         {
             Steps.Ui(id, a);
+            Driver?.OnUiCall(id, a);
             return null;
         });
 

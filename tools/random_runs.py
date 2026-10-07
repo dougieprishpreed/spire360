@@ -126,6 +126,12 @@ def act(rng, state):
             return a("skip_select")
         picks = rng.sample(range(len(cards)), n)
         return a("select_cards", indices=",".join(str(i) for i in sorted(picks)))
+    if d == "crystal_sphere":
+        if rng.random() < 0.2:
+            return a("crystal_sphere_tool", tool=rng.choice(state.get("tools", ["Small"])))
+        hidden = [c for c in state.get("cells", []) if c.get("hidden")]
+        c = rng.choice(hidden or state.get("cells", [{"x": 0, "y": 0}]))
+        return a("crystal_sphere_click", x=c["x"], y=c["y"])
     if d == "shop":
         gold = state.get("player", {}).get("gold", 0)
         buys = []

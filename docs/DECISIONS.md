@@ -73,8 +73,10 @@ Inherited from sts2-cli; each is UI-driven flow the adapter replicates:
 3. Between-act healing is re-implemented (`HealBetweenActs`).
 4. Rest site and some events are forced back to the map after an option.
 5. Card-reward alternatives (e.g. Singing Bowl-style options) are not exposed.
-6. Crystal Sphere minigame: options do nothing (no minigame protocol yet).
+6. ~~Crystal Sphere minigame~~: now a `crystal_sphere` decision (tool + cell clicks on the game's own minigame model).
 7. Neutralize: sts2-cli's replacement is disabled; verify the original works.
+8. Single-target cards are reported unplayable while no enemy can be targeted
+   (e.g. Test Subject between death and revive), mirroring what the UI allows.
 
 ## D7. The game's AutoSlay bot defines the screen list
 

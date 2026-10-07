@@ -1,38 +1,53 @@
 # Handoff
 
-Kept short and rewritten each session. The full plan is being written to
-`docs/PLAN.md`.
+Rewritten each session; kept short. Plan: [docs/PLAN.md](docs/PLAN.md).
+Why things are the way they are: [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## Direction
+## State (pinned game build v0.111.0)
 
-Run the real game logic instead of re-implementing it:
+**Logic, on PC: working.** The player's sts2.dll runs headless through
+`logic/Spire.Logic` on one thread:
 
-    player's sts2.dll --Spire.Patcher--> patched IL
-      --NativeAOT-LLVM (wasi-wasm, preview1 core module, emulated EH)--> logic.wasm
-      --w2c2--> C89 --XDK cl.exe--> linked into the XEX with runtime/ + engine/
+- `tools/random_runs.py`: 25/25 random runs complete (all five characters);
+  with `--tank` the agent reaches Act 3 and wins full runs.
+- NativeAOT x64 build of adapter + game runs (all 1,660 models register
+  through reflection without JIT): strong evidence for NativeAOT-LLVM.
+- `selfplay` command (agent inside the logic): PC JIT baseline: start_run
+  2.1 s, action avg 1.8 ms / p95 6 ms / max 119 ms, GC heap 15 MB.
+- Responses carry `steps`: state diffs (hp, block, powers, card moves,
+  intents, orbs) and UI cues (sounds, VFX, speech, music, `wait` pacing) in
+  game order.
 
-The logic runs on its own hardware thread and talks the sts2-cli JSON protocol
-over in-memory stdin/stdout pipes. Presentation (engine/, not started) is
-native C++ drawing the player's converted assets.
+**Runtime: verified.** `runtime/tests/run_tests.py`: x86-64, big-endian
+PowerPC (qemu), Win32 backend (wine).
 
-## Done and verified in this sandbox
+**XDK spike: ready to build (user).** `xdk/README.md` has the commands.
 
-- `runtime/`: WASI p1 + CoreLib's p2 clock/poll subset, pipes, guest thread,
-  virtual timers, reserve/commit memory. `runtime/tests/run_tests.py` passes on
-  x86-64, big-endian PowerPC (qemu) and Win32 (wine).
-- `tools/w2c2_imports.py`: import audit + trapping stubs (tested).
-- `logic/Spire.Patcher`: Cecil IL patcher, all actions tested on a mock
-  assembly (`logic/tests/run_patcher_test.sh`), and the patched IL passes
-  NativeAOT x64.
+**Converter: started.** `converter/pck_tool.py` reads Godot 4 packs (tested
+on a Godot 4.5 export).
 
-## Written but not yet compiled against the real game
+## Waiting on the user
 
-- `logic/Spire.Logic`: single-threaded port of sts2-cli's RunSimulator, hooks,
-  selector with nested decisions, animation step recorder.
-- `logic/patches.json`, `tools/build_logic.py`.
+1. M0: build and run `xdk/` (hello, selftest, bench, bigcode, probe); send the
+   result files and any build errors.
+2. M1: on the PC with the dotnet-experimental feed and wasi-sdk 29:
+   `python tools/build_logic.py --game-dir <install> --stage copy,patch,wasm,c`
+   and send the output (wasm size, import audit).
+3. `python converter/pck_tool.py info <SlayTheSpire2.pck>` output, plus
+   `pck_tool.py list` (as a file) and a `pck_tool.py sample` zip if small
+   enough to attach.
 
-## Next
+## Next (agent)
 
-1. Get the player's game DLLs into the session (not into git), compile
-   Spire.Logic, run the smoke stage and sts2-cli's random-agent regression.
-2. Plan docs, XDK M0 spike, asset converter, engine.
+- Converter: localization extraction (unblocks running the logic from the
+  player's own files), textures (.ctex), scenes (binary RSRC), pack writer.
+- M2 runner: `xdk/logic_runner` generated from `out/logic/c` (selfplay on the
+  console, timing to the result file).
+- Fidelity gaps in DECISIONS D6 (rewards screen choice first).
+
+## Known issues
+
+- Fidelity gaps D6 (auto-collected rewards, treasure auto-pick, healing
+  between acts re-implemented, rest site forced to map).
+- `InitProgressData` warns once on a fresh profile (harmless; reloaded after
+  ModelDb).

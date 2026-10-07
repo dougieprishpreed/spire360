@@ -49,6 +49,16 @@ internal static class Program
             Dictionary<string, object?>? result;
             try
             {
+                if (Protocol.Str(cmd.Value, "cmd") == "selfplay")
+                {
+                    result = await SelfPlay.Run(driver,
+                        Protocol.Str(cmd.Value, "character", "Ironclad")!,
+                        Protocol.Str(cmd.Value, "seed", "selfplay")!,
+                        Protocol.Int(cmd.Value, "steps", 3000),
+                        cmd.Value.TryGetProperty("tank", out var tk) && tk.ValueKind == JsonValueKind.True);
+                    proto.Write(result);
+                    continue;
+                }
                 result = HandleCommand(driver, cmd.Value);
             }
             catch (Exception ex)
@@ -234,6 +244,15 @@ public partial class RunDriver
             return true;
         }
         return false;
+    }
+
+    /// <summary>Test aid for selfplay --tank.</summary>
+    internal void SetPlayerHp(int hp, int? maxHp)
+    {
+        var player = LocalPlayer();
+        if (player?.Creature == null) return;
+        if (maxHp != null) SetField(player.Creature, "_maxHp", maxHp.Value);
+        SetField(player.Creature, "_currentHp", hp);
     }
 
     internal void SkipNestedReward()

@@ -741,6 +741,10 @@ public partial class RunDriver
                     return DoLeaveRoom(player);
                 case "proceed":
                     return DoProceed(player);
+                case "crystal_sphere_tool":
+                    return DoCrystalSphereTool(args);
+                case "crystal_sphere_click":
+                    return DoCrystalSphereClick(args);
                 default:
                     return Error($"Unknown action: {action}");
             }
@@ -1466,6 +1470,11 @@ public partial class RunDriver
             return GameOverState(false);
         }
 
+        // Event minigames (Crystal Sphere) run inside an event option.
+        var minigame = MinigameDecision();
+        if (minigame != null)
+            return minigame;
+
         // Check if there's a pending bundle selection (Scroll Boxes: pick 1 of N packs)
         if (_pendingBundles != null && _pendingBundleTcs != null && !_pendingBundleTcs.Task.IsCompleted)
         {
@@ -1865,7 +1874,10 @@ public partial class RunDriver
                 ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
                 ["type"] = c.Type.ToString(),
                 ["rarity"] = c.Rarity.ToString(),
-                ["can_play"] = c.CanPlay(out _, out _),
+                // The UI cannot aim a single-target card at nothing (e.g. while
+                // Test Subject waits to revive), so it is not playable then.
+                ["can_play"] = c.CanPlay(out _, out _)
+                    && !(c.TargetType == TargetType.AnyEnemy && aliveEnemiesForTargeting.Count == 0),
                 ["target_type"] = c.TargetType.ToString(),
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
