@@ -11,6 +11,8 @@ Stages (each can be run alone with --stage):
   aot      NativeAOT publish for this PC (finds AOT/reflection problems fast)
   wasm     NativeAOT-LLVM publish to wasi-wasm -> out/logic/logic.wasm
   c        w2c2 translation of logic.wasm -> out/logic/c/ + import audit
+  native   compile out/logic/c with the runtime into a PC program
+           (out/logic/native/logic_host): the translated logic, run natively
 
 Usage:
   build_logic.py --game-dir "<...>/Slay the Spire 2" [--stage all|copy|patch|...]
@@ -40,7 +42,7 @@ GAME_DLLS = [
     "Steamworks.NET.dll", "MonoMod.Backports.dll", "MonoMod.ILHelpers.dll",
     "0Harmony.dll", "System.IO.Hashing.dll",
 ]
-STAGES = ["copy", "stubs", "patch", "jit", "smoke", "aot", "wasm", "c"]
+STAGES = ["copy", "stubs", "patch", "jit", "smoke", "aot", "wasm", "c", "native"]
 # "aot" (a NativeAOT build for this PC) is a diagnostic; on Windows it needs
 # the VS 2022 C++ tools, so it is opt-in.
 DEFAULT_STAGES = ["copy", "patch", "jit", "smoke", "wasm", "c"]
@@ -123,6 +125,21 @@ def stage_patch(a):
          "--hookbridge", os.path.join(tmp, "Spire.HookBridge.dll"),
          "--search", tmp, "--search", LIB_GAME,
          "--report", os.path.join(LIB_PATCHED, "patch_report.json")])
+    check_stubs(os.path.join(tmp, "GodotSharp.dll"))
+
+
+def check_stubs(stub_dll):
+    """Stub enums, class hierarchy and constraints must match the real
+    GodotSharp: NativeAOT-LLVM rejects callers whose IL disagrees with them."""
+    real = os.path.join(LIB_GAME, "GodotSharp.real.dll")
+    if not os.path.exists(real):
+        print("  (no GodotSharp.real.dll: run the copy stage to check the stubs)")
+        return
+    tools = os.path.join(OUT, "apidump")
+    run(["dotnet", "build", os.path.join(LOGIC, "Spire.ApiDump"), "-c", "Release", "-o", tools, "-nologo", "-v", "q"])
+    r = run(["dotnet", os.path.join(tools, "Spire.ApiDump.dll"), "--check-stubs", stub_dll, real], check=False)
+    if r.returncode != 0:
+        sys.exit("stub check failed: fix logic/Spire.GodotStubs (see docs/LOGIC_BUILD.md)")
 
 
 def stage_jit(a):
@@ -239,6 +256,64 @@ def stage_c(a):
     print(f"{n} C files in {cdir}")
 
 
+def stage_native(a):
+    """The translated logic as a PC program, built from the same C the console
+    compiles: tools/random_runs.py --cmd out/logic/native/logic_host."""
+    import concurrent.futures
+    cdir = os.path.join(OUT, "c")
+    if not os.path.isdir(cdir):
+        sys.exit("run the c stage first")
+    build = os.path.join(OUT, "native")
+    objdir = os.path.join(build, "obj")
+    os.makedirs(objdir, exist_ok=True)
+    rt = os.path.join(ROOT, "runtime")
+    plat = "srt_plat_win32.c" if os.name == "nt" else "srt_plat_posix.c"
+    sources = sorted(os.path.join(cdir, f) for f in os.listdir(cdir) if f.endswith(".c"))
+    sources += [os.path.join(rt, "src", f) for f in ("srt_core.c", "srt_wasi.c", "srt_wasi_p2.c", plat)]
+    sources.append(os.path.join(rt, "hosts", "logic_host.c"))
+    incs = [os.path.join(rt, "include"), os.path.join(rt, "src"), os.path.join(ROOT, "third_party", "w2c2", "w2c2"), cdir]
+    cl = shutil.which("cl") if os.name == "nt" else None
+    cc = None if cl else next((c for c in ("cc", "gcc", "clang") if shutil.which(c)), None)
+    if not cl and not cc:
+        sys.exit("no C compiler: run from a Visual Studio x64 command prompt, or install gcc/clang")
+    opt = a.native_opt
+    exe = os.path.join(build, "logic_host" + (".exe" if os.name == "nt" else ""))
+
+    def compile_one(src):
+        obj = os.path.join(objdir, os.path.splitext(os.path.basename(src))[0] + (".obj" if cl else ".o"))
+        if os.path.exists(obj) and os.path.getmtime(obj) > os.path.getmtime(src):
+            return obj
+        if cl:
+            cmd = [cl, "/nologo", "/c", "/O" + opt, "/w", "/bigobj", "/DW2C2_HOST_MEMORY", "/D_CRT_SECURE_NO_WARNINGS"] + \
+                  ["/I" + i for i in incs] + ["/Fo" + obj, src]
+        else:
+            cmd = [cc, "-c", "-O" + opt, "-w", "-DW2C2_HOST_MEMORY", "-fno-strict-aliasing"] + \
+                  ["-I" + i for i in incs] + ["-o", obj, src]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"{os.path.basename(src)}:\n{r.stdout}{r.stderr}")
+        return obj
+
+    jobs = a.jobs or os.cpu_count() or 4
+    print(f"compiling {len(sources)} files with {cl or cc} -O{opt}, {jobs} jobs", flush=True)
+    t0 = __import__("time").time()
+    objs = []
+    with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+        for n, obj in enumerate(pool.map(compile_one, sources), 1):
+            objs.append(obj)
+            if n % 10 == 0 or n == len(sources):
+                print(f"  {n}/{len(sources)} ({__import__('time').time() - t0:.0f} s)", flush=True)
+    if cl:
+        link = shutil.which("link") or "link"
+        rsp = os.path.join(build, "link.rsp")
+        with open(rsp, "w") as f:
+            f.write("\n".join('"%s"' % o for o in objs))
+        run([link, "/nologo", "/STACK:16777216", "/OUT:" + exe, "@" + rsp])
+    else:
+        run([cc, "-o", exe] + objs + ["-lm", "-lpthread"])
+    print(f"{exe} ({os.path.getsize(exe) // 1024} KB), {__import__('time').time() - t0:.0f} s")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--game-dir", help="Slay the Spire 2 install folder (needed for 'copy')")
@@ -249,6 +324,8 @@ def main():
     ap.add_argument("--ilc-version", help="pin Microsoft.DotNet.ILCompiler.LLVM version")
     ap.add_argument("--w2c2", help="path to a built w2c2")
     ap.add_argument("--funcs-per-file", type=int, default=2000)
+    ap.add_argument("--native-opt", default="1", help="optimisation level for the native stage (0, 1, 2)")
+    ap.add_argument("--jobs", type=int, help="parallel compiles for the native stage (default: all cores)")
     a = ap.parse_args()
     stages = DEFAULT_STAGES if a.stage == "all" else a.stage.split(",")
     if "copy" in stages and not a.game_dir:

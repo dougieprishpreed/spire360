@@ -19,5 +19,15 @@ WASI layer in `runtime/`).
 5. `w2c2/w2c2_base.h`: endianness detection knows MSVC's PowerPC macros
    (`_M_PPC`, `_M_PPCBE`) and `_XBOX`; the XDK compiler defines none of the
    GCC-style ones.
+6. `w2c2/w2c2_base.h`: the MSVC atomics block (`<intrin.h>`) is skipped on
+   `_XBOX`; the XDK has neither the header nor the 8/16-bit intrinsics. The
+   non-atomic data-segment fallbacks apply (modules use no wasm atomics).
+7. `w2c2/w2c2_base.h`, `W2C2_PORTABLE_MATH`: MSVC before 2013 (the XDK's is
+   2010) lacks `trunc`, `nearbyint`, `signbit`, `INFINITY` and `NAN`, and
+   rejects `1.0/0.0`. Those builds use the bit-exact replacements upstream
+   wrote for Plan 9 (and MSVC's own `INFINITY`/`NAN` definitions). Defining
+   `W2C2_PORTABLE_MATH` forces them on any compiler: they matched libm on
+   200k values on x86-64 and big-endian PowerPC, and the XDK test programs
+   give identical results with them (`gen_xdk_tests.py --cflag=-DW2C2_PORTABLE_MATH`).
 
 Keep this list in sync when re-vendoring.

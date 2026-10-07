@@ -9,6 +9,14 @@ if (args.Length >= 3 && args[0] == "--calls")
     return Calls.Run(args[1], args[2]);
 if (args.Length >= 5 && args[0] == "--gen-stubs")
     return StubGen.Run(args[1], args[2], args[3], args[4]);
+if (args.Length >= 2 && args[0] == "--real-bases")
+    return RealBases.Run(args[1]);
+if (args.Length >= 3 && args[0] == "--bases")
+    return Bases.Run(args[1], args[2]);
+if (args.Length >= 3 && args[0] == "--print-enums")
+    return PrintEnums.Run(args[1], args.Skip(2));
+if (args.Length >= 3 && args[0] == "--check-stubs")
+    return CheckStubs.Run(args[1], args[2]);
 if (args.Length >= 3 && args[0] == "--stub-gaps")
     return StubGaps.Run(args[1], args[2], args.Length > 3 ? args[3] : null);
 if (args.Length < 2)

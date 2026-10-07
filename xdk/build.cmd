@@ -6,7 +6,8 @@ rem the XDK but does not put MSBuild on PATH; this script appends the .NET 4.0
 rem MSBuild (the one Visual Studio 2010 uses) to PATH when it is missing. It is
 rem appended, not prepended, so "cl" stays the XDK's PowerPC compiler.
 rem
-rem   xdk\build.cmd            hello, selftest, bench, bigcode (64 MB), probe
+rem   xdk\build.cmd            hello, selftest, bench, probe
+rem   xdk\build.cmd bigcode    the 64 MB link test (slow)
 rem   xdk\build.cmd hello      one project
 rem
 rem Logs: xdk\build_logs\<project>.log  (send these if anything fails)
@@ -29,7 +30,7 @@ if errorlevel 1 (
 )
 
 set PROJECTS=%*
-if "%PROJECTS%"=="" set PROJECTS=hello selftest bench bigcode probe
+if "%PROJECTS%"=="" set PROJECTS=hello selftest bench probe
 
 set SUMMARY=
 for %%P in (%PROJECTS%) do (
@@ -44,7 +45,7 @@ for %%P in (%PROJECTS%) do (
       )
     )
     echo Building %%P...
-    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:Rebuild /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal"
+    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:Rebuild /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal;PerformanceSummary"
     if errorlevel 1 (set SUMMARY=!SUMMARY! %%P:FAILED) else (set SUMMARY=!SUMMARY! %%P:ok)
   )
 )

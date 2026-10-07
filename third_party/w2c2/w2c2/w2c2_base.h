@@ -280,7 +280,9 @@ typedef WasmPtr WasmMemoryAddress;
 #define UINT64_MAX W2C2_LL(18446744073709551615U)
 #endif
 
-#if defined(_MSC_VER) && _MSC_VER <= 1500
+/* spire360 patch: MSVC before 2013 (the XDK compiler is 2010) has no
+   INFINITY/NAN either, and rejects 1.0/0.0. */
+#if defined(_MSC_VER) && _MSC_VER < 1800
 
 /* disable warning C4756: overflow in constant arithmetic */
 #pragma warning(disable:4756 4056)
@@ -651,6 +653,16 @@ f64_promote_f32(F32 value) {
     return (F64)value;
 }
 
+/* spire360 patch: MSVC before 2013 lacks trunc, nearbyint and signbit; use
+   the same bit-exact replacements as Plan 9. W2C2_PORTABLE_MATH forces them
+   (to test this path with other compilers). */
+#if defined(PLAN9) || (defined(_MSC_VER) && _MSC_VER < 1800)
+#ifndef W2C2_PORTABLE_MATH
+#define W2C2_PORTABLE_MATH
+#endif
+#endif
+
+#ifdef W2C2_PORTABLE_MATH
 #ifdef PLAN9
 /* APE lacks the C99 math operations used by generated code. */
 #ifndef NAN
@@ -658,7 +670,16 @@ f64_promote_f32(F32 value) {
 #endif
 #undef INFINITY
 #define INFINITY f32_reinterpret_i32(0x7f800000U)
+#endif /* PLAN9 */
 #undef signbit
+#undef fabsf
+#undef sqrtf
+#undef ceilf
+#undef floorf
+#undef trunc
+#undef truncf
+#undef nearbyint
+#undef nearbyintf
 #define signbit(x) ((i64_reinterpret_f64((F64)(x)) >> 63) != 0)
 #define fabsf(x) f32_reinterpret_i32(i32_reinterpret_f32(x) & 0x7fffffffU)
 #define sqrtf(x) ((F32)sqrt((F64)(x)))
@@ -1696,7 +1717,9 @@ struct wasmModuleInstance {
 #define __has_extension __has_feature
 #endif
 
-#if defined(_MSC_VER) && _MSC_VER >= 1500
+/* spire360 patch: the XDK has no <intrin.h> and no 8/16-bit Interlocked
+   intrinsics; Spire360 modules use no wasm atomics. */
+#if defined(_MSC_VER) && _MSC_VER >= 1500 && !defined(_XBOX)
 #define WASM_ATOMICS_MSVC
 #elif defined(__GNUC__) && (GCC_VERSION >= 40700 || __has_extension(c_atomic))
 #define WASM_ATOMICS_GCC

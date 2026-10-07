@@ -14,10 +14,10 @@ namespace Godot
         {
         }
     }
-    public partial class AnimationMixer : global::Godot.Node
+    public partial class AnimationMixer
     {
         public bool Active { get => default; set { } }
-        public partial class SignalName : global::Godot.Node.SignalName
+        public partial class SignalName
         {
             public static readonly global::Godot.StringName AnimationFinished = "AnimationFinished";
         }
@@ -28,8 +28,6 @@ namespace Godot
     }
     public partial class AspectRatioContainer
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Container.MethodName
         {
             public MethodName() { }
@@ -69,8 +67,6 @@ namespace Godot
     }
     public partial class BackBufferCopy
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Node2D.MethodName
         {
             public MethodName() { }
@@ -135,7 +131,7 @@ namespace Godot
             AndDraw = 2,
             Max = 3,
         }
-        public partial class SignalName : global::Godot.Node.SignalName
+        public partial class SignalName
         {
             public static readonly global::Godot.StringName VisibilityChanged = "VisibilityChanged";
             public static readonly global::Godot.StringName ItemRectChanged = "ItemRectChanged";
@@ -172,8 +168,6 @@ namespace Godot
     }
     public partial class ColorRect
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Control.MethodName
         {
             public MethodName() { }
@@ -201,8 +195,6 @@ namespace Godot
     }
     public partial class Container
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Control.MethodName
         {
             public MethodName() { }
@@ -233,13 +225,10 @@ namespace Godot
         public void SetGlobalPosition(global::Godot.Vector2 p0, bool p1 = false) { }
         public void SetAnchorsPreset(global::Godot.Control.LayoutPreset p0, bool p1 = false) { }
         public void AddThemeFontOverride(global::Godot.StringName p0, global::Godot.Font p1) { }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public global::Godot.Font GetThemeFont(global::Godot.StringName p0, global::Godot.StringName p1 = null) { return default; }
         public int GetThemeFontSize(global::Godot.StringName p0, global::Godot.StringName p1 = null) { return default; }
         public void RemoveThemeFontSizeOverride(global::Godot.StringName p0) { }
         public void RemoveThemeColorOverride(global::Godot.StringName p0) { }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public void ResetSize() { }
         public void SetFocusMode(global::Godot.Control.FocusModeEnum p0) { }
         public void SetPivotOffset(global::Godot.Vector2 p0) { }
@@ -328,8 +317,6 @@ namespace Godot
         public int Amount { get => default; set { } }
         public float EmissionSphereRadius { get => default; set { } }
         public void Restart() { }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Node2D.MethodName
         {
             public MethodName() { }
@@ -540,9 +527,6 @@ namespace Godot
         public global::Godot.FlowContainer.AlignmentMode Alignment { get => default; set { } }
         public bool ReverseFill { get => default; set { } }
         public int GetLineCount() { return default; }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public enum AlignmentMode : long
         {
             Begin = 0,
@@ -568,7 +552,7 @@ namespace Godot
     }
     public static partial class GD
     {
-        public static T Load<T>(string p0) { return default; }
+        public static T Load<T>(string p0) where T : class { return default; }
         public static float Randf() { return default; }
         public static double RandRange(double p0, double p1) { return default; }
     }
@@ -578,13 +562,10 @@ namespace Godot
     }
     public partial class GodotObject
     {
-        protected virtual void SaveGodotObjectData(global::Godot.Bridge.GodotSerializationInfo p0) { }
-        protected virtual void RestoreGodotObjectData(global::Godot.Bridge.GodotSerializationInfo p0) { }
         public virtual void _Notification(int p0) { }
         public global::Godot.Error Connect(global::Godot.StringName p0, global::Godot.Callable p1, uint p2 = 0U) { return default; }
         public bool IsConnected(global::Godot.StringName p0, global::Godot.Callable p1) { return default; }
         public global::Godot.Variant CallDeferred(global::Godot.StringName p0, params global::Godot.Variant[] p1) { return default; }
-        public void Dispose() { }
         public void Disconnect(global::Godot.StringName p0, global::Godot.Callable p1) { }
         public global::Godot.Variant Call(global::Godot.StringName p0, params global::Godot.Variant[] p1) { return default; }
         public string GetClass() { return default; }
@@ -604,8 +585,6 @@ namespace Godot
     {
         public bool LocalCoords { get => default; set { } }
         public void Restart() { }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public void SetEmitting(bool p0) { }
         public void SetOneShot(bool p0) { }
         public global::Godot.Material GetProcessMaterial() { return default; }
@@ -637,8 +616,6 @@ namespace Godot
     }
     public partial class HBoxContainer
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.BoxContainer.MethodName
         {
             public MethodName() { }
@@ -753,9 +730,6 @@ namespace Godot
     {
         public bool Pressed { get => default; set { } }
     }
-    public partial class InputEventFromWindow : global::Godot.InputEvent
-    {
-    }
     public partial class InputEventGesture : global::Godot.InputEventWithModifiers
     {
     }
@@ -768,7 +742,7 @@ namespace Godot
         public global::Godot.Key Keycode { get => default; set { } }
         public bool Pressed { get => default; set { } }
     }
-    public partial class InputEventMouse : global::Godot.InputEventWithModifiers
+    public partial class InputEventMouse
     {
         public global::Godot.Vector2 Position { get => default; set { } }
         public global::Godot.Vector2 GlobalPosition { get => default; set { } }
@@ -786,7 +760,7 @@ namespace Godot
     {
         public global::Godot.Vector2 Delta { get => default; set { } }
     }
-    public partial class InputEventWithModifiers : global::Godot.InputEventFromWindow
+    public partial class InputEventWithModifiers
     {
         public bool AltPressed { get => default; set { } }
         public bool CtrlPressed { get => default; set { } }
@@ -815,8 +789,6 @@ namespace Godot
         public global::Godot.VerticalAlignment VerticalAlignment { get => default; set { } }
         public global::Godot.TextServer.AutowrapMode AutowrapMode { get => default; set { } }
         public global::Godot.HorizontalAlignment HorizontalAlignment { get => default; set { } }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Control.MethodName
         {
             public MethodName() { }
@@ -834,8 +806,6 @@ namespace Godot
     {
         public void AddPoint(global::Godot.Vector2 p0, int p1 = -1) { }
         public void RemovePoint(int p0) { }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public int GetPointCount() { return default; }
         public global::Godot.Vector2 GetPointPosition(int p0) { return default; }
         public global::Godot.Gradient GetGradient() { return default; }
@@ -862,8 +832,6 @@ namespace Godot
         public bool IsEditing() { return default; }
         public void Unedit() { }
         public void Edit() { }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public event global::Godot.LineEdit.TextChangedEventHandler TextChanged;
         public void SetPlaceholder(string p0) { }
         public partial class MethodName : global::Godot.Control.MethodName
@@ -877,10 +845,11 @@ namespace Godot
         }
         public delegate void TextChangedEventHandler(string p0);
     }
+    public partial class MainLoop
+    {
+    }
     public partial class MarginContainer
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Container.MethodName
         {
             public MethodName() { }
@@ -922,9 +891,7 @@ namespace Godot
     {
         public string SceneFilePath { get => default; set { } }
         public global::Godot.Node.ProcessModeEnum ProcessMode { get => default; set { } }
-        public T GetParent<T>() { return default; }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
+        public T GetParent<T>() where T : class { return default; }
         public int GetIndex(bool p0 = false) { return default; }
         public global::Godot.Node GetNodeOrNull(global::Godot.NodePath p0) { return default; }
         public bool IsNodeReady() { return default; }
@@ -936,14 +903,13 @@ namespace Godot
         public global::Godot.Node GetNode(global::Godot.NodePath p0) { return default; }
         public global::Godot.Node Duplicate(int p0 = 15) { return default; }
         public global::Godot.NodePath GetPath() { return default; }
-        public T GetChild<T>(int p0, bool p1 = false) { return default; }
+        public T GetChild<T>(int p0, bool p1 = false) where T : class { return default; }
         public global::Godot.Node GetChild(int p0, bool p1 = false) { return default; }
         public void SetProcessInput(bool p0) { }
         public void SetName(string p0) { }
         public bool HasNode(global::Godot.NodePath p0) { return default; }
         public event global::System.Action TreeExiting;
-        public T GetChildOrNull<T>(int p0, bool p1 = false) { return default; }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
+        public T GetChildOrNull<T>(int p0, bool p1 = false) where T : class { return default; }
         public partial class MethodName
         {
             public static readonly global::Godot.StringName AddSibling = "AddSibling";
@@ -971,14 +937,11 @@ namespace Godot
         public float GlobalRotation { get => default; set { } }
         public global::Godot.Vector2 GlobalScale { get => default; set { } }
         public float Skew { get => default; set { } }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public float GetAngleTo(global::Godot.Vector2 p0) { return default; }
         public global::Godot.Vector2 ToLocal(global::Godot.Vector2 p0) { return default; }
         public void Rotate(float p0) { }
     }
-    public partial class Noise : global::Godot.Resource
+    public partial class Noise
     {
         public float GetNoise1D(float p0) { return default; }
         public float GetNoise2D(float p0, float p1) { return default; }
@@ -1017,8 +980,6 @@ namespace Godot
     }
     public partial class Panel
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Control.MethodName
         {
             public MethodName() { }
@@ -1049,8 +1010,6 @@ namespace Godot
     }
     public partial class PathFollow2D
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Node2D.MethodName
         {
             public MethodName() { }
@@ -1146,9 +1105,6 @@ namespace Godot
     }
     public partial class Range
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Control.MethodName
         {
             public MethodName() { }
@@ -1166,11 +1122,8 @@ namespace Godot
         public bool Intersects(global::Godot.Rect2 p0, bool p1 = false) { return default; }
         public global::Godot.Rect2 Merge(global::Godot.Rect2 p0) { return default; }
     }
-    public partial class RefCounted : global::Godot.GodotObject
+    public partial class RefCounted
     {
-        public partial class SignalName : global::Godot.GodotObject.SignalName
-        {
-        }
     }
     public partial class RenderingDevice : global::Godot.GodotObject
     {
@@ -1210,8 +1163,6 @@ namespace Godot
     }
     public partial class ResourceFormatLoader
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
     }
     public static partial class ResourceLoader
     {
@@ -1229,8 +1180,6 @@ namespace Godot
     }
     public partial class RichTextEffect
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Resource.MethodName
         {
             public MethodName() { }
@@ -1249,8 +1198,6 @@ namespace Godot
         public global::Godot.Collections.Array CustomEffects { get => default; set { } }
         public global::Godot.HorizontalAlignment HorizontalAlignment { get => default; set { } }
         public global::Godot.VerticalAlignment VerticalAlignment { get => default; set { } }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public void InstallEffect(global::Godot.Variant p0) { }
         public void ScrollToLine(int p0) { }
         public void SetText(string p0) { }
@@ -1268,9 +1215,6 @@ namespace Godot
         {
             public SignalName() { }
         }
-    }
-    public partial struct Rid
-    {
     }
     public partial class SceneTree
     {
@@ -1302,8 +1246,6 @@ namespace Godot
     public partial class Sprite2D
     {
         public bool FlipH { get => default; set { } }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Node2D.MethodName
         {
             public MethodName() { }
@@ -1321,9 +1263,6 @@ namespace Godot
     {
         public static bool operator ==(in global::Godot.NativeInterop.godot_string_name p0, global::Godot.StringName p1) { return default; }
         public static bool operator !=(in global::Godot.NativeInterop.godot_string_name p0, global::Godot.StringName p1) { return default; }
-    }
-    public partial class StyleBox : global::Godot.Resource
-    {
     }
     public partial class SubViewport
     {
@@ -1346,8 +1285,6 @@ namespace Godot
         public void SetCaretColumn(int p0, bool p1 = true, int p2 = 0) { }
         public int GetCaretLine(int p0 = 0) { return default; }
         public int GetCaretColumn(int p0 = 0) { return default; }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.Control.MethodName
         {
             public MethodName() { }
@@ -1457,9 +1394,6 @@ namespace Godot
         public global::Godot.TextureRect.ExpandModeEnum ExpandMode { get => default; set { } }
         public bool FlipH { get => default; set { } }
         public global::Godot.TextureRect.StretchModeEnum StretchMode { get => default; set { } }
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public void SetTexture(global::Godot.Texture2D p0) { }
         public void SetFlipV(bool p0) { }
         public enum ExpandModeEnum : long
@@ -1508,9 +1442,6 @@ namespace Godot
     }
     public partial class VBoxContainer
     {
-        protected virtual bool InvokeGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0, global::Godot.NativeInterop.NativeVariantPtrArgs p1, out global::Godot.NativeInterop.godot_variant p2) { p2 = default; return default; }
-        protected virtual bool HasGodotClassMethod(global::Godot.NativeInterop.godot_string_name p0) { return default; }
-        protected virtual bool HasGodotClassSignal(global::Godot.NativeInterop.godot_string_name p0) { return default; }
         public partial class MethodName : global::Godot.BoxContainer.MethodName
         {
             public MethodName() { }
@@ -1539,7 +1470,7 @@ namespace Godot
         public static global::Godot.Variant CreateFrom<T>(global::Godot.Collections.Array<T> p0) { return default; }
         public global::Godot.Collections.Array<T> AsGodotArray<T>() { return default; }
         public static global::Godot.Variant CreateFrom(global::Godot.GodotObject[] p0) { return default; }
-        public T[] AsGodotObjectArray<T>() { return default; }
+        public T[] AsGodotObjectArray<T>() where T : global::Godot.GodotObject { return default; }
         public static explicit operator global::Godot.Vector2(global::Godot.Variant p0) { return default; }
         public static global::Godot.Variant CreateFrom<TKey, TValue>(global::Godot.Collections.Dictionary<TKey, TValue> p0) { return default; }
         public global::Godot.Collections.Dictionary<TKey, TValue> AsGodotDictionary<TKey, TValue>() { return default; }
@@ -1630,12 +1561,12 @@ namespace Godot
 
 namespace Godot.Bridge
 {
-    public sealed partial class GodotSerializationInfo
+    public partial class GodotSerializationInfo
     {
         public void AddProperty(global::Godot.StringName p0, global::Godot.Variant p1) { }
         public bool TryGetProperty(global::Godot.StringName p0, out global::Godot.Variant p1) { p1 = default; return default; }
         public void AddSignalEventDelegate(global::Godot.StringName p0, global::System.Delegate p1) { }
-        public bool TryGetSignalEventDelegate<T>(global::Godot.StringName p0, out T p1) { p1 = default; return default; }
+        public bool TryGetSignalEventDelegate<T>(global::Godot.StringName p0, out T p1) where T : global::System.Delegate { p1 = default; return default; }
     }
     public partial struct ManagedCallbacks
     {
@@ -1658,39 +1589,10 @@ namespace Godot.Bridge
 
 namespace Godot.Collections
 {
-    public partial class Array
-    {
-        public global::Godot.Variant this[int p0] { get => default; set { } }
-        public int Count { get => default; }
-        public void Clear() { }
-        public void Add(global::Godot.Variant p0) { }
-        public bool Contains(global::Godot.Variant p0) { return default; }
-    }
     public partial class Array<T>
     {
-        public int Count { get => default; }
-        public T this[int p0] { get => default; set { } }
-        public global::System.Collections.Generic.IEnumerator<T> GetEnumerator() { return default; }
         public static explicit operator global::Godot.Collections.Array<T>(global::Godot.Variant p0) { return default; }
-        public void Add(T p0) { }
-        public bool Contains(T p0) { return default; }
         public static implicit operator global::Godot.Variant(global::Godot.Collections.Array<T> p0) { return default; }
-    }
-    public sealed partial class Dictionary
-    {
-        public global::Godot.Variant this[global::Godot.Variant p0] { get => default; set { } }
-        public int Count { get => default; }
-        public bool TryGetValue(global::Godot.Variant p0, out global::Godot.Variant p1) { p1 = default; return default; }
-        public bool ContainsKey(global::Godot.Variant p0) { return default; }
-        public global::System.Collections.Generic.IEnumerator<global::System.Collections.Generic.KeyValuePair<global::Godot.Variant, global::Godot.Variant>> GetEnumerator() { return default; }
-        public Dictionary() { }
-        public void Add(global::Godot.Variant p0, global::Godot.Variant p1) { }
-    }
-    public partial class Dictionary<TKey, TValue>
-    {
-        public virtual TValue this[TKey p0] { get => default; set { } }
-        public bool ContainsKey(TKey p0) { return default; }
-        public bool TryGetValue(TKey p0, out TValue p1) { p1 = default; return default; }
     }
 }
 
@@ -1715,7 +1617,7 @@ namespace Godot.NativeInterop
         public static global::Godot.NativeInterop.godot_variant CreateFrom<T>(in T p0) { return default; }
         public static global::Godot.Collections.Array<T> ConvertToArray<T>(in global::Godot.NativeInterop.godot_variant p0) { return default; }
         public static global::Godot.NativeInterop.godot_variant CreateFromArray<T>(global::Godot.Collections.Array<T> p0) { return default; }
-        public static T[] ConvertToSystemArrayOfGodotObject<T>(in global::Godot.NativeInterop.godot_variant p0) { return default; }
+        public static T[] ConvertToSystemArrayOfGodotObject<T>(in global::Godot.NativeInterop.godot_variant p0) where T : global::Godot.GodotObject { return default; }
         public static global::Godot.NativeInterop.godot_variant CreateFromSystemArrayOfGodotObject(global::Godot.GodotObject[] p0) { return default; }
         public static global::Godot.Collections.Dictionary<TKey, TValue> ConvertToDictionary<TKey, TValue>(in global::Godot.NativeInterop.godot_variant p0) { return default; }
         public static global::Godot.NativeInterop.godot_variant CreateFromDictionary<TKey, TValue>(global::Godot.Collections.Dictionary<TKey, TValue> p0) { return default; }

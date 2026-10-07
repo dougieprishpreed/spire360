@@ -84,6 +84,12 @@ def implemented_symbols(src_dir):
             text = f.read()
         for m in MACRO_RE.finditer(text):
             prefix = MACRO_PREFIXES[m.group("macro")]
+            real_len = len(demangle_part(m.group("name")))
+            if int(m.group("len")) != real_len:
+                # The length is part of the symbol: a wrong one silently leaves
+                # the import unimplemented.
+                sys.exit("%s: %s(%s, %s): name is %d characters" % (
+                    fn, m.group("macro"), m.group("len"), m.group("name"), real_len))
             syms.add("%s%s_%s" % (prefix, m.group("len"), m.group("name")))
         for m in DIRECT_RE.finditer(text):
             syms.add(m.group(1))

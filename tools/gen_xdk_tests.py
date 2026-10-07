@@ -72,7 +72,7 @@ def check(a, name, gen, cc, runner):
            [os.path.join(gen, f) for f in sorted(os.listdir(gen)) if f.endswith(".c")]
     flags = ["-O2", "-w", "-std=gnu99", "-DW2C2_HOST_MEMORY", '-DSPIRE_ROOT_OVERRIDE="%s"' % root,
              "-I", os.path.join(RT, "include"), "-I", os.path.join(RT, "src"), "-I", W2C2_INC, "-I", gen]
-    extra = ["-static"] if "powerpc" in cc else []
+    extra = (["-static"] if "powerpc" in cc else []) + a.cflags
     run([cc] + flags + extra + srcs + ["-o", out, "-lm", "-lpthread"])
     r = subprocess.run(runner + [out], capture_output=True, text=True, timeout=900)
     print(r.stdout[-1500:])
@@ -86,6 +86,8 @@ def main():
     ap.add_argument("--w2c2", default=os.environ.get("W2C2"))
     ap.add_argument("--build", default=os.path.join(ROOT, "out", "xdk-gen"))
     ap.add_argument("--no-check", action="store_true")
+    ap.add_argument("--cflag", dest="cflags", action="append", default=[],
+                    help="extra C flag for the checks (e.g. -DW2C2_PORTABLE_MATH, the XDK's math path)")
     a = ap.parse_args()
     if not a.wasi_sdk:
         sys.exit("set --wasi-sdk or WASI_SDK_PATH")

@@ -57,16 +57,32 @@ Stages, in order (`--stage a,b,...` runs a subset):
 | Stage | Output | Check |
 |---|---|---|
 | copy | `logic/lib/game/` + `manifest.json` (hashes, game version) | prints the version |
-| patch | `logic/lib/patched/sts2.dll` + `patch_report.json` | every non-optional patch `applied` |
+| patch | `logic/lib/patched/sts2.dll` + `patch_report.json` | every non-optional patch `applied`; `check-stubs: ... 0 problem(s)` |
 | jit | `out/logic/jit/` | builds |
 | smoke | - | a decision comes back |
 | aot | `out/logic/aot-<rid>/` | builds (ILC warnings list members that will throw); opt-in, needs the platform's native linker (VS 2022 C++ tools on Windows) |
 | wasm | `out/logic/logic.wasm` | builds |
 | c | `out/logic/c/*.c` + `logic_stubs.c` | import audit prints 0 missing, or the list to implement |
+| native | `out/logic/native/logic_host` | the translated C as a PC program; drive it with `random_runs.py --cmd` |
 
 `stubs` and `aot` (not in the default list) are opt-in: `stubs`
 regenerates `logic/Spire.GodotStubs/Generated/` from the game's real
 `GodotSharp.dll` (run it after a game update, before `patch`).
+
+## The translated logic on PC
+
+`--stage native` compiles `out/logic/c` with the runtime and
+`runtime/hosts/logic_host.c` (all cores; `--native-opt 0|1|2`). On Windows
+run it from the **x64 Native Tools Command Prompt for VS 2022** (64-bit
+`cl`/`link`; the host reserves 1 GB for the guest's memory). Then:
+
+```
+python tools/random_runs.py --cmd "out/logic/native/logic_host --root ." --runs 2
+```
+
+`--root` is mounted as the guest's `/`; the logic reads `/data`, i.e.
+`./data/localization`. Same seeds should give the same traces as the JIT
+build (`--trace-dir`).
 
 ## Regression
 

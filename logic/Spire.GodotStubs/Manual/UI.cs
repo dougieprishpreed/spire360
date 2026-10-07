@@ -18,13 +18,42 @@ public partial class CanvasItem : Node
 // Control
 public partial class Control : CanvasItem
 {
-    public enum FocusModeEnum { None, Click, All }
-    public enum MouseFilterEnum { Stop, Pass, Ignore }
-    public enum LayoutPreset { TopLeft, TopRight, BottomLeft, BottomRight, FullRect }
+    public enum FocusModeEnum : long
+    {
+        None = 0,
+        Click = 1,
+        All = 2,
+        Accessibility = 3,
+    }
+    public enum MouseFilterEnum : long
+    {
+        Stop = 0,
+        Pass = 1,
+        Ignore = 2,
+    }
+    public enum LayoutPreset : long
+    {
+        TopLeft = 0,
+        TopRight = 1,
+        BottomLeft = 2,
+        BottomRight = 3,
+        CenterLeft = 4,
+        CenterTop = 5,
+        CenterRight = 6,
+        CenterBottom = 7,
+        Center = 8,
+        LeftWide = 9,
+        TopWide = 10,
+        RightWide = 11,
+        BottomWide = 12,
+        VcenterWide = 13,
+        HcenterWide = 14,
+        FullRect = 15,
+    }
 
-    public new partial class MethodName : Node.MethodName { }
-    public new partial class PropertyName : Node.PropertyName { }
-    public new partial class SignalName : Node.SignalName
+    public new partial class MethodName : global::Godot.CanvasItem.MethodName { }
+    public new partial class PropertyName : global::Godot.CanvasItem.PropertyName { }
+    public new partial class SignalName : global::Godot.CanvasItem.SignalName
     {
         public static readonly StringName FocusEntered = "FocusEntered";
         public static readonly StringName FocusExited = "FocusExited";
@@ -60,9 +89,9 @@ public partial class Control : CanvasItem
 // Node2D
 public partial class Node2D : CanvasItem
 {
-    public new partial class MethodName : Node.MethodName { }
-    public new partial class PropertyName : Node.PropertyName { }
-    public new partial class SignalName : Node.SignalName { }
+    public new partial class MethodName : global::Godot.CanvasItem.MethodName { }
+    public new partial class PropertyName : global::Godot.CanvasItem.PropertyName { }
+    public new partial class SignalName : global::Godot.CanvasItem.SignalName { }
 
     public Vector2 Position { get; set; }
     public Vector2 GlobalPosition { get; set; }
@@ -74,24 +103,32 @@ public partial class Node2D : CanvasItem
 }
 
 // Resource
-public partial class Resource : GodotObject
+public partial class Resource : global::Godot.RefCounted
 {
     public string ResourcePath { get; set; } = "";
-    public partial class MethodName { }
-    public partial class PropertyName { }
-    public partial class SignalName { }
+    public partial class MethodName : global::Godot.RefCounted.MethodName { }
+    public partial class PropertyName : global::Godot.RefCounted.PropertyName { }
+    public partial class SignalName : global::Godot.RefCounted.SignalName { }
 }
 
 // PackedScene
 public partial class PackedScene : Resource
 {
-    public enum GenEditState { Disabled, Instance, Main }
-    public T Instantiate<T>(GenEditState editState = GenEditState.Disabled) where T : Node, new() => new T();
+    public enum GenEditState : long
+    {
+        Disabled = 0,
+        Instance = 1,
+        Main = 2,
+        MainInherited = 3,
+    }
+    // Spire360: real constraint is `class` (scenes are not loaded headless).
+    public T Instantiate<T>(GenEditState editState = GenEditState.Disabled) where T : class =>
+        typeof(T).GetConstructor(Type.EmptyTypes)?.Invoke(null) as T ?? default!;
     public Node Instantiate(GenEditState editState = GenEditState.Disabled) => new Node();
 }
 
 // Texture types
-public partial class Texture2D : Resource { }
+public partial class Texture2D : global::Godot.Texture { }
 public partial class CompressedTexture2D : Texture2D { }
 public partial class AtlasTexture : Texture2D
 {
@@ -116,12 +153,32 @@ public partial class Curve : Resource
 }
 
 // Tween
-public partial class Tween : GodotObject
+public partial class Tween : global::Godot.RefCounted
 {
-    public enum EaseType { In, Out, InOut, OutIn }
-    public enum TransitionType { Linear, Sine, Quint, Quart, Quad, Expo, Elastic, Cubic, Circ, Bounce, Back, Spring }
+    public enum EaseType : long
+    {
+        In = 0,
+        Out = 1,
+        InOut = 2,
+        OutIn = 3,
+    }
+    public enum TransitionType : long
+    {
+        Linear = 0,
+        Sine = 1,
+        Quint = 2,
+        Quart = 3,
+        Quad = 4,
+        Expo = 5,
+        Elastic = 6,
+        Cubic = 7,
+        Circ = 8,
+        Bounce = 9,
+        Back = 10,
+        Spring = 11,
+    }
 
-    public new partial class SignalName : GodotObject.SignalName
+    public new partial class SignalName : global::Godot.RefCounted.SignalName
     {
         public static readonly StringName Finished = "finished";
     }
@@ -151,7 +208,7 @@ public partial class Tween : GodotObject
     public enum ProcessModeEnum { Physics, Idle, Always }
 }
 
-public partial class PropertyTweener
+public partial class PropertyTweener : global::Godot.Tweener
 {
     public PropertyTweener From(Variant value) => this;
     public PropertyTweener SetEase(Tween.EaseType ease) => this;
@@ -160,19 +217,19 @@ public partial class PropertyTweener
     public PropertyTweener AsRelative() => this;
 }
 
-public partial class CallbackTweener
+public partial class CallbackTweener : global::Godot.Tweener
 {
     public CallbackTweener SetDelay(double delay) => this;
 }
 
-public partial class MethodTweener
+public partial class MethodTweener : global::Godot.Tweener
 {
     public MethodTweener SetEase(Tween.EaseType ease) => this;
     public MethodTweener SetTrans(Tween.TransitionType trans) => this;
     public MethodTweener SetDelay(double delay) => this;
 }
 
-public partial class IntervalTweener { }
+public partial class IntervalTweener : global::Godot.Tweener { }
 
 // UI Controls
 public partial class TextureRect : Control
@@ -189,7 +246,7 @@ public partial class ColorRect : Control
 }
 
 public partial class Panel : Control { }
-public partial class PanelContainer : Control { }
+public partial class PanelContainer : global::Godot.Container { }
 
 public partial class Container : Control { }
 public partial class BoxContainer : Container { }
@@ -220,9 +277,9 @@ public partial class RichTextLabel : Control
     public void AddText(string text) { Text += text; }
 }
 
-public partial class Button : Control
+public partial class Button : global::Godot.BaseButton
 {
-    public new partial class SignalName : Control.SignalName
+    public new partial class SignalName : global::Godot.BaseButton.SignalName
     {
         public static readonly StringName Pressed = "Pressed";
     }
@@ -264,19 +321,19 @@ public partial class TextEdit : Control
     public string Text { get; set; } = "";
 }
 
-public partial class SpinBox : Control
+public partial class SpinBox : global::Godot.Range
 {
     public double Value { get; set; }
 }
 
-public partial class Slider : Control
+public partial class Slider : global::Godot.Range
 {
     public double Value { get; set; }
 }
 public partial class HSlider : Slider { }
 public partial class VSlider : Slider { }
 
-public partial class ScrollBar : Control
+public partial class ScrollBar : global::Godot.Range
 {
     public double Value { get; set; }
 }
@@ -322,32 +379,37 @@ public partial class InputEvent : Resource
     public bool IsPressed() => false;
     public bool IsReleased() => true;
 }
-public partial class InputEventKey : InputEvent { }
-public partial class InputEventMouseButton : InputEvent
+public partial class InputEventKey : global::Godot.InputEventWithModifiers { }
+public partial class InputEventMouseButton : global::Godot.InputEventMouse
 {
     public Vector2 Position { get; set; }
     public Vector2 GlobalPosition { get; set; }
 }
-public partial class InputEventMouseMotion : InputEvent
+public partial class InputEventMouseMotion : global::Godot.InputEventMouse
 {
     public Vector2 Position { get; set; }
     public Vector2 Relative { get; set; }
 }
 
 // FileAccess
-public partial class FileAccess : GodotObject, IDisposable
+public partial class FileAccess : global::Godot.RefCounted
 {
-    public enum ModeFlags { Read, Write, ReadWrite, WriteRead }
+    public enum ModeFlags : long
+    {
+        Read = 1,
+        Write = 2,
+        ReadWrite = 3,
+        WriteRead = 7,
+    }
     public static FileAccess? Open(string path, ModeFlags flags) => null;
     public static bool FileExists(string path) => File.Exists(path);
     public string GetAsText(bool skipCr = false) => "";
     public bool StoreString(string str) => true;
     public void Close() { }
-    public void Dispose() { }
 }
 
 // DirAccess
-public partial class DirAccess : GodotObject, IDisposable
+public partial class DirAccess : global::Godot.RefCounted
 {
     public static bool DirExistsAbsolute(string path) => Directory.Exists(path);
     public static Error MakeDirAbsolute(string path) { try { Directory.CreateDirectory(path); return Error.Ok; } catch { return Error.Failed; } }
@@ -359,13 +421,12 @@ public partial class DirAccess : GodotObject, IDisposable
     public DirAccess() { _path = ""; }
     public string[] GetFiles() { try { return Directory.GetFiles(_path).Select(Path.GetFileName).ToArray()!; } catch { return Array.Empty<string>(); } }
     public string[] GetDirectories() { try { return Directory.GetDirectories(_path).Select(Path.GetFileName).ToArray()!; } catch { return Array.Empty<string>(); } }
-    public void Dispose() { }
 }
 
 // Animation
-public partial class AnimationPlayer : Node
+public partial class AnimationPlayer : global::Godot.AnimationMixer
 {
-    public new partial class SignalName : Node.SignalName
+    public new partial class SignalName : global::Godot.AnimationMixer.SignalName
     {
         public static readonly StringName AnimationFinished = "AnimationFinished";
     }
@@ -395,7 +456,7 @@ public partial class Sprite2D : Node2D
 }
 
 // CharFXTransform for RichTextEffects
-public partial class CharFXTransform : GodotObject
+public partial class CharFXTransform : global::Godot.RefCounted
 {
     public Color Color { get; set; } = Color.White;
     public Vector2 Offset { get; set; }
@@ -407,16 +468,16 @@ public partial class CharFXTransform : GodotObject
 // RichTextEffect
 public partial class RichTextEffect : Resource
 {
-    public new partial class SignalName { }
+    public new partial class SignalName : global::Godot.Resource.SignalName { }
     public virtual bool _ProcessCustomFX(CharFXTransform charFx) => false;
 }
 
 // ResourceFormatLoader
-public partial class ResourceFormatLoader : GodotObject
+public partial class ResourceFormatLoader : global::Godot.RefCounted
 {
-    public partial class MethodName { }
-    public partial class PropertyName { }
-    public partial class SignalName { }
+    public partial class MethodName : global::Godot.RefCounted.MethodName { }
+    public partial class PropertyName : global::Godot.RefCounted.PropertyName { }
+    public partial class SignalName : global::Godot.RefCounted.SignalName { }
 
     public virtual Variant _Load(string path, string originalPath, bool useSubThreads, int cacheMode) => default;
     public virtual string[] _GetRecognizedExtensions() => Array.Empty<string>();
@@ -430,7 +491,49 @@ public partial class ResourceFormatLoader : GodotObject
 // Image
 public partial class Image : Resource
 {
-    public enum Format { Rgba8 }
+    public enum Format : long
+    {
+        L8 = 0,
+        La8 = 1,
+        R8 = 2,
+        Rg8 = 3,
+        Rgb8 = 4,
+        Rgba8 = 5,
+        Rgba4444 = 6,
+        Rgb565 = 7,
+        Rf = 8,
+        Rgf = 9,
+        Rgbf = 10,
+        Rgbaf = 11,
+        Rh = 12,
+        Rgh = 13,
+        Rgbh = 14,
+        Rgbah = 15,
+        Rgbe9995 = 16,
+        Dxt1 = 17,
+        Dxt3 = 18,
+        Dxt5 = 19,
+        RgtcR = 20,
+        RgtcRg = 21,
+        BptcRgba = 22,
+        BptcRgbf = 23,
+        BptcRgbfu = 24,
+        Etc = 25,
+        Etc2R11 = 26,
+        Etc2R11S = 27,
+        Etc2Rg11 = 28,
+        Etc2Rg11S = 29,
+        Etc2Rgb8 = 30,
+        Etc2Rgba8 = 31,
+        Etc2Rgb8A1 = 32,
+        Etc2RaAsRg = 33,
+        Dxt5RaAsRg = 34,
+        Astc4X4 = 35,
+        Astc4X4Hdr = 36,
+        Astc8X8 = 37,
+        Astc8X8Hdr = 38,
+        Max = 39,
+    }
     public static Image CreateEmpty(int width, int height, bool useMipmaps, Format format) => new();
     public void SetPixel(int x, int y, Color color) { }
 }

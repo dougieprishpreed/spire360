@@ -319,13 +319,13 @@ U32 WASI_FN(14, clockX5FtimeX5Fget)(wasmModuleInstance* inst, U32 id, U64 precis
 
 /* ---- fd operations ---- */
 
-U32 WASI_FN(10, fdX5Fadvise)(wasmModuleInstance* inst, U32 fd, U64 offset, U64 len, U32 advice) {
+U32 WASI_FN(9, fdX5Fadvise)(wasmModuleInstance* inst, U32 fd, U64 offset, U64 len, U32 advice) {
     (void)inst; (void)offset; (void)len; (void)advice;
     srt_g.wasi_calls++;
     return srt_fd_get(fd) != NULL ? 0 : SRT_EBADF;
 }
 
-U32 WASI_FN(12, fdX5Fallocate)(wasmModuleInstance* inst, U32 fd, U64 offset, U64 len) {
+U32 WASI_FN(11, fdX5Fallocate)(wasmModuleInstance* inst, U32 fd, U64 offset, U64 len) {
     (void)inst; (void)fd; (void)offset; (void)len;
     srt_g.wasi_calls++;
     return SRT_ENOTSUP;

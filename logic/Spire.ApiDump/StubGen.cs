@@ -144,8 +144,10 @@ static class StubGen
             p.Parent = Plan(real.DeclaringType);
             p.Parent.Nested.Add(p);
         }
-        // A generated class needs its Godot base classes to exist too.
-        if (!p.ExistsInManual && real.BaseType != null && IsGodotType(real.BaseType))
+        // Every stub class derives from its real base, so the whole real
+        // ancestry must exist (the game passes an InputEventMouseMotion where
+        // an InputEventMouse is expected; NativeAOT-LLVM rejects a mismatch).
+        if (real.BaseType != null && IsGodotType(real.BaseType))
         {
             var b = FindReal(real.BaseType.GetElementType());
             if (b != null) Plan(b);
@@ -177,6 +179,56 @@ static class StubGen
         && d.Parameters.Select(x => Norm(x.ParameterType)).SequenceEqual(r.Parameters.Select(x => Norm(x.ParameterType)));
 
     private static bool ManualHas(TypeDefinition manual, IMemberDefinition def)
+    {
+        if (ManualHasOwn(manual, def)) return true;
+        // Inherited from a hand-written base (Godot stub or a BCL collection):
+        // a generated no-op would hide the working member.
+        for (var b = manual.BaseType; b != null;)
+        {
+            var bd = b.Scope == _manual || b.Module == _manual ? _manual.GetType(b.GetElementType().FullName.Replace('/', '+'))
+                     ?? FindManualByName(b.GetElementType().FullName) : null;
+            if (bd != null)
+            {
+                if (ManualHasOwn(bd, def)) return true;
+                b = bd.BaseType;
+                continue;
+            }
+            if (BclHas(b.GetElementType().FullName, def)) return true;
+            break;
+        }
+        return false;
+    }
+
+    private static TypeDefinition? FindManualByName(string fullName)
+    {
+        foreach (var t in _manual.Types)
+            if (t.FullName == fullName) return t;
+        return null;
+    }
+
+    /// <summary>Does a BCL base type (List`1, Dictionary`2, ...) have a public member of this name and arity?</summary>
+    private static bool BclHas(string fullName, IMemberDefinition def)
+    {
+        var t = Type.GetType(fullName);
+        if (t == null) return false;
+        const System.Reflection.BindingFlags F = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance
+                                                 | System.Reflection.BindingFlags.Static;
+        switch (def)
+        {
+            case MethodDefinition m when m.IsGetter || m.IsSetter:
+                var pname = m.Name[4..];
+                if (pname == "Item") return t.GetProperties(F).Any(p => p.GetIndexParameters().Length > 0);
+                return t.GetProperty(pname, F) != null;
+            case MethodDefinition m when !m.IsConstructor:
+                // Same name, arity and return type (List<T>.GetEnumerator returns a
+                // struct; the Godot one returns IEnumerator<T>, a different member).
+                return t.GetMethods(F).Any(x => x.Name == m.Name && x.GetParameters().Length == m.Parameters.Count
+                                                && x.ReturnType.Name == m.ReturnType.Name);
+        }
+        return false;
+    }
+
+    private static bool ManualHasOwn(TypeDefinition manual, IMemberDefinition def)
     {
         switch (def)
         {
@@ -358,7 +410,7 @@ static class StubGen
         if (m.HasOverrides || m.Name.Contains('.')) return; // explicit interface impls are not callable by name
         var ret = Cs(m.ReturnType);
         var generic = m.HasGenericParameters ? "<" + string.Join(", ", m.GenericParameters.Select(g => CsName(g.Name))) + ">" : "";
-        var head = $"{(vis.Length > 0 ? vis + " " : "")}{mods}{ret} {CsName(m.Name)}{generic}({Params(m, true)})";
+        var head = $"{(vis.Length > 0 ? vis + " " : "")}{mods}{ret} {CsName(m.Name)}{generic}({Params(m, true)}){Constraints(m)}";
         if (kind == "interface")
         {
             sb.AppendLine($"{i}{head};");
@@ -366,6 +418,29 @@ static class StubGen
         }
         var body = OutAssigns(m) + (m.ReturnType.FullName == "System.Void" ? "" : "return default; ");
         sb.AppendLine($"{i}{head} {{ {body}}}");
+    }
+
+    /// <summary>The real method's generic constraints: callers' own constrained
+    /// generics only verify against a stub with the same constraints.</summary>
+    private static string Constraints(MethodDefinition m)
+    {
+        var sb = new StringBuilder();
+        foreach (var g in m.GenericParameters)
+        {
+            var parts = new List<string>();
+            var a = g.Attributes;
+            if ((a & GenericParameterAttributes.NotNullableValueTypeConstraint) != 0) parts.Add("struct");
+            else if ((a & GenericParameterAttributes.ReferenceTypeConstraint) != 0) parts.Add("class");
+            foreach (var c in g.Constraints)
+            {
+                var ct = c.ConstraintType;
+                if (ct.FullName == "System.ValueType" && parts.Contains("struct")) continue;
+                parts.Add(Cs(ct));
+            }
+            if ((a & GenericParameterAttributes.DefaultConstructorConstraint) != 0 && !parts.Contains("struct")) parts.Add("new()");
+            if (parts.Count > 0) sb.Append($" where {CsName(g.Name)} : {string.Join(", ", parts)}");
+        }
+        return sb.ToString();
     }
 
     private static string OutAssigns(MethodDefinition m) =>

@@ -92,3 +92,25 @@ The player's DLLs, `.pck`, extracted assets and everything built from them
 live in ignored folders (`logic/lib/`, `out/`, packs). The repository holds
 only original code, vendored MIT code, and the generated Godot API stub
 (Godot's own MIT API surface).
+
+## D9. The Godot stubs mirror the real API's metadata, not just its names
+
+The JIT and x64 NativeAOT accept IL that NativeAOT-LLVM rejects ("will
+always throw: Invalid IL"): 1,473 game methods in the first wasm build. The
+cause was stub metadata that compiled but differed from the real
+GodotSharp: `int` enums where Godot's are `long` (call sites push int64),
+enum values (`Variant.Type.Color` was 10, real 20), missing intermediate
+classes (`InputEventMouseMotion` not an `InputEventMouse`), missing
+interfaces (`GodotObject : IDisposable`), and generic constraints.
+
+Rules, enforced by `Spire.ApiDump --check-stubs` in the patch stage:
+enums are printed from the real DLL (`--print-enums`); every stub class
+derives from its real base (`Manual/Hierarchy.cs` from
+`tools/gen_stub_hierarchy.py` holds the intermediates the hand-written
+stubs need; the generator plans every real ancestor); generated generic
+methods carry the real constraints; and the generator never emits a no-op
+member that would hide a working inherited one (`Array<T> : List<T>`).
+ILVerify (`dotnet tool install -g dotnet-ilverify`) is the local stand-in
+for NativeAOT-LLVM's strictness: StackUnexpected errors went 35,382 -> 2
+(both in compiler-generated code real compilers accept). Game behaviour
+was unchanged: 25 seeded runs produced byte-identical traces.

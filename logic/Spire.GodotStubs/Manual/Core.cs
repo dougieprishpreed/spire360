@@ -4,8 +4,12 @@ using System.Runtime.CompilerServices;
 
 namespace Godot;
 
-public partial class GodotObject
+public partial class GodotObject : IDisposable
 {
+    // Spire360: real GodotObject is IDisposable (the game uses `using` on nodes).
+    public void Dispose() { Dispose(true); GC.SuppressFinalize(this); }
+    protected virtual void Dispose(bool disposing) { }
+
     public partial class SignalName { }
 
     public static bool IsInstanceValid(GodotObject? obj) => obj != null;
@@ -18,8 +22,8 @@ public partial class GodotObject
     }
 
     // Bridge methods overridden in generated code
-    protected virtual void SaveGodotObjectData(GodotSerializationInfo info) { }
-    protected virtual void RestoreGodotObjectData(GodotSerializationInfo info) { }
+    protected virtual void SaveGodotObjectData(Bridge.GodotSerializationInfo info) { }
+    protected virtual void RestoreGodotObjectData(Bridge.GodotSerializationInfo info) { }
     protected virtual bool InvokeGodotClassMethod(in NativeInterop.godot_string_name method, NativeInterop.NativeVariantPtrArgs args, out NativeInterop.godot_variant ret) { ret = default; return false; }
     protected virtual bool HasGodotClassMethod(in NativeInterop.godot_string_name method) => false;
     protected virtual bool SetGodotClassPropertyValue(in NativeInterop.godot_string_name name, in NativeInterop.godot_variant value) => false;
@@ -30,12 +34,17 @@ public partial class GodotObject
 
 public partial class Node : GodotObject
 {
-    public enum InternalMode { Disabled, Front, Back }
+    public enum InternalMode : long
+    {
+        Disabled = 0,
+        Front = 1,
+        Back = 2,
+    }
 
     private Node? _parent;
     private readonly List<Node> _children = new();
 
-    public partial class MethodName
+    public partial class MethodName : global::Godot.GodotObject.MethodName
     {
         public static readonly StringName AddChild = "AddChild";
         public static readonly StringName RemoveChild = "RemoveChild";
@@ -43,7 +52,7 @@ public partial class Node : GodotObject
         public static readonly StringName _Ready = "_Ready";
     }
 
-    public partial class PropertyName { }
+    public partial class PropertyName : global::Godot.GodotObject.PropertyName { }
     public new partial class SignalName : GodotObject.SignalName
     {
         public static readonly StringName ProcessFrame = "ProcessFrame";
@@ -106,7 +115,7 @@ public partial class Node : GodotObject
 
 public partial class SceneTree : MainLoop
 {
-    public new partial class SignalName : Node.SignalName
+    public new partial class SignalName : global::Godot.MainLoop.SignalName
     {
         public static new readonly StringName ProcessFrame = "process_frame";
     }
@@ -122,7 +131,7 @@ public partial class SceneTree : MainLoop
     public Window Root { get; } = new Window();
 }
 
-public partial class SceneTreeTimer : GodotObject
+public partial class SceneTreeTimer : global::Godot.RefCounted
 {
     public event Action? Timeout;
 
@@ -179,7 +188,14 @@ public static partial class ProjectSettings
 
 public static partial class ResourceLoader
 {
-    public enum CacheMode { Reuse, Replace, Ignore }
+    public enum CacheMode : long
+    {
+        Ignore = 0,
+        Reuse = 1,
+        Replace = 2,
+        IgnoreDeep = 3,
+        ReplaceDeep = 4,
+    }
     public static T? Load<T>(string path, string? typeHint = null, CacheMode cacheMode = CacheMode.Reuse) where T : class => null;
     public static bool Exists(string path) => false;
     public static bool Exists(string path, string typeHint) => false;
@@ -190,9 +206,9 @@ public static partial class Time
     public static ulong GetTicksMsec() => (ulong)Environment.TickCount64;
 }
 
-public partial class Window : Node
+public partial class Window : global::Godot.Viewport
 {
-    public new partial class SignalName : Node.SignalName
+    public new partial class SignalName : global::Godot.Viewport.SignalName
     {
         public static readonly StringName SizeChanged = "SizeChanged";
     }

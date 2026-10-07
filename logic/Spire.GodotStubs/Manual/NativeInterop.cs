@@ -19,7 +19,11 @@ public static partial class VariantUtils
 // Low-level native interop types used in generated bridge code
 public partial struct godot_string_name { }
 public partial struct godot_variant { }
-public partial struct godot_bool { }
+public enum godot_bool : byte
+{
+    True = 1,
+    False = 0,
+}
 public partial struct NativeGodotVariant { }
 public partial struct NativeGodotString { }
 public partial struct NativeGodotStringName { }

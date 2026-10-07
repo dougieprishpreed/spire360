@@ -7,6 +7,8 @@ public partial class Array<T> : List<T>
 {
     public Array() { }
     public Array(IEnumerable<T> items) : base(items) { }
+    // Spire360: the real signature (callers bind to IEnumerator<T>, not List's struct).
+    public new IEnumerator<T> GetEnumerator() => base.GetEnumerator();
 }
 
 // Godot Dictionary
@@ -20,4 +22,5 @@ public partial class Dictionary<TKey, TValue> : System.Collections.Generic.Dicti
 public partial class Array : List<Variant>
 {
     public Array() { }
+    public new IEnumerator<Variant> GetEnumerator() => base.GetEnumerator();
 }
