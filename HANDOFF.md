@@ -104,15 +104,13 @@ holds, for the converter:
 
 ## Waiting on the user
 
-1. Decision: Spine runtime (official spine-c under the Spine Runtimes
-   License, or our own runtime for the 4.2 binary format).
-2. `xdk\build.cmd spire_view` with a console-scale pack (see xdk/README.md),
+1. `xdk\build.cmd spire_view` with a console-scale pack (see xdk/README.md),
    run in Xenia: screenshot + `spire360_view.txt`.
 3. Later: `xdk\build.cmd logic_runner` in Xenia (M2), hardware runs.
 
 ## Next (agent)
 
-- Spine (after the decision); dark_blur and other screen-texture shaders.
+- Spine: our own 4.2 runtime (DECISIONS D12); dark_blur and other screen-texture shaders.
 - Font pages: subset glyphs to the selected language's characters and
   repack (today ~100 MB uncompressed for the bundle's fonts).
 - Presentation of real screens: ports of the game's node scripts

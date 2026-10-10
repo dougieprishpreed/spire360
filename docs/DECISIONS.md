@@ -160,3 +160,13 @@ the game imports without MSDF are exported as MSDF too (marked
 Open: glyph pages are big (512x512 RGBA, ~100 MB for the bundle's fonts);
 before the console build the converter must subset glyphs to the
 characters the selected language uses and repack them.
+
+## D12. Spine: our own runtime for the 4.2 binary format
+
+The game's skeletons are Spine 4.2.39 binary exports (creatures, backgrounds,
+the logo). The official runtimes (spine-c) come under the Spine Runtimes
+License, which ties their use to a Spine Editor licence. The user chose a
+runtime of our own instead: a reader for the 4.2 binary skeleton and the
+atlas, and the animation, constraint and attachment evaluation the game's
+skeletons use, written from the format's public description and checked
+against the game by eye. No Esoteric Software code goes into the repository.
