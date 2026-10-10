@@ -62,6 +62,17 @@ void SceneTree::layout(int passes) {
     }
 }
 
+void SceneTree::process_node(Node* n, double dt) {
+    if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
+    n->process(dt);
+    for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
+}
+
+void SceneTree::process(double dt) {
+    g_shader_time += dt;
+    process_node(&root_, dt);
+}
+
 static Rect2 xform_rect(const Xform2D& xf, const Rect2& r) {
     Vec2 p[4] = { xf.xform(r.pos), xf.xform(Vec2(r.pos.x + r.size.x, r.pos.y)), xf.xform(r.end()),
                   xf.xform(Vec2(r.pos.x, r.pos.y + r.size.y)) };

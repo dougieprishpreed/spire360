@@ -14,6 +14,7 @@ namespace spire {
 class Canvas;
 class Texture;
 class ResourceLoader;
+struct SceneFile;
 
 enum Side { SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM };
 
@@ -32,7 +33,7 @@ public:
         RES_SHADER_MATERIAL,
         RES_PACKED_SCENE
     };
-    Resource(Kind k, const std::string& cls) : kind(k), type(cls), props(NULL) {}
+    Resource(Kind k, const std::string& cls) : kind(k), type(cls), props(NULL), file(NULL) {}
     virtual ~Resource() {}
 
     bool is_texture() const { return kind == RES_IMAGE_TEXTURE || kind == RES_ATLAS_TEXTURE; }
@@ -42,6 +43,7 @@ public:
     std::string type; /* Godot class */
     std::string path; /* pack name, or "scene::sub_id" */
     const Json* props; /* as stored (generic access) */
+    const SceneFile* file; /* where props' sub-resource references resolve */
 };
 
 /* ---- textures ---- */

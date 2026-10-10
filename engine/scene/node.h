@@ -62,6 +62,8 @@ public:
      * of this class (it then goes to extra). */
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     const Json* get_extra(const char* key) const;
+    /* Per frame (Godot's _process / internal process), dt in seconds. */
+    virtual void process(double dt) { (void)dt; }
 
 private:
     Node(const Node&);

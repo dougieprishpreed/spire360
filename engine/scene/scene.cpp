@@ -2,6 +2,7 @@
 
 #include "../core/pack.h"
 #include "controls.h"
+#include "particles.h"
 #include "rich_text.h"
 #include "script.h"
 #include "text_nodes.h"
@@ -275,6 +276,7 @@ Resource* SceneLibrary::build(const std::string& cls, const Json& p, const Scene
     }
     r->path = path;
     r->props = &p;
+    r->file = ctx;
     return r;
 }
 
@@ -324,6 +326,8 @@ Node* SceneLibrary::create_node(const std::string& type) {
     if (type == "Label") return new Label();
     if (type == "RichTextLabel") return new RichTextLabel();
     if (type == "Sprite2D") return new Sprite2D();
+    if (type == "CPUParticles2D") return new Particles2D(false);
+    if (type == "GPUParticles2D") return new Particles2D(true);
     if (godot_is_a(type, "Container")) return new Container();
     if (godot_is_a(type, "Control")) return new Control();
     if (godot_is_a(type, "Node2D")) return new Node2D();
@@ -352,7 +356,8 @@ static bool is_native(const std::string& type) {
            type == "MarginContainer" || type == "CenterContainer" || type == "GridContainer" ||
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
            type == "RichTextLabel" || type == "Sprite2D" || type == "Node" || type == "Node2D" ||
-           type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" ||
+           type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
+           type == "GPUParticles2D" ||
            type == "Control";
 }
 

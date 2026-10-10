@@ -21,6 +21,8 @@ public:
     Node* root() { return &root_; }
 
     void layout(int passes = 3);
+    /* One frame of time for every node (particles, animations), dt in s. */
+    void process(double dt);
     void render(Canvas& c);
 
     /* Items not drawn, by reason ("shader res://...", ...), from the last render. */
@@ -31,6 +33,7 @@ public:
 
 private:
     void layout_node(Node* n);
+    void process_node(Node* n, double dt);
     void collect(Node* n, const Xform2D& xf, const Color& mod, int z, const Rect2* clip, MaterialRes* mat,
                  std::vector<DrawItem>& out);
 

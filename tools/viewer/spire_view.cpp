@@ -82,6 +82,8 @@ int main(int argc, char** argv) {
     tree.set_viewport(design, Xform2D::scaling(scale, scale));
     tree.root()->add_child(scene);
     tree.layout();
+    /* Godot's reference render is taken on its 5th frame (tools/godot/shot.gd). */
+    for (int f = 0; f < 5; ++f) tree.process(1.0 / 60.0);
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
     /* project.binary: rendering/environment/defaults/default_clear_color */
