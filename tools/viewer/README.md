@@ -1,0 +1,26 @@
+# spire_view and reference diffs
+
+`spire_view` renders a scene from `pack.s3p` with the engine's software
+renderer; `refdiff.py` compares those renders with Godot's own.
+
+Build (PC, strict C++03 like the XDK compiler): `tools/viewer/build.sh`
+-> `out/engine/spire_view`.
+
+    out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts]
+    out/engine/spire_view <pack.s3p> "Some text" out.png --text fonts/kreon_bold.ttf 24
+
+Reference renders come from Godot 4.5.1 (official build) running the game
+files under a virtual display, so they need the extracted files
+(`convert.py bundle` output, copied into a folder with an empty
+`project.godot`... the bundle already has `project.binary`):
+
+    xvfb-run -a -s "-screen 0 1920x1080x24" godot --path <bundle dir> \
+        --rendering-driver opengl3 --rendering-method gl_compatibility \
+        --resolution 1920x1080 --script tools/godot/shot.gd -- res://scenes/x.tscn refs/x.png
+
+(copy `tools/godot/shot.gd` into the bundle folder first). Then:
+
+    python3 tools/viewer/refdiff.py <pack.s3p> refs/ diffs/
+
+Godot's render runs without the game's C#, so the diff uses `--no-scripts`.
+Things the engine does not draw yet are listed per scene.

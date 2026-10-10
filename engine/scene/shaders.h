@@ -10,6 +10,9 @@ namespace spire {
 
 class Canvas;
 
+/* Godot's TIME for shaders, in seconds. */
+extern double g_shader_time;
+
 /* Applies the material for the next item's draws; false: not ported. */
 bool shader_begin(Canvas& c, const MaterialRes* m);
 void shader_end(Canvas& c, const MaterialRes* m);

@@ -110,6 +110,21 @@ public:
     float aa_size;
 };
 
+class StyleBoxLineRes : public StyleBoxRes {
+public:
+    StyleBoxLineRes() : StyleBoxRes(RES_STYLEBOX_EMPTY, "StyleBoxLine"), color(0, 0, 0, 1), thickness(1), grow_begin(1),
+                        grow_end(1), vertical(false) {}
+    virtual float style_margin(int side) const {
+        if (vertical) return (side == SIDE_LEFT || side == SIDE_RIGHT) ? thickness / 2.0f : 0.0f;
+        return (side == SIDE_TOP || side == SIDE_BOTTOM) ? thickness / 2.0f : 0.0f;
+    }
+    virtual void draw(Canvas& c, const Rect2& rect) const;
+    Color color;
+    int thickness;
+    float grow_begin, grow_end;
+    bool vertical;
+};
+
 class StyleBoxTextureRes : public StyleBoxRes {
 public:
     StyleBoxTextureRes();

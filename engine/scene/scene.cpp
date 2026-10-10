@@ -218,10 +218,18 @@ Resource* SceneLibrary::build(const std::string& cls, const Json& p, const Scene
         if (p.has("draw_center")) s->draw_center = p["draw_center"].b(true);
         jv_color(p["modulate_color"], s->modulate);
         r = s;
-    } else if (cls == "StyleBoxEmpty" || cls == "StyleBox" || cls == "StyleBoxLine") {
+    } else if (cls == "StyleBoxLine") {
+        StyleBoxLineRes* s = new StyleBoxLineRes();
+        margins4(p, "content_margin_", s->content_margin);
+        jv_color(p["color"], s->color);
+        if (p.has("thickness")) s->thickness = p["thickness"].i(1);
+        if (p.has("grow_begin")) s->grow_begin = jv_float(p["grow_begin"], 1);
+        if (p.has("grow_end")) s->grow_end = jv_float(p["grow_end"], 1);
+        s->vertical = p["vertical"].b();
+        r = s;
+    } else if (cls == "StyleBoxEmpty" || cls == "StyleBox") {
         StyleBoxRes* s = new StyleBoxRes(Resource::RES_STYLEBOX_EMPTY, cls);
         margins4(p, "content_margin_", s->content_margin);
-        if (cls == "StyleBoxLine") note("resource StyleBoxLine");
         r = s;
     } else if (cls == "Theme") {
         r = build_theme(p, ctx);
@@ -344,7 +352,8 @@ static bool is_native(const std::string& type) {
            type == "MarginContainer" || type == "CenterContainer" || type == "GridContainer" ||
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
            type == "RichTextLabel" || type == "Sprite2D" || type == "Node" || type == "Node2D" ||
-           type == "Container" || type == "BoxContainer";
+           type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" ||
+           type == "Control";
 }
 
 Node* SceneLibrary::instantiate_file(const SceneFile* f, int depth, std::string* error) {

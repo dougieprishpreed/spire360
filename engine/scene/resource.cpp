@@ -318,6 +318,23 @@ void StyleBoxFlatRes::draw(Canvas& canvas, const Rect2& p_rect) const {
     canvas.draw_colored_triangles(verts, idx, colors);
 }
 
+/* ---- StyleBoxLine ---- */
+
+void StyleBoxLineRes::draw(Canvas& canvas, const Rect2& p) const {
+    /* Rect2i r = p_rect */
+    float x = (float)(int)p.pos.x, y = (float)(int)p.pos.y, w = (float)(int)p.size.x, h = (float)(int)p.size.y;
+    if (vertical) {
+        y -= (int)grow_begin;
+        h += (int)(grow_begin + grow_end);
+        w = (float)thickness;
+    } else {
+        x -= (int)grow_begin;
+        w += (int)(grow_begin + grow_end);
+        h = (float)thickness;
+    }
+    canvas.draw_rect(Rect2(x, y, w, h), color);
+}
+
 /* ---- StyleBoxTexture ---- */
 
 StyleBoxTextureRes::StyleBoxTextureRes()

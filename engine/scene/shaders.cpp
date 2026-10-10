@@ -7,6 +7,8 @@
 
 namespace spire {
 
+double g_shader_time = 0.0;
+
 static float param(const MaterialRes* m, const char* name, float fallback) {
     if (!m->props) return fallback;
     std::string k = std::string("shader_parameter/") + name;
@@ -62,6 +64,14 @@ bool shader_begin(Canvas& c, const MaterialRes* m) {
     if (m->shader == "shaders/hsv.gdshader") {
         float cm[12];
         hsv_matrix(m, cm);
+        c.set_color_matrix(cm);
+        return true;
+    }
+    if (m->shader == "shaders/button_pulse.gdshader") {
+        /* COLOR.rgb += |sin(2 TIME)| * 0.2 * pulse_strength (added to the
+         * texel here, i.e. before modulation: exact for white modulate). */
+        float k = fabsf(sinf((float)g_shader_time * 2.0f)) * 0.2f * param(m, "pulse_strength", 0.0f);
+        float cm[12] = { 1, 0, 0, k, 0, 1, 0, k, 0, 0, 1, k };
         c.set_color_matrix(cm);
         return true;
     }
