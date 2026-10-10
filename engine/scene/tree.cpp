@@ -3,6 +3,7 @@
 #include "canvas.h"
 #include "controls.h"
 #include "script.h"
+#include "shaders.h"
 
 #include <algorithm>
 #include <math.h>
@@ -138,7 +139,7 @@ void SceneTree::render(Canvas& canvas) {
     for (size_t i = 0; i < order.size(); ++i) {
         DrawItem& d = *order[i];
         BlendMode blend = BLEND_MIX;
-        if (d.material && d.material->kind == Resource::RES_SHADER_MATERIAL) {
+        if (d.material && d.material->kind == Resource::RES_SHADER_MATERIAL && !shader_begin(canvas, d.material)) {
             /* Godot shaders are ported one by one (engine/scene/shaders); an
              * unknown one is not drawn rather than drawn wrong. */
             ++skipped["shader " + d.material->shader];
@@ -156,6 +157,7 @@ void SceneTree::render(Canvas& canvas) {
         canvas.set_item(d.xf, d.modulate, blend, d.ci->effective_texture_flags());
         canvas.set_clip(d.has_clip ? &d.clip : NULL);
         d.ci->draw(canvas);
+        shader_end(canvas, d.material);
         ++items_drawn;
     }
     canvas.set_clip(NULL);

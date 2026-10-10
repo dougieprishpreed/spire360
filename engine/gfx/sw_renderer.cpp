@@ -5,7 +5,7 @@
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0) {}
+    : clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false) {}
 
 Texture* SwRenderer::create_texture(const TextureData& d) {
     SwTexture* t = new SwTexture();
@@ -160,6 +160,12 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 }
             } else {
                 s[0] = s[1] = s[2] = s[3] = 1.0f;
+            }
+            if (cm_on_) {
+                float r = s[0], g = s[1], b = s[2];
+                s[0] = cm_[0] * r + cm_[1] * g + cm_[2] * b + cm_[3] * s[3];
+                s[1] = cm_[4] * r + cm_[5] * g + cm_[6] * b + cm_[7] * s[3];
+                s[2] = cm_[8] * r + cm_[9] * g + cm_[10] * b + cm_[11] * s[3];
             }
             /* premultiplied source = texel(premul) * modulate (straight) */
             float sa = s[3] * col[3];

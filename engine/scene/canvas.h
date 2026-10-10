@@ -21,6 +21,8 @@ public:
     /* Item state. xform maps local coordinates to screen pixels. */
     void set_item(const Xform2D& xform, const Color& modulate, BlendMode blend, int tex_flags);
     void set_clip(const Rect2* screen_rect);
+    /* Ported material shaders that reduce to a colour matrix (NULL: none). */
+    void set_color_matrix(const float* m) { r_->set_color_matrix(m); }
     const Xform2D& xform() const { return xform_; }
 
     void draw_rect(const Rect2& r, const Color& c);

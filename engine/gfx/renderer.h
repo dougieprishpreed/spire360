@@ -42,6 +42,10 @@ public:
     /* Parameters of the next DRAW_MSDF draws (Godot's canvas shader: pixel
      * range of the glyph atlas, outline thickness; 0 = fill). */
     virtual void set_msdf(float px_range, float outline) = 0;
+    /* A colour matrix applied to the texel before modulation (ported canvas
+     * shaders such as the game's hsv.gdshader): rgb' = M * rgb + offset * a,
+     * m = 3 rows of (r, g, b, offset). NULL: identity. */
+    virtual void set_color_matrix(const float* m) = 0;
     virtual void end() = 0;
 };
 

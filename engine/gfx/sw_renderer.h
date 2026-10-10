@@ -23,6 +23,11 @@ public:
     virtual void set_clip(const Rect2* clip);
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags);
     virtual void end() {}
+    virtual void set_color_matrix(const float* m) {
+        cm_on_ = m != NULL;
+        if (m)
+            for (int i = 0; i < 12; ++i) cm_[i] = m[i];
+    }
     virtual void set_msdf(float px_range, float outline) {
         msdf_range_ = px_range;
         msdf_outline_ = outline;
@@ -38,6 +43,8 @@ private:
     int cx0_, cy0_, cx1_, cy1_;
     long tris_;
     float msdf_range_, msdf_outline_;
+    bool cm_on_;
+    float cm_[12];
 };
 
 } /* namespace spire */
