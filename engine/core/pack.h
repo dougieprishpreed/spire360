@@ -21,8 +21,11 @@ struct PackEntry {
     u32 crc;
 };
 
+enum { TEXF_DATA = 1 }; /* texture flags: not colour (MSDF): never premultiply */
+
 struct TextureData {
     int format;            /* TexFormat */
+    int flags;             /* TEXF_* */
     int width, height;     /* stored size */
     int orig_width, orig_height; /* size in layout units */
     std::vector<std::vector<u8> > levels;

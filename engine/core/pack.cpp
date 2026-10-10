@@ -128,6 +128,7 @@ bool Pack::parse_texture(const std::vector<u8>& d, TextureData& t) {
     if (d.size() < 12) return false;
     t.format = d[0];
     int n = d[1];
+    t.flags = be16(&d[2]);
     t.width = be16(&d[4]);
     t.height = be16(&d[6]);
     t.orig_width = be16(&d[8]);

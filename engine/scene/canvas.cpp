@@ -208,6 +208,16 @@ void Canvas::draw_nine_patch(Texture2DRes* t, const Rect2& rect_in, const Rect2&
     }
 }
 
+void Canvas::draw_msdf(ImageTextureRes* page, const Rect2& dst, const Rect2& uv, const Color& color, float px_range,
+                       float outline) {
+    Texture* tex = gpu_texture(page);
+    if (!tex) return;
+    Vec2 ts = page->size();
+    r_->set_msdf(px_range, outline);
+    emit_quad(tex, dst.pos, dst.end(), Vec2(uv.pos.x / ts.x, uv.pos.y / ts.y),
+              Vec2((uv.pos.x + uv.size.x) / ts.x, (uv.pos.y + uv.size.y) / ts.y), modulate_ * color, DRAW_MSDF);
+}
+
 void Canvas::draw_colored_triangles(const std::vector<Vec2>& v, const std::vector<int>& idx,
                                     const std::vector<Color>& colors) {
     if (idx.empty()) return;

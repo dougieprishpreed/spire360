@@ -30,6 +30,10 @@ public:
      * are left, top, right, bottom. */
     void draw_nine_patch(Texture2DRes* t, const Rect2& rect, const Rect2& src, const float margin[4], int axis_h,
                          int axis_v, bool draw_center, const Color& mod);
+    /* A glyph from an MSDF atlas page (Godot's
+     * canvas_item_add_msdf_texture_rect_region); uv in page pixels. */
+    void draw_msdf(ImageTextureRes* page, const Rect2& dst, const Rect2& uv, const Color& color, float px_range,
+                   float outline);
     /* Untextured indexed triangles with per-vertex colours. */
     void draw_colored_triangles(const std::vector<Vec2>& v, const std::vector<int>& idx,
                                 const std::vector<Color>& colors);

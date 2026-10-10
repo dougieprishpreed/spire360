@@ -16,8 +16,8 @@ struct Image {
 };
 
 /* Decodes one level (format TEX_DXT1/TEX_DXT5/TEX_ARGB8, PC block order)
- * into a premultiplied image of w x h. */
-bool decode_texture_level(int format, int w, int h, const u8* data, size_t size, Image& out);
+ * into an image of w x h, premultiplied unless asked not to (data textures). */
+bool decode_texture_level(int format, int w, int h, const u8* data, size_t size, Image& out, bool premultiply = true);
 
 /* Writes an 8-bit RGBA PNG (un-premultiplies). */
 bool write_png(const char* path, const Image& img);

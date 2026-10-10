@@ -11,7 +11,7 @@ namespace spire {
 enum BlendMode { BLEND_MIX, BLEND_ADD, BLEND_SUB, BLEND_MUL, BLEND_PREMULT_ALPHA };
 
 /* draw_triangles flags */
-enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2 };
+enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2, DRAW_MSDF = 4 };
 
 class Texture {
 public:
@@ -39,6 +39,9 @@ public:
     virtual void set_clip(const Rect2* clip) = 0;
     /* count is a multiple of 3. tex NULL = white. flags: DRAW_*. */
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) = 0;
+    /* Parameters of the next DRAW_MSDF draws (Godot's canvas shader: pixel
+     * range of the glyph atlas, outline thickness; 0 = fill). */
+    virtual void set_msdf(float px_range, float outline) = 0;
     virtual void end() = 0;
 };
 

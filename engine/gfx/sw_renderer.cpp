@@ -4,7 +4,8 @@
 
 namespace spire {
 
-SwRenderer::SwRenderer() : clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0) {}
+SwRenderer::SwRenderer()
+    : clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0) {}
 
 Texture* SwRenderer::create_texture(const TextureData& d) {
     SwTexture* t = new SwTexture();
@@ -13,7 +14,8 @@ Texture* SwRenderer::create_texture(const TextureData& d) {
     t->orig_width = d.orig_width;
     t->orig_height = d.orig_height;
     if (d.levels.empty() || d.levels[0].empty() ||
-        !decode_texture_level(d.format, d.width, d.height, &d.levels[0][0], d.levels[0].size(), t->img)) {
+        !decode_texture_level(d.format, d.width, d.height, &d.levels[0][0], d.levels[0].size(), t->img,
+                              (d.flags & TEXF_DATA) == 0)) {
         log_warn("texture decode failed (%dx%d fmt %d)", d.width, d.height, d.format);
         t->img.resize(1, 1);
     }
@@ -112,6 +114,18 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
      * point never lies exactly on an edge: triangles sharing an edge (the two
      * halves of a quad) cover each pixel exactly once. */
     double inv = 1.0 / area;
+    /* MSDF: Godot's px_size = max(0.5 * dot(px_range / tex_size, 1 / fwidth(uv)), 1). */
+    float msdf_px_size = 1.0f;
+    if ((flags & DRAW_MSDF) && tex) {
+        double dx1 = B.pos.x - A.pos.x, dy1 = B.pos.y - A.pos.y, dx2 = C.pos.x - A.pos.x, dy2 = C.pos.y - A.pos.y;
+        double du1 = B.uv.x - A.uv.x, du2 = C.uv.x - A.uv.x, dv1 = B.uv.y - A.uv.y, dv2 = C.uv.y - A.uv.y;
+        double dudx = (du1 * dy2 - du2 * dy1) / area, dudy = (dx1 * du2 - dx2 * du1) / area;
+        double dvdx = (dv1 * dy2 - dv2 * dy1) / area, dvdy = (dx1 * dv2 - dx2 * dv1) / area;
+        double fu = fabs(dudx) + fabs(dudy), fv = fabs(dvdx) + fabs(dvdy);
+        double dest_x = fu > 0 ? 1.0 / fu : 0, dest_y = fv > 0 ? 1.0 / fv : 0;
+        double ps = 0.5 * (msdf_range_ / tex->img.w * dest_x + msdf_range_ / tex->img.h * dest_y);
+        msdf_px_size = (float)(ps > 1.0 ? ps : 1.0);
+    }
     for (int y = y0; y < y1; ++y) {
         double py = y + 0.5 + 0.000713;
         for (int x = x0; x < x1; ++x) {
@@ -131,6 +145,19 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
                 float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
                 sample(tex->img, u, v, flags, s);
+                if (flags & DRAW_MSDF) {
+                    float r = s[0], g = s[1], b = s[2];
+                    float d = maxf(minf(r, g), minf(maxf(r, g), b));
+                    float a;
+                    if (msdf_outline_ > 0) {
+                        float cr = clampf(msdf_outline_, 0.0f, msdf_range_ / 2.0f - 1.0f) / msdf_range_;
+                        d = minf(d, s[3]);
+                        a = clampf((d - 0.5f + cr) * msdf_px_size, 0.0f, 1.0f);
+                    } else {
+                        a = clampf((d - 0.5f) * msdf_px_size + 0.5f, 0.0f, 1.0f);
+                    }
+                    s[0] = s[1] = s[2] = s[3] = a; /* premultiplied white */
+                }
             } else {
                 s[0] = s[1] = s[2] = s[3] = 1.0f;
             }

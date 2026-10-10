@@ -24,6 +24,8 @@ All integers big-endian (the console's byte order). See docs/PACK_FORMAT.md.
 
 Texture payload:
       u8 format (1 DXT1, 2 DXT5, 3 ARGB8), u8 levels, u16 flags
+                                     (bit 0 TEX_FLAG_DATA: not colour (MSDF
+                                     glyphs): sample as is, never premultiply)
       u16 width, u16 height          stored size
       u16 orig_width, u16 orig_height size in layout units (the game's)
       u32 level offset [levels]      from the payload start, 16-aligned
@@ -35,6 +37,7 @@ import zlib
 TYPE_TEXTURE, TYPE_BLOB, TYPE_SCENE, TYPE_FONT, TYPE_AUDIO = 1, 2, 3, 4, 5
 TYPE_NAMES = {1: "texture", 2: "blob", 3: "scene", 4: "font", 5: "audio"}
 FLAG_TEX_LITTLE_ENDIAN = 1
+TEX_FLAG_DATA = 1
 HEADER = struct.Struct(">4sIIIQQII24s")
 ENTRY = struct.Struct(">QQIHHII")
 TEX_HEADER = struct.Struct(">BBHHHHH")
@@ -48,10 +51,10 @@ def fnv1a64(name):
     return h
 
 
-def texture_payload(t):
+def texture_payload(t, flags=0):
     """ConsoleTexture -> bytes."""
     n = len(t.levels)
-    head = TEX_HEADER.pack(t.format, n, 0, t.width, t.height, t.orig_width, t.orig_height)
+    head = TEX_HEADER.pack(t.format, n, flags, t.width, t.height, t.orig_width, t.orig_height)
     pos = len(head) + 4 * n
     pos += -pos % 16
     offsets = []

@@ -135,3 +135,28 @@ path (binary search on the console), CRC32 per entry, 4 KB aligned texture
 payloads. Scenes and .tres resources go in as JSON with references already
 resolved to pack names. Godot formats are decoded from their source layout
 and tested against files Godot 4.5.1 itself produced (tests/fixtures).
+
+## D11. The engine is Godot's 2D layer, ported; text from Godot-rendered MSDF
+
+The presentation draws the game's scenes the way Godot 4.5.1 does, so the
+engine (`engine/scene`, `engine/text`) is a C++03 port of the parts of
+Godot the scenes use: Control layout and containers, theme lookup with
+Godot's default theme, style boxes, nine patches, canvas order, Label and
+RichTextLabel. Each port names its Godot source; behaviour is checked by
+rendering the same scene in Godot (xvfb, gl_compatibility) and in
+`tools/viewer/spire_view` and diffing pixels.
+
+The game imports its fonts as MSDF. The console has no FreeType or
+HarfBuzz, so the converter runs Godot 4.5.1 headless
+(`tools/godot/font_export.gd`) to render every glyph of each font into MSDF
+pages and to measure shaping (advances, kerning and ligatures, from
+HarfBuzz through Godot's TextServer). Godot reproduces the game's own
+pre-rendered glyphs bit for bit; the engine draws them with Godot's canvas
+shader formula. A Godot binary on the player's PC is one more tool for the
+converter (`convert.py fetch-godot` downloads the official build). Fonts
+the game imports without MSDF are exported as MSDF too (marked
+`msdf_substitute`): close, not identical, at small sizes.
+
+Open: glyph pages are big (512x512 RGBA, ~100 MB for the bundle's fonts);
+before the console build the converter must subset glyphs to the
+characters the selected language uses and repack them.

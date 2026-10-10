@@ -57,17 +57,24 @@ static void bc3_alpha(const u8* b, u8 out[16][4]) {
     for (int i = 0; i < 16; ++i) out[i][3] = (u8)a[(bits >> (3 * i)) & 7];
 }
 
-static void put_premul(Image& img, int x, int y, const u8* c) {
+static void put_premul(Image& img, int x, int y, const u8* c, bool premul) {
     if (x >= img.w || y >= img.h) return;
     u8* d = img.at(x, y);
     int a = c[3];
+    if (!premul) {
+        d[0] = c[0];
+        d[1] = c[1];
+        d[2] = c[2];
+        d[3] = c[3];
+        return;
+    }
     d[0] = (u8)((c[0] * a + 127) / 255);
     d[1] = (u8)((c[1] * a + 127) / 255);
     d[2] = (u8)((c[2] * a + 127) / 255);
     d[3] = (u8)a;
 }
 
-bool decode_texture_level(int format, int w, int h, const u8* data, size_t size, Image& out) {
+bool decode_texture_level(int format, int w, int h, const u8* data, size_t size, Image& out, bool premul) {
     out.resize(w, h);
     if (format == TEX_ARGB8) {
         if (size < (size_t)w * h * 4) return false;
@@ -75,7 +82,7 @@ bool decode_texture_level(int format, int w, int h, const u8* data, size_t size,
             for (int x = 0; x < w; ++x) {
                 const u8* s = data + ((size_t)y * w + x) * 4; /* B G R A */
                 u8 c[4] = { s[2], s[1], s[0], s[3] };
-                put_premul(out, x, y, c);
+                put_premul(out, x, y, c, premul);
             }
         return true;
     }
@@ -92,7 +99,7 @@ bool decode_texture_level(int format, int w, int h, const u8* data, size_t size,
                 bc1_colors(b + 8, true, px);
                 bc3_alpha(b, px);
             }
-            for (int i = 0; i < 16; ++i) put_premul(out, bx * 4 + (i & 3), by * 4 + (i >> 2), px[i]);
+            for (int i = 0; i < 16; ++i) put_premul(out, bx * 4 + (i & 3), by * 4 + (i >> 2), px[i], premul);
         }
     return true;
 }

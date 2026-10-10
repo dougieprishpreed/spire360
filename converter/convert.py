@@ -18,10 +18,17 @@
       menu, combat room, card, creature, hand, top bar, map and rewards.
 
   convert.py build <pck | dir> <out_dir> [--scale 0.6667] [--only GLOB]... [--jobs N]
+                   [--godot PATH]
       Writes <out_dir>/pack.s3p (textures as DXT at the console's scale,
       scenes and resources as JSON, fonts, Spine data, audio streams) and
       <out_dir>/data/localization (the tables the logic reads), plus
       <out_dir>/pack_report.json. --only limits it to matching res paths.
+      Fonts need Godot 4.5.1 (it renders the glyphs, see
+      spire_convert/fonts.py): --godot, $SPIRE_GODOT, or fetch-godot.
+
+  convert.py fetch-godot
+      Downloads the official Godot 4.5.1 build (MIT, ~60 MB) into
+      converter/.cache/godot for the font step.
 
 Needs Python 3.9+, numpy, Pillow, texture2ddecoder (converter/requirements.txt).
 """
@@ -34,7 +41,7 @@ import time
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from spire_convert import ctex, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
+from spire_convert import ctex, fonts as fontconv, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
 from spire_convert.pck import Pck  # noqa: E402
 
 # 1920x1080 design resolution -> 1280x720 on the console.
@@ -389,13 +396,38 @@ def cmd_build(a):
                 add(f, s3p.TYPE_SCENE, json.dumps(scenes.to_json(tr, res), separators=(",", ":")).encode("utf-8"))
             except Exception as e:  # noqa: BLE001
                 report["errors"][f] = f"{type(e).__name__}: {e}"
+        godot = fontconv.find_godot(a.godot)
+        if fonts and not godot:
+            print("  fonts: no Godot 4.5.1 (--godot, $SPIRE_GODOT or `convert.py fetch-godot`); "
+                  "storing the raw font files, the console will not draw their text", flush=True)
+        font_jobs = []
         for p in fonts:
             try:
-                r = godot_binary.parse_rsrc(src.read(res.resolve(p)))
-                main = r["resources"][-1]["props"]
-                add(p, s3p.TYPE_FONT, main["data"], {"font": main.get("font_name"), "style": main.get("style_name")})
+                raw = src.read(res.resolve(p))
+                if not godot:
+                    main = godot_binary.parse_rsrc(raw)["resources"][-1]["props"]
+                    add(p, s3p.TYPE_FONT, main["data"], {"font": main.get("font_name"), "style": main.get("style_name")})
+                else:
+                    font_jobs.append((p, raw))
             except Exception as e:  # noqa: BLE001
                 report["errors"][p] = f"{type(e).__name__}: {e}"
+        if godot:
+            font_jobs.append((fontconv.DEFAULT_FONT_NAME, "default"))
+            import concurrent.futures
+            t1 = time.time()
+            with concurrent.futures.ThreadPoolExecutor(max(1, min(jobs, 4))) as ex:
+                futs = {ex.submit(fontconv.export, godot, raw): p for p, raw in font_jobs}
+                for fut in concurrent.futures.as_completed(futs):
+                    p = futs[fut]
+                    try:
+                        info, pages = fut.result()
+                        for name, type_, payload in fontconv.payloads(p, info, pages):
+                            add(name, type_, payload, {"font": info.get("name"), "style": info.get("style"),
+                                                       "glyphs": len(info["glyphs"])} if type_ == s3p.TYPE_FONT else
+                                {"font_page": p})
+                    except Exception as e:  # noqa: BLE001
+                        report["errors"][p] = f"{type(e).__name__}: {e}"
+            print(f"  fonts {len(font_jobs)} ({time.time() - t1:.0f} s)", flush=True)
         for p in spine:
             add(p, s3p.TYPE_BLOB, src.read(res.resolve(p)))
         for p in audio:
@@ -452,9 +484,12 @@ def main():
     b.add_argument("--scale", type=float, default=CONSOLE_SCALE)
     b.add_argument("--only", action="append", help="res path glob (repeatable), e.g. 'images/cards/*'")
     b.add_argument("--jobs", type=int)
+    b.add_argument("--godot", help="Godot 4.5.1 binary for the font step")
+    sub.add_parser("fetch-godot")
     a = ap.parse_args()
     try:
-        {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build}[a.cmd](a)
+        {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build,
+         "fetch-godot": lambda _a: print(f"godot: {fontconv.fetch_godot()}")}[a.cmd](a)
     except KeyboardInterrupt:
         sys.exit(1)
     except Exception:  # noqa: BLE001

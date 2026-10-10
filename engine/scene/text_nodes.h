@@ -1,24 +1,51 @@
-/* Label and RichTextLabel. Shaping and drawing are in engine/text. */
+/* Label and RichTextLabel, ported from Godot 4.5.1 scene/gui/label.cpp and
+ * rich_text_label.cpp (MIT, see THIRD_PARTY.md). Shaping is engine/text. */
 #ifndef SPIRE_TEXT_NODES_H
 #define SPIRE_TEXT_NODES_H
 
+#include "../text/shaper.h"
 #include "node.h"
 
 namespace spire {
 
+enum { AUTOWRAP_OFF, AUTOWRAP_ARBITRARY, AUTOWRAP_WORD, AUTOWRAP_WORD_SMART };
+enum { HALIGN_LEFT, HALIGN_CENTER, HALIGN_RIGHT, HALIGN_FILL };
+enum { VALIGN_TOP, VALIGN_CENTER, VALIGN_BOTTOM, VALIGN_FILL };
+
 class Label : public Control {
 public:
-    Label() : h_align(0), v_align(0), autowrap(0), clip_text(false), uppercase(false), visible_ratio(1.0f) {}
+    Label();
     std::string text;
-    int h_align, v_align, autowrap;
+    int h_align, v_align, autowrap, trim_flags, overrun;
     bool clip_text, uppercase;
+    int visible_characters, max_lines_visible, lines_skipped;
     float visible_ratio;
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+    virtual Vec2 get_minimum_size();
+    virtual void draw(Canvas& c);
+    virtual bool clips() const { return clip_contents || clip_text; }
+
+    void set_text(const std::string& t) { text = t; }
+    int line_count();
+
+private:
+    struct Para {
+        std::vector<u32> cps;
+        ShapedText shaped;
+        std::vector<ShapedText> lines;
+    };
+    void shape();
+    float line_height(const ShapedText& l, float font_h) const;
+    std::vector<Para> paras_;
+    Vec2 minsize_;
+    FontRes* font_;
+    int font_size_;
 };
 
 class RichTextLabel : public Control {
 public:
-    RichTextLabel() : bbcode(false), fit_content(false), scroll_active(true), autowrap(3), h_align(0), v_align(0) {}
+    RichTextLabel() : bbcode(false), fit_content(false), scroll_active(true), autowrap(AUTOWRAP_WORD_SMART), h_align(0),
+                      v_align(0) {}
     std::string text;
     bool bbcode, fit_content, scroll_active;
     int autowrap, h_align, v_align;
