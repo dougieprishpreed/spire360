@@ -3,6 +3,7 @@
 #include "../core/pack.h"
 #include "controls.h"
 #include "rich_text.h"
+#include "script.h"
 #include "text_nodes.h"
 #include "value.h"
 
@@ -321,13 +322,20 @@ Node* SceneLibrary::create_node(const std::string& type) {
     return new Node();
 }
 
+static void ready_tree(Node* n) {
+    for (size_t i = 0; i < n->children.size(); ++i) ready_tree(n->children[i]);
+    if (n->behavior) n->behavior->ready(n);
+}
+
 Node* SceneLibrary::instantiate(const std::string& scene, std::string* error) {
     const SceneFile* f = file(scene);
     if (!f || f->doc["kind"].str() != "scene") {
         if (error) *error = "no scene " + scene;
         return NULL;
     }
-    return instantiate_file(f, 0, error);
+    Node* root = instantiate_file(f, 0, error);
+    if (root) ready_tree(root);
+    return root;
 }
 
 static bool is_native(const std::string& type) {
@@ -398,6 +406,7 @@ Node* SceneLibrary::instantiate_file(const SceneFile* f, int depth, std::string*
             const Json& v = props[key.c_str()];
             if (!node->set(key, v, ctx)) node->extra[key] = &v;
         }
+        if (!existing && !node->script.empty() && !node->behavior) node->behavior = create_script(node->script, node);
         if (i == 0) {
             root = node;
         } else if (!existing) {

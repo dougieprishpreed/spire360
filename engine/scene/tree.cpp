@@ -2,6 +2,7 @@
 
 #include "canvas.h"
 #include "controls.h"
+#include "script.h"
 
 #include <algorithm>
 #include <math.h>
@@ -46,6 +47,7 @@ void SceneTree::layout_node(Node* n) {
         bool placed = p && p->is_container() && Container::sortable(c);
         if (!placed) c->update_rect();
         c->resized();
+        if (c->behavior) c->behavior->resized(c);
         if (c->is_container() && c->visible) c->sort_children();
     }
     for (size_t i = 0; i < n->children.size(); ++i) layout_node(n->children[i]);

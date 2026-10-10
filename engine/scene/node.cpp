@@ -1,6 +1,7 @@
 #include "node.h"
 
 #include "scene.h"
+#include "script.h"
 #include "value.h"
 
 #include <math.h>
@@ -136,9 +137,10 @@ bool godot_is_a(const std::string& cls, const char* base) {
 
 /* ---- Node ---- */
 
-Node::Node() : parent(NULL), owner(NULL), unique_name(false), flags(0) {}
+Node::Node() : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), flags(0) {}
 
 Node::~Node() {
+    delete behavior;
     for (size_t i = 0; i < children.size(); ++i) delete children[i];
 }
 

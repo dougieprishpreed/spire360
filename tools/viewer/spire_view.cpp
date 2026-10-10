@@ -1,16 +1,18 @@
 /* spire_view: renders a scene from pack.s3p to a PNG with the software
  * renderer, for comparing against Godot's own render.
  *
- *   spire_view <pack.s3p> <scene> <out.png> [--scale S]
+ *   spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts]
  *   spire_view <pack.s3p> <text> <out.png> --text <font> <size>
  *
  * --scale 1 renders at the design size (1920x1080) for diffs against a
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
+#include "../../engine/game/game.h"
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
 #include "../../engine/scene/controls.h"
 #include "../../engine/scene/scene.h"
+#include "../../engine/scene/script.h"
 #include "../../engine/scene/text_nodes.h"
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
@@ -53,8 +55,11 @@ int main(int argc, char** argv) {
         return 2;
     }
     float scale = 1.0f;
-    for (int i = 4; i + 1 < argc; ++i)
-        if (strcmp(argv[i], "--scale") == 0) scale = (float)atof(argv[++i]);
+    for (int i = 4; i < argc; ++i) {
+        if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--no-scripts") == 0) set_scripts_enabled(false); /* as Godot's render, without the game's C# */
+    }
+    install_game_scripts();
     Pack pack;
     std::string err;
     if (!pack.open(argv[1], &err)) {

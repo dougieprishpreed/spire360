@@ -28,6 +28,8 @@ struct RtlCharFx {
 };
 typedef void (*RtlEffectFn)(RtlCharFx& fx);
 void register_rtl_effect(const char* name, RtlEffectFn fn);
+/* Color::from_string: #rgb[a], #rrggbb[aa] or a name. */
+bool rtl_parse_color(const std::string& s, Color& out);
 
 class RichTextLabel : public Control {
 public:

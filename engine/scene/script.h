@@ -1,0 +1,37 @@
+/* Script behaviours: C++ ports of the game's node scripts (C#), attached by
+ * script path like Godot attaches the script. The game's C# UI code is not
+ * in the logic build (patches.json ui.strip); each port lives in
+ * engine/game and registers itself by the script's res:// path.
+ *
+ * Scripts can be switched off (spire_view --no-scripts) to compare a scene
+ * with Godot's own render of it, which runs without the game's C#. */
+#ifndef SPIRE_SCRIPT_H
+#define SPIRE_SCRIPT_H
+
+#include "../core/base.h"
+
+namespace spire {
+
+class Node;
+class Control;
+
+class ScriptBehavior {
+public:
+    virtual ~ScriptBehavior() {}
+    /* After the scene that holds the node is instantiated (Godot: _ready,
+     * children first). */
+    virtual void ready(Node*) {}
+    /* Each layout pass, after the control's rect is set (Godot:
+     * NOTIFICATION_RESIZED; check for a change yourself). */
+    virtual void resized(Control*) {}
+};
+
+typedef ScriptBehavior* (*ScriptFactory)(Node* node);
+void register_script(const char* res_path, ScriptFactory factory);
+ScriptBehavior* create_script(const std::string& res_path, Node* node); /* NULL if none */
+void set_scripts_enabled(bool on);
+bool scripts_enabled();
+
+} /* namespace spire */
+
+#endif

@@ -58,13 +58,14 @@ struct RichTextLabel::Style {
     bool has_outline_color;
     Color outline_color;
     bool underline, strike;
-    std::string fx;           /* innermost custom effect */
-    std::map<std::string, std::string> fx_env;
-    int fx_start;             /* character offset where it opened */
+    /* custom effects, outermost first */
+    std::vector<std::string> fx;
+    std::vector<std::map<std::string, std::string> > fx_env;
+    std::vector<int> fx_start; /* character offset where each opened */
     int align;                /* paragraph alignment, -1 none */
     Style()
         : def_font(-1), font(NULL), font_item_size(0), font_size(0), has_color(false), outline_size(-1),
-          has_outline_color(false), underline(false), strike(false), fx_start(0), align(-1) {}
+          has_outline_color(false), underline(false), strike(false), align(-1) {}
 };
 
 struct RichTextLabel::Run {
@@ -174,6 +175,8 @@ static bool parse_color(const std::string& s0, Color& out) {
     return false;
 }
 
+bool rtl_parse_color(const std::string& s, Color& out) { return parse_color(s, out); }
+
 static std::string unquote(const std::string& s) {
     if (s.size() >= 2 && (s[0] == '"' || s[0] == '\'') && s[s.size() - 1] == s[0]) return s.substr(1, s.size() - 2);
     return s;
@@ -239,6 +242,7 @@ struct RtlBuilder {
                     if (!runs.empty() && runs.back().type == RUN_TEXT && runs.back().char_ofs + (int)runs.back().text.size() == char_ofs &&
                         runs.back().st.def_font == st.def_font && runs.back().st.font == st.font &&
                         runs.back().st.font_size == st.font_size && runs.back().st.fx == st.fx &&
+                        runs.back().st.fx_start == st.fx_start &&
                         runs.back().st.has_color == st.has_color && runs.back().st.color == st.color &&
                         runs.back().st.outline_size == st.outline_size && runs.back().st.underline == st.underline &&
                         runs.back().st.strike == st.strike && runs.back().st.has_outline_color == st.has_outline_color &&
@@ -486,10 +490,10 @@ void RichTextLabel::parse() {
             for (size_t i = 0; i < custom_effects.size(); ++i)
                 if (custom_effects[i] == name) installed = true;
             if (installed && !tag.empty()) {
-                st.fx = name;
-                st.fx_env = opts;
-                if (!value.empty()) st.fx_env[""] = value;
-                st.fx_start = b.char_ofs;
+                st.fx.push_back(name);
+                if (!value.empty()) opts[""] = value;
+                st.fx_env.push_back(opts);
+                st.fx_start.push_back(b.char_ofs);
                 b.push(name, st);
             } else {
                 std::vector<u32> lb(1, '[');
@@ -697,19 +701,20 @@ void RichTextLabel::draw(Canvas& c) {
                     Vec2 fx_off;
                     bool vis = true;
                     if (!run.st.fx.empty()) {
-                        RtlEffectFn fn = find_effect(run.st.fx);
-                        if (fn) {
-                            RtlCharFx fx;
-                            fx.color = font_color;
-                            fx.visible = true;
-                            fx.relative_index = run.char_ofs + (gl.start - run.start) - run.st.fx_start;
-                            fx.elapsed_time = elapsed_time;
-                            fx.env = &run.st.fx_env;
+                        /* _fetch_item_fx_stack: innermost first */
+                        RtlCharFx fx;
+                        fx.color = font_color;
+                        fx.elapsed_time = elapsed_time;
+                        for (size_t e = run.st.fx.size(); e-- > 0;) {
+                            RtlEffectFn fn = find_effect(run.st.fx[e]);
+                            if (!fn) continue;
+                            fx.relative_index = run.char_ofs + (gl.start - run.start) - run.st.fx_start[e];
+                            fx.env = &run.st.fx_env[e];
                             fn(fx);
-                            font_color = fx.color;
-                            fx_off = Vec2(floorf(fx.offset.x + 0.5f), floorf(fx.offset.y + 0.5f));
-                            vis = fx.visible;
                         }
+                        font_color = fx.color;
+                        fx_off = Vec2(floorf(fx.offset.x + 0.5f), floorf(fx.offset.y + 0.5f));
+                        vis = fx.visible;
                     }
                     if (vis && font_color.a != 0 && gl.face) {
                         Vec2 at = ofs + pen + fx_off;

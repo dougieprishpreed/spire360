@@ -16,6 +16,7 @@ namespace spire {
 
 class Canvas;
 class SceneLibrary;
+class ScriptBehavior;
 struct SceneFile;
 
 /* What set() needs to resolve references in a scene file. */
@@ -40,6 +41,7 @@ public:
     Node* owner;         /* root of the scene file that created this node */
     bool unique_name;    /* %Name */
     std::string script;  /* res:// path of the attached script ("" if none) */
+    ScriptBehavior* behavior; /* its C++ port, if there is one (owned) */
     std::map<std::string, const Json*> extra; /* properties without a native field (script exports, metadata) */
     u32 flags;
 
