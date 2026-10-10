@@ -9,6 +9,7 @@ rem
 rem   xdk\build.cmd            hello, selftest, bench, probe
 rem   xdk\build.cmd bigcode    the 64 MB link test (slow)
 rem   xdk\build.cmd hello      one project
+rem   xdk\build.cmd spire_view the scene viewer (engine + D3D9 renderer)
 rem
 rem Logs: xdk\build_logs\<project>.log  (send these if anything fails)
 setlocal enabledelayedexpansion

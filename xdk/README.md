@@ -85,6 +85,24 @@ per-action average/p95/max, GC heap) to `game:\spire360_logic\result.txt`.
 A `spire360_logic\script.txt` (one JSON command per line) replaces the
 default commands.
 
+## spire_view: the engine drawing the game's scenes on the console
+
+`xdk\build.cmd spire_view` builds `spire_view.xex`: the engine (layout, MSDF
+text, particles, ported shaders) with the D3D9 renderer at 1280x720. Shaders
+are compiled by the XDK's fxc (`%XEDK%\bin\win32\fxc.exe`) during the build.
+
+It needs a pack converted at the console's scale, with fonts:
+
+    python converter\convert.py fetch-godot          (once: Godot 4.5.1 renders the fonts)
+    python converter\convert.py build <SlayTheSpire2.pck or bundle dir> out
+
+Put `out\pack.s3p` in a `spire` folder next to the XEX (`game:\spire\pack.s3p`).
+In Xenia, `game:` is the XEX's folder.
+
+Pad: D-pad left/right = previous/next scene, A = game scripts on/off,
+Back = write the log now, Start = quit. The log, `game:\spire360_view.txt`,
+holds load and per-frame CPU times per scene. Send it with a screenshot.
+
 ## What each one tells us
 
 - **hello**: compiler version and type sizes; whether `lwbrx` byte-reversed

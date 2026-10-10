@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- spire_view.xex: the engine's D3D9 renderer drawing the game's scenes from
+     game:\spire\pack.s3p (see main.cpp and xdk/README.md). -->
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Xbox 360">
+      <Configuration>Debug</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Xbox 360">
+      <Configuration>Release</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{CDCB232F-3634-5533-A9A2-F5F0B45A1CB1}</ProjectGuid>
+    <Keyword>Xbox360Proj</Keyword>
+    <RootNamespace>spire_view</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="..\common\spire360.props" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- $(IntDir): canvas_vs.h / canvas_ps.h from fxc below -->
+      <AdditionalIncludeDirectories>$(IntDir);$(SpireRoot)engine\gfx;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="$(SpireRoot)engine\gfx\shaders\canvas.hlsl">
+      <Message>fxc canvas.hlsl</Message>
+      <Command>"$(XEDK)\bin\win32\fxc.exe" /nologo /T vs_3_0 /E vs_main /Vn g_vs_main /Fh "$(IntDir)canvas_vs.h" "%(FullPath)"
+if errorlevel 1 exit /b 1
+"$(XEDK)\bin\win32\fxc.exe" /nologo /T ps_3_0 /E ps_main /Vn g_ps_main /Fh "$(IntDir)canvas_ps.h" "%(FullPath)"</Command>
+      <Outputs>$(IntDir)canvas_vs.h;$(IntDir)canvas_ps.h;%(Outputs)</Outputs>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\core\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\gfx\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\scene\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\text\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\game\*.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
