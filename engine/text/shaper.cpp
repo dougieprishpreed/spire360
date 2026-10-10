@@ -101,6 +101,12 @@ void shape_run(const std::vector<u32>& text, int start, int end, const FontRes* 
         g.flags = 0;
         g.gid = 0;
         g.advance = 0;
+        g.object = -1;
+        g.asc = g.desc = 0;
+        if (face) {
+            g.asc = face->ascent * size / face->base_size + (font ? font->spacing_top : 0);
+            g.desc = face->descent * size / face->base_size + (font ? font->spacing_bottom : 0);
+        }
         if (face && !zero_width(c)) {
             float scale = size / face->base_size;
             bool subpos = scale != 1.0f; /* MSDF fonts scale; at base size Godot rounds */
@@ -143,6 +149,26 @@ void shape_run(const std::vector<u32>& text, int start, int end, const FontRes* 
     }
 }
 
+void shape_object(ShapedText& out, int pos, float width, int object) {
+    if (out.glyphs.empty()) out.start = pos;
+    out.end = pos + 1;
+    ShapedGlyph g;
+    g.face = NULL;
+    g.gid = 0;
+    g.cp = 0xFFFC;
+    g.font_size = 0;
+    g.advance = width;
+    g.x_off = g.y_off = 0;
+    g.asc = g.desc = 0;
+    g.start = pos;
+    g.end = pos + 1;
+    g.count = 1;
+    g.flags = GF_OBJECT;
+    g.object = object;
+    out.width += width;
+    out.glyphs.push_back(g);
+}
+
 void shape_finish(const std::vector<u32>& text, ShapedText& out) {
     /* Break opportunities (a subset of ICU line breaking): position p means
      * "a line may start at p". */
@@ -166,12 +192,17 @@ void shape_finish(const std::vector<u32>& text, ShapedText& out) {
         } else if (is_cjk(c) && nx && i + 1 < n) {
             brk[i + 1] = 1;
         }
+        if (nx == 0xFFFC && i + 1 < n) brk[i + 1] = brk[i + 1] ? brk[i + 1] : 1; /* LB20: break before objects */
     }
     std::vector<ShapedGlyph> res;
     res.reserve(out.glyphs.size() + 8);
     for (size_t i = 0; i < out.glyphs.size(); ++i) {
         ShapedGlyph g = out.glyphs[i];
         u32 c = text[g.start];
+        if (g.flags & GF_OBJECT) {
+            res.push_back(g);
+            continue;
+        }
         if (is_whitespace_cp(c)) g.flags |= GF_SPACE;
         bool virt = false;
         if (g.end <= n && brk[g.end]) {
@@ -299,14 +330,22 @@ void shaped_substr(const ShapedText& t, int start, int end, ShapedText& out) {
     out.clear();
     out.start = start;
     out.end = end;
-    out.ascent = t.ascent;
-    out.descent = t.descent;
+    bool any = false;
     for (size_t i = 0; i < t.glyphs.size(); ++i) {
         const ShapedGlyph& g = t.glyphs[i];
         if (g.start >= start && g.end <= end) {
             out.glyphs.push_back(g);
             out.width += g.advance;
+            if (g.face) {
+                out.ascent = any ? maxf(out.ascent, g.asc) : g.asc;
+                out.descent = any ? maxf(out.descent, g.desc) : g.desc;
+                any = true;
+            }
         }
+    }
+    if (!any) {
+        out.ascent = t.ascent;
+        out.descent = t.descent;
     }
 }
 

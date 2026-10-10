@@ -2,6 +2,7 @@
 
 #include "../core/pack.h"
 #include "controls.h"
+#include "rich_text.h"
 #include "text_nodes.h"
 #include "value.h"
 
@@ -22,7 +23,12 @@ static const char* const DEFAULT_THEME_JSON[] = {
  * using it falls back to the first font the scene names. */
 static const char* const DEFAULT_FONT_NAME = "godot/OpenSans_SemiBold.ttf";
 
+static SceneLibrary* g_library = NULL;
+
+SceneLibrary* SceneLibrary::current() { return g_library; }
+
 SceneLibrary::SceneLibrary(const Pack* pack) : pack_(pack), default_theme_(NULL), default_font_(NULL) {
+    g_library = this;
     default_font_ = new FontRes("FontFile");
     default_font_->file = DEFAULT_FONT_NAME;
     default_font_->path = DEFAULT_FONT_NAME;
@@ -33,6 +39,7 @@ SceneLibrary::SceneLibrary(const Pack* pack) : pack_(pack), default_theme_(NULL)
 }
 
 SceneLibrary::~SceneLibrary() {
+    if (g_library == this) g_library = NULL;
     if (g_default_theme == default_theme_) {
         g_default_theme = NULL;
         g_default_font = NULL;

@@ -273,18 +273,4 @@ void Label::draw(Canvas& c) {
     }
 }
 
-/* ---- RichTextLabel ---- */
-
-bool RichTextLabel::set(const std::string& key, const Json& v, const PropCtx& ctx) {
-    if (key == "text") text = v.str();
-    else if (key == "bbcode_enabled") bbcode = v.b();
-    else if (key == "fit_content") fit_content = v.b();
-    else if (key == "scroll_active") scroll_active = v.b(true);
-    else if (key == "autowrap_mode") autowrap = v.i();
-    else if (key == "horizontal_alignment") h_align = v.i();
-    else if (key == "vertical_alignment") v_align = v.i();
-    else return Control::set(key, v, ctx);
-    return true;
-}
-
 } /* namespace spire */

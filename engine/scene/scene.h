@@ -21,6 +21,8 @@ class SceneLibrary {
 public:
     explicit SceneLibrary(const Pack* pack);
     ~SceneLibrary();
+    /* The library the scene system uses (BBCode [img] / [font] paths). */
+    static SceneLibrary* current();
 
     const Pack* pack() const { return pack_; }
 

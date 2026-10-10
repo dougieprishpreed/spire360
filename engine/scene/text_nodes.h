@@ -1,5 +1,5 @@
-/* Label and RichTextLabel, ported from Godot 4.5.1 scene/gui/label.cpp and
- * rich_text_label.cpp (MIT, see THIRD_PARTY.md). Shaping is engine/text. */
+/* Label, ported from Godot 4.5.1 scene/gui/label.cpp (MIT, see
+ * THIRD_PARTY.md). Shaping is engine/text; RichTextLabel is rich_text.h. */
 #ifndef SPIRE_TEXT_NODES_H
 #define SPIRE_TEXT_NODES_H
 
@@ -40,16 +40,6 @@ private:
     Vec2 minsize_;
     FontRes* font_;
     int font_size_;
-};
-
-class RichTextLabel : public Control {
-public:
-    RichTextLabel() : bbcode(false), fit_content(false), scroll_active(true), autowrap(AUTOWRAP_WORD_SMART), h_align(0),
-                      v_align(0) {}
-    std::string text;
-    bool bbcode, fit_content, scroll_active;
-    int autowrap, h_align, v_align;
-    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
 };
 
 } /* namespace spire */

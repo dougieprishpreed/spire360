@@ -18,7 +18,8 @@ enum GlyphFlags {
     GF_SPACE = 1,
     GF_BREAK_SOFT = 2,
     GF_BREAK_HARD = 4,
-    GF_VIRTUAL = 8 /* inserted break point, zero width */
+    GF_VIRTUAL = 8, /* inserted break point, zero width */
+    GF_OBJECT = 16  /* inline object (RichTextLabel image) */
 };
 
 struct ShapedGlyph {
@@ -26,8 +27,10 @@ struct ShapedGlyph {
     u32 gid, cp;
     int font_size;
     float advance, x_off, y_off;
+    float asc, desc; /* this glyph's font ascent / descent (with spacing) */
     int start, end, count;
     u32 flags;
+    int object; /* GF_OBJECT: caller's index */
 };
 
 struct ShapedText {
@@ -56,6 +59,9 @@ float font_height(const FontRes* font, int size);
  * the text (its last glyph gets no extra spacing). */
 void shape_run(const std::vector<u32>& text, int start, int end, const FontRes* font, int size, bool last_run,
                ShapedText& out);
+/* An inline object of the given width at text position pos (the text holds
+ * U+FFFC there). */
+void shape_object(ShapedText& out, int pos, float width, int object);
 /* Break flags (call once after all runs). */
 void shape_finish(const std::vector<u32>& text, ShapedText& out);
 
@@ -63,7 +69,8 @@ enum { BREAK_MANDATORY = 1, BREAK_WORD_BOUND = 2, BREAK_GRAPHEME_BOUND = 4, BREA
        BREAK_TRIM_START_EDGE_SPACES = 16, BREAK_TRIM_END_EDGE_SPACES = 32 };
 /* Line ranges as [start0, end0, start1, end1, ...] (character positions). */
 void line_breaks(const ShapedText& t, float width, int flags, std::vector<int>& out);
-/* The glyphs of [start, end), with metrics. */
+/* The glyphs of [start, end), with metrics (ascent / descent from the
+ * glyphs' fonts; objects are the caller's to align). */
 void shaped_substr(const ShapedText& t, int start, int end, ShapedText& out);
 
 /* Draws one glyph at the pen position (baseline). outline_size > 0 draws
