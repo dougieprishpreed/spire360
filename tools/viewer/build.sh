@@ -8,6 +8,7 @@ CXX=${CXX:-g++}
 FLAGS="-std=c++98 -pedantic -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"
 pids=""
 for f in engine/*/*.cpp tools/viewer/spire_view.cpp; do
+    case "$f" in *d3d9_renderer.cpp) continue ;; esac  # Windows / XDK only
     o=out/engine/$(basename "$f" .cpp).o
     $CXX $FLAGS -c "$f" -o "$o" &
     pids="$pids $!"

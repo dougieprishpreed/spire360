@@ -31,7 +31,8 @@ public:
         RES_FONT,
         RES_CANVAS_ITEM_MATERIAL,
         RES_SHADER_MATERIAL,
-        RES_PACKED_SCENE
+        RES_PACKED_SCENE,
+        RES_SPINE_DATA
     };
     Resource(Kind k, const std::string& cls) : kind(k), type(cls), props(NULL), file(NULL) {}
     virtual ~Resource() {}

@@ -42,6 +42,7 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spire_convert import ctex, fonts as fontconv, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
+from spire_convert import spine as spinefmt  # noqa: E402
 from spire_convert.pck import Pck  # noqa: E402
 
 # 1920x1080 design resolution -> 1280x720 on the console.
@@ -216,6 +217,49 @@ def cmd_survey(a):
         other[name] = {"count": len(sel), "bytes": total}
         say(f"{name:20s} {len(sel):5d}  {human(total)}")
     report["other"] = other
+
+    # Spine: every skeleton through the reader (it must consume each file
+    # exactly) and the features they use, for the engine's runtime.
+    say("")
+    say("== spine")
+    feats, errors, versions = collections.Counter(), {}, collections.Counter()
+    skels = [f for f in files if f.endswith(".spskel")]
+    for f in skels:
+        try:
+            sk = spinefmt.read_skeleton(src.read(f))
+        except Exception as e:  # noqa: BLE001
+            errors[f] = f"{type(e).__name__}: {e}"
+            continue
+        versions[sk["version"]] += 1
+        for k in ("ik", "transform", "path", "physics"):
+            if sk[k]:
+                feats["constraint " + k] += 1
+        if len(sk["skins"]) > 1:
+            feats["several skins"] += 1
+        kinds = set()
+        for skin in sk["skins"]:
+            for att in skin["attachments"]:
+                kinds.add(att["type"] + (" weighted" if "bones" in att else ""))
+                if "sequence" in att:
+                    kinds.add("sequence")
+        kinds.update("blend " + s["blend"] for s in sk["slots"] if s["blend"] != "normal")
+        kinds.update("dark colour" for s in sk["slots"] if "dark" in s)
+        kinds.update("inherit " + b["inherit"] for b in sk["bones"] if b["inherit"] != "normal")
+        for an in sk["animations"]:
+            for grp in ("slots", "bones", "path", "physics", "attachments"):
+                kinds.update("timeline " + t["type"] for t in an[grp])
+            for grp in ("ik", "transform", "draw_order", "events"):
+                if an[grp]:
+                    kinds.add("timeline " + grp)
+        feats.update(kinds)
+    say(f"skeletons {len(skels)}, read {len(skels) - len(errors)}; versions "
+        + ", ".join(f"{k} {v}" for k, v in versions.most_common()))
+    for k, v in sorted(feats.items()):
+        say(f"  {k:32s} {v:5d}")
+    for k, v in list(errors.items())[:20]:
+        say(f"  error {k}: {v}")
+    report["spine"] = {"skeletons": len(skels), "versions": dict(versions), "features": dict(feats),
+                       "errors": errors}
     say("")
     say(f"survey took {time.time() - t0:.0f} s")
     if a.json:
@@ -276,6 +320,12 @@ def dependencies(src, res, roots):
                     path = res.uid_path(e["uid"]) or path
                 if path and not path.endswith((".cs", ".gd")):
                     stack.append(resources.strip_res(path))
+        elif real.endswith(".spatlas"):
+            # Spine atlases load their page images by name, next to the atlas.
+            try:
+                stack.extend(spinefmt.page_textures(src.read(real), p))
+            except Exception:  # noqa: BLE001
+                pass
     return out
 
 
@@ -324,6 +374,18 @@ def _convert_texture(name):
                                                 "oh": out.orig_height, "levels": len(out.levels)}, None
     except Exception as e:  # noqa: BLE001
         return name, None, None, f"{type(e).__name__}: {e}"
+
+
+def _round_floats(v):
+    """Spine data is float32: 7 significant digits keep it exact enough and
+    halve the JSON."""
+    if isinstance(v, float):
+        return float(f"{v:.7g}")
+    if isinstance(v, list):
+        return [_round_floats(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _round_floats(x) for k, x in v.items()}
+    return v
 
 
 def cmd_build(a):
@@ -429,7 +491,18 @@ def cmd_build(a):
                         report["errors"][p] = f"{type(e).__name__}: {e}"
             print(f"  fonts {len(font_jobs)} ({time.time() - t1:.0f} s)", flush=True)
         for p in spine:
-            add(p, s3p.TYPE_BLOB, src.read(res.resolve(p)))
+            try:
+                raw = src.read(res.resolve(p))
+                if p.endswith(".atlas"):
+                    doc = spinefmt.engine_atlas(spinefmt.read_spatlas(raw), p.rsplit("/", 1)[0] if "/" in p else "")
+                    info = {"pages": len(doc["pages"]), "regions": len(doc["regions"])}
+                else:
+                    doc = spinefmt.engine_skeleton(spinefmt.read_skeleton(raw))
+                    info = {"bones": len(doc["bones"]), "slots": len(doc["slots"]),
+                            "animations": len(doc["animations"])}
+                add(p, s3p.TYPE_SPINE, json.dumps(_round_floats(doc), separators=(",", ":")).encode("utf-8"), info)
+            except Exception as e:  # noqa: BLE001
+                report["errors"][p] = f"{type(e).__name__}: {e}"
         for p in audio:
             try:
                 raw = src.read(res.resolve(p))

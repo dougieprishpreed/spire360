@@ -4,9 +4,10 @@
 renderer; `refdiff.py` compares those renders with Godot's own.
 
 Build (PC, strict C++03 like the XDK compiler): `tools/viewer/build.sh`
--> `out/engine/spire_view`.
+-> `out/engine/spire_view`. `--time T` runs T seconds of frames (60 fps)
+before the shot (default 5 frames, as `shot.gd`), to see animations move.
 
-    out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts]
+    out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts] [--time T]
     out/engine/spire_view <pack.s3p> "Some text" out.png --text fonts/kreon_bold.ttf 24
 
 Reference renders come from Godot 4.5.1 (official build) running the game

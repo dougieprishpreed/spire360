@@ -7,8 +7,12 @@
 namespace spire {
 
 void install_text_scripts();
+void install_anim_scripts();
 
-inline void install_game_scripts() { install_text_scripts(); }
+inline void install_game_scripts() {
+    install_text_scripts();
+    install_anim_scripts();
+}
 
 } /* namespace spire */
 

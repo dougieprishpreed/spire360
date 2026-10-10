@@ -24,6 +24,9 @@ public:
     /* Ported material shaders that reduce to a colour matrix (NULL: none). */
     void set_color_matrix(const float* m) { r_->set_color_matrix(m); }
     const Xform2D& xform() const { return xform_; }
+    /* Per-draw blend inside an item (Spine slots). */
+    void set_blend(BlendMode b) { blend_ = b; }
+    BlendMode blend() const { return blend_; }
 
     void draw_rect(const Rect2& r, const Color& c);
     void draw_texture_rect(Texture2DRes* t, const Rect2& r, bool tile, const Color& mod = Color());

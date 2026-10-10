@@ -16,7 +16,8 @@ All integers big-endian (the console's byte order). See docs/PACK_FORMAT.md.
       u64 hash   FNV-1a 64 of the UTF-8 res path (no "res://")
       u64 offset
       u32 size
-      u16 type   1 texture, 2 blob, 3 scene (JSON), 4 font, 5 audio
+      u16 type   1 texture, 2 blob, 3 scene (JSON), 4 font, 5 audio,
+                 6 spine (JSON: skeleton or atlas, spine.py engine form)
       u16 flags
       u32 name offset (into names: NUL-terminated UTF-8)
       u32 crc32 of the payload
@@ -34,8 +35,8 @@ Texture payload:
 import struct
 import zlib
 
-TYPE_TEXTURE, TYPE_BLOB, TYPE_SCENE, TYPE_FONT, TYPE_AUDIO = 1, 2, 3, 4, 5
-TYPE_NAMES = {1: "texture", 2: "blob", 3: "scene", 4: "font", 5: "audio"}
+TYPE_TEXTURE, TYPE_BLOB, TYPE_SCENE, TYPE_FONT, TYPE_AUDIO, TYPE_SPINE = 1, 2, 3, 4, 5, 6
+TYPE_NAMES = {1: "texture", 2: "blob", 3: "scene", 4: "font", 5: "audio", 6: "spine"}
 FLAG_TEX_LITTLE_ENDIAN = 1
 TEX_FLAG_DATA = 1
 HEADER = struct.Struct(">4sIIIQQII24s")

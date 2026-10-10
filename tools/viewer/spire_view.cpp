@@ -1,7 +1,7 @@
 /* spire_view: renders a scene from pack.s3p to a PNG with the software
  * renderer, for comparing against Godot's own render.
  *
- *   spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts]
+ *   spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T]
  *   spire_view <pack.s3p> <text> <out.png> --text <font> <size>
  *
  * --scale 1 renders at the design size (1920x1080) for diffs against a
@@ -51,12 +51,14 @@ static Node* text_scene(SceneLibrary& lib, const char* font, int size, const cha
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S]\n");
+        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T]\n");
         return 2;
     }
     float scale = 1.0f;
+    int frames = 5; /* --time: seconds of process at 60 fps */
     for (int i = 4; i < argc; ++i) {
         if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--time") == 0 && i + 1 < argc) frames = (int)(atof(argv[++i]) * 60.0 + 0.5);
         else if (strcmp(argv[i], "--no-scripts") == 0) set_scripts_enabled(false); /* as Godot's render, without the game's C# */
     }
     install_game_scripts();
@@ -83,7 +85,7 @@ int main(int argc, char** argv) {
     tree.root()->add_child(scene);
     tree.layout();
     /* Godot's reference render is taken on its 5th frame (tools/godot/shot.gd). */
-    for (int f = 0; f < 5; ++f) tree.process(1.0 / 60.0);
+    for (int f = 0; f < frames; ++f) tree.process(1.0 / 60.0);
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
     /* project.binary: rendering/environment/defaults/default_clear_color */

@@ -4,6 +4,7 @@
 #include "controls.h"
 #include "particles.h"
 #include "rich_text.h"
+#include "spine_sprite.h"
 #include "script.h"
 #include "text_nodes.h"
 #include "value.h"
@@ -174,7 +175,14 @@ static void margins4(const Json& p, const char* prefix, float* out) {
 
 Resource* SceneLibrary::build(const std::string& cls, const Json& p, const SceneFile* ctx, const std::string& path) {
     Resource* r = NULL;
-    if (cls == "AtlasTexture") {
+    if (cls == "SpineSkeletonDataResource") {
+        SpineDataRes* d = new SpineDataRes();
+        const Json& a = p["atlas_res"];
+        const Json& k = p["skeleton_file_res"];
+        if (jv_is_ext(a) && a["ext"].is_string()) d->atlas_path = a["ext"].str();
+        if (jv_is_ext(k) && k["ext"].is_string()) d->skeleton_path = k["ext"].str();
+        r = d;
+    } else if (cls == "AtlasTexture") {
         AtlasTextureRes* t = new AtlasTextureRes();
         Resource* a = resolve(p["atlas"], ctx);
         t->atlas = a && a->is_texture() ? (Texture2DRes*)a : NULL;
@@ -328,6 +336,7 @@ Node* SceneLibrary::create_node(const std::string& type) {
     if (type == "Sprite2D") return new Sprite2D();
     if (type == "CPUParticles2D") return new Particles2D(false);
     if (type == "GPUParticles2D") return new Particles2D(true);
+    if (type == "SpineSprite") return new SpineSprite();
     if (godot_is_a(type, "Container")) return new Container();
     if (godot_is_a(type, "Control")) return new Control();
     if (godot_is_a(type, "Node2D")) return new Node2D();
@@ -357,7 +366,7 @@ static bool is_native(const std::string& type) {
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
            type == "RichTextLabel" || type == "Sprite2D" || type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
-           type == "GPUParticles2D" ||
+           type == "GPUParticles2D" || type == "SpineSprite" ||
            type == "Control";
 }
 

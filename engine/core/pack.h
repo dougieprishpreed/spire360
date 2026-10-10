@@ -8,7 +8,7 @@
 
 namespace spire {
 
-enum PackEntryType { PACK_TEXTURE = 1, PACK_BLOB = 2, PACK_SCENE = 3, PACK_FONT = 4, PACK_AUDIO = 5 };
+enum PackEntryType { PACK_TEXTURE = 1, PACK_BLOB = 2, PACK_SCENE = 3, PACK_FONT = 4, PACK_AUDIO = 5, PACK_SPINE = 6 };
 enum TexFormat { TEX_DXT1 = 1, TEX_DXT5 = 2, TEX_ARGB8 = 3 };
 
 struct PackEntry {

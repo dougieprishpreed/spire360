@@ -58,7 +58,9 @@ long XDK compile (279 MB of C; /MP on).
 **Converter (M3): reads everything, builds the pack; needs the user's pack
 to run at full scale.** `converter/convert.py survey|texture|build`
 (requirements.txt). Decoders tested against Godot 4.5.1 output (12 tests).
-Not yet: fonts -> glyph atlases, FMOD banks, Spine runtime on the console.
+Spine skeletons and atlases go into the pack as JSON (`spire_convert/spine.py`,
+our own 4.2 reader; `survey` lists the Spine features the game uses).
+Not yet: FMOD banks.
 
 **Converter (older notes):** `converter/pck_tool.py` reads Godot 4 packs; works on
 the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
@@ -98,19 +100,34 @@ holds, for the converter:
 - `tools/viewer/spire_view`: scene -> PNG (`tools/viewer/build.sh`);
   `tools/viewer/refdiff.py`: diffs against Godot's renders (see
   `tools/viewer/README.md`). Bundle status: 7 of 8 root scenes within 0.11%
-  of pixels off by >16/255; the main menu (10%) waits on Spine and
-  dark_blur (screen-texture blur).
+  of pixels off by >16/255; the main menu waits on the Spine page images
+  and dark_blur (screen-texture blur).
+- `spine/`: our own Spine 4.2 runtime (DECISIONS D12): bones (all inherit
+  modes), region and mesh attachments (weighted, deform), skins, curve
+  timelines, draw order, tracks with crossfades. `scene/spine_sprite` is
+  the SpineSprite node; `game/anim_scripts` ports NSpineAutoPlayer. Not
+  yet: IK / transform / path / physics constraints, clipping, sequences,
+  dark colour (reported per scene). Checked on the menu's 3 skeletons with
+  stand-in page images only (the bundle had no page images; `bundle` now
+  includes them).
 - `xdk/spire_view`: the engine on the console (D3D9, 1280x720).
 
 ## Waiting on the user
 
 1. `xdk\build.cmd spire_view` with a console-scale pack (see xdk/README.md),
    run in Xenia: screenshot + `spire360_view.txt`.
+2. A new bundle (`convert.py bundle`, now with the Spine page images), a
+   new `convert.py survey` report (it now lists the Spine features of all
+   164 skeletons), and a 1920x1080 screenshot of the game's main menu (the
+   reference for the Spine runtime, by eye).
 3. Later: `xdk\build.cmd logic_runner` in Xenia (M2), hardware runs.
 
 ## Next (agent)
 
-- Spine: our own 4.2 runtime (DECISIONS D12); dark_blur and other screen-texture shaders.
+- Spine: check the menu against the game's screenshot; constraints (IK,
+  transform, physics) and clipping as the survey shows the creatures need
+  them; the game's creature scripts (NCreatureVisuals) on top.
+- dark_blur and other screen-texture shaders.
 - Font pages: subset glyphs to the selected language's characters and
   repack (today ~100 MB uncompressed for the bundle's fonts).
 - Presentation of real screens: ports of the game's node scripts
