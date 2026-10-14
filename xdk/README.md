@@ -72,7 +72,14 @@ Xenon/PC factor for translated code.
 ## logic_runner (milestone M2): the game logic on the console
 
 Builds the translated game logic (`out/logic/c`, from
-`tools/build_logic.py`, stages up to `c`) with the same runtime as selftest:
+`tools/build_logic.py`, stages up to `c`) with the same runtime as selftest.
+`out/logic/c` from before October 15 2026 needs its table initialiser
+rewritten first (the stage does it now; otherwise the XDK compiler stops
+with C1002 "out of heap space" on logic.c):
+
+    python tools\w2c2_fix_tables.py out\logic\c\logic.c
+
+Then:
 
 ```
 xdk\build.cmd logic_runner

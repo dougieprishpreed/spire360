@@ -251,6 +251,9 @@ def stage_c(a):
     # Module name "logic" -> symbols m5_logic*; 2000 functions per file keeps
     # each translation unit small enough for the XDK compiler.
     run([w2c2, "-f", str(a.funcs_per_file), os.path.join(OUT, "logic.wasm"), os.path.join(cdir, "logic.c")])
+    # The table initialiser as data: one 100k-statement function is more than
+    # the XDK compiler's heap can take.
+    run([sys.executable, os.path.join(ROOT, "tools", "w2c2_fix_tables.py"), os.path.join(cdir, "logic.c")])
     run([sys.executable, os.path.join(ROOT, "tools", "w2c2_imports.py"), os.path.join(cdir, "logic.h"),
          "--stubs", os.path.join(cdir, "logic_stubs.c")], check=False)
     n = len([f for f in os.listdir(cdir) if f.endswith(".c")])
