@@ -3,8 +3,11 @@
 # own glyph cache), metrics, and the kerning and ligatures Godot's shaper
 # (HarfBuzz) applies. Run by converter/convert.py:
 #
-#   godot --headless --path <empty project> --script font_export.gd -- <font> <out_dir>
+#   godot --headless --path <empty project> --script font_export.gd -- <font> <out_dir> [<chars file>]
 #
+# <chars file>: UTF-8 text; only these characters' glyphs are exported (the
+# converter passes what the chosen languages' text uses). Without it, the
+# whole cmap (gigabytes for the game's CJK fonts).
 # <font>: a .fontdata (imported FontFile) path, or "default" for Godot's
 # default theme font. Fonts imported without MSDF are exported as MSDF
 # (msdf_size 48, pixel range 16) and marked "msdf_substitute".
@@ -25,6 +28,12 @@ func _init():
 	var args = OS.get_cmdline_user_args()
 	var src = args[0]
 	var out_dir = args[1]
+	var keep = null
+	if args.size() > 2:
+		keep = {}
+		var text = FileAccess.get_file_as_string(args[2])
+		for i in text.length():
+			keep[text.unicode_at(i)] = true
 	var orig
 	if src == "default":
 		orig = ThemeDB.get_default_theme().default_font
@@ -50,6 +59,8 @@ func _init():
 	var gids = {}
 	for i in chars.length():
 		var cp = chars.unicode_at(i)
+		if keep != null and not keep.has(cp):
+			continue
 		var g = f.get_glyph_index(base, cp, 0)
 		if g != 0:
 			cmap.append([cp, g])

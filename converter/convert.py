@@ -18,13 +18,14 @@
       menu, combat room, card, creature, hand, top bar, map and rewards.
 
   convert.py build <pck | dir> <out_dir> [--scale 0.6667] [--only GLOB]... [--jobs N]
-                   [--godot PATH]
+                   [--godot PATH] [--languages eng,deu,...]
       Writes <out_dir>/pack.s3p (textures as DXT at the console's scale,
       scenes and resources as JSON, fonts, Spine data, audio streams) and
       <out_dir>/data/localization (the tables the logic reads), plus
       <out_dir>/pack_report.json. --only limits it to matching res paths.
       Fonts need Godot 4.5.1 (it renders the glyphs, see
-      spire_convert/fonts.py): --godot, $SPIRE_GODOT, or fetch-godot.
+      spire_convert/fonts.py): --godot, $SPIRE_GODOT, or fetch-godot. Fonts
+      keep only the characters of --languages (default eng).
 
   convert.py fetch-godot
       Downloads the official Godot 4.5.1 build (MIT, ~60 MB) into
@@ -440,7 +441,9 @@ def cmd_build(a):
             report["entries"][name] = dict(info or {}, type=s3p.TYPE_NAMES[type_], bytes=len(payload))
 
         # Textures, in parallel.
-        jobs = a.jobs or max(1, (os.cpu_count() or 2) - 1)
+        # Each worker holds a decoded image (up to ~6000x5000 RGBA plus its
+        # resampling buffers): cap the default so a big pack fits in RAM.
+        jobs = a.jobs or max(1, min(6, (os.cpu_count() or 2) - 1))
         done = 0
         with multiprocessing.Pool(jobs, _worker_init, (a.pack, a.scale)) as pool:
             for name, payload, info, err in pool.imap_unordered(_convert_texture, textures, chunksize=4):
@@ -477,8 +480,12 @@ def cmd_build(a):
             font_jobs.append((fontconv.DEFAULT_FONT_NAME, "default"))
             import concurrent.futures
             t1 = time.time()
+            chars = None
+            if a.languages != "all":
+                chars = fontconv.charset(src, files, set(a.languages.split(",")))
+                print(f"  fonts: {len(chars)} characters for {a.languages}", flush=True)
             with concurrent.futures.ThreadPoolExecutor(max(1, min(jobs, 4))) as ex:
-                futs = {ex.submit(fontconv.export, godot, raw): p for p, raw in font_jobs}
+                futs = {ex.submit(fontconv.export, godot, raw, chars): p for p, raw in font_jobs}
                 for fut in concurrent.futures.as_completed(futs):
                     p = futs[fut]
                     try:
@@ -556,7 +563,10 @@ def main():
     b.add_argument("out")
     b.add_argument("--scale", type=float, default=CONSOLE_SCALE)
     b.add_argument("--only", action="append", help="res path glob (repeatable), e.g. 'images/cards/*'")
-    b.add_argument("--jobs", type=int)
+    b.add_argument("--jobs", type=int, help="texture worker processes (default: cores - 1, at most 6)")
+    b.add_argument("--languages", default="eng",
+                   help="comma-separated localization folders whose characters the fonts keep "
+                        "(default eng; 'all' keeps every glyph: gigabytes for the CJK fonts)")
     b.add_argument("--godot", help="Godot 4.5.1 binary for the font step")
     sub.add_parser("fetch-godot")
     a = ap.parse_args()

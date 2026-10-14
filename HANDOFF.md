@@ -128,8 +128,9 @@ holds, for the converter:
   transform, physics) and clipping as the survey shows the creatures need
   them; the game's creature scripts (NCreatureVisuals) on top.
 - dark_blur and other screen-texture shaders.
-- Font pages: subset glyphs to the selected language's characters and
-  repack (today ~100 MB uncompressed for the bundle's fonts).
+- Font pages: glyphs are now limited to the chosen languages' characters
+  (`build --languages`, default eng: ~110 characters, ~5 MB of MSDF pages
+  per font). Still to do: repack Godot's 512x512 pages tightly.
 - Presentation of real screens: ports of the game's node scripts
   (NMainMenu, NCombatRoom, NCard, ...) driven by the logic protocol.
 - M2 runner: `xdk/logic_runner` from `out/logic/c`.

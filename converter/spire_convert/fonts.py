@@ -13,6 +13,9 @@ Pack entries per font (name = the font's res path, e.g. fonts/kreon_bold.ttf):
     <name>#page<N>  type texture: ARGB8, flag TEX_FLAG_DATA (MSDF data:
                     filtered as is, never premultiplied)
 Godot's default theme font goes in as godot/OpenSans_SemiBold.ttf.
+
+Only the characters the chosen languages need are exported (charset()):
+the game's CJK fonts hold tens of thousands of glyphs, gigabytes as MSDF.
 """
 import json
 import os
@@ -75,9 +78,47 @@ def fetch_godot():
     return find_godot()
 
 
-def export(godot, fontdata_bytes, timeout=1800):
-    """Runs font_export.gd on a .fontdata (bytes) or "default".
-    Returns (info dict, [RGBA arrays of the pages])."""
+# Always kept, whatever the languages' text holds: printable ASCII (seeds,
+# numbers, typed text) and the replacement character.
+BASE_RANGES = [(0x20, 0x7E), (0xFFFD, 0xFFFD)]
+
+
+def _strings(v, out):
+    if isinstance(v, str):
+        out.append(v)
+    elif isinstance(v, dict):
+        for x in v.values():
+            _strings(x, out)
+    elif isinstance(v, list):
+        for x in v:
+            _strings(x, out)
+
+
+def charset(src, files, languages):
+    """The characters to export: the base ranges, every string of the
+    languages' localization tables, and the text of scenes and resources
+    (labels set in the editor, the language picker's native names)."""
+    chars = set()
+    for a, b in BASE_RANGES:
+        chars.update(chr(c) for c in range(a, b + 1))
+    texts = []
+    for f in files:
+        try:
+            if f.startswith("localization/") and f.endswith(".json") and f.split("/")[1] in languages:
+                _strings(json.loads(src.read(f).decode("utf-8")), texts)
+            elif f.endswith((".tscn", ".tres")):
+                texts.append(src.read(f).decode("utf-8", "replace"))
+        except Exception:  # noqa: BLE001
+            continue
+    for t in texts:
+        chars.update(t)
+    return "".join(sorted(c for c in chars if c >= " "))
+
+
+def export(godot, fontdata_bytes, chars=None, timeout=1800):
+    """Runs font_export.gd on a .fontdata (bytes) or "default"; chars: the
+    characters to keep (None: all). Returns (info dict, [RGBA arrays of the
+    pages])."""
     work = tempfile.mkdtemp(prefix="spire_font_")
     try:
         with open(os.path.join(work, "project.godot"), "w") as f:
@@ -91,6 +132,10 @@ def export(godot, fontdata_bytes, timeout=1800):
             with open(src, "wb") as f:
                 f.write(fontdata_bytes)
         cmd = [godot, "--headless", "--path", work, "--script", os.path.abspath(SCRIPT), "--", src, out]
+        if chars is not None:
+            with open(os.path.join(work, "chars.txt"), "w", encoding="utf-8") as f:
+                f.write(chars)
+            cmd.append(os.path.join(work, "chars.txt"))
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         info_path = os.path.join(out, "font.json")
         if r.returncode != 0 or not os.path.isfile(info_path):
