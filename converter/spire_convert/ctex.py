@@ -25,12 +25,19 @@ FLAG_HAS_MIPMAPS = 1 << 23
 
 # Image::Format values used by imported 2D textures.
 FMT_L8, FMT_LA8, FMT_R8, FMT_RG8, FMT_RGB8, FMT_RGBA8, FMT_RGBA4444, FMT_RGB565 = range(8)
+# Float formats (32-bit, then half): 1-4 channels. The game has one
+# (card_frame_sdf.exr, RGBAH); values are taken as 0..1 and stored 8-bit.
+FMT_RF, FMT_RGF, FMT_RGBF, FMT_RGBAF, FMT_RH, FMT_RGH, FMT_RGBH, FMT_RGBAH = range(8, 16)
+_FLOAT_FORMATS = {FMT_RF: ("<f4", 1), FMT_RGF: ("<f4", 2), FMT_RGBF: ("<f4", 3), FMT_RGBAF: ("<f4", 4),
+                  FMT_RH: ("<f2", 1), FMT_RGH: ("<f2", 2), FMT_RGBH: ("<f2", 3), FMT_RGBAH: ("<f2", 4)}
 FMT_DXT1, FMT_DXT3, FMT_DXT5, FMT_RGTC_R, FMT_RGTC_RG, FMT_BPTC_RGBA = 17, 18, 19, 20, 21, 22
 
 FORMAT_NAMES = {
     FMT_L8: "L8", FMT_LA8: "LA8", FMT_R8: "R8", FMT_RG8: "RG8", FMT_RGB8: "RGB8", FMT_RGBA8: "RGBA8",
     FMT_RGBA4444: "RGBA4444", FMT_RGB565: "RGB565", FMT_DXT1: "DXT1", FMT_DXT3: "DXT3", FMT_DXT5: "DXT5",
     FMT_RGTC_R: "BC4", FMT_RGTC_RG: "BC5", FMT_BPTC_RGBA: "BC7",
+    FMT_RF: "RF", FMT_RGF: "RGF", FMT_RGBF: "RGBF", FMT_RGBAF: "RGBAF", FMT_RH: "RH", FMT_RGH: "RGH",
+    FMT_RGBH: "RGBH", FMT_RGBAH: "RGBAH",
 }
 # Bytes per pixel (plain formats) or per 4x4 block (block formats).
 _PIXEL_BYTES = {FMT_L8: 1, FMT_LA8: 2, FMT_R8: 1, FMT_RG8: 2, FMT_RGB8: 3, FMT_RGBA8: 4,
@@ -50,6 +57,9 @@ def level_size(fmt, w, h):
     """Bytes of one level of a raw image (block formats round up to 4x4)."""
     if fmt in _PIXEL_BYTES:
         return w * h * _PIXEL_BYTES[fmt]
+    if fmt in _FLOAT_FORMATS:
+        dt, n = _FLOAT_FORMATS[fmt]
+        return w * h * n * int(dt[2])
     if fmt in _BLOCK_BYTES:
         return ((w + 3) // 4) * ((h + 3) // 4) * _BLOCK_BYTES[fmt]
     raise CtexError(f"unsupported image format {fmt}")
@@ -130,6 +140,17 @@ def _decode_raw(fmt, w, h, data):
         if fmt == FMT_RGTC_R:
             rgba = np.dstack([rgba[..., 0], rgba[..., 0] * 0, rgba[..., 0] * 0, np.full_like(rgba[..., 0], 255)])
         return rgba
+    if fmt in _FLOAT_FORMATS:
+        dt, n = _FLOAT_FORMATS[fmt]
+        f = np.frombuffer(data, dt, w * h * n).reshape(h, w, n).astype(np.float32)
+        v = np.clip(np.nan_to_num(f) * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        if n == 1:  # R as Godot shows it: red only
+            return np.dstack([v[..., 0], v[..., 0] * 0, v[..., 0] * 0, np.full((h, w), 255, np.uint8)])
+        if n == 2:
+            return np.dstack([v, np.zeros((h, w), np.uint8), np.full((h, w), 255, np.uint8)])
+        if n == 3:
+            return np.dstack([v, np.full((h, w), 255, np.uint8)])
+        return v
     a = np.frombuffer(data, np.uint8)
     if fmt == FMT_RGBA8:
         return a.reshape(h, w, 4)

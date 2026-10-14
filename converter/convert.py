@@ -484,8 +484,19 @@ def cmd_build(a):
             if a.languages != "all":
                 chars = fontconv.charset(src, files, set(a.languages.split(",")))
                 print(f"  fonts: {len(chars)} characters for {a.languages}", flush=True)
+            # Fonts in a language's folder (fonts/jpn/..., fonts/rus/...) serve
+            # that language only: no glyphs unless it is chosen.
+            all_langs = {f.split("/")[1] for f in files if f.startswith("localization/") and f.count("/") >= 2}
+
+            def font_chars(p):
+                parts = p.split("/")
+                if chars is not None and len(parts) > 2 and parts[1] in all_langs \
+                        and parts[1] not in a.languages.split(","):
+                    return ""
+                return chars
+
             with concurrent.futures.ThreadPoolExecutor(max(1, min(jobs, 4))) as ex:
-                futs = {ex.submit(fontconv.export, godot, raw, chars): p for p, raw in font_jobs}
+                futs = {ex.submit(fontconv.export, godot, raw, font_chars(p)): p for p, raw in font_jobs}
                 for fut in concurrent.futures.as_completed(futs):
                     p = futs[fut]
                     try:
