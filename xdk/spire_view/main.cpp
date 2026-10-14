@@ -51,6 +51,9 @@ static void flush_log() {
     CloseHandle(h);
 }
 
+/* Engine warnings (missing resources, scripts, Spine data) into the log. */
+static void engine_log(const char* line) { logf("%s", line); }
+
 static double now_ms() {
     LARGE_INTEGER f, c;
     QueryPerformanceFrequency(&f);
@@ -75,10 +78,14 @@ static View load_scene(SceneLibrary& lib, int idx) {
     v.tree->layout();
     v.load_ms = now_ms() - t0;
     logf("%s: instantiated and laid out in %.1f ms", SCENES[idx], v.load_ms);
+    /* What the engine skipped so far (cumulative over the scenes). */
+    for (std::map<std::string, int>::const_iterator it = lib.unsupported.begin(); it != lib.unsupported.end(); ++it)
+        logf("  not drawn / unsupported: %s x%d", it->first.c_str(), it->second);
     return v;
 }
 
 void __cdecl main() {
+    set_log_sink(engine_log);
     logf("spire_view starting");
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
     D3DPRESENT_PARAMETERS pp;

@@ -85,7 +85,11 @@ int main(int argc, char** argv) {
     tree.root()->add_child(scene);
     tree.layout();
     /* Godot's reference render is taken on its 5th frame (tools/godot/shot.gd). */
-    for (int f = 0; f < frames; ++f) tree.process(1.0 / 60.0);
+    /* As the console loop does: process, then one layout pass, per frame. */
+    for (int f = 0; f < frames; ++f) {
+        tree.process(1.0 / 60.0);
+        tree.layout(1);
+    }
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
     /* project.binary: rendering/environment/defaults/default_clear_color */

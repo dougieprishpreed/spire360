@@ -197,21 +197,36 @@ std::string format(const char* fmt, ...) {
     return buf;
 }
 
+static LogSink g_log_sink = NULL;
+
+void set_log_sink(LogSink sink) { g_log_sink = sink; }
+
+static void log_line(const char* prefix, const char* fmt, va_list ap) {
+    char buf[1024];
+    size_t n = strlen(prefix);
+    memcpy(buf, prefix, n);
+    vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
+    buf[sizeof(buf) - 1] = 0;
+    if (g_log_sink) {
+        g_log_sink(buf);
+    } else {
+        fputs(buf, stderr);
+        fputc('\n', stderr);
+    }
+}
+
 void log_info(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    log_line("", fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
 }
 
 void log_warn(const char* fmt, ...) {
     va_list ap;
-    fputs("[warn] ", stderr);
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    log_line("[warn] ", fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
 }
 
 } /* namespace spire */

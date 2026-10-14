@@ -42,6 +42,8 @@ def _value(v, ext_names):
         name, type_, path = ext_names.get(v.id, (None, None, None))
         if name is None:
             return {"ext": None, "type": type_, "path": path}  # not in the pack (scripts): keep the res:// path
+        if type_ == "Script":  # the engine attaches script ports by res:// path
+            return {"ext": name, "type": type_, "path": path}
         return {"ext": name, "type": type_}
     if isinstance(v, variant.Ctor):
         return {"t": v.name, "v": [_value(a, ext_names) for a in v.args]}

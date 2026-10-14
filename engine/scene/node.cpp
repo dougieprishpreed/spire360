@@ -230,7 +230,12 @@ bool Node::set(const std::string& key, const Json& v, const PropCtx& ctx) {
         return true;
     }
     if (key == "script") {
-        script = v.is_object() && v.has("path") ? v["path"].str() : std::string();
+        /* {"ext": null, "path": "res://..."} when the script is not in the
+         * pack; packs from a .pck that holds the scripts name the entry
+         * instead ({"ext": "src/....cs"}): the same res:// path. */
+        script.clear();
+        if (v.is_object() && v["path"].is_string()) script = v["path"].str();
+        else if (v.is_object() && v["ext"].is_string()) script = "res://" + v["ext"].str();
         return true;
     }
     return false;

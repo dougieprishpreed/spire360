@@ -92,6 +92,10 @@ struct Xform2D {
 std::string format(const char* fmt, ...);
 void log_info(const char* fmt, ...);
 void log_warn(const char* fmt, ...);
+/* Where log lines go (one line, no newline); NULL: stderr. The console
+ * apps send them to their log file. */
+typedef void (*LogSink)(const char* line);
+void set_log_sink(LogSink sink);
 
 } /* namespace spire */
 
