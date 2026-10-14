@@ -170,3 +170,16 @@ runtime of our own instead: a reader for the 4.2 binary skeleton and the
 atlas, and the animation, constraint and attachment evaluation the game's
 skeletons use, written from the format's public description and checked
 against the game by eye. No Esoteric Software code goes into the repository.
+
+## D13. Stay on the XDK; revisit xsdk when it matures
+
+xsdk (github.com/xenosworks/xsdk: GCC 15, its own Xenos GPU layer and a
+Vulkan subset, no Microsoft code) would let the XEX be built in the cloud and
+by anyone with free tools. In October 2026 it is days into its console
+milestones and has no license file, so the port stays on the XDK. The switch
+stays cheap: the logic's C was already proven with GCC on big-endian
+PowerPC, and the engine is portable C++ behind a small renderer and platform
+layer; only those two would be rewritten.
+
+Would change if: xsdk publishes a license and stabilises, or the XDK path
+hits a wall.
