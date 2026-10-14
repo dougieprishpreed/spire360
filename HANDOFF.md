@@ -114,8 +114,13 @@ holds, for the converter:
 
 ## Waiting on the user
 
-1. `xdk\build.cmd spire_view` with a console-scale pack (see xdk/README.md),
-   run in Xenia: screenshot + `spire360_view.txt`.
+1. Done 2026-10-14: spire_view built clean and drew all 8 scenes in Xenia
+   (per-frame CPU 0.4-2.4 ms, main menu 16.6 ms, likely vsync-bound). Found:
+   no game scripts attached with a full-.pck pack (fixed, 59dc49a); output
+   ~13 levels darker than the PC render, even the clear colour (display
+   gamma in Xenia? check on hardware). logic_runner hit C1002 on logic.c
+   (fixed by tools/w2c2_fix_tables.py, c918979; 10 seeded runs identical).
+   Next: rebuild both and rerun.
 2. A new bundle (`convert.py bundle`, now with the Spine page images), a
    new `convert.py survey` report (it now lists the Spine features of all
    164 skeletons), and a 1920x1080 screenshot of the game's main menu (the
