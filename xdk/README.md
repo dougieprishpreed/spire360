@@ -85,6 +85,11 @@ Then:
 xdk\build.cmd logic_runner
 ```
 
+The logic links without debug information or identical-COMDAT folding
+(the 32-bit XDK linker runs out of memory otherwise: LNK1000). `build.cmd`
+builds logic_runner incrementally, so a failed link does not cost the hour
+of compiling again; `set SPIRE_REBUILD=1` first to start from scratch.
+
 Copy the localization tables next to the XEX:
 `<xex folder>\spire360_logic\data\localization\eng\*.json` (from `data\localization`).
 It plays a seeded self-play session and writes the timing report (start-up,

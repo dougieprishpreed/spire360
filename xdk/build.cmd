@@ -10,6 +10,9 @@ rem   xdk\build.cmd            hello, selftest, bench, probe
 rem   xdk\build.cmd bigcode    the 64 MB link test (slow)
 rem   xdk\build.cmd hello      one project
 rem   xdk\build.cmd spire_view the scene viewer (engine + D3D9 renderer)
+rem   xdk\build.cmd logic_runner  the game logic (M2). Incremental: an
+rem                            unchanged compile is kept (it takes over an
+rem                            hour); set SPIRE_REBUILD=1 to start over.
 rem
 rem Logs: xdk\build_logs\<project>.log  (send these if anything fails)
 setlocal enabledelayedexpansion
@@ -45,8 +48,10 @@ for %%P in (%PROJECTS%) do (
         python "%XDKDIR%bigcode\gen_bigcode.py" --mb 64
       )
     )
-    echo Building %%P...
-    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:Rebuild /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal;PerformanceSummary"
+    set TARGET=Rebuild
+    if /i "%%P"=="logic_runner" if not "%SPIRE_REBUILD%"=="1" set TARGET=Build
+    echo Building %%P ^(!TARGET!^)...
+    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:!TARGET! /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal;PerformanceSummary"
     if errorlevel 1 (set SUMMARY=!SUMMARY! %%P:FAILED) else (set SUMMARY=!SUMMARY! %%P:ok)
   )
 )

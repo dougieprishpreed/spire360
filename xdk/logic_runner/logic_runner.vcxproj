@@ -30,6 +30,14 @@
     <ClCompile>
       <AdditionalIncludeDirectories>.;$(SpireRoot)out\logic\c;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <!-- The logic is ~100 MB of PowerPC code: past what the 32-bit XDK
+         linker can hold with a debug image and identical-COMDAT folding
+         (LNK1000 out of memory in IMAGE::BuildImage). Linker-only settings,
+         so changing them relinks without recompiling. -->
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\common\module_main.c" />
