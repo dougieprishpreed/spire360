@@ -11,6 +11,7 @@
  * --scale 1 renders at the design size (1920x1080) for diffs against a
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
+#include "../../engine/game/combat_screen.h"
 #include "../../engine/game/game.h"
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
@@ -95,7 +96,26 @@ int main(int argc, char** argv) {
     Node* scene = NULL;
     for (int i = 4; i + 2 < argc; ++i)
         if (strcmp(argv[i], "--text") == 0) scene = text_scene(lib, argv[i + 1], atoi(argv[i + 2]), argv[2], &design);
-    if (!scene) scene = lib.instantiate(argv[2], &err);
+    /* A decision JSON (one line of the logic's output): its screen. */
+    size_t alen = strlen(argv[2]);
+    if (!scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
+        FILE* jf = fopen(argv[2], "rb");
+        std::string text;
+        if (jf) {
+            char buf[65536];
+            size_t got;
+            while ((got = fread(buf, 1, sizeof(buf), jf)) > 0) text.append(buf, got);
+            fclose(jf);
+        }
+        Json d = Json::parse(text.c_str(), text.size(), &err);
+        if (d["decision"].str() == "combat_play") {
+            CombatScreen cs(&lib);
+            scene = cs.build(d, &err);
+        } else if (err.empty()) {
+            err = "no screen for decision " + d["decision"].str();
+        }
+    }
+    if (!scene && err.empty()) scene = lib.instantiate(argv[2], &err);
     if (!scene) {
         fprintf(stderr, "%s\n", err.c_str());
         return 1;
