@@ -37,6 +37,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem Files removed from the repository that an older copy updated in place
+rem may still hold (the projects compile every .cpp in engine\*).
+for %%F in (engine\spine\spine.cpp) do (
+  if exist "%XDKDIR%..\%%F" (
+    echo Removing %%F ^(from an older version, no longer used^)
+    del "%XDKDIR%..\%%F"
+  )
+)
+
 set PROJECTS=%*
 if "%PROJECTS%"=="" set PROJECTS=hello selftest bench probe
 
