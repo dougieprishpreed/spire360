@@ -119,20 +119,17 @@ holds, for the converter:
 
 ## Waiting on the user
 
-1. Done 2026-10-14: spire_view built clean and drew all 8 scenes in Xenia
-   (per-frame CPU 0.4-2.4 ms, main menu 16.6 ms, likely vsync-bound). Found:
-   no game scripts attached with a full-.pck pack (fixed, 59dc49a); output
-   ~13 levels darker than the PC render, even the clear colour (display
-   gamma in Xenia? check on hardware). logic_runner hit C1002 on logic.c
-   (fixed by tools/w2c2_fix_tables.py, c918979; 10 seeded runs identical).
-   Rerun 2026-10-15: main menu animates (Spine) on the console; logic_runner
-   passes (see M2). The darker output in Xenia fits (x - 16) * 1.07 (black
-   level), not our renderer: the PC render matches the game.
-2. A new bundle (`convert.py bundle`, now with the Spine page images), a
-   new `convert.py survey` report (it now lists the Spine features of all
-   164 skeletons), and a 1920x1080 screenshot of the game's main menu (the
-   reference for the Spine runtime, by eye).
-3. Later: `xdk\build.cmd logic_runner` in Xenia (M2), hardware runs.
+1. (2026-10-15) A bundle for the combat UI, hand, intents and powers
+   (globs: scenes/combat|cards|ui/*.tscn, intent/power/controller/card
+   atlases, materials/cards|ui, sprite_fonts, card_template).
+2. spire_view rebuilt and run in Xenia (checks the D3D9 canvas-group code:
+   render target on PC D3D9, EDRAM surface + Resolve on the 360).
+3. Logic rebuild (protocol changed) and `xdk\build.cmd spire360` (first
+   build of logic_lib takes over an hour); run with out\ copied to
+   game:\spire\. Send game:\spire360.txt and screenshots.
+
+Earlier results: spire_view drew all scenes in Xenia (output ~13 levels
+darker: Xenia's black level, not ours); logic_runner passed M2.
 
 ## Next (agent)
 
@@ -177,6 +174,16 @@ holds, for the converter:
   sprite, label), powers (visible, counter, display_amount, amount_color),
   creatures (hp_display, poison_next_turn, hp_bar_reduction,
   health_bar_visible). The stand-in Color(string) parses hex now.
+- Game loop: engine/game/logic_link (SrtLink in-process, PipeLink child
+  process), game_client (decisions -> screens, choices -> commands,
+  auto-play), tools/viewer/spire_play (headless PC game with the real
+  logic, PNG per screen), xdk/spire360 (the console program) and
+  xdk/logic_lib (the logic compiled once).
+- Protocol: combat UI fields (exhaust_pile_count, stars, turn_number),
+  card view fields (title, description_bbcode, portrait, pools, cost
+  display/colours, glow). Specs from the game's scripts are summarised in
+  the scratchpad (spec_combat_ui.md, spec_hand.md); key numbers belong in
+  the code comments when ported.
 - Next: combat UI overlay (energy, piles, end turn, controller glyphs),
   hand and cards, intents and power icons (need a bundle with
   scenes/combat/*.tscn, scenes/cards/*.tscn, scenes/ui/*.tscn and the
