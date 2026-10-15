@@ -107,12 +107,14 @@ holds, for the converter:
   and dark_blur (screen-texture blur).
 - `spine/`: our own Spine 4.2 runtime (DECISIONS D12): bones (all inherit
   modes), region and mesh attachments (weighted, deform), skins, curve
-  timelines, draw order, tracks with crossfades. `scene/spine_sprite` is
-  the SpineSprite node; `game/anim_scripts` ports NSpineAutoPlayer. Not
-  yet: IK / transform / path / physics constraints, clipping, sequences,
-  dark colour (reported per scene). Checked on the menu's 3 skeletons with
-  stand-in page images only (the bundle had no page images; `bundle` now
-  includes them).
+  timelines, draw order, tracks with crossfades, IK (1 and 2 bones),
+  transform (local/world, absolute/relative), path and physics constraints
+  with Spine's update order, clipping, sequences. The pack holds skeletons
+  in our binary form ("SPB1", spine.py engine_binary; no JSON parse on the
+  console). `scene/spine_sprite` is the SpineSprite node;
+  `game/anim_scripts` ports NSpineAutoPlayer. Not yet: dark-colour tint,
+  screen blend. Matches the game on the main menu; the constraints still
+  need checking against creatures (a creature bundle).
 - `xdk/spire_view`: the engine on the console (D3D9, 1280x720).
 
 ## Waiting on the user

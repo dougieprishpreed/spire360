@@ -23,19 +23,20 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
     tried_ = true;
     if (!lib) return NULL;
     std::string err;
-    Json atlas_doc, skel_doc;
+    Json atlas_doc;
     if (!read_json(lib->pack(), atlas_path, atlas_doc, &err) || !atlas_.load(atlas_doc, &err)) {
         log_warn("spine atlas %s: %s", atlas_path.c_str(), err.c_str());
         lib->note("spine atlas " + atlas_path);
         return NULL;
     }
-    if (!read_json(lib->pack(), skeleton_path, skel_doc, &err)) {
-        log_warn("spine skeleton %s: %s", skeleton_path.c_str(), err.c_str());
+    std::vector<u8> raw;
+    if (!lib->pack() || !lib->pack()->read(skeleton_path.c_str(), raw) || raw.empty()) {
+        log_warn("spine skeleton %s: not in the pack", skeleton_path.c_str());
         lib->note("spine skeleton " + skeleton_path);
         return NULL;
     }
     SpSkeletonData* d = new SpSkeletonData();
-    if (!d->load(skel_doc, &atlas_, &err)) {
+    if (!d->load(&raw[0], raw.size(), &atlas_, &err)) {
         log_warn("spine skeleton %s: %s", skeleton_path.c_str(), err.c_str());
         lib->note("spine skeleton " + skeleton_path);
         delete d;
@@ -79,9 +80,8 @@ bool SpineSprite::ensure() {
         failed_ = true;
         return false;
     }
-    skel_ = new SpSkeleton(d);
-    skel_->scale_y = -1.0f; /* Spine is y-up */
-    skel_->update_world_transform();
+    skel_ = new SpSkeleton(d); /* y-down, like spine-godot */
+    skel_->update_world_transform(SP_PHYSICS_RESET);
     return true;
 }
 
@@ -99,9 +99,11 @@ bool SpineSprite::set_animation(const std::string& name, bool loop, int track) {
 
 void SpineSprite::process(double dt) {
     if (!ensure()) return;
-    state_.update((float)dt * time_scale);
+    float d = (float)dt * time_scale;
+    state_.update(d);
     state_.apply(*skel_);
-    skel_->update_world_transform();
+    skel_->update(d);
+    skel_->update_world_transform(SP_PHYSICS_UPDATE);
 }
 
 void SpineSprite::draw(Canvas& c) {
@@ -110,34 +112,64 @@ void SpineSprite::draw(Canvas& c) {
     const SpSkeleton& s = *skel_;
     static const int QUAD[6] = { 0, 1, 2, 2, 3, 0 };
     for (size_t n = 0; n < s.draw_order.size(); ++n) {
-        const SpSlot& slot = s.slots[s.draw_order[n]];
+        int si = s.draw_order[n];
+        const SpSlot& slot = s.slots[si];
         const SpAttachment* a = slot.attachment;
-        if (!a || (a->type != SP_ATT_REGION && a->type != SP_ATT_MESH) || !a->region) continue;
-        if (!s.bones[slot.data->bone].active) continue;
+        if (!s.bones[slot.data->bone].active) {
+            clipper_.end_slot(si);
+            continue;
+        }
+        if (a && a->type == SP_ATT_CLIPPING) {
+            clipper_.start(s, slot, *a);
+            continue;
+        }
+        if (!a || (a->type != SP_ATT_REGION && a->type != SP_ATT_MESH)) {
+            clipper_.end_slot(si);
+            continue;
+        }
+        int frame = a->frame(slot.sequence_index);
+        const SpAtlasRegion* region = frame < (int)a->regions.size() ? a->regions[frame] : NULL;
         Color col = s.color * slot.color * a->color;
-        if (col.a <= 0) continue;
-        ImageTextureRes* img = data_res->page(a->region->page);
-        if (!img) continue;
+        ImageTextureRes* img = region ? data_res->page(region->page) : NULL;
+        if (!img || col.a <= 0) {
+            clipper_.end_slot(si);
+            continue;
+        }
         s.world_vertices(slot, world_);
+        const std::vector<float>& uvs = a->frame_uvs[frame];
         size_t nv = world_.size() / 2;
-        if (a->uvs.size() < nv * 2) continue;
+        if (uvs.size() < nv * 2) {
+            clipper_.end_slot(si);
+            continue;
+        }
+        if (a->type == SP_ATT_REGION) idx_.assign(QUAD, QUAD + 6);
+        else idx_ = a->triangles;
+        const std::vector<float>* pos = &world_;
+        const std::vector<float>* uv = &uvs;
+        if (clipper_.active()) {
+            clipper_.clip(world_, uvs, idx_, cpos_, cuv_, ctris_);
+            pos = &cpos_;
+            uv = &cuv_;
+            idx_ = ctris_;
+            nv = cpos_.size() / 2;
+        }
         v_.resize(nv);
         uv_.resize(nv);
         col_.assign(nv, col);
         for (size_t i = 0; i < nv; ++i) {
-            v_[i] = Vec2(world_[i * 2], world_[i * 2 + 1]);
-            uv_[i] = Vec2(a->uvs[i * 2], a->uvs[i * 2 + 1]);
+            v_[i] = Vec2((*pos)[i * 2], (*pos)[i * 2 + 1]);
+            uv_[i] = Vec2((*uv)[i * 2], (*uv)[i * 2 + 1]);
         }
-        if (a->type == SP_ATT_REGION) idx_.assign(QUAD, QUAD + 6);
-        else idx_ = a->triangles;
         switch (slot.data->blend) {
         case SP_BLEND_ADDITIVE: c.set_blend(BLEND_ADD); break;
         case SP_BLEND_MULTIPLY: c.set_blend(BLEND_MUL); break;
         case SP_BLEND_SCREEN: c.set_blend(BLEND_ADD); break; /* not exact (no screen blend yet) */
         default: c.set_blend(item_blend); break;
         }
-        c.draw_triangles(img, v_, uv_, col_, idx_);
+        if (!idx_.empty()) c.draw_triangles(img, v_, uv_, col_, idx_);
+        clipper_.end_slot(si);
     }
+    clipper_.end();
     c.set_blend(item_blend);
 }
 

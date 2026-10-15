@@ -57,6 +57,9 @@ private:
     std::vector<Vec2> v_, uv_;
     std::vector<Color> col_;
     std::vector<int> idx_;
+    SpClipper clipper_;
+    std::vector<float> cpos_, cuv_;
+    std::vector<int> ctris_;
 };
 
 } /* namespace spire */

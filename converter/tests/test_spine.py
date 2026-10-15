@@ -146,6 +146,14 @@ class SpineReader(unittest.TestCase):
         self.assertEqual(by["deform"]["vertices"], [[0, 0, 10, 0, 10, 10, 0, 10], [0, 0, 15, 6, 10, 10, 0, 10]])
         self.assertEqual(by["draw_order"]["orders"], [[1, 0]])
 
+    def test_binary_form(self):
+        e = spine.engine_skeleton(spine.read_skeleton(skeleton_bytes()))
+        b = spine.engine_binary(e)
+        self.assertEqual(b[:4], b"SPB1")
+        self.assertEqual(b[-4:], b"END1")
+        # header: version, x, y, width, height, reference scale, bone count
+        self.assertEqual(struct.unpack_from(">I5fI", b, 4), (1, 0.0, 0.0, 100.0, 200.0, 100.0, 3))
+
     def test_atlas(self):
         text = ("page.png\nsize:64,32\nfilter:Linear,Linear\nscale:0.5\n"
                 "a\nbounds:0,0,10,20\noffsets:1,2,12,24\nrotate:90\nb\nbounds:20,0,5,5\n")

@@ -10,7 +10,7 @@
   convert.py texture <pck | dir> <res://path.png> <out.png> [--level N]
       Decodes one texture to a PNG (to check the decoder by eye).
 
-  convert.py bundle <pck> <out.zip> [scene res paths...] [--max-mb 45]
+  convert.py bundle <pck> <out.zip> [scene res paths or globs...] [--max-mb 45]
       A scene and everything it references (recursively: scenes, resources,
       textures with their .import stubs, fonts, Spine data), plus project
       settings and English localization, as a zip laid out like the pack.
@@ -335,6 +335,14 @@ def cmd_bundle(a):
     src = open_source(a.pack)
     res = resources.Resources(src)
     roots = a.scenes or DEFAULT_BUNDLE
+    if any(ch in r for r in roots for ch in "*?["):
+        import fnmatch
+        listing = src.list()
+        expanded = []
+        for r in roots:
+            r = resources.strip_res(r)
+            expanded += sorted(f for f in listing if fnmatch.fnmatchcase(f, r)) if any(ch in r for ch in "*?[") else [r]
+        roots = expanded
     files = dependencies(src, res, roots)
     extra = [f for f in ("project.binary", ".godot/uid_cache.bin") if src.exists(f)]
     extra += [f for f in src.list() if f.startswith("localization/eng/")]
@@ -518,6 +526,8 @@ def cmd_build(a):
                     doc = spinefmt.engine_skeleton(spinefmt.read_skeleton(raw))
                     info = {"bones": len(doc["bones"]), "slots": len(doc["slots"]),
                             "animations": len(doc["animations"])}
+                    add(p, s3p.TYPE_SPINE, spinefmt.engine_binary(doc), info)
+                    continue
                 add(p, s3p.TYPE_SPINE, json.dumps(_round_floats(doc), separators=(",", ":")).encode("utf-8"), info)
             except Exception as e:  # noqa: BLE001
                 report["errors"][p] = f"{type(e).__name__}: {e}"

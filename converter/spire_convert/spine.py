@@ -169,11 +169,8 @@ def read_skeleton(data):
         c["compress"] = bool(f & 4)
         c["stretch"] = bool(f & 8)
         c["uniform"] = bool(f & 16)
-        c["mix"] = 1.0
-        if f & 32:
-            c["mix"] = r.float() if f & 64 else 1.0
-        else:
-            c["mix"] = 0.0 if not (f & 64) else 1.0
+        # Flag 32: a mix; 64: not 1, stored (as the IK timeline's keys).
+        c["mix"] = (r.float() if f & 64 else 1.0) if f & 32 else 0.0
         c["softness"] = r.float() if f & 128 else 0.0
         iks.append(c)
     sk["ik"] = iks
@@ -805,3 +802,222 @@ def page_textures(spatlas_data, atlas_path):
     """Pack paths of an imported atlas's page images (for the bundle)."""
     base = atlas_path.rsplit("/", 1)[0] if "/" in atlas_path else ""
     return [p["texture"] for p in engine_atlas(read_spatlas(spatlas_data), base)["pages"]]
+
+
+# ---- binary engine form (what the pack holds) ----
+#
+# The engine reads this straight into its runtime structures
+# (engine/spine/spine.cpp, SpSkeletonData::load): no JSON parse, no DOM.
+# Big-endian. Strings: i32 byte length (-1 = none) + UTF-8. Lists: u32 count
+# + items. Curves: per key but the last, u8 0 linear / 1 stepped / 2 bezier
+# + 4 floats per value.
+
+BIN_MAGIC = b"SPB1"
+ATT_TYPE_IDS = {"region": 0, "mesh": 1, "boundingbox": 2, "path": 3, "point": 4, "clipping": 5}
+# Must match SpTimelineType in engine/spine/spine.h.
+TIMELINE_IDS = {
+    "rotate": 0, "translate": 1, "translatex": 2, "translatey": 3, "scale": 4, "scalex": 5, "scaley": 6,
+    "shear": 7, "shearx": 8, "sheary": 9, "inherit": 10,
+    "attachment": 11, "rgba": 12, "rgb": 13, "alpha": 14, "rgba2": 15, "rgb2": 16,
+    "deform": 17, "sequence": 18, "draw_order": 19, "event": 20,
+    "ik": 21, "transform": 22, "path_position": 23, "path_spacing": 24, "path_mix": 25,
+    "physics_inertia": 26, "physics_strength": 27, "physics_damping": 28, "physics_mass": 29,
+    "physics_wind": 30, "physics_gravity": 31, "physics_mix": 32, "physics_reset": 33,
+}
+CURVE_VALUES = {"rotate": 1, "translate": 2, "translatex": 1, "translatey": 1, "scale": 2, "scalex": 1,
+                "scaley": 1, "shear": 2, "shearx": 1, "sheary": 1, "rgba": 4, "rgb": 3, "alpha": 1, "rgba2": 7,
+                "rgb2": 6, "transform": 6, "path_position": 1, "path_spacing": 1, "path_mix": 3}
+
+
+class _W:
+    def __init__(self):
+        self.b = bytearray()
+
+    def u8(self, v):
+        self.b += struct.pack(">B", int(v) & 255)
+
+    def i32(self, v):
+        self.b += struct.pack(">i", int(v))
+
+    def u32(self, v):
+        self.b += struct.pack(">I", int(v))
+
+    def f32(self, *vs):
+        for v in vs:
+            self.b += struct.pack(">f", float(v))
+
+    def str(self, s):
+        if s is None:
+            self.i32(-1)
+        else:
+            e = s.encode("utf-8")
+            self.i32(len(e))
+            self.b += e
+
+    def ints(self, vs):
+        self.u32(len(vs))
+        self.b += struct.pack(f">{len(vs)}i", *[int(v) for v in vs])
+
+    def floats(self, vs):
+        self.u32(len(vs))
+        self.b += struct.pack(f">{len(vs)}f", *[float(v) for v in vs])
+
+    def curves(self, curves, values):
+        self.u32(len(curves))
+        for c in curves:
+            if isinstance(c, list):
+                self.u8(2)
+                n = 4 * max(values, 1)
+                self.f32(*(list(c) + [0.0] * n)[:n])
+            else:
+                self.u8(1 if c == 1 else 0)
+
+
+def _attachment(w, a):
+    t = ATT_TYPE_IDS.get(a["type"], 255)
+    w.u8(t)
+    w.i32(a["slot"])
+    w.str(a["key"])
+    w.str(a["name"])
+    w.str(a.get("path", a["name"]))
+    w.str(a.get("timeline_key", a["key"]))
+    w.f32(*a.get("color", [1, 1, 1, 1]))
+    seq = a.get("sequence")
+    w.u8(1 if seq else 0)
+    if seq:
+        w.i32(seq["count"]); w.i32(seq["start"]); w.i32(seq["digits"]); w.i32(seq["setup"])
+    if t == 0:
+        w.f32(a["x"], a["y"], a["rotation"], a["scale_x"], a["scale_y"], a["width"], a["height"])
+    elif t == 4:
+        w.f32(a["rotation"], a["x"], a["y"])
+    elif t in (1, 2, 3, 5):
+        w.i32(a.get("vertex_count", 0))
+        if "bones" in a:  # weighted: [count, (bone, x, y, w) * count] per vertex
+            ints, fl, b, i = [], [], a["bones"], 0
+            while i < len(b):
+                k = int(b[i]); ints.append(k); i += 1
+                for _ in range(k):
+                    ints.append(int(b[i])); fl += [b[i + 1], b[i + 2], b[i + 3]]; i += 4
+            w.ints(ints); w.floats(fl)
+        else:
+            w.ints([]); w.floats(a.get("vertices", []))
+        if t == 1:
+            w.floats(a["uvs"]); w.ints(a["triangles"]); w.i32(a["hull"])
+        elif t == 3:
+            w.u8(a["closed"]); w.u8(a["constant_speed"]); w.floats(a["lengths"])
+        elif t == 5:
+            w.i32(a["end_slot"])
+
+
+def _timeline(w, t):
+    typ = t["type"]
+    w.u8(TIMELINE_IDS[typ])
+    if typ in CURVE_VALUES:
+        target = t.get("bone", t.get("slot", t.get("constraint", 0)))
+        w.i32(target)
+        w.floats(t["frames"])
+        w.curves(t["curves"], CURVE_VALUES[typ])
+    elif typ == "attachment":
+        w.i32(t["slot"]); w.floats(t["times"])
+        w.u32(len(t["names"]))
+        for n in t["names"]:
+            w.str(n)
+    elif typ == "inherit":
+        w.i32(t["bone"]); w.floats(t["times"]); w.ints(t["modes"])
+    elif typ == "deform":
+        w.i32(t["slot"]); w.i32(t["skin"]); w.str(t["attachment"]); w.floats(t["times"])
+        w.u32(len(t["vertices"]))
+        for v in t["vertices"]:
+            w.floats(v)
+        w.curves(t["curves"], 1)
+    elif typ == "sequence":
+        w.i32(t["slot"]); w.i32(t["skin"]); w.str(t["attachment"]); w.floats(t["frames"])
+    elif typ == "draw_order":
+        w.i32(0); w.floats(t["times"])
+        w.u32(len(t["orders"]))
+        for o in t["orders"]:
+            w.ints(o or [])
+    elif typ == "ik":
+        fr = t["frames"]
+        w.i32(t["constraint"])
+        flat, bend, flags = [], [], []
+        for f in fr:
+            flat += [f["time"], f["mix"], f["softness"]]
+            bend.append(f["bend"])
+            flags.append((1 if f["compress"] else 0) | (2 if f["stretch"] else 0))
+        w.floats(flat); w.ints(bend); w.ints(flags)
+        w.curves([1 if f.get("curve") == "stepped" else (f.get("curve") or 0) for f in fr[:-1]], 2)
+    elif typ.startswith("physics_"):
+        w.i32(t["constraint"])
+        if typ == "physics_reset":
+            w.floats(t["times"])
+        else:
+            w.floats(t["frames"]); w.curves(t["curves"], 1)
+    else:
+        raise SpineError(f"no binary form for timeline {typ}")
+
+
+def engine_binary(e):
+    """The engine form (engine_skeleton()) as the pack's binary skeleton."""
+    w = _W()
+    w.b += BIN_MAGIC
+    w.u32(1)
+    w.f32(e["x"], e["y"], e["width"], e["height"], e.get("reference_scale", 100.0))
+    w.u32(len(e["bones"]))
+    for b in e["bones"]:
+        w.str(b["name"]); w.i32(-1 if b["parent"] is None else b["parent"])
+        w.f32(b["x"], b["y"], b["rotation"], b["scale_x"], b["scale_y"], b["shear_x"], b["shear_y"], b["length"])
+        w.u8(b["inherit"]); w.u8(b["skin_required"])
+    w.u32(len(e["slots"]))
+    for s in e["slots"]:
+        w.str(s["name"]); w.i32(s["bone"]); w.f32(*s["color"])
+        w.u8(1 if "dark" in s else 0)
+        if "dark" in s:
+            w.f32(*s["dark"])
+        w.str(s["attachment"]); w.u8(s["blend"])
+    w.u32(len(e["ik"]))
+    for c in e["ik"]:
+        w.str(c["name"]); w.i32(c["order"]); w.ints(c["bones"]); w.i32(c["target"]); w.i32(c["bend"])
+        w.u8(c["compress"]); w.u8(c["stretch"]); w.u8(c["uniform"]); w.f32(c["mix"], c["softness"])
+        w.u8(c["skin_required"])
+    w.u32(len(e["transform"]))
+    for c in e["transform"]:
+        w.str(c["name"]); w.i32(c["order"]); w.ints(c["bones"]); w.i32(c["target"])
+        w.u8(c["local"]); w.u8(c["relative"])
+        w.f32(c["offset_rotation"], c["offset_x"], c["offset_y"], c["offset_scale_x"], c["offset_scale_y"],
+              c["offset_shear_y"], c["mix_rotate"], c["mix_x"], c["mix_y"], c["mix_scale_x"], c["mix_scale_y"],
+              c["mix_shear_y"])
+        w.u8(c["skin_required"])
+    w.u32(len(e["path"]))
+    for c in e["path"]:
+        w.str(c["name"]); w.i32(c["order"]); w.ints(c["bones"]); w.i32(c["target"])
+        w.u8(c["position_mode"]); w.u8(c["spacing_mode"]); w.u8(c["rotate_mode"])
+        w.f32(c["offset_rotation"], c["position"], c["spacing"], c["mix_rotate"], c["mix_x"], c["mix_y"])
+        w.u8(c["skin_required"])
+    w.u32(len(e["physics"]))
+    for c in e["physics"]:
+        w.str(c["name"]); w.i32(c["order"]); w.i32(c["bone"])
+        w.f32(c["x"], c["y"], c["rotate"], c["scale_x"], c["shear_x"], c["limit"], c["step"], c["inertia"],
+              c["strength"], c["damping"], c["mass_inverse"], c["wind"], c["gravity"], c["mix"])
+        flags = 0
+        for i, k in enumerate(("inertia_global", "strength_global", "damping_global", "mass_global", "wind_global",
+                               "gravity_global", "mix_global")):
+            if c[k]:
+                flags |= 1 << i
+        w.u8(flags); w.u8(c["skin_required"])
+    w.u32(len(e["skins"]))
+    for s in e["skins"]:
+        w.str(s["name"])
+        for k in ("bones", "ik", "transform", "path", "physics"):
+            w.ints(s.get(k, []))
+        w.u32(len(s["attachments"]))
+        for a in s["attachments"]:
+            _attachment(w, a)
+    w.u32(len(e["animations"]))
+    for an in e["animations"]:
+        tls = [t for t in an["timelines"] if t["type"] != "event"]
+        w.str(an["name"]); w.f32(an["duration"]); w.u32(len(tls))
+        for t in tls:
+            _timeline(w, t)
+    w.b += b"END1"
+    return bytes(w.b)
