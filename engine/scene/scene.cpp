@@ -316,7 +316,7 @@ ThemeRes* SceneLibrary::build_theme(const Json& p, const SceneFile* ctx) {
 
 /* ---- nodes ---- */
 
-Node* SceneLibrary::create_node(const std::string& type) {
+static Node* new_node(const std::string& type) {
     if (type == "Control") return new Control();
     if (type == "TextureRect") return new TextureRect();
     if (type == "NinePatchRect") return new NinePatchRect();
@@ -343,6 +343,13 @@ Node* SceneLibrary::create_node(const std::string& type) {
     if (godot_is_a(type, "Control")) return new Control();
     if (godot_is_a(type, "Node2D")) return new Node2D();
     return new Node();
+}
+
+Node* SceneLibrary::create_node(const std::string& type) {
+    Node* n = new_node(type);
+    /* The Godot class: theme lookups and scripts go by it. */
+    if (n && n->type.empty()) n->type = type;
+    return n;
 }
 
 static void ready_tree(Node* n) {

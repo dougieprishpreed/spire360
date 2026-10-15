@@ -601,6 +601,20 @@ void Control::add_theme_color_override(const std::string& name, const Color& c) 
     override_values[k] = &j;
 }
 
+void Control::add_theme_font_size_override(const std::string& name, int size) {
+    std::string k = "font_sizes/" + name;
+    Json& j = code_overrides[k];
+    j = Json::make_number(size);
+    override_values[k] = &j;
+}
+
+void Control::add_theme_constant_override(const std::string& name, int value) {
+    std::string k = "constants/" + name;
+    Json& j = code_overrides[k];
+    j = Json::make_number(value);
+    override_values[k] = &j;
+}
+
 bool Control::has_theme_color_override(const char* name) const {
     return override_values.find(std::string("colors/") + name) != override_values.end();
 }

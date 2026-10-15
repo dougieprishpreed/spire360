@@ -1,0 +1,121 @@
+/* spire_play: the whole game on PC, headless. Runs the logic as a child
+ * process (any build that speaks the protocol), shows each decision as the
+ * console would, plays by itself, and saves a PNG of every screen.
+ *
+ *   spire_play <pack.s3p> <out_dir> --logic "dotnet out/logic/jit/Spire.Logic.dll"
+ *              [--character Ironclad] [--seed S] [--steps N] [--scale S] [--auto SEED]
+ *
+ * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision)
+ * per screen, and logic.log (the logic's stderr). The logic's working
+ * directory is ours: give it SPIRE_DATA in the environment for localization. */
+#include "../../engine/core/pack.h"
+#include "../../engine/game/game.h"
+#include "../../engine/game/game_client.h"
+#include "../../engine/game/logic_link.h"
+#include "../../engine/gfx/sw_renderer.h"
+#include "../../engine/scene/canvas.h"
+#include "../../engine/scene/scene.h"
+#include "../../engine/scene/tree.h"
+#include "../../engine/text/font.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+using namespace spire;
+
+static bool save_text(const std::string& path, const std::string& text) {
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+    fwrite(text.data(), 1, text.size(), f);
+    fclose(f);
+    return true;
+}
+
+int main(int argc, char** argv) {
+    if (argc < 3) {
+        fprintf(stderr, "usage: spire_play <pack.s3p> <out_dir> --logic CMD [--character C] [--seed S] [--steps N] "
+                        "[--scale S] [--auto SEED]\n");
+        return 2;
+    }
+    std::string logic_cmd, character = "Ironclad", seed = "spire360";
+    int steps = 40;
+    float scale = 2.0f / 3.0f;
+    unsigned auto_seed = 1;
+    for (int i = 3; i < argc; ++i) {
+        if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
+        else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
+        else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
+    }
+    if (logic_cmd.empty()) {
+        fprintf(stderr, "spire_play: --logic is required\n");
+        return 2;
+    }
+    std::string out_dir = argv[2];
+    install_game_scripts();
+    Pack pack;
+    std::string err;
+    if (!pack.open(argv[1], &err)) {
+        fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    SceneLibrary lib(&pack);
+    FontLibrary fonts(&pack);
+    FontLibrary::set_current(&fonts);
+    PipeLink link;
+    if (!link.start(logic_cmd, (out_dir + "/logic.log").c_str(), &err)) {
+        fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    SceneTree tree;
+    tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
+    GameClient game(&lib, &tree, &link);
+    game.set_auto_play(auto_seed);
+    game.start_run(character, seed);
+    SwRenderer sw;
+    Canvas canvas(&sw, &pack);
+    int shown = 0, idle = 0;
+    while (shown < steps) {
+        PadState pad;
+        int before = game.decision_count();
+        game.update(pad);
+        if (game.decision_count() != before) {
+            /* A new screen: let it settle (Godot's reference: 5th frame;
+             * a second for the intro animations), then save it. */
+            tree.layout();
+            for (int f = 0; f < 60; ++f) {
+                tree.process(1.0 / 60.0);
+                tree.layout(1);
+            }
+            sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+            tree.render(canvas);
+            sw.end();
+            const std::string& kind = game.decision()["decision"].str();
+            std::string base = format("%s/%04d_%s", out_dir.c_str(), shown, kind.c_str());
+            if (!write_png((base + ".png").c_str(), sw.framebuffer())) fprintf(stderr, "cannot write %s.png\n", base.c_str());
+            /* The decision as JSON lines are not kept by Json; re-serialise
+             * what we need: the logic log has the full lines. */
+            save_text(base + ".txt", kind + "\n");
+            printf("%04d %s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)");
+            fflush(stdout);
+            ++shown;
+            idle = 0;
+            if (game.game_over()) break;
+        } else if (link.finished()) {
+            fprintf(stderr, "spire_play: the logic exited (see %s/logic.log)\n", out_dir.c_str());
+            return 1;
+        } else {
+            usleep(2000);
+            if (++idle > 60000) { /* 2 minutes without an answer */
+                fprintf(stderr, "spire_play: no answer from the logic\n");
+                return 1;
+            }
+        }
+    }
+    printf("%d screens\n", shown);
+    return 0;
+}

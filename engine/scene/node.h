@@ -134,6 +134,8 @@ public:
     std::map<std::string, Resource*> override_resources; /* fonts, styles, icons */
     /* AddThemeColorOverride from code ("font_color"). */
     void add_theme_color_override(const std::string& name, const Color& c);
+    void add_theme_font_size_override(const std::string& name, int size);
+    void add_theme_constant_override(const std::string& name, int value);
     std::map<std::string, Json> code_overrides; /* storage for the above */
 
     /* Layout state (Godot's pos_cache / size_cache). */
