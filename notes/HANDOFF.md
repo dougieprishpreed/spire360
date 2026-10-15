@@ -162,6 +162,15 @@ holds, for the converter:
 - Spine: binary skeletons (SPB1), constraints, clipping, sequences,
   SpineBoneNode/SpineSlotNode. All 44 creature scenes a-f render coherently
   (`spire_view ... --spine-anim idle_loop --origin 960 900`).
-- Next: compare Ironclad + slimes with the user's combat screenshots
-  (creatures2 bundle); then the combined XEX (logic + engine, main menu ->
-  run -> map -> combat).
+- Ironclad + slimes match the user's combat screenshots (pose, art, scale).
+- Protocol for the presentation (JIT-checked, seeded runs unchanged): ids
+  (monster/combat/power/relic/potion/orb/character), map_select.map (whole
+  act map), combat_play.view (encounter, camera, the game's background pick
+  via DirAccess over data/res_dirs.json). The console logic needs a rebuild
+  (build_logic.py stages up to c) before the combined XEX.
+- Next: the combined program. engine/game: LogicLink (PC: logic_host
+  subprocess; console: srt in-process), GameClient (decisions -> screens),
+  combat screen = combat_room.tscn + NCombatBackground + NCreature per
+  creature placed as NCombatRoom.PositionEnemies / PositionPlayersAndPets
+  (ported), then hand/cards/top bar. Test data still needed: a bundle with
+  scenes/backgrounds/overgrowth/* (layers), card portraits.
