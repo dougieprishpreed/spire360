@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- logic_lib.lib: the wasm runtime and the translated game logic
+     (out\logic\c from tools/build_logic.py, stages up to "c"), compiled
+     once for logic_runner and spire360. Compiling it takes over an hour;
+     xdk\build.cmd builds it incrementally. -->
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Xbox 360">
+      <Configuration>Debug</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Xbox 360">
+      <Configuration>Release</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{2B7D9C40-5E1F-4A83-B6C2-9F0E3D1A7C58}</ProjectGuid>
+    <Keyword>Xbox360Proj</Keyword>
+    <RootNamespace>logic_lib</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="..\common\spire360.props" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(SpireRoot)out\logic\c;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- No program database for 100 MB of translated code. -->
+      <DebugInformationFormat>None</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="$(SpireRoot)runtime\src\srt_core.c" />
+    <ClCompile Include="$(SpireRoot)runtime\src\srt_wasi.c" />
+    <ClCompile Include="$(SpireRoot)runtime\src\srt_wasi_p2.c" />
+    <ClCompile Include="$(SpireRoot)runtime\src\srt_plat_win32.c" />
+    <ClCompile Include="$(SpireRoot)out\logic\c\*.c" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

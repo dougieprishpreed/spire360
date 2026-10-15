@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- spire360.xex: the game. The engine (as in spire_view) plus the wasm
+     runtime and the translated game logic (as in logic_runner, from
+     out\logic\c: tools/build_logic.py stages up to "c"). -->
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Xbox 360">
+      <Configuration>Debug</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Xbox 360">
+      <Configuration>Release</Configuration>
+      <Platform>Xbox 360</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{8E3F2A61-7B4C-4D1E-A5F9-2C6B0D8E4F17}</ProjectGuid>
+    <Keyword>Xbox360Proj</Keyword>
+    <RootNamespace>spire360</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="..\common\spire360.props" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <!-- $(IntDir): canvas_vs.h / canvas_ps.h from fxc below.
+           SPIRE_WITH_SRT: engine/game/logic_link talks to the runtime. -->
+      <AdditionalIncludeDirectories>$(IntDir);$(SpireRoot)engine\gfx;$(SpireRoot)out\logic\c;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>SPIRE_WITH_SRT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <!-- As logic_runner: the logic is ~100 MB of PowerPC code, past what the
+         32-bit linker holds with a debug image and COMDAT folding. -->
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <!-- The runtime and the logic: ..\logic_lib (built first by build.cmd). -->
+      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\logic_lib\$(Configuration)\logic_lib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="$(SpireRoot)engine\gfx\shaders\canvas.hlsl">
+      <Message>fxc canvas.hlsl</Message>
+      <Command>"$(XEDK)\bin\win32\fxc.exe" /nologo /T vs_3_0 /E vs_main /Vn g_vs_main /Fh "$(IntDir)canvas_vs.h" "%(FullPath)"
+if errorlevel 1 exit /b 1
+"$(XEDK)\bin\win32\fxc.exe" /nologo /T ps_3_0 /E ps_main /Vn g_ps_main /Fh "$(IntDir)canvas_ps.h" "%(FullPath)"</Command>
+      <Outputs>$(IntDir)canvas_vs.h;$(IntDir)canvas_ps.h;%(Outputs)</Outputs>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="logic_glue.c" />
+    <ClCompile Include="$(SpireRoot)engine\core\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\gfx\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\scene\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\text\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\game\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\spine\*.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

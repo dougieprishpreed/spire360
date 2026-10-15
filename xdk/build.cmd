@@ -10,9 +10,13 @@ rem   xdk\build.cmd            hello, selftest, bench, probe
 rem   xdk\build.cmd bigcode    the 64 MB link test (slow)
 rem   xdk\build.cmd hello      one project
 rem   xdk\build.cmd spire_view the scene viewer (engine + D3D9 renderer)
-rem   xdk\build.cmd logic_runner  the game logic (M2). Incremental: an
-rem                            unchanged compile is kept (it takes over an
-rem                            hour); set SPIRE_REBUILD=1 to start over.
+rem   xdk\build.cmd logic_runner  the game logic's self-play test (M2)
+rem   xdk\build.cmd spire360  the game (engine + logic)
+rem                            Both link logic_lib (the runtime and the
+rem                            translated logic), built first and
+rem                            incrementally: an unchanged compile is kept
+rem                            (it takes over an hour); set SPIRE_REBUILD=1
+rem                            to start over.
 rem
 rem Logs: xdk\build_logs\<project>.log  (send these if anything fails)
 setlocal enabledelayedexpansion
@@ -48,8 +52,18 @@ for %%P in (%PROJECTS%) do (
         python "%XDKDIR%bigcode\gen_bigcode.py" --mb 64
       )
     )
+    set NEEDS_LIB=
+    if /i "%%P"=="logic_runner" set NEEDS_LIB=1
+    if /i "%%P"=="spire360" set NEEDS_LIB=1
+    if defined NEEDS_LIB if not defined LIB_DONE (
+      set LIB_TARGET=Build
+      if "%SPIRE_REBUILD%"=="1" set LIB_TARGET=Rebuild
+      echo Building logic_lib ^(!LIB_TARGET!; the first time takes over an hour^)...
+      msbuild "%XDKDIR%logic_lib\logic_lib.vcxproj" /nologo /t:!LIB_TARGET! /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\logic_lib.log;verbosity=normal;PerformanceSummary"
+      if errorlevel 1 (set SUMMARY=!SUMMARY! logic_lib:FAILED) else (set SUMMARY=!SUMMARY! logic_lib:ok)
+      set LIB_DONE=1
+    )
     set TARGET=Rebuild
-    if /i "%%P"=="logic_runner" if not "%SPIRE_REBUILD%"=="1" set TARGET=Build
     echo Building %%P ^(!TARGET!^)...
     msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:!TARGET! /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal;PerformanceSummary"
     if errorlevel 1 (set SUMMARY=!SUMMARY! %%P:FAILED) else (set SUMMARY=!SUMMARY! %%P:ok)

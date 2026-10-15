@@ -2168,6 +2168,12 @@ public partial class RunDriver
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
+            // The combat UI (NCombatUi): exhaust pile button, star counter,
+            // "End Turn {n}".
+            ["exhaust_pile_count"] = pcs?.ExhaustPile?.Cards?.Count ?? 0,
+            ["stars"] = pcs?.Stars ?? 0,
+            ["always_show_stars"] = player.Character?.ShouldAlwaysShowStarCounter ?? false,
+            ["turn_number"] = pcs?.TurnNumber ?? 0,
             ["view"] = CombatView(),
         };
 
@@ -2188,12 +2194,6 @@ public partial class RunDriver
                     ["evoke"] = (int)orb.EvokeVal,
                 }).ToList();
                 result["orb_slots"] = orbQueue.Capacity;
-            }
-
-            // Regent: Stars
-            if (pcs != null && pcs.Stars >= 0 && player.Character?.Id.Entry == "REGENT")
-            {
-                result["stars"] = pcs.Stars;
             }
 
             // Necrobinder: Osty (minion)

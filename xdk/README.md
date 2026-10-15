@@ -2,6 +2,8 @@
 
 Built with the Xbox 360 XDK and Visual Studio 2010:
 
+- **spire360**: the game: the engine and the game's logic in one program
+  (see below). Work in progress.
 - **spire_view**: the engine drawing the game's scenes from your converted
   pack (see below).
 - **logic_runner**: the game's own logic, translated from your copy, playing
@@ -89,10 +91,13 @@ Then:
 xdk\build.cmd logic_runner
 ```
 
-The logic links without debug information or identical-COMDAT folding
-(the 32-bit XDK linker runs out of memory otherwise: LNK1000). `build.cmd`
-builds logic_runner incrementally, so a failed link does not cost the hour
-of compiling again; `set SPIRE_REBUILD=1` first to start from scratch.
+The runtime and the translated logic are compiled once into
+`logic_lib\Release\logic_lib.lib`, which logic_runner and spire360 both
+link. `build.cmd` builds it first and incrementally, so the hour of
+compiling is not repeated for the other program or after a failed link;
+`set SPIRE_REBUILD=1` first to start from scratch. The programs link
+without debug information or identical-COMDAT folding (the 32-bit XDK
+linker runs out of memory otherwise: LNK1000).
 
 Copy the localization tables next to the XEX:
 `<xex folder>\spire360_logic\data\localization\eng\*.json` (from `data\localization`).
@@ -100,6 +105,23 @@ It plays a seeded self-play session and writes the timing report (start-up,
 per-action average/p95/max, GC heap) to `game:\spire360_logic\result.txt`.
 A `spire360_logic\script.txt` (one JSON command per line) replaces the
 default commands.
+
+## spire360: the game
+
+```
+xdk\build.cmd spire360
+```
+
+Needs `out\logic\c` (as logic_runner) and a converted pack. Copy the
+converter's whole output folder (`pack.s3p` and `data\`) to a `spire`
+folder next to the XEX: `game:\spire\pack.s3p`, `game:\spire\data\...`.
+
+The title screen waits for A (or Start), then a run starts (Ironclad, a new
+seed each time). Screens the engine does not draw yet show the decision's
+choices as a list. D-pad or left stick: pick; A: confirm; Y: end turn;
+Back: write the log now; Back + Start: quit. The log is
+`game:\spire360.txt` (startup, each decision and how long the logic took,
+frame times).
 
 ## spire_view: the engine drawing the game's scenes on the console
 

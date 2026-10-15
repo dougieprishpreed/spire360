@@ -37,15 +37,12 @@
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <!-- The runtime and the logic: ..\logic_lib (built first by build.cmd). -->
+      <AdditionalDependencies>$(MSBuildThisFileDirectory)..\logic_lib\$(Configuration)\logic_lib.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\common\module_main.c" />
-    <ClCompile Include="$(SpireRoot)runtime\src\srt_core.c" />
-    <ClCompile Include="$(SpireRoot)runtime\src\srt_wasi.c" />
-    <ClCompile Include="$(SpireRoot)runtime\src\srt_wasi_p2.c" />
-    <ClCompile Include="$(SpireRoot)runtime\src\srt_plat_win32.c" />
-    <ClCompile Include="$(SpireRoot)out\logic\c\*.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
