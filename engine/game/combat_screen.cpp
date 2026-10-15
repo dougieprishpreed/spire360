@@ -751,6 +751,10 @@ void CombatScreen::build_hand(Node* ui, const Json& d) {
         hd.node = h;
         hd.angle = hd.to_angle = 0;
         hd.scale = hd.to_scale = 1;
+        hd.text = cards[i]["description_bbcode"].str();
+        const Json& by = cards[i]["description_by_target"];
+        for (size_t t = 0; t < by.size(); ++t) hd.text_by_target.push_back(by[t].str());
+        hd.text_multi = cards[i]["description_multi"].is_string() ? cards[i]["description_multi"].str() : hd.text;
         holders_.push_back(hd);
     }
     layout_hand(true);
@@ -814,6 +818,12 @@ static Vec2 global_pos(Node* n) {
     return n && n->is_canvas_item() ? ((CanvasItem*)n)->global_transform().origin : Vec2(0, 0);
 }
 
+/* NCard.UpdateVisuals' description, as card_view sets it. */
+void CombatScreen::show_card_text(Holder& h, const std::string& text) {
+    Node* label = find_named(h.node, "DescriptionLabel");
+    if (label) set_label(label, "[center]" + text + "[/center]");
+}
+
 /* NSelectionReticle.OnSelect / OnDeselect. */
 void CombatScreen::select_reticle(Creature& c, bool on) {
     Control* r = c.reticle;
@@ -860,6 +870,7 @@ void CombatScreen::begin_play(int card, const std::string& target_type, int targ
     /* NCardPlay.ShowMultiCreatureTargetingVisuals. */
     play_single_ = false;
     if (target_type == "AllEnemies" || target_type == "RandomEnemy") {
+        show_card_text(h, h.text_multi);
         for (size_t i = 0; i < enemies_.size(); ++i) select_reticle(enemies_[i], true);
     } else if (target_type == "Self" || target_type == "AllAllies") {
         select_reticle(player_, true);
@@ -877,6 +888,8 @@ bool CombatScreen::set_play_target(int enemy) {
     play_target_ = enemy;
     /* OnCreatureHovered: highlight, reticle, the arrow to VfxSpawnPosition. */
     Creature& c = enemies_[enemy];
+    Holder& h = holders_[play_card_];
+    if (enemy < (int)h.text_by_target.size()) show_card_text(h, h.text_by_target[enemy]);
     select_reticle(c, true);
     show_nameplate(c, true);
     if (arrow_) {
@@ -898,6 +911,7 @@ void CombatScreen::end_play() {
         tweens_.kill(&arrow_head_->scale);
         arrow_->visible = false;
     }
+    show_card_text(holders_[play_card_], holders_[play_card_].text);
     play_card_ = -1;
     play_target_ = -1;
     play_single_ = false;

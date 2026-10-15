@@ -1486,7 +1486,7 @@ public partial class RunDriver
                     var stats = new Dictionary<string, object?>();
                     try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
                     var bkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                    return new Dictionary<string, object?>
+                    return WithCardView(card, PileType.None, new Dictionary<string, object?>
                     {
                         ["name"] = _loc.Card(card.Id.Entry),
                         ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
@@ -1495,7 +1495,7 @@ public partial class RunDriver
                         ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                         ["stats"] = stats.Count > 0 ? stats : null,
                         ["keywords"] = bkws?.Count > 0 ? bkws : null,
-                    };
+                    });
                 }).ToList(),
             }).ToList();
 
@@ -1518,7 +1518,7 @@ public partial class RunDriver
                 var stats = new Dictionary<string, object?>();
                 try { foreach (var dv in cr.Card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
                 var rrkws = cr.Card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                return WithCardView(cr.Card, PileType.None, new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["id"] = cr.Card.Id.ToString(),
@@ -1530,7 +1530,7 @@ public partial class RunDriver
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card),
-                };
+                });
             }).ToList();
 
             return new Dictionary<string, object?>
@@ -1554,7 +1554,7 @@ public partial class RunDriver
                 var stats = new Dictionary<string, object?>();
                 try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
                 var selkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                return WithCardView(card, card.Pile?.Type ?? PileType.None, new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["id"] = card.Id.ToString(),
@@ -1567,7 +1567,7 @@ public partial class RunDriver
                     ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card),
-                };
+                });
             }).ToList();
 
             return new Dictionary<string, object?>
@@ -1881,6 +1881,32 @@ public partial class RunDriver
                 c.UpdateDynamicVarPreview(MegaCrit.Sts2.Core.Entities.Cards.CardPreviewMode.Normal, c.CurrentTarget, c.Enchantment.DynamicVars);
             }
             d["description_bbcode"] = c.GetDescriptionForPile(pile, c.CurrentTarget);
+            if (pile == PileType.Hand && c.CombatState != null)
+            {
+                // NCard.SetPreviewTarget while the pad aims the card: the text
+                // against each enemy (the decision's enemies, in order), and
+                // ShowMultiCreatureTargetingVisuals' preview for all-enemy cards.
+                var enemies = c.CombatState.Enemies.Where(e => e != null && e.IsAlive).ToList();
+                string Preview(CardPreviewMode mode, Creature? target)
+                {
+                    c.DynamicVars.ClearPreview();
+                    c.UpdateDynamicVarPreview(mode, target, c.DynamicVars);
+                    if (c.Enchantment != null)
+                    {
+                        c.Enchantment.DynamicVars.ClearPreview();
+                        c.UpdateDynamicVarPreview(mode, target, c.Enchantment.DynamicVars);
+                    }
+                    return c.GetDescriptionForPile(pile, target);
+                }
+                if (c.TargetType == TargetType.AnyEnemy)
+                    d["description_by_target"] = enemies.Select(e => Preview(CardPreviewMode.Normal, e)).ToList();
+                else if (c.TargetType == TargetType.AllEnemies || c.TargetType == TargetType.RandomEnemy)
+                {
+                    var hittable = c.CombatState.HittableEnemies;
+                    d["description_multi"] = Preview(CardPreviewMode.MultiCreatureTargeting,
+                                                     hittable.Count == 1 ? hittable[0] : c.CurrentTarget);
+                }
+            }
         }
         catch (Exception ex) { Log($"CardView {c.Id.Entry}: {(ex.InnerException ?? ex).Message}"); }
         finally
@@ -1893,6 +1919,13 @@ public partial class RunDriver
             }
             catch { }
         }
+    }
+
+    // The card's view fields (AddCardView) on a decision's card entry.
+    private static Dictionary<string, object?> WithCardView(CardModel? c, PileType pile, Dictionary<string, object?> d)
+    {
+        if (c != null) AddCardView(d, c, pile);
+        return d;
     }
 
     // NPower.RefreshAmount: the icon's label.
@@ -2372,7 +2405,7 @@ public partial class RunDriver
             var stats = new Dictionary<string, object?>();
             try { foreach (var dv in c.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
             var crkws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-            return new Dictionary<string, object?>
+            return WithCardView(c, PileType.None, new Dictionary<string, object?>
             {
                 ["index"] = i,
                 ["id"] = c.Id.ToString(),
@@ -2384,7 +2417,7 @@ public partial class RunDriver
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
                 ["after_upgrade"] = GetUpgradedInfo(c),
-            };
+            });
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -2654,7 +2687,7 @@ public partial class RunDriver
                 }
                 catch { }
                 var shopkws = card?.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-                return new Dictionary<string, object?>
+                return WithCardView(card, PileType.None, new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["name"] = _loc.Card(entry),
@@ -2668,7 +2701,7 @@ public partial class RunDriver
                     ["cost"] = e.Cost,
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
-                };
+                });
             }).ToList();
 
         var relics = inv.RelicEntries.Select((e, i) => new Dictionary<string, object?>
@@ -2927,6 +2960,8 @@ public partial class RunDriver
                     ["target_type"] = p.TargetType.ToString(),
                 };
             }).Where(x => x != null).ToList(),
+            ["max_potions"] = player.MaxPotionCount,
+            ["ascension"] = _runState?.AscensionLevel ?? 0,
             ["deck_size"] = player.Deck?.Cards?.Count(c => c != null) ?? 0,
             ["deck"] = player.Deck?.Cards?.Where(c => c != null).Select(c =>
             {

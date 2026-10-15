@@ -67,7 +67,13 @@ private:
         Vec2 pos, to_pos;
         float angle, to_angle; /* degrees */
         float scale, to_scale;
+        /* The card's text at rest, against each enemy (single-enemy cards)
+         * and while marking all enemies (NCard.SetPreviewTarget). */
+        std::string text;
+        std::vector<std::string> text_by_target;
+        std::string text_multi;
     };
+    void show_card_text(Holder& h, const std::string& text);
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);

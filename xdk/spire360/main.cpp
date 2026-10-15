@@ -159,7 +159,7 @@ void __cdecl main() {
     SrtLink link;
     GameClient* game = NULL;
     unsigned prev = 0;
-    double last = now_ms(), acc_ms = 0, wait_start = 0;
+    double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, wait_start = 0;
     int frames = 0, shown = 0;
     for (;;) {
         XINPUT_STATE xs;
@@ -215,18 +215,26 @@ void __cdecl main() {
         double t = now_ms();
         double dt = (t - last) / 1000.0;
         last = t;
+        /* Where a frame's time goes: process + layout, building the draw
+         * calls, and Present (which waits for vsync and the GPU). */
         double f0 = now_ms();
         tree->process(dt > 0.1 ? 0.1 : dt);
         tree->layout(1);
+        double f1 = now_ms();
         renderer.begin(1280, 720, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
         tree->render(canvas);
         renderer.end();
-        acc_ms += now_ms() - f0;
+        double f2 = now_ms();
         dev->Present(NULL, NULL, NULL, NULL);
+        double f3 = now_ms();
+        acc_ms += f1 - f0;
+        acc_draw += f2 - f1;
+        acc_present += f3 - f2;
         if (++frames == 600) {
-            logf("%.2f ms per frame (CPU, layout + draw), %ld draw calls", acc_ms / frames, renderer.draw_calls());
+            logf("per frame: %.2f ms process + layout, %.2f ms draw, %.2f ms present; %ld draw calls", acc_ms / frames,
+                 acc_draw / frames, acc_present / frames, renderer.draw_calls());
             frames = 0;
-            acc_ms = 0;
+            acc_ms = acc_draw = acc_present = 0;
         }
     }
     delete game;

@@ -259,7 +259,8 @@ public:
     }
     virtual void resized(Control*) {
         if (!enabled_) return;
-        if (!adjusted_ || fabsf(last_size_.x - rtl_->size.x) > 0.01f || fabsf(last_size_.y - rtl_->size.y) > 0.01f)
+        if (!adjusted_ || fabsf(last_size_.x - rtl_->size.x) > 0.01f || fabsf(last_size_.y - rtl_->size.y) > 0.01f ||
+            last_text_ != rtl_->text)
             adjust();
     }
 
@@ -337,6 +338,7 @@ private:
         if (!enabled_) return;
         adjusted_ = true;
         last_size_ = rtl_->size;
+        last_text_ = rtl_->text;
         std::vector<TextSeg> segs;
         segments(segs);
         if (!too_big(segs, max_)) {
@@ -357,6 +359,7 @@ private:
     int min_, max_, last_set_;
     bool vbound_, hbound_, adjusted_;
     Vec2 last_size_;
+    std::string last_text_;
     Json size_json_;
 };
 

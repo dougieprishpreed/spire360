@@ -130,16 +130,15 @@ Any other header the translated C includes needs the same treatment.
 
 ## Waiting on the user
 
-1. (2026-10-15) spire360 with the fresh logic plays in Xenia (title ->
-   Neow -> map -> combat, cards played). Found there: the health bars'
-   canvas group draws nothing on the console (the bar's own pre-group
-   draws are wiped too: the background shows through the mask), and the
-   frame is darker than the PC render by a gamma of ~1.14 (2.5/2.2).
-   Sent: a gamma ramp (Back + Y toggles), the group debug modes
-   (Back + X cycles D3D9Renderer::set_group_debug 0-5, logged), and the
-   game's two-press card play. Waiting for screenshots of each mode and
-   spire360.txt. Shader and VS outputs checked in xenia.log (fine); the
-   1280x720 group texture is created and reloaded each frame there.
+1. (2026-10-15) Builds take the user over an hour each time (logic_lib
+   was recompiling: zip extracts re-date w2c2_base.h; fixed in build.cmd,
+   unconfirmed). The user asked for much more progress per build. Their
+   last run: the arrow, reticles and gamma ramp work; the health bars were
+   invisible because every texture of 16 texels or less was uploaded into
+   the packed mip tail's place (XGTILE_NONPACKED fix, 0da3488). Next build
+   carries a logic change too (card view fields on reward / select /
+   bundle / shop cards, description_by_target, description_multi,
+   max_potions, ascension; JIT: 15 seeded runs unchanged).
 
 ## Next (agent)
 
