@@ -1670,6 +1670,42 @@ public partial class RunDriver
         };
     }
 
+    // The whole act map for the map screen: every point (type, children),
+    // the start and boss points, the grid size and the path taken so far.
+    private Dictionary<string, object?>? MapView(ActMap? map)
+    {
+        if (map == null) return null;
+        try
+        {
+            Dictionary<string, object?> Point(MapPoint p) => new()
+            {
+                ["col"] = (int)p.coord.col,
+                ["row"] = (int)p.coord.row,
+                ["type"] = p.PointType.ToString(),
+                ["children"] = (p.Children ?? Enumerable.Empty<MapPoint>())
+                    .Select(c => new List<int> { (int)c.coord.col, (int)c.coord.row }).ToList(),
+            };
+            var cur = _runState?.CurrentMapCoord;
+            return new Dictionary<string, object?>
+            {
+                ["cols"] = map.GetColumnCount(),
+                ["rows"] = map.GetRowCount(),
+                ["points"] = map.GetAllMapPoints().Select(Point).ToList(),
+                ["start"] = Point(map.StartingMapPoint),
+                ["boss"] = Point(map.BossMapPoint),
+                ["second_boss"] = map.SecondBossMapPoint != null ? Point(map.SecondBossMapPoint) : null,
+                ["visited"] = (_runState?.VisitedMapCoords ?? new List<MapCoord>())
+                    .Select(c => new List<int> { (int)c.col, (int)c.row }).ToList(),
+                ["current"] = cur.HasValue ? new List<int> { (int)cur.Value.col, (int)cur.Value.row } : null,
+            };
+        }
+        catch (Exception ex)
+        {
+            Log($"MapView: {ex.Message}");
+            return null;
+        }
+    }
+
     private Dictionary<string, object?> MapSelectState()
     {
         var map = _runState?.Map;
@@ -1760,6 +1796,7 @@ public partial class RunDriver
             ["decision"] = "map_select",
             ["context"] = RunContext(),
             ["choices"] = choices,
+            ["map"] = MapView(map),
             ["player"] = PlayerSummary(_runState!.Players[0]),
             ["act"] = _runState.CurrentActIndex + 1,
             ["act_name"] = _loc.Act(_runState.Act?.Id.Entry ?? "OVERGROWTH"),
@@ -1849,6 +1886,7 @@ public partial class RunDriver
                         var row = new Dictionary<string, object?>
                         {
                             ["target_index"] = ti,
+                            ["id"] = tgt.Monster?.Id.Entry,
                             ["name"] = _loc.Monster(tgt.Monster?.Id.Entry ?? "UNKNOWN"),
                         };
                         if (perHit != null) row["damage"] = perHit;
@@ -1957,6 +1995,7 @@ public partial class RunDriver
                 // Enemy powers
                 var ePowers = e.Powers?.Select(pw => new Dictionary<string, object?>
                 {
+                    ["id"] = pw.Id.Entry,
                     ["name"] = _loc.Power(pw.Id.Entry),
                     ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
                     ["amount"] = pw.Amount,
@@ -1965,6 +2004,11 @@ public partial class RunDriver
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
+                    // View ids: the monster (its visuals are
+                    // scenes/creature_visuals/<id lowercased>.tscn) and the
+                    // creature, stable for the whole combat.
+                    ["id"] = e.Monster?.Id.Entry,
+                    ["combat_id"] = e.CombatId,
                     ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
@@ -1978,6 +2022,7 @@ public partial class RunDriver
         // Player powers/buffs
         var playerPowers = player.Creature?.Powers?.Select(pw => new Dictionary<string, object?>
         {
+            ["id"] = pw.Id.Entry,
             ["name"] = _loc.Power(pw.Id.Entry),
             ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
             ["amount"] = pw.Amount,
@@ -2009,6 +2054,7 @@ public partial class RunDriver
                 result["orbs"] = orbQueue.Orbs.Select((orb, i) => new Dictionary<string, object?>
                 {
                     ["index"] = i,
+                    ["id"] = orb.Id.Entry,
                     ["name"] = _loc.Bilingual("orbs", orb.Id.Entry + ".title"),
                     ["type"] = orb.GetType().Name.Replace("Orb", ""),
                     ["passive"] = (int)orb.PassiveVal,
@@ -2029,6 +2075,8 @@ public partial class RunDriver
             {
                 result["osty"] = new Dictionary<string, object?>
                 {
+                    ["id"] = osty.Monster?.Id.Entry,
+                    ["combat_id"] = osty.CombatId,
                     ["name"] = _loc.Monster(osty.Monster?.Id.Entry ?? "OSTY"),
                     ["hp"] = osty.CurrentHp,
                     ["max_hp"] = osty.MaxHp,
@@ -2440,6 +2488,7 @@ public partial class RunDriver
         var relics = inv.RelicEntries.Select((e, i) => new Dictionary<string, object?>
         {
             ["index"] = i,
+            ["id"] = e.Model?.Id.Entry,
             ["name"] = _loc.Relic(e.Model?.Id.Entry ?? "?"),
             ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
@@ -2449,6 +2498,7 @@ public partial class RunDriver
         var potions = inv.PotionEntries.Select((e, i) => new Dictionary<string, object?>
         {
             ["index"] = i,
+            ["id"] = e.Model?.Id.Entry,
             ["name"] = _loc.Potion(e.Model?.Id.Entry ?? "?"),
             ["description"] = _loc.Bilingual("potions", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
@@ -2657,6 +2707,8 @@ public partial class RunDriver
     {
         return new Dictionary<string, object?>
         {
+            ["character"] = player.Character?.Id.Entry,
+            ["combat_id"] = player.Creature?.CombatId,
             ["name"] = _loc.Bilingual("characters", (player.Character?.Id.Entry ?? "IRONCLAD") + ".title"),
             ["hp"] = player.Creature?.CurrentHp ?? 0,
             ["max_hp"] = player.Creature?.MaxHp ?? 0,
@@ -2668,6 +2720,7 @@ public partial class RunDriver
                 try { foreach (var dv in r.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch { }
                 return new Dictionary<string, object?>
                 {
+                    ["id"] = r.Id.Entry,
                     ["name"] = _loc.Relic(r.Id.Entry),
                     ["description"] = _loc.Bilingual("relics", r.Id.Entry + ".description"),
                     ["vars"] = vars.Count > 0 ? vars : null,
@@ -2681,6 +2734,7 @@ public partial class RunDriver
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
+                    ["id"] = p.Id.Entry,
                     ["name"] = _loc.Potion(p.Id.Entry),
                     ["description"] = _loc.Bilingual("potions", p.Id.Entry + ".description"),
                     ["vars"] = pvars.Count > 0 ? pvars : null,
