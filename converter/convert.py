@@ -330,6 +330,20 @@ def dependencies(src, res, roots):
     return out
 
 
+def res_dir_listing(src):
+    """The folders the logic lists (scenes/backgrounds/<name>/layers), files
+    in the .pck's order (the order Godot lists them in). A bundle carries the
+    listing from its .pck (res_dirs.json): an extracted folder has no order."""
+    if not isinstance(src, resources.PckSource) and src.exists("res_dirs.json"):
+        return json.loads(src.read("res_dirs.json").decode("utf-8"))
+    out = {}
+    for f in src.ordered():
+        parts = f.split("/")
+        if len(parts) == 5 and parts[0] == "scenes" and parts[1] == "backgrounds" and parts[3] == "layers":
+            out.setdefault("/".join(parts[:4]), []).append(parts[4])
+    return out
+
+
 def cmd_bundle(a):
     import zipfile
     src = open_source(a.pack)
@@ -358,6 +372,7 @@ def cmd_bundle(a):
             z.writestr(f, src.read(f))
             total += size
         z.writestr("bundle_info.json", json.dumps({"roots": roots, "skipped": skipped}, indent=1))
+        z.writestr("res_dirs.json", json.dumps(res_dir_listing(src), indent=0))
     print(f"{len(files)} files for {len(roots)} scene(s); {human(total)} written to {a.out}"
           + (f"; {len(skipped)} largest imported files left out (over --max-mb)" if skipped else ""))
 
@@ -544,11 +559,7 @@ def cmd_build(a):
 
     # Folder listings the logic's game code reads (the combat background
     # picker lists scenes/backgrounds/<name>/layers), in .pck order.
-    res_dirs = {}
-    for f in src.ordered():
-        parts = f.split("/")
-        if len(parts) == 5 and parts[0] == "scenes" and parts[1] == "backgrounds" and parts[3] == "layers":
-            res_dirs.setdefault("/".join(parts[:4]), []).append(parts[4])
+    res_dirs = res_dir_listing(src)
     os.makedirs(os.path.join(a.out, "data"), exist_ok=True)
     with open(os.path.join(a.out, "data", "res_dirs.json"), "w", encoding="utf-8") as fh:
         json.dump(res_dirs, fh, indent=0)
