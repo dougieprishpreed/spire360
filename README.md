@@ -22,7 +22,7 @@ project is not affiliated with or endorsed by Mega Crit.
 
 Work in progress: **not playable yet.**
 
-- Working on the console (tested in the Xenia emulator): the game's logic
+- Tested in Xenia emulator: the game's logic
   plays full seeded runs, identical to PC; the engine draws the game's
   screens (animated main menu, combat room, cards, map, rewards, top bar).
 - Not done yet: connecting the screens to the running game, controller play,
