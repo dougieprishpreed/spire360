@@ -117,6 +117,13 @@ holds, for the converter:
   need checking against creatures (a creature bundle).
 - `xdk/spire_view`: the engine on the console (D3D9, 1280x720).
 
+## How the user updates
+
+The user downloads the branch as a zip from GitHub and extracts it over
+the folder (no git). Deleted or renamed source files therefore stay on
+their disk: whenever one is removed, add it to the stale-file list at the
+top of xdk/build.cmd (the projects compile every .cpp in engine\*).
+
 ## Waiting on the user
 
 1. (2026-10-15) A bundle for the combat UI, hand, intents and powers

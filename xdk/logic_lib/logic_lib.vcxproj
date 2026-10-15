@@ -32,8 +32,6 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(SpireRoot)out\logic\c;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <!-- No program database for 100 MB of translated code. -->
-      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

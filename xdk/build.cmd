@@ -69,13 +69,25 @@ for %%P in (%PROJECTS%) do (
       if "%SPIRE_REBUILD%"=="1" set LIB_TARGET=Rebuild
       echo Building logic_lib ^(!LIB_TARGET!; the first time takes over an hour^)...
       msbuild "%XDKDIR%logic_lib\logic_lib.vcxproj" /nologo /t:!LIB_TARGET! /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\logic_lib.log;verbosity=normal;PerformanceSummary"
-      if errorlevel 1 (set SUMMARY=!SUMMARY! logic_lib:FAILED) else (set SUMMARY=!SUMMARY! logic_lib:ok)
+      if errorlevel 1 (
+        set SUMMARY=!SUMMARY! logic_lib:FAILED
+        set LIB_FAILED=1
+      ) else (
+        set SUMMARY=!SUMMARY! logic_lib:ok
+      )
       set LIB_DONE=1
     )
-    set TARGET=Rebuild
-    echo Building %%P ^(!TARGET!^)...
-    msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:!TARGET! /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal;PerformanceSummary"
-    if errorlevel 1 (set SUMMARY=!SUMMARY! %%P:FAILED) else (set SUMMARY=!SUMMARY! %%P:ok)
+    set SKIP=
+    if defined NEEDS_LIB if defined LIB_FAILED set SKIP=1
+    if defined SKIP (
+      echo Skipping %%P: logic_lib failed ^(see %LOGS%\logic_lib.log^)
+      set SUMMARY=!SUMMARY! %%P:skipped
+    ) else (
+      set TARGET=Rebuild
+      echo Building %%P ^(!TARGET!^)...
+      msbuild "%XDKDIR%%%P\%%P.vcxproj" /nologo /t:!TARGET! /p:Configuration=Release /p:Platform="Xbox 360" /v:minimal /fl "/flp:logfile=%LOGS%\%%P.log;verbosity=normal;PerformanceSummary"
+      if errorlevel 1 (set SUMMARY=!SUMMARY! %%P:FAILED) else (set SUMMARY=!SUMMARY! %%P:ok)
+    )
   )
 )
 echo.
