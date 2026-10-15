@@ -1,5 +1,6 @@
 #include "combat_screen.h"
 
+#include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
@@ -158,9 +159,21 @@ void CombatScreen::update_bounds(Creature& c) {
     }
 }
 
+/* A power by id in the creature's list (NULL if it has none). */
+static const Json* find_power(const Json& powers, const char* id) {
+    for (size_t i = 0; i < powers.size(); ++i)
+        if (powers[i]["id"].str() == id) return &powers[i];
+    return NULL;
+}
+
+static float patch_margin(Control* c, int side) {
+    return c && c->type == "NinePatchRect" ? ((NinePatchRect*)c)->margin[side] : 0.0f;
+}
+
 /* NHealthBar.RefreshValues (RefreshBlockUi, RefreshForeground,
- * RefreshMiddleground, RefreshText) at rest: the tweens' end values. */
-void CombatScreen::refresh_health_bar(Creature& c, const Json& e) {
+ * RefreshMiddleground, RefreshText) at rest: the tweens' end values.
+ * e: the creature's decision data; powers: its power list. */
+void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& powers) {
     Control* sd = ctl(c.node, "HealthBar");
     Control* hb = ctl(sd, "HealthBar");
     if (!hb) return;
@@ -171,41 +184,118 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e) {
     Control* doom = ctl(hb, "DoomForeground");
     Control* outline = ctl(hb, "BlockOutline");
     Control* block = ctl(hb, "BlockContainer");
+    Control* infinity = ctl(hb, "InfinityTex");
     Node* hp_label = hb->find_unique("HpLabel");
     Node* block_label = hb->find_unique("BlockLabel");
+    if (!fg || !mid || !poison || !doom) return;
     float max_w = c.max_fg_width;
     /* GetFgWidth */
-    float w = max_hp <= 0 ? 0.0f : maxf((float)hp / (float)max_hp * max_w, hp > 0 ? 12.0f : 0.0f);
+    float fg_w = max_hp <= 0 ? 0.0f : maxf((float)hp / (float)max_hp * max_w, hp > 0 ? 12.0f : 0.0f);
+    const std::string& hp_display = e["hp_display"].str();
+    bool infinite = hp_display.compare(0, 8, "Infinite") == 0;
+    bool shows_numbers = hp_display != "InfiniteWithoutNumbers";
+    const Json* poison_power = find_power(powers, "POISON_POWER");
+    const Json* doom_power = find_power(powers, "DOOM_POWER");
+    int poison_dmg = poison_power ? e["poison_next_turn"].i() : 0;
+    int doom_amount = doom_power ? (*doom_power)["amount"].i() : 0;
+    bool poison_lethal = poison_power && poison_dmg > 0 && poison_dmg >= hp;
+    bool doom_lethal = doom_power && doom_amount > 0 && doom_amount >= hp - poison_dmg;
 
+    /* RefreshBlockUi */
     if (blk <= 0) {
         if (block) block->visible = false;
         if (outline) outline->visible = false;
-        if (fg) fg->self_modulate = hex(0xF1373E);
+        fg->self_modulate = hex(0xF1373E);
     } else {
         if (outline) outline->visible = true;
-        if (fg) fg->self_modulate = hex(0x3B6FA3);
+        fg->self_modulate = hex(0x3B6FA3);
         if (block) block->visible = true;
         if (block_label && block_label->type == "Label") ((Label*)block_label)->set_text(format("%d", blk));
     }
-    /* Poison and Doom previews need the poison's next-turn damage (not in
-     * the protocol yet): hidden. */
-    if (poison) poison->visible = false;
-    if (doom) doom->visible = false;
-    if (fg) {
-        fg->visible = hp > 0;
-        fg->offset[SIDE_RIGHT] = w - max_w;
+
+    /* RefreshForeground */
+    if (hp <= 0) {
+        poison->visible = doom->visible = fg->visible = false;
+    } else {
+        fg->visible = true;
+        float fg_right = fg_w - max_w;
+        fg->offset[SIDE_RIGHT] = fg_right;
+        if (infinite) {
+            fg->self_modulate = hex(0xC5BBED);
+            poison->visible = doom->visible = false;
+        } else {
+            if (poison_power && poison_dmg > 0) {
+                poison->visible = true;
+                if (poison_lethal) {
+                    poison->offset[SIDE_LEFT] = 0;
+                    poison->offset[SIDE_RIGHT] = fg_right;
+                    fg->visible = false;
+                } else {
+                    float w = max_hp <= 0 ? 0.0f : maxf((float)(hp - poison_dmg) / (float)max_hp * max_w, 12.0f);
+                    fg->offset[SIDE_RIGHT] = w - max_w;
+                    fg->visible = true;
+                    poison->offset[SIDE_LEFT] = maxf(0.0f, w - patch_margin(poison, SIDE_LEFT));
+                    poison->offset[SIDE_RIGHT] = fg_right;
+                }
+            } else {
+                poison->visible = false;
+                if (!poison_power) poison->offset[SIDE_LEFT] = 0;
+            }
+            if (doom_power && doom_amount > 0) {
+                doom->visible = true;
+                float dw = (max_hp <= 0 ? 0.0f : maxf((float)doom_amount / (float)max_hp * max_w, 12.0f)) - max_w;
+                if (doom_lethal) {
+                    if (!poison_lethal) {
+                        doom->offset[SIDE_RIGHT] = fg->offset[SIDE_RIGHT];
+                    } else {
+                        doom->visible = false;
+                    }
+                    fg->visible = false;
+                } else {
+                    doom->offset[SIDE_RIGHT] = minf(0.0f, dw + patch_margin(doom, SIDE_RIGHT));
+                    fg->visible = true;
+                }
+            } else {
+                doom->visible = false;
+            }
+        }
     }
-    if (mid) {
-        mid->visible = hp > 0;
-        if (fg) mid->offset[SIDE_RIGHT] = fg->offset[SIDE_RIGHT] - 2.0f;
+
+    /* RefreshMiddleground: where its tween ends */
+    mid->visible = hp > 0;
+    if (hp > 0) {
+        mid->offset[SIDE_LEFT] = 1.0f;
+        mid->offset[SIDE_RIGHT] = (poison->visible ? poison->offset[SIDE_RIGHT] : fg->offset[SIDE_RIGHT]) - 2.0f;
     }
-    if (hp_label && hp_label->type == "Label") {
-        Label* l = (Label*)hp_label;
-        Color outline_c = blk > 0 ? hex(0x1B3045) : hex(0x900000);
-        l->add_theme_color_override("font_color", Color(1, 0.964706f, 0.886275f)); /* StsColors.cream */
-        l->add_theme_color_override("font_outline_color", outline_c);
-        l->set_text(hp > 0 ? format("%d/%d", hp, max_hp) : std::string("Dead"));
+
+    /* RefreshText */
+    if (!hp_label || hp_label->type != "Label") return;
+    Label* l = (Label*)hp_label;
+    Color cream(1, 0.964706f, 0.886275f); /* StsColors.cream */
+    if (hp <= 0) {
+        /* HEALTH_BAR.DEAD (gameplay_ui); the engine has no localization
+         * tables yet. */
+        l->add_theme_color_override("font_color", cream);
+        l->add_theme_color_override("font_outline_color", hex(0x900000));
+        l->set_text("Dead");
+        return;
     }
+    doom->modulate.a = infinite ? 0.0f : 1.0f;
+    if (infinity) infinity->visible = hp_display == "InfiniteWithoutNumbers";
+    l->visible = shows_numbers;
+    if (!shows_numbers) return;
+    Color font = cream, out;
+    if (hp_display == "InfiniteWithNumbers") out = hex(0x4C4370);
+    else if (poison_lethal) {
+        font = hex(0x76FF40);
+        out = hex(0x074700);
+    } else if (doom_lethal) {
+        font = hex(0xFB8DFF);
+        out = hex(0x2D1263);
+    } else out = blk > 0 ? hex(0x1B3045) : hex(0x900000);
+    l->add_theme_color_override("font_color", font);
+    l->add_theme_color_override("font_outline_color", out);
+    l->set_text(format("%d/%d", hp, max_hp));
 }
 
 /* NCombatRoom.PositionEnemies. */
@@ -311,7 +401,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     if (make_creature(player["character"].is_string() ? player["character"].str() : std::string("ironclad"), true, c)) {
         allies->add_child(c.node);
         update_bounds(c);
-        refresh_health_bar(c, player);
+        refresh_health_bar(c, player, d["player_powers"]);
         ally_nodes.push_back(c);
     }
     const Json& es = d["enemies"];
@@ -320,7 +410,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
         enemies->add_child(c.node);
         update_bounds(c);
-        refresh_health_bar(c, es[i]);
+        refresh_health_bar(c, es[i], es[i]["powers"]);
         enemy_nodes.push_back(c);
     }
     position_players(ally_nodes, scaling, view["fully_center_players"].b());

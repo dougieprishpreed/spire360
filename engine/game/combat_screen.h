@@ -40,7 +40,7 @@ private:
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
-    void refresh_health_bar(Creature& c, const Json& data);
+    void refresh_health_bar(Creature& c, const Json& data, const Json& powers);
     void position_enemies(std::vector<Creature>& c, float scaling);
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center);
     SceneLibrary* lib_;

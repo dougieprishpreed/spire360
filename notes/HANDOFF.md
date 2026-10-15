@@ -168,9 +168,17 @@ holds, for the converter:
   act map), combat_play.view (encounter, camera, the game's background pick
   via DirAccess over data/res_dirs.json). The console logic needs a rebuild
   (build_logic.py stages up to c) before the combined XEX.
-- Next: the combined program. engine/game: LogicLink (PC: logic_host
-  subprocess; console: srt in-process), GameClient (decisions -> screens),
-  combat screen = combat_room.tscn + NCombatBackground + NCreature per
-  creature placed as NCombatRoom.PositionEnemies / PositionPlayersAndPets
-  (ported), then hand/cards/top bar. Test data still needed: a bundle with
-  scenes/backgrounds/overgrowth/* (layers), card portraits.
+- Combat screen (engine/game/combat_screen): room, background, creatures,
+  hitboxes, health bars (block, poison, lethal colours) match the game's
+  screenshot. Canvas groups (clip_children) in both renderers; verified
+  against Godot renders. Doom's bar needs FastNoiseLite + doom_bar.gdshader
+  (not drawn yet).
+- Protocol (JIT-checked, 15 seeded runs unchanged): intents (animation,
+  sprite, label), powers (visible, counter, display_amount, amount_color),
+  creatures (hp_display, poison_next_turn, hp_bar_reduction,
+  health_bar_visible). The stand-in Color(string) parses hex now.
+- Next: combat UI overlay (energy, piles, end turn, controller glyphs),
+  hand and cards, intents and power icons (need a bundle with
+  scenes/combat/*.tscn, scenes/cards/*.tscn, scenes/ui/*.tscn and the
+  intent/power/card atlases), top bar. Then LogicLink + GameClient and the
+  combined XEX (the console logic needs a rebuild first).
