@@ -1,9 +1,13 @@
-# Xbox 360 spike (milestone M0)
+# Xbox 360 projects
 
-Four small XEXs answer the questions the plan depends on before any engine
-work: what the XDK compiler accepts, whether the translated-code runtime works
-on a real Xenon, how fast translated code runs there, and whether a very large
-code image links.
+Built with the Xbox 360 XDK and Visual Studio 2010:
+
+- **spire_view**: the engine drawing the game's scenes from your converted
+  pack (see below).
+- **logic_runner**: the game's own logic, translated from your copy, playing
+  a seeded run and reporting its timings.
+- **hello, selftest, bench, bigcode, probe**: small checks of the compiler,
+  the runtime the logic runs on, its speed and very large code images.
 
 Everything here builds with the XDK and Visual Studio 2010 (platform
 "Xbox 360"). The translated C in `selftest/gen` and `bench/gen` is committed
@@ -69,7 +73,7 @@ total      625047 us
 The `check` values must match exactly on the 360; the time ratio gives the
 Xenon/PC factor for translated code.
 
-## logic_runner (milestone M2): the game logic on the console
+## logic_runner: the game logic on the console
 
 Builds the translated game logic (`out/logic/c`, from
 `tools/build_logic.py`, stages up to `c`) with the same runtime as selftest.

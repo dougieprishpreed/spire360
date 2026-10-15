@@ -1,5 +1,5 @@
-/* Spine 4.2 runtime (DECISIONS D12: our own, written from the format's
- * public description; no Esoteric Software code). The converter
+/* Spine 4.2 runtime: our own, written from the format's public description
+ * (no Esoteric Software code). The converter
  * (converter/spire_convert/spine.py) reads the binary skeleton and the atlas
  * and stores them in the pack (skeleton: our binary engine form, "SPB1";
  * atlas: JSON); this side holds the data, poses the skeleton from

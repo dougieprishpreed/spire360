@@ -1,23 +1,73 @@
 # Spire360
 
-An unofficial Xbox 360 port of Slay the Spire 2 for people who own the game.
-It runs the game's **own logic**, built from your installed copy, and draws
-your own copy's art, text and sound with a new native engine.
+An unofficial Xbox 360 port of **Slay the Spire 2**, for people who own the
+game on PC.
 
-Nothing from the game is in this repository, and builds made with it contain
-your copy of the game: keep them to yourself. Not affiliated with Mega Crit.
+Spire360 does not re-create the game. It takes **your installed copy** and
+turns it into something the Xbox 360 can run:
 
-Status: early. The real game logic (v0.111.0) runs headless on PC through the
-single-threaded adapter and plays full runs for all five characters; the wasm
-runtime passes its tests on big-endian PowerPC. No console build yet. See
-[HANDOFF.md](HANDOFF.md).
+- **The game itself** (its rules, cards, monsters and random number
+  generator) is your copy's own code, translated to run natively on the
+  Xbox 360's processor. A run with a given seed plays out exactly as it does
+  on PC.
+- **The graphics** are drawn by a new engine that reproduces the game's own
+  screens: the same layouts, art, fonts, animations and effects, converted
+  from your copy's game files.
+
+Nothing from the game is in this repository. Everything the tools produce is
+made from your copy of the game, so **keep your builds to yourself**. This
+project is not affiliated with or endorsed by Mega Crit.
+
+## Status
+
+Work in progress: **not playable yet.**
+
+- Working on the console (tested in the Xenia emulator): the game's logic
+  plays full seeded runs, identical to PC; the engine draws the game's
+  screens (animated main menu, combat room, cards, map, rewards, top bar).
+- Not done yet: connecting the screens to the running game, controller play,
+  sound, saving. Tested with Slay the Spire 2 v0.111.0.
+
+## What you need
+
+- Slay the Spire 2 on a Windows PC.
+- An Xbox 360 that can run homebrew (RGH/JTAG), or the Xenia emulator.
+- To build:
+  - Python 3.9 or newer (`pip install -r converter/requirements.txt`);
+  - the .NET 10 SDK and wasi-sdk 29 (to build the game logic);
+  - Visual Studio 2010 with the Xbox 360 XDK. The XDK is not provided here:
+    Microsoft licensed it to registered developers only.
+
+## Building
+
+1. **Convert the game's files** into a pack the console reads:
+
+   ```
+   python converter\convert.py fetch-godot
+   python converter\convert.py build "C:\...\Slay the Spire 2\SlayTheSpire2.pck" out
+   ```
+
+   This writes `out\pack.s3p` (about 700 MB) and `out\data\localization`.
+   `fetch-godot` downloads the official Godot 4.5.1 build once; it renders
+   the game's fonts for the console.
+
+2. **Build the game logic** from your copy's code:
+   [docs/LOGIC_BUILD.md](docs/LOGIC_BUILD.md).
+
+3. **Build the Xbox 360 programs** from the "Xbox 360 Command Prompt":
+   [xdk/README.md](xdk/README.md). Today these are test programs: one draws
+   the game's screens, the other runs the game's logic.
+
+## Repository
 
 | Folder | What |
 |---|---|
-| `logic/` | C# adapter around the game assembly, Godot stubs, IL patcher, API tools |
-| `runtime/` | C89 host for the w2c2-translated logic: WASI, pipes, memory, threads |
-| `third_party/w2c2` | WebAssembly-to-C translator (MIT), with documented patches |
-| `converter/` | Python: reads the game's `.pck` (more to come) |
-| `tools/` | build pipeline, regression runner, import audit |
-| `xdk/` | Xbox 360 test projects for the XDK (M0) |
-| `docs/` | [PLAN](docs/PLAN.md), [DECISIONS](docs/DECISIONS.md), [LOGIC_BUILD](docs/LOGIC_BUILD.md) |
+| `converter/` | Reads the game's `.pck` and builds the console pack (textures, scenes, fonts, animations) |
+| `logic/` | Prepares the game's code for the console: Godot stand-ins, patches, a command interface |
+| `runtime/` | Runs the translated game code: memory, files, clocks |
+| `engine/` | The console engine: scenes, layout, text, particles, Spine animations, renderers |
+| `xdk/` | Xbox 360 projects (Visual Studio 2010 + XDK) |
+| `tools/` | Build scripts, a PC scene viewer, test runners |
+| `third_party/` | w2c2, the WebAssembly-to-C translator (MIT) |
+
+Third-party code and licenses: [THIRD_PARTY.md](THIRD_PARTY.md).

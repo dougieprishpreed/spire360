@@ -1,7 +1,7 @@
 """Spine 4.2 binary skeletons (.skel, Godot imports them as .spskel) and
 text atlases (.atlas / .spatlas JSON with "atlas_data").
 
-Our own reader (DECISIONS D12): read_skeleton() turns the binary export
+Our own reader (no Spine runtime code is used): read_skeleton() turns the binary export
 into plain dicts; the converter stores them as JSON for the engine's runtime
 (engine/spine). Every file must parse to its last byte, which is how the
 layout is checked.
