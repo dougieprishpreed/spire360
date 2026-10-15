@@ -24,6 +24,8 @@ public:
     /* Each layout pass, after the control's rect is set (Godot:
      * NOTIFICATION_RESIZED; check for a change yourself). */
     virtual void resized(Control*) {}
+    /* Each frame, before the node's own process (Godot: _Process). */
+    virtual void process(Node*, double dt) { (void)dt; }
 };
 
 typedef ScriptBehavior* (*ScriptFactory)(Node* node);

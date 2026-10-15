@@ -74,6 +74,7 @@ void SceneTree::layout(int passes) {
 
 void SceneTree::process_node(Node* n, double dt) {
     if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
+    if (n->behavior) n->behavior->process(n, dt);
     n->process(dt);
     for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
 }

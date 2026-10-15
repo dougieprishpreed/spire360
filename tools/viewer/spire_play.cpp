@@ -10,6 +10,7 @@
  * directory is ours: give it SPIRE_DATA in the environment for localization. */
 #include "../../engine/core/pack.h"
 #include "../../engine/game/game.h"
+#include "../../engine/game/loc.h"
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/logic_link.h"
 #include "../../engine/gfx/sw_renderer.h"
@@ -63,6 +64,10 @@ int main(int argc, char** argv) {
         fprintf(stderr, "%s\n", err.c_str());
         return 1;
     }
+    /* The localization tables: the converter writes data/ next to the pack. */
+    std::string pack_dir = argv[1];
+    size_t slash = pack_dir.find_last_of('/');
+    Loc::init(slash == std::string::npos ? std::string("data") : pack_dir.substr(0, slash) + "/data");
     SceneLibrary lib(&pack);
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);

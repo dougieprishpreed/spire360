@@ -1,9 +1,12 @@
 #include "combat_screen.h"
+#include "loc.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
+#include "../scene/rich_text.h"
+#include "../scene/script.h"
 #include "../scene/text_nodes.h"
 
 #include <ctype.h>
@@ -273,11 +276,9 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     Label* l = (Label*)hp_label;
     Color cream(1, 0.964706f, 0.886275f); /* StsColors.cream */
     if (hp <= 0) {
-        /* HEALTH_BAR.DEAD (gameplay_ui); the engine has no localization
-         * tables yet. */
         l->add_theme_color_override("font_color", cream);
         l->add_theme_color_override("font_outline_color", hex(0x900000));
-        l->set_text("Dead");
+        l->set_text(Loc::get("gameplay_ui", "HEALTH_BAR.DEAD"));
         return;
     }
     doom->modulate.a = infinite ? 0.0f : 1.0f;
@@ -357,6 +358,176 @@ void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bo
     }
 }
 
+/* ---- the combat UI (NCombatUi and its children at rest, player turn) ---- */
+
+static Node* find_named(Node* n, const char* name) {
+    if (n->name == name) return n;
+    for (size_t i = 0; i < n->children.size(); ++i) {
+        Node* r = find_named(n->children[i], name);
+        if (r) return r;
+    }
+    return NULL;
+}
+
+static Control* child_ctl(Node* n, const char* path) {
+    Node* c = n ? n->get_node(path) : NULL;
+    return c && c->is_control() ? (Control*)c : NULL;
+}
+
+static void set_label(Node* n, const std::string& text) {
+    if (n && n->type == "Label") ((Label*)n)->set_text(text);
+    else if (n && n->type == "RichTextLabel") ((RichTextLabel*)n)->text = text;
+}
+
+/* A control of the full-screen combat UI moved to a screen position, as the
+ * scripts' Position = ... (its size kept). */
+static void place_on_screen(Control* c, const Vec2& pos) {
+    float w = (c->anchor[SIDE_RIGHT] - c->anchor[SIDE_LEFT]) * 1920.0f + c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT];
+    float h = (c->anchor[SIDE_BOTTOM] - c->anchor[SIDE_TOP]) * 1080.0f + c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
+    for (int i = 0; i < 4; ++i) c->anchor[i] = 0;
+    place(c, pos.x, pos.y, w, h);
+}
+
+/* NHotkeyIcon.UpdateInput with a controller: the pad glyph shown, the
+ * keyboard key hidden. Glyphs: controller_atlas xbox_360 (Xbox360Config). */
+static void show_glyph(SceneLibrary* lib, Node* hotkey_icon, const char* glyph) {
+    if (!hotkey_icon) return;
+    Node* pad = hotkey_icon->find_unique("ControllerIcon");
+    Node* key = hotkey_icon->find_unique("KeyboardIcon");
+    if (key && key->is_canvas_item()) ((CanvasItem*)key)->visible = false;
+    if (!pad || pad->type != "TextureRect") return;
+    Resource* r = lib->ext(std::string("images/atlases/controller_atlas.sprites/xbox_360/") + glyph + ".tres");
+    ((TextureRect*)pad)->texture = r && r->is_texture() ? (Texture2DRes*)r : NULL;
+    ((CanvasItem*)pad)->visible = r != NULL;
+}
+
+/* NEnergyCounter._Process / NStarCounter: the orb's rotation layers turn,
+ * layer i at (i + 1) * speed degrees a second. */
+class SpinLayers : public ScriptBehavior {
+public:
+    SpinLayers(Node* layers, float speed) : layers_(layers), speed_(speed) {}
+    virtual void process(Node*, double dt) {
+        for (size_t i = 0; i < layers_->children.size(); ++i) {
+            Node* c = layers_->children[i];
+            if (c->is_control())
+                ((Control*)c)->rotation += (float)(dt * speed_ * (double)(i + 1)) * 3.14159265f / 180.0f;
+        }
+    }
+
+private:
+    Node* layers_;
+    float speed_;
+};
+
+static void set_counter_label(Node* label, int count) {
+    set_label(label, format("%d", count));
+}
+
+void CombatScreen::setup_combat_ui(Node* root, const Json& d) {
+    Node* ui = find_named(root, "CombatUi");
+    if (!ui) return;
+    const Json& player = d["player"];
+    std::string character = lower(player["character"].is_string() ? player["character"].str() : std::string("ironclad"));
+    int energy = d["energy"].i(), max_energy = d["max_energy"].i(), stars = d["stars"].i();
+
+    /* Energy counter: CharacterModel.EnergyCounterPath, at the container's
+     * origin (Regent: 22 px higher, room for the star counter). */
+    Control* box = child_ctl(ui, "EnergyCounterContainer");
+    Node* orb = instance(lib_, "scenes/combat/energy_counters/" + character + "_energy_counter.tscn");
+    if (box && orb) {
+        if (d["always_show_stars"].b()) {
+            box->offset[SIDE_TOP] -= 22;
+            box->offset[SIDE_BOTTOM] -= 22;
+        }
+        box->add_child(orb);
+        static const struct {
+            const char* id;
+            unsigned outline;
+        } outlines[] = { { "ironclad", 0x801212 }, { "silent", 0x004F04 }, { "defect", 0x163E64 },
+                         { "necrobinder", 0x702D6F }, { "regent", 0x784000 } };
+        Color outline(0, 0, 0, 0.05f); /* CharacterModel default #0000000D */
+        for (size_t i = 0; i < sizeof(outlines) / sizeof(outlines[0]); ++i)
+            if (character == outlines[i].id) outline = hex(outlines[i].outline);
+        Node* label = orb->get_node("Label");
+        if (label && label->is_control()) {
+            Control* l = (Control*)label;
+            l->add_theme_color_override("font_color", energy > 0 ? Color(1, 0.964706f, 0.886275f) : hex(0xFF5555));
+            l->add_theme_color_override("font_outline_color", energy > 0 ? outline : hex(0x501717));
+            set_label(label, format("%d/%d", energy, max_energy));
+        }
+        /* RefreshLabel: the layers' energy_orb_dark material (the scene's
+         * own state) only at 0 energy; DarkGray then. */
+        Node* layers = orb->find_unique("Layers");
+        Node* spin = orb->find_unique("RotationLayers");
+        Node* groups[2] = { layers, spin };
+        for (int g = 0; g < 2; ++g)
+            for (size_t i = 0; groups[g] && i < groups[g]->children.size(); ++i) {
+                Node* c = groups[g]->children[i];
+                if (c->is_control() && energy > 0) ((Control*)c)->material = NULL;
+            }
+        if (layers && layers->is_control() && energy <= 0)
+            ((Control*)layers)->modulate = Color(0.663f, 0.663f, 0.663f); /* Colors.DarkGray */
+        if (spin && !orb->behavior) orb->behavior = new SpinLayers(spin, energy > 0 ? 30.0f : 5.0f);
+    }
+
+    /* Star counter: Regent always, others once they have stars. */
+    Control* star = child_ctl(ui, "StarCounter");
+    if (star) {
+        star->visible = d["always_show_stars"].b() || stars > 0;
+        Node* count = star->find_unique("CountLabel");
+        if (count && count->is_control()) {
+            ((Control*)count)->add_theme_color_override("default_color",
+                                                        stars > 0 ? Color(1, 0.964706f, 0.886275f) : hex(0xFF5555));
+            set_label(count, format("[center]%d[/center]", stars));
+        }
+        Node* spin = star->get_node("Icon/RotationLayers");
+        if (spin && !star->behavior) star->behavior = new SpinLayers(spin, stars > 0 ? 30.0f : 5.0f);
+    }
+
+    /* Piles: counts and their pad glyphs (LT, RT, RB). */
+    Node* piles = find_named(ui, "CombatPileContainer");
+    Node* draw = piles ? piles->get_node("DrawPile") : NULL;
+    Node* discard = piles ? piles->get_node("DiscardPile") : NULL;
+    Node* exhaust = piles ? piles->get_node("ExhaustPile") : NULL;
+    if (draw) {
+        set_counter_label(draw->get_node("CountContainer/Count"), d["draw_pile_count"].i());
+        show_glyph(lib_, draw->get_node("HotkeyIcon"), "lt");
+    }
+    if (discard) {
+        set_counter_label(discard->get_node("CountContainer/Count"), d["discard_pile_count"].i());
+        show_glyph(lib_, discard->get_node("HotkeyIcon"), "rt");
+    }
+    if (exhaust && exhaust->is_control()) {
+        int n = d["exhaust_pile_count"].i();
+        Control* e = (Control*)exhaust;
+        e->visible = n > 0;
+        place_on_screen(e, Vec2(1920 - 90, 1080 - 290)); /* NExhaustPileButton._showPosition */
+        set_counter_label(exhaust->get_node("CountContainer/Count"), n);
+        show_glyph(lib_, exhaust->get_node("HotkeyIcon"), "rb");
+    }
+
+    /* End Turn: ShowPos (1604, 846), "End Turn {turnNumber}", Y. */
+    Control* end = child_ctl(ui, "EndTurnButton");
+    if (end) {
+        place_on_screen(end, Vec2(1604, 846));
+        Node* label = end->get_node("Visuals/Label");
+        if (label && label->is_control()) {
+            ((Control*)label)->modulate = Color(1, 0.964706f, 0.886275f); /* StsColors.cream */
+            set_label(label, Loc::format("gameplay_ui", "END_TURN_BUTTON", "turnNumber",
+                                         format("%d", d["turn_number"].i(d["round"].i(1)))));
+        }
+        show_glyph(lib_, end->get_node("Visuals/HotkeyIcon"), "y");
+    }
+
+    /* At rest these are hidden or off screen (multiplayer, selection modes). */
+    static const char* const hidden[] = { "PingButton", "PeekButton", "SelectionHeader", "SelectModeConfirmButton",
+                                          "SelectModeBackstop", "UpgradePreviewContainer" };
+    for (size_t i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i) {
+        Node* n = find_named(ui, hidden[i]);
+        if (n && n->is_canvas_item()) ((CanvasItem*)n)->visible = false;
+    }
+}
+
 static void play_idle(Node* n) {
     if (n->type == "SpineSprite") ((SpineSprite*)n)->set_animation("idle_loop", true, 0);
     for (size_t i = 0; i < n->children.size(); ++i) play_idle(n->children[i]);
@@ -413,6 +584,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         refresh_health_bar(c, es[i], es[i]["powers"]);
         enemy_nodes.push_back(c);
     }
+    setup_combat_ui(root, d);
     position_players(ally_nodes, scaling, view["fully_center_players"].b());
     position_enemies(enemy_nodes, scaling);
     play_idle(root);
