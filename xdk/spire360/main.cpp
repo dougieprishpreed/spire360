@@ -16,6 +16,7 @@
 #include "../../engine/core/pack.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/game_client.h"
+#include "../../engine/game/loc.h"
 #include "../../engine/game/logic_link.h"
 #include "../../engine/gfx/d3d9_renderer.h"
 #include "../../engine/scene/canvas.h"
@@ -122,6 +123,7 @@ void __cdecl main() {
         return;
     }
     logf("logic: started in %.1f ms", now_ms() - t0);
+    Loc::init("game:\\spire\\data");
     install_game_scripts();
     SceneLibrary* lib = new SceneLibrary(&pack);
     FontLibrary* fonts = new FontLibrary(&pack);
