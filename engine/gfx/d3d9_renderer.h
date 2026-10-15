@@ -46,6 +46,7 @@ public:
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags);
     virtual void set_msdf(float px_range, float outline);
     virtual void set_color_matrix(const float* m);
+    virtual void set_ripple(const float* p);
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
     virtual void end();
@@ -74,6 +75,8 @@ private:
     float msdf_[2];
     bool cm_on_;
     float cm_[12];
+    bool ripple_on_;
+    float ripple_[4];
     bool clip_on_;
     RECT clip_;
     bool dirty_;

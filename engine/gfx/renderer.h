@@ -54,6 +54,12 @@ public:
      * screen. bounds: the screen area the group and its mask stay inside.
      * One group at a time; false if groups are unavailable (the caller then
      * draws the children unmasked). */
+    /* Godot's shaders/card_ripple.gdshader on the next draws (the card
+     * glow): a = texel.a * colour.a is read as a distance field; with
+     * sdf = mod(phase + a, modulo), b = a - sdf + smoothstep(0, ease, sdf) *
+     * modulo, the output alpha is smoothstep(1 - width, 1, b). p = phase
+     * (TIME * ripple_speed), modulo, ease, width; NULL: off. */
+    virtual void set_ripple(const float* p) = 0;
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;
     virtual void end() = 0;

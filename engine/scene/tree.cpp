@@ -221,7 +221,7 @@ void SceneTree::render(Canvas& canvas) {
             extra_flags = DRAW_GROUP;
         }
         BlendMode blend = BLEND_MIX;
-        if (d.material && d.material->kind == Resource::RES_SHADER_MATERIAL && !shader_begin(canvas, d.material)) {
+        if (d.material && d.material->kind == Resource::RES_SHADER_MATERIAL && !shader_begin(canvas, d.material, d.ci)) {
             /* Godot shaders are ported one by one (engine/scene/shaders); an
              * unknown one is not drawn rather than drawn wrong. */
             ++skipped["shader " + d.material->shader];
@@ -232,6 +232,7 @@ void SceneTree::render(Canvas& canvas) {
             int m = d.material->blend_mode;
             blend = m >= 0 && m < 5 ? modes[m] : BLEND_MIX;
         }
+        shader_blend(d.material, &blend);
         canvas.set_item(d.xf, d.modulate, blend, d.ci->effective_texture_flags() | extra_flags);
         canvas.set_clip(d.has_clip ? &d.clip : NULL);
         d.ci->draw(canvas);

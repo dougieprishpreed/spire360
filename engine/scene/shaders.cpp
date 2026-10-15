@@ -1,6 +1,7 @@
 #include "shaders.h"
 
 #include "canvas.h"
+#include "node.h"
 #include "value.h"
 
 #include <math.h>
@@ -9,7 +10,13 @@ namespace spire {
 
 double g_shader_time = 0.0;
 
+static const CanvasItem* g_item = NULL; /* the item being drawn */
+
 static float param(const MaterialRes* m, const char* name, float fallback) {
+    if (g_item) {
+        std::map<std::string, float>::const_iterator it = g_item->shader_params.find(name);
+        if (it != g_item->shader_params.end()) return it->second;
+    }
     if (!m->props) return fallback;
     std::string k = std::string("shader_parameter/") + name;
     return m->props->has(k.c_str()) ? jv_float((*m->props)[k.c_str()], fallback) : fallback;
@@ -59,8 +66,9 @@ static void hsv_matrix(const MaterialRes* m, float out[12]) {
     }
 }
 
-bool shader_begin(Canvas& c, const MaterialRes* m) {
+bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
     if (!m || m->kind != Resource::RES_SHADER_MATERIAL) return true;
+    g_item = item;
     if (m->shader == "shaders/hsv.gdshader") {
         float cm[12];
         hsv_matrix(m, cm);
@@ -75,11 +83,31 @@ bool shader_begin(Canvas& c, const MaterialRes* m) {
         c.set_color_matrix(cm);
         return true;
     }
+    if (m->shader == "shaders/card_ripple.gdshader") {
+        /* render_mode blend_add: shader_blend. */
+        float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),
+                       param(m, "ease", 0.0f), param(m, "width", 0.0f) };
+        c.set_ripple(p);
+        return true;
+    }
+    return false;
+}
+
+/* Blend modes from a shader's render_mode (the tree applies the item's
+ * blend after shader_begin). */
+bool shader_blend(const MaterialRes* m, BlendMode* out) {
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/card_ripple.gdshader") {
+        *out = BLEND_ADD;
+        return true;
+    }
     return false;
 }
 
 void shader_end(Canvas& c, const MaterialRes* m) {
-    if (m && m->kind == Resource::RES_SHADER_MATERIAL) c.set_color_matrix(NULL);
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL) {
+        c.set_color_matrix(NULL);
+        c.set_ripple(NULL);
+    }
 }
 
 } /* namespace spire */

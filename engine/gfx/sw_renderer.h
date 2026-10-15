@@ -28,6 +28,11 @@ public:
         if (m)
             for (int i = 0; i < 12; ++i) cm_[i] = m[i];
     }
+    virtual void set_ripple(const float* p) {
+        ripple_on_ = p != NULL;
+        if (p)
+            for (int i = 0; i < 4; ++i) ripple_[i] = p[i];
+    }
     virtual void set_msdf(float px_range, float outline) {
         msdf_range_ = px_range;
         msdf_outline_ = outline;
@@ -51,6 +56,8 @@ private:
     float msdf_range_, msdf_outline_;
     bool cm_on_;
     float cm_[12];
+    bool ripple_on_;
+    float ripple_[4];
 };
 
 } /* namespace spire */

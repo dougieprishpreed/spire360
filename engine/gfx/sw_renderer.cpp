@@ -6,7 +6,9 @@
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false) {}
+    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false) {
+    for (int i = 0; i < 4; ++i) ripple_[i] = 0;
+}
 
 Texture* SwRenderer::create_texture(const TextureData& d) {
     SwTexture* t = new SwTexture();
@@ -209,6 +211,23 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 s[0] = cm_[0] * r + cm_[1] * g + cm_[2] * b + cm_[3] * s[3];
                 s[1] = cm_[4] * r + cm_[5] * g + cm_[6] * b + cm_[7] * s[3];
                 s[2] = cm_[8] * r + cm_[9] * g + cm_[10] * b + cm_[11] * s[3];
+            }
+            if (ripple_on_) {
+                /* card_ripple: straight colour kept, alpha from the field. */
+                float a = s[3] * col[3];
+                float sdf = fmodf(ripple_[0] + a, ripple_[1]);
+                if (sdf < 0) sdf += ripple_[1];
+                float t = ripple_[2] > 0 ? clampf(sdf / ripple_[2], 0.0f, 1.0f) : 1.0f;
+                float b = a - sdf + t * t * (3.0f - 2.0f * t) * ripple_[1];
+                float w = ripple_[3];
+                float u = w > 0 ? clampf((b - (1.0f - w)) / w, 0.0f, 1.0f) : (b >= 1.0f ? 1.0f : 0.0f);
+                float na = u * u * (3.0f - 2.0f * u);
+                float inv = s[3] > 0 ? 1.0f / s[3] : 0.0f;
+                s[0] *= inv;
+                s[1] *= inv;
+                s[2] *= inv;
+                s[3] = 1.0f;
+                col[3] = na; /* s is straight now: the premultiply below uses na */
             }
             /* premultiplied source = texel(premul) * modulate (straight) */
             float sa = s[3] * col[3];

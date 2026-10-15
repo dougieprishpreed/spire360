@@ -21,11 +21,12 @@ namespace spire {
 
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
-      cm_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
+      cm_on_(false), ripple_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
       group_failed_(false), width_(0), height_(0), draws_(0) {
     msdf_[0] = 16;
     msdf_[1] = 0;
     memset(cm_, 0, sizeof(cm_));
+    memset(ripple_, 0, sizeof(ripple_));
     memset(&clip_, 0, sizeof(clip_));
     memset(&group_rect_, 0, sizeof(group_rect_));
 }
@@ -356,6 +357,15 @@ void D3D9Renderer::set_color_matrix(const float* m) {
     dirty_ = true;
 }
 
+void D3D9Renderer::set_ripple(const float* p) {
+    bool on = p != NULL;
+    if (on == ripple_on_ && (!on || memcmp(p, ripple_, sizeof(ripple_)) == 0)) return;
+    flush();
+    ripple_on_ = on;
+    if (p) memcpy(ripple_, p, sizeof(ripple_));
+    dirty_ = true;
+}
+
 void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) {
     D3D9Texture* t = (D3D9Texture*)tex;
     if (t != tex_ || blend != blend_ || flags != flags_) {
@@ -430,12 +440,14 @@ void D3D9Renderer::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
-    float c[20] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f, 0,
+    float c[24] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
+                    ripple_on_ ? 1.0f : 0.0f,
                     msdf_[0], msdf_[1], tw, th,
                     cm_[0], cm_[1], cm_[2], cm_[3],
                     cm_[4], cm_[5], cm_[6], cm_[7],
-                    cm_[8], cm_[9], cm_[10], cm_[11] };
-    dev_->SetPixelShaderConstantF(0, c, 5);
+                    cm_[8], cm_[9], cm_[10], cm_[11],
+                    ripple_[0], ripple_[1], ripple_[2], ripple_[3] };
+    dev_->SetPixelShaderConstantF(0, c, 6);
     dirty_ = false;
 }
 

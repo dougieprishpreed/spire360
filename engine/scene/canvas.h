@@ -23,6 +23,7 @@ public:
     void set_clip(const Rect2* screen_rect);
     /* Ported material shaders that reduce to a colour matrix (NULL: none). */
     void set_color_matrix(const float* m) { r_->set_color_matrix(m); }
+    void set_ripple(const float* p) { r_->set_ripple(p); }
     const Xform2D& xform() const { return xform_; }
     /* Per-draw blend inside an item (Spine slots). */
     void set_blend(BlendMode b) { blend_ = b; }

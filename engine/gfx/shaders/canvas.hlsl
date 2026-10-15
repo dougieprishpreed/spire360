@@ -33,11 +33,12 @@ VsOut vs_main(VsIn i) {
 
 sampler2D g_tex : register(s0);
 sampler2D g_group : register(s1);     // the canvas group layer (premultiplied)
-float4 g_mode : register(c0);         // x: colour matrix on, y: MSDF on, z: group mask
+float4 g_mode : register(c0);         // x: colour matrix on, y: MSDF on, z: group mask, w: ripple
 float4 g_msdf : register(c1);         // x: px_range, y: outline, zw: texture size
 float4 g_cm0 : register(c2);          // colour matrix rows: rgb' = M * rgb + offset * a
 float4 g_cm1 : register(c3);
 float4 g_cm2 : register(c4);
+float4 g_ripple : register(c5);       // phase, modulo, ease, width (card_ripple.gdshader)
 
 float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
@@ -68,5 +69,11 @@ float4 ps_main(VsOut i) : COLOR {
         t.rgb = float3(dot(g_cm0.xyz, rgb) + g_cm0.w, dot(g_cm1.xyz, rgb) + g_cm1.w, dot(g_cm2.xyz, rgb) + g_cm2.w);
     }
     float4 c = t * i.color;
+    if (g_mode.w > 0.5) {
+        // Godot's card_ripple.gdshader: the alpha as a distance field.
+        float sdf = fmod(g_ripple.x + c.a, g_ripple.y);
+        float b = c.a - sdf + smoothstep(0.0, g_ripple.z, sdf) * g_ripple.y;
+        c.a = smoothstep(1.0 - g_ripple.w, 1.0, b);
+    }
     return float4(c.rgb * c.a, c.a);
 }

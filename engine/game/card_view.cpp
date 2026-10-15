@@ -208,6 +208,7 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
     if (glow) {
         const std::string g = c["glow"].str();
         glow->visible = g == "playable" || g == "gold" || g == "red";
+        glow->shader_params["width"] = glow->visible ? 0.075f : 0.0f; /* AnimShow's end value */
         if (g == "gold") glow->modulate = Color(1, 0.784f, 0, 0.98f);
         else if (g == "red") glow->modulate = Color(0.83f, 0, 0.33f, 0.98f);
         else glow->modulate = Color(0, 0.957f, 0.988f, 0.98f);

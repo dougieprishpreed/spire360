@@ -84,6 +84,9 @@ public:
     MaterialRes* material;
     bool use_parent_material;
     int texture_filter, texture_repeat; /* 0 = parent */
+    /* Shader parameters set from code for this item (Godot: a material
+     * local to the scene, changed by the node's script). */
+    std::map<std::string, float> shader_params;
 
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Xform2D get_transform() const { return Xform2D(); }
