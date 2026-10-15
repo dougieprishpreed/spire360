@@ -16,6 +16,7 @@
 
 namespace spire {
 
+class CombatScreen;
 class LogicLink;
 class Node;
 class SceneLibrary;
@@ -72,6 +73,7 @@ private:
     unsigned next_rand();
     void choose_automatically();
     void handle_input(const PadState& pad);
+    void combat_input(const PadState& pad);
     Node* plain_screen(const Json& d);
     void refresh_plain_screen();
 
@@ -79,6 +81,9 @@ private:
     SceneTree* tree_;
     LogicLink* link_;
     Node* screen_;
+    CombatScreen* combat_; /* the combat screen's state while it is shown */
+    int hand_focus_;       /* kept across decisions, as the game's _lastFocusedHolderIdx */
+    int target_;           /* combat targeting: enemy index, -1 when not targeting */
     Json decision_;
     std::vector<Choice> choices_;
     size_t focus_;

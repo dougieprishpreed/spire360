@@ -1,4 +1,5 @@
 #include "combat_screen.h"
+#include "card_view.h"
 #include "loc.h"
 
 #include "../scene/controls.h"
@@ -14,7 +15,7 @@
 
 namespace spire {
 
-CombatScreen::CombatScreen(SceneLibrary* lib) : lib_(lib) {}
+CombatScreen::CombatScreen(SceneLibrary* lib) : lib_(lib), hand_focus_(-1) {}
 
 static std::string lower(std::string s) {
     for (size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
@@ -528,6 +529,104 @@ void CombatScreen::setup_combat_ui(Node* root, const Json& d) {
     }
 }
 
+/* ---- the hand (NPlayerHand + HandPosHelper + NHandCardHolder, at rest) ---- */
+
+/* HandPosHelper: card centres relative to the bottom centre of the screen
+ * and angles in degrees, for 1..10 cards. */
+static const float HAND_POS[10][10][2] = {
+    { { 0, -50 } },
+    { { -100, -50 }, { 100, -50 } },
+    { { -180, -50 }, { 0, -59 }, { 180, -50 } },
+    { { -240, -25 }, { -80, -50 }, { 80, -50 }, { 240, -25 } },
+    { { -340, 10 }, { -170, -30 }, { 0, -50 }, { 170, -30 }, { 340, 10 } },
+    { { -460, 13 }, { -273, -25 }, { -90, -50 }, { 90, -50 }, { 273, -25 }, { 460, 13 } },
+    { { -534, 18 }, { -365, -14 }, { -189, -39 }, { 0, -50 }, { 189, -39 }, { 365, -14 }, { 534, 18 } },
+    { { -565, 28 }, { -400, -14 }, { -231, -39 }, { -80, -50 }, { 80, -50 }, { 231, -39 }, { 400, -14 }, { 565, 28 } },
+    { { -600, 37 }, { -445, -2 }, { -300, -29 }, { -150, -45 }, { 0, -50 }, { 150, -45 }, { 300, -29 }, { 445, -2 },
+      { 600, 37 } },
+    { { -610, 38 }, { -472, 5 }, { -340, -21 }, { -200, -41 }, { -64, -50 }, { 64, -50 }, { 200, -41 }, { 340, -21 },
+      { 472, 5 }, { 610, 38 } }
+};
+static const float HAND_ANGLE[10][10] = {
+    { 0 },
+    { -2, 2 },
+    { -3, 0, 3 },
+    { -8, -4, 4, 8 },
+    { -8, -4, 0, 4, 8 },
+    { -9, -6, -3, 3, 6, 9 },
+    { -9, -6, -3, 0, 3, 6, 9 },
+    { -12, -9, -6, -3, 3, 6, 9, 12 },
+    { -12, -9, -6, -3, 0, 3, 6, 9, 12 },
+    { -15, -12, -9, -6, -3, 3, 6, 9, 12, 15 }
+};
+
+/* NPlayerHand.RefreshLayout with a controller: the focused card upright,
+ * full size and raised to its hitbox's half height; the others pushed
+ * aside (75, 50, 25 px for distances 1..3). */
+void CombatScreen::build_hand(Node* ui, const Json& d) {
+    holders_.clear();
+    Node* hand = ui ? find_named(ui, "Hand") : NULL;
+    Node* box = hand ? hand->find_unique("CardHolderContainer") : NULL;
+    if (!box) return;
+    const Json& cards = d["hand"];
+    for (size_t i = 0; i < cards.size() && i < 10; ++i) {
+        Node* holder = instance(lib_, "scenes/cards/holders/hand_card_holder.tscn");
+        if (!holder || !holder->is_control()) {
+            delete holder;
+            continue;
+        }
+        Control* h = (Control*)holder;
+        Node* card = make_card(lib_, cards[i]);
+        if (card) h->add_child(card);
+        /* Flash (upgrade / cost change pulse) and the index label are off at rest. */
+        Node* flash = h->get_node("Flash");
+        if (flash && flash->is_canvas_item()) ((CanvasItem*)flash)->modulate.a = 0;
+        Node* index = h->find_unique("HandIndex");
+        if (index && index->is_canvas_item()) ((CanvasItem*)index)->visible = false;
+        box->add_child(h);
+        holders_.push_back(h);
+    }
+    layout_hand();
+}
+
+void CombatScreen::set_hand_focus(int index) {
+    hand_focus_ = index;
+    layout_hand();
+}
+
+void CombatScreen::layout_hand() {
+    int n = (int)holders_.size();
+    if (n == 0) return;
+    int focus = hand_focus_ < 0 ? n / 2 : (hand_focus_ >= n ? n - 1 : hand_focus_);
+    float scale = 0.8f * (n <= 7 ? 1.0f : n == 8 ? 0.95f : n == 9 ? 0.9f : 0.85f);
+    for (int i = 0; i < n; ++i) {
+        Control* h = holders_[i];
+        float x = HAND_POS[n - 1][i][0], y = HAND_POS[n - 1][i][1];
+        float angle = HAND_ANGLE[n - 1][i], sc = scale;
+        h->z_index = 0;
+        if (i == focus) {
+            Control* hit = ctl(h, "Hitbox");
+            y = -(hit ? offset_size(hit).y : 422.0f) * 0.5f + 2.0f;
+            angle = 0;
+            sc = 1;
+            h->z_index = 1;
+        } else {
+            int dist = i < focus ? focus - i : i - focus;
+            float push = 100.0f * (1.0f - minf(1.0f, (float)dist / 4.0f));
+            x += i < focus ? -push : push;
+        }
+        place(h, x, y, 0, 0);
+        h->rotation = angle * 3.14159265f / 180.0f;
+        h->scale = Vec2(sc, sc);
+    }
+}
+
+/* NSelectionReticle.OnSelect / OnDeselect, at rest. */
+void CombatScreen::show_target(int enemy) {
+    for (size_t i = 0; i < reticles_.size(); ++i)
+        if (reticles_[i]) reticles_[i]->modulate.a = (int)i == enemy ? 1.0f : 0.0f;
+}
+
 static void play_idle(Node* n) {
     if (n->type == "SpineSprite") ((SpineSprite*)n)->set_animation("idle_loop", true, 0);
     for (size_t i = 0; i < n->children.size(); ++i) play_idle(n->children[i]);
@@ -567,6 +666,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
 
     /* Allies: the player (pets later). */
     std::vector<Creature> ally_nodes, enemy_nodes;
+    reticles_.clear();
     const Json& player = d["player"];
     Creature c;
     if (make_creature(player["character"].is_string() ? player["character"].str() : std::string("ironclad"), true, c)) {
@@ -577,14 +677,19 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     }
     const Json& es = d["enemies"];
     for (size_t i = 0; i < es.size(); ++i) {
-        if (!make_creature(es[i]["id"].str(), false, c)) continue;
+        if (!make_creature(es[i]["id"].str(), false, c)) {
+            reticles_.push_back(NULL); /* keep reticles_[i] = enemy i */
+            continue;
+        }
         c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
         enemies->add_child(c.node);
+        reticles_.push_back(ctl(c.node, "SelectionReticle"));
         update_bounds(c);
         refresh_health_bar(c, es[i], es[i]["powers"]);
         enemy_nodes.push_back(c);
     }
     setup_combat_ui(root, d);
+    build_hand(find_named(root, "CombatUi"), d);
     position_players(ally_nodes, scaling, view["fully_center_players"].b());
     position_enemies(enemy_nodes, scaling);
     play_idle(root);

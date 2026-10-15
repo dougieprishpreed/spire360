@@ -4,6 +4,11 @@
  *
  *   spire_play <pack.s3p> <out_dir> --logic "dotnet out/logic/jit/Spire.Logic.dll"
  *              [--character Ironclad] [--seed S] [--steps N] [--scale S] [--auto SEED]
+ *              [--pad A,RIGHT,A,Y,...]
+ *
+ * --pad presses those buttons one per frame while a decision is shown (a
+ * frame is also saved after each, NNNN_pad_KK.png), then auto-play takes
+ * over.
  *
  * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision)
  * per screen, and logic.log (the logic's stderr). The logic's working
@@ -44,6 +49,7 @@ int main(int argc, char** argv) {
     int steps = 40;
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
+    std::vector<unsigned> pad_script;
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
@@ -51,6 +57,26 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
+        else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
+            static const struct {
+                const char* name;
+                unsigned bit;
+            } names[] = { { "A", PadState::A },       { "B", PadState::B },         { "X", PadState::X },
+                          { "Y", PadState::Y },       { "LEFT", PadState::LEFT },   { "RIGHT", PadState::RIGHT },
+                          { "UP", PadState::UP },     { "DOWN", PadState::DOWN },   { "START", PadState::START },
+                          { "LB", PadState::LB },     { "RB", PadState::RB },       { "LT", PadState::LT },
+                          { "RT", PadState::RT } };
+            std::string list = argv[++i];
+            size_t at = 0;
+            while (at <= list.size()) {
+                size_t comma = list.find(',', at);
+                std::string tok = list.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+                for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k)
+                    if (tok == names[k].name) pad_script.push_back(names[k].bit);
+                if (comma == std::string::npos) break;
+                at = comma + 1;
+            }
+        }
     }
     if (logic_cmd.empty()) {
         fprintf(stderr, "spire_play: --logic is required\n");
@@ -79,15 +105,30 @@ int main(int argc, char** argv) {
     SceneTree tree;
     tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
     GameClient game(&lib, &tree, &link);
-    game.set_auto_play(auto_seed);
+    if (pad_script.empty()) game.set_auto_play(auto_seed);
+    size_t pad_at = 0;
     game.start_run(character, seed);
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
     int shown = 0, idle = 0;
     while (shown < steps) {
         PadState pad;
+        if (pad_at < pad_script.size() && !game.busy() && game.decision_count() > 0) {
+            pad.pressed = pad.held = pad_script[pad_at++];
+        } else if (pad_at >= pad_script.size() && !pad_script.empty()) {
+            game.set_auto_play(auto_seed);
+            pad_script.clear();
+        }
         int before = game.decision_count();
         game.update(pad);
+        if (pad.pressed && game.decision_count() == before) {
+            /* The screen after this press (focus, targeting). */
+            tree.layout();
+            sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+            tree.render(canvas);
+            sw.end();
+            write_png(format("%s/%04d_pad_%02d.png", out_dir.c_str(), shown, (int)pad_at).c_str(), sw.framebuffer());
+        }
         if (game.decision_count() != before) {
             /* A new screen: let it settle (Godot's reference: 5th frame;
              * a second for the intro animations), then save it. */

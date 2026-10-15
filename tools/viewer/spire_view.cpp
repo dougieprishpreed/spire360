@@ -64,17 +64,19 @@ static void play_everywhere(Node* n, const char* anim) {
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y]\n");
+        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y] [--hand-focus I]\n");
         return 2;
     }
     float scale = 1.0f;
     int frames = 5; /* --time: seconds of process at 60 fps */
     const char* spine_anim = NULL;
     float origin_x = 0, origin_y = 0;
+    int hand_focus = -1;
     bool has_origin = false;
     for (int i = 4; i < argc; ++i) {
         if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--spine-anim") == 0 && i + 1 < argc) spine_anim = argv[++i];
+        else if (strcmp(argv[i], "--hand-focus") == 0 && i + 1 < argc) hand_focus = atoi(argv[++i]);
         else if (strcmp(argv[i], "--origin") == 0 && i + 2 < argc) {
             origin_x = (float)atof(argv[++i]);
             origin_y = (float)atof(argv[++i]);
@@ -115,6 +117,7 @@ int main(int argc, char** argv) {
         Json d = Json::parse(text.c_str(), text.size(), &err);
         if (d["decision"].str() == "combat_play") {
             CombatScreen cs(&lib);
+            cs.set_hand_focus(hand_focus);
             scene = cs.build(d, &err);
         } else if (err.empty()) {
             err = "no screen for decision " + d["decision"].str();

@@ -139,10 +139,11 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), screen_(NULL), focus_(0), waiting_(true), ready_(false), auto_(false),
+    : lib_(lib), tree_(tree), link_(link), screen_(NULL), combat_(NULL), hand_focus_(-1), target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
       rng_(1), decisions_(0), errors_(0) {}
 
 GameClient::~GameClient() {
+    delete combat_;
     if (screen_) {
         screen_->parent->remove_child(screen_);
         delete screen_;
@@ -211,11 +212,19 @@ void GameClient::show(const Json& d) {
         delete screen_;
         screen_ = NULL;
     }
+    delete combat_;
+    combat_ = NULL;
+    target_ = -1;
     std::string err;
     if (d["decision"].str() == "combat_play") {
-        CombatScreen cs(lib_);
-        screen_ = cs.build(d, &err);
-        if (!screen_) log_warn("combat screen: %s", err.c_str());
+        combat_ = new CombatScreen(lib_);
+        combat_->set_hand_focus(hand_focus_);
+        screen_ = combat_->build(d, &err);
+        if (!screen_) {
+            log_warn("combat screen: %s", err.c_str());
+            delete combat_;
+            combat_ = NULL;
+        }
     }
     if (!screen_) screen_ = plain_screen(d);
     tree_->root()->add_child(screen_);
@@ -235,7 +244,58 @@ void GameClient::choose_automatically() {
     pick(next_rand() % n);
 }
 
+/* Combat with a pad, as the game plays it: the hand has the focus (left /
+ * right), A plays the focused card or, for a single-enemy card with a
+ * choice of targets, starts targeting (left / right pick the enemy, A
+ * plays, B cancels); Y ends the turn. */
+void GameClient::combat_input(const PadState& pad) {
+    const Json& hand = decision_["hand"];
+    const Json& enemies = decision_["enemies"];
+    int n = combat_->hand_size();
+    int ne = (int)enemies.size();
+    int focus = combat_->hand_focus() < 0 ? n / 2 : combat_->hand_focus();
+    if (focus >= n) focus = n - 1;
+    if (target_ >= 0) {
+        if ((pad.pressed & PadState::LEFT) && ne > 0) target_ = (target_ + ne - 1) % ne;
+        if ((pad.pressed & PadState::RIGHT) && ne > 0) target_ = (target_ + 1) % ne;
+        combat_->show_target(target_);
+        if (pad.pressed & PadState::B) {
+            target_ = -1;
+            combat_->show_target(-1);
+        } else if ((pad.pressed & PadState::A) && focus >= 0) {
+            send(action("play_card", format("\"card_index\":%d,\"target_index\":%d", hand[(size_t)focus]["index"].i(),
+                                            enemies[(size_t)target_]["index"].i())));
+            target_ = -1;
+        }
+        return;
+    }
+    if (n > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
+        focus = (pad.pressed & PadState::LEFT) ? (focus + n - 1) % n : (focus + 1) % n;
+        hand_focus_ = focus;
+        combat_->set_hand_focus(focus);
+    }
+    if ((pad.pressed & PadState::A) && focus >= 0 && focus < n) {
+        const Json& card = hand[(size_t)focus];
+        if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) return;
+        if (card["target_type"].str() == "AnyEnemy" && ne > 1) {
+            target_ = 0;
+            combat_->show_target(0);
+        } else if (card["target_type"].str() == "AnyEnemy" && ne == 1) {
+            send(action("play_card", format("\"card_index\":%d,\"target_index\":%d", card["index"].i(),
+                                            enemies[(size_t)0]["index"].i())));
+        } else {
+            send(action("play_card", format("\"card_index\":%d", card["index"].i())));
+        }
+    } else if (pad.pressed & PadState::Y) {
+        send(action("end_turn"));
+    }
+}
+
 void GameClient::handle_input(const PadState& pad) {
+    if (combat_) {
+        combat_input(pad);
+        return;
+    }
     if (choices_.empty()) return;
     size_t n = choices_.size();
     if (pad.pressed & (PadState::DOWN | PadState::RIGHT)) focus_ = (focus_ + 1) % n;

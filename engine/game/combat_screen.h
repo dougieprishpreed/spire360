@@ -26,6 +26,14 @@ public:
     explicit CombatScreen(SceneLibrary* lib);
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
+    /* The controller's focused card in the hand (-1: the middle one); set
+     * before build, or after it to move the focus (relays the hand). */
+    void set_hand_focus(int index);
+    int hand_focus() const { return hand_focus_; }
+    int hand_size() const { return (int)holders_.size(); }
+    /* The targeting reticle on an enemy (its index in the decision's
+     * enemies), -1: none. */
+    void show_target(int enemy);
 
 private:
     struct Creature {
@@ -41,10 +49,15 @@ private:
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
     void setup_combat_ui(Node* root, const Json& d);
+    void build_hand(Node* ui, const Json& d);
+    void layout_hand();
     void refresh_health_bar(Creature& c, const Json& data, const Json& powers);
     void position_enemies(std::vector<Creature>& c, float scaling);
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center);
     SceneLibrary* lib_;
+    int hand_focus_;
+    std::vector<Control*> holders_;   /* in the built tree (not owned) */
+    std::vector<Control*> reticles_;  /* the enemies' SelectionReticle */
 };
 
 } /* namespace spire */
