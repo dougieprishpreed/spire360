@@ -10,8 +10,8 @@
  * screen half a second after each is saved, NNNN_pad_KK.png), then
  * auto-play takes over.
  *
- * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision)
- * per screen, and logic.log (the logic's stderr). The logic's working
+ * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision's
+ * line) per screen, and logic.log (the logic's stderr). The logic's working
  * directory is ours: give it SPIRE_DATA in the environment for localization. */
 #include "../../engine/core/pack.h"
 #include "../../engine/game/game.h"
@@ -30,6 +30,25 @@
 #include <unistd.h>
 
 using namespace spire;
+
+/* The pipe link, keeping the last decision line (saved with its screen). */
+class RecordingLink : public LogicLink {
+public:
+    explicit RecordingLink(PipeLink* inner) : inner_(inner) {}
+    virtual bool send(const std::string& line) { return inner_->send(line); }
+    virtual bool poll(std::string& line) {
+        if (!inner_->poll(line)) return false;
+        if (line.find("\"type\": \"decision\"") != std::string::npos ||
+            line.find("\"type\":\"decision\"") != std::string::npos)
+            last_decision = line;
+        return true;
+    }
+    virtual bool finished() { return inner_->finished(); }
+    std::string last_decision;
+
+private:
+    PipeLink* inner_;
+};
 
 static bool save_text(const std::string& path, const std::string& text) {
     FILE* f = fopen(path.c_str(), "wb");
@@ -97,11 +116,12 @@ int main(int argc, char** argv) {
     SceneLibrary lib(&pack);
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
-    PipeLink link;
-    if (!link.start(logic_cmd, (out_dir + "/logic.log").c_str(), &err)) {
+    PipeLink pipe;
+    if (!pipe.start(logic_cmd, (out_dir + "/logic.log").c_str(), &err)) {
         fprintf(stderr, "%s\n", err.c_str());
         return 1;
     }
+    RecordingLink link(&pipe);
     SceneTree tree;
     tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
     GameClient game(&lib, &tree, &link);
@@ -148,9 +168,7 @@ int main(int argc, char** argv) {
             const std::string& kind = game.decision()["decision"].str();
             std::string base = format("%s/%04d_%s", out_dir.c_str(), shown, kind.c_str());
             if (!write_png((base + ".png").c_str(), sw.framebuffer())) fprintf(stderr, "cannot write %s.png\n", base.c_str());
-            /* The decision as JSON lines are not kept by Json; re-serialise
-             * what we need: the logic log has the full lines. */
-            save_text(base + ".txt", kind + "\n");
+            save_text(base + ".json", link.last_decision + "\n");
             printf("%04d %s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)");
             fflush(stdout);
             ++shown;

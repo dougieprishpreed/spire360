@@ -7,6 +7,9 @@
 
 #if defined(_XBOX)
 #include <xgraphics.h>
+#if !defined(XGTILE_NONPACKED)
+#define XGTILE_NONPACKED 0x1
+#endif
 #include "canvas_ps.h" /* g_ps_main, from fxc /Fh /Vn g_ps_main */
 #include "canvas_vs.h" /* g_vs_main */
 #else
@@ -145,7 +148,8 @@ Texture* D3D9Renderer::create_texture(const TextureData& d) {
     D3DFORMAT fmt = d3d_format(d.format);
     bool block = d.format != TEX_ARGB8;
 #if defined(_XBOX)
-    /* One level for now: the packed mip tail needs XGTILE flags per level. */
+    /* One level for now (no packed mip tail: D3D creates a one-level
+     * texture unpacked, its base level at the base address). */
     UINT levels = 1;
     if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, 0, &t->tex, NULL))) return t;
 #else
@@ -181,7 +185,12 @@ Texture* D3D9Renderer::create_texture(const TextureData& d) {
         }
         D3DLOCKED_RECT lr;
         if (FAILED(t->tex->LockRect(lv, &lr, NULL, 0))) break;
-        XGTileTextureLevel(w, h, lv, XGGetGpuFormat(fmt), 0, lr.pBits, NULL, &sw[0], pitch, NULL);
+        /* XGTILE_NONPACKED: without it a level of 16 texels or less is
+         * written where the packed mip tail would hold it, and the GPU
+         * (reading the unpacked base) sees nothing: every small texture
+         * (the health bars' pieces, the 1x1 white of untextured draws) was
+         * invisible. */
+        XGTileTextureLevel(w, h, lv, XGGetGpuFormat(fmt), XGTILE_NONPACKED, lr.pBits, NULL, &sw[0], pitch, NULL);
         t->tex->UnlockRect(lv);
 #else
         D3DLOCKED_RECT lr;

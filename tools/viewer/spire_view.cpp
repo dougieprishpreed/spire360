@@ -116,9 +116,10 @@ int main(int argc, char** argv) {
         }
         Json d = Json::parse(text.c_str(), text.size(), &err);
         if (d["decision"].str() == "combat_play") {
-            CombatScreen cs(&lib);
-            cs.set_hand_focus(hand_focus);
-            scene = cs.build(d, &err);
+            /* Lives as long as the scene (it drives its animations). */
+            CombatScreen* cs = new CombatScreen(&lib);
+            cs->set_hand_focus(hand_focus);
+            scene = cs->build(d, &err);
         } else if (err.empty()) {
             err = "no screen for decision " + d["decision"].str();
         }

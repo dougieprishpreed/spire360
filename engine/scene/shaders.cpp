@@ -83,6 +83,15 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.set_color_matrix(cm);
         return true;
     }
+    if (m->shader == "shaders/power.gdshader") {
+        /* COLOR.rgb += |sin(3 TIME)| * 0.2 while pulse == 1 (NPower's
+         * PulsingStarted). */
+        float k = param(m, "pulse", 0.0f) == 1.0f ? fabsf(sinf((float)g_shader_time * 3.0f)) * 0.2f : 0.0f;
+        if (k == 0.0f) return true;
+        float cm[12] = { 1, 0, 0, k, 0, 1, 0, k, 0, 0, 1, k };
+        c.set_color_matrix(cm);
+        return true;
+    }
     if (m->shader == "shaders/card_ripple.gdshader") {
         /* render_mode blend_add: shader_blend. */
         float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),

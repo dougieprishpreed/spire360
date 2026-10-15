@@ -79,6 +79,8 @@ private:
     Node2D* make_arrow();
     void update_arrow(const Vec2& target);
     void refresh_health_bar(Creature& c, const Json& data, const Json& powers);
+    void make_intents(Creature& c, const Json& intents, int creature_index);
+    void make_powers(Creature& c, const Json& powers);
     void position_enemies(std::vector<Creature>& c, float scaling);
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center);
     SceneLibrary* lib_;

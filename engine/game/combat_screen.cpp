@@ -9,6 +9,7 @@
 #include "../scene/spine_sprite.h"
 #include "../scene/rich_text.h"
 #include "../scene/script.h"
+#include "../scene/shaders.h"
 #include "../scene/text_nodes.h"
 
 #include <ctype.h>
@@ -322,6 +323,143 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     l->add_theme_color_override("font_color", font);
     l->add_theme_color_override("font_outline_color", out);
     l->set_text(format("%d/%d", hp, max_hp));
+}
+
+static void set_label(Node* n, const std::string& text);
+
+/* ---- powers (NPowerContainer, NPower) ---- */
+
+static Color json_color(const Json& c, const Color& fallback) {
+    if (c.size() < 3) return fallback;
+    return Color((float)c[(size_t)0].num(), (float)c[1].num(), (float)c[2].num(), c.size() > 3 ? (float)c[3].num() : 1.0f);
+}
+
+/* NPowerContainer.SetCreatureBounds + Add + UpdatePositions, NPower at rest
+ * (its fade-in done): the visible powers in rows under the health bar,
+ * as wide as the creature's bounds plus 25 px, centred when wider. */
+void CombatScreen::make_powers(Creature& c, const Json& powers) {
+    Control* sd = ctl(c.node, "HealthBar");
+    Control* box = ctl(sd, "PowerContainer");
+    if (!box) return;
+    std::vector<Control*> nodes;
+    for (size_t i = 0; i < powers.size(); ++i) {
+        const Json& pw = powers[i];
+        if (!pw["visible"].b(true)) continue;
+        Node* n = instance(lib_, "scenes/combat/power.tscn");
+        if (!n || !n->is_control()) {
+            delete n;
+            continue;
+        }
+        Node* icon = n->find_unique("Icon");
+        Resource* tex = lib_->ext("images/atlases/power_atlas.sprites/" + lower(pw["id"].str()) + ".tres");
+        if (icon && icon->type == "TextureRect") ((TextureRect*)icon)->texture = tex && tex->is_texture() ? (Texture2DRes*)tex : NULL;
+        /* RefreshAmount */
+        Node* label = n->find_unique("AmountLabel");
+        if (label && label->is_control()) {
+            ((Control*)label)->add_theme_color_override("font_color", json_color(pw["amount_color"], Color(1, 1, 1)));
+            set_label(label, pw["counter"].b() ? format("%d", pw["display_amount"].i(pw["amount"].i())) : std::string());
+        }
+        box->add_child(n);
+        nodes.push_back((Control*)n);
+    }
+    /* SetCreatureBounds: x at the bounds' left, width bounds + 25. */
+    float width = c.hitbox.size.x + 25.0f;
+    float x0 = c.hitbox.pos.x - offset_pos(sd).x;
+    if (nodes.empty()) {
+        place(box, x0, box->offset[SIDE_TOP], width, 0);
+        return;
+    }
+    float w = offset_size(nodes[0]).x;
+    if (w <= 0) w = 48;
+    int n = (int)nodes.size();
+    int per_row = (int)ceilf(width / w);
+    if ((n + 1) / 2 > per_row) per_row = (n + 1) / 2;
+    for (int i = 0; i < n; ++i) {
+        Vec2 sz = offset_size(nodes[i]);
+        place(nodes[i], w * (float)(i % per_row), floorf((float)i / (float)per_row) * w, sz.x, sz.y);
+    }
+    float used = w * (float)(n < per_row ? n : per_row);
+    place(box, x0 - maxf(0.0f, used - width) / 2.0f, box->offset[SIDE_TOP], width, 0);
+}
+
+/* ---- intents (NCreature.UpdateIntent, NIntent) ---- */
+
+/* IntentAnimData: an animation's frames in intent_atlas (prefix_NN, or one
+ * sprite). */
+static std::vector<std::string> intent_frames(const std::string& anim) {
+    static const struct {
+        const char* name;
+        const char* prefix;
+        int frames; /* 0: one sprite, no number */
+    } data[] = { { "attack_1", "attack/intent_attack_1", 0 }, { "attack_2", "attack/intent_attack_2", 0 },
+                 { "attack_3", "attack/intent_attack_3", 0 }, { "attack_4", "attack/intent_attack_4", 0 },
+                 { "attack_5", "attack/intent_attack_5", 0 }, { "buff", "buff/intent_buff", 30 },
+                 { "card_debuff", "card_debuff/intent_carddebuff", 15 }, { "death_blow", "intent_death_blow", 0 },
+                 { "debuff", "debuff/intent_megadebuff", 11 }, { "defend", "defend/intent_defend", 45 },
+                 { "escape", "escape/intent_escape", 40 }, { "heal", "heal/intent_heal", 45 },
+                 { "hidden", "intent_hidden", 0 }, { "sleep", "sleep/intent_sleep", 16 },
+                 { "status", "status/intent_statuscard", 19 }, { "stun", "stun/intent_stunned", 16 },
+                 { "summon", "summon/intent_summon", 25 }, { "unknown", "unknown/intent_unknown", 30 } };
+    std::vector<std::string> out;
+    for (size_t i = 0; i < sizeof(data) / sizeof(data[0]); ++i) {
+        if (anim != data[i].name) continue;
+        std::string base = std::string("images/atlases/intent_atlas.sprites/") + data[i].prefix;
+        if (data[i].frames == 0) out.push_back(base + ".tres");
+        for (int f = 0; f < data[i].frames; ++f) out.push_back(format("%s_%02d.tres", base.c_str(), f));
+    }
+    return out;
+}
+
+/* NIntent._Process: the holder bobs (sin(t * pi + offset) * 10 + 8 px up)
+ * and the sprite runs its frames at 15 fps. On the shaders' clock (Godot's
+ * Time.GetTicksMsec), so a rebuilt screen carries on where it was. */
+class IntentAnim : public ScriptBehavior {
+public:
+    IntentAnim(Control* holder, Sprite2D* sprite, float offset) : holder_(holder), sprite_(sprite), offset_(offset) {}
+    std::vector<Texture2DRes*> frames;
+    virtual void process(Node*, double) {
+        float t = (float)g_shader_time;
+        float y = -(sinf(t * PI_F + offset_) * 10.0f + 8.0f);
+        holder_->offset[SIDE_TOP] = y;
+        holder_->offset[SIDE_BOTTOM] = y;
+        if (!frames.empty() && sprite_) sprite_->texture = frames[(size_t)(t * 15.0f) % frames.size()];
+    }
+
+private:
+    Control* holder_;
+    Sprite2D* sprite_;
+    float offset_;
+};
+
+/* NCreature.UpdateIntent: one intent.tscn per intent of the move in the
+ * creature's %Intents row; the label (damage, status cards) as the game
+ * formats it. Shown at rest (RevealIntents' fade is done). */
+void CombatScreen::make_intents(Creature& c, const Json& intents, int creature_index) {
+    Node* row = c.node ? c.node->find_unique("Intents") : NULL;
+    if (!row || !row->is_control()) return;
+    ((Control*)row)->modulate.a = 1;
+    for (size_t i = 0; i < intents.size(); ++i) {
+        const Json& in = intents[i];
+        Node* n = instance(lib_, "scenes/combat/intent.tscn");
+        if (!n) return;
+        Control* holder = ctl(n, "IntentHolder");
+        Node* sprite = n->find_unique("Intent");
+        if (!holder) {
+            delete n;
+            return;
+        }
+        IntentAnim* anim = new IntentAnim(holder, sprite && sprite->type == "Sprite2D" ? (Sprite2D*)sprite : NULL,
+                                          (float)creature_index * 1.7f + (float)i * 0.3f);
+        std::vector<std::string> frames = intent_frames(in["animation"].str());
+        if (frames.empty() && in["sprite"].is_string()) frames.push_back(in["sprite"].str());
+        for (size_t f = 0; f < frames.size(); ++f) {
+            Resource* r = lib_->ext(frames[f]);
+            if (r && r->is_texture()) anim->frames.push_back((Texture2DRes*)r);
+        }
+        n->behavior = anim;
+        set_label(n->find_unique("Value"), in["label"].is_string() ? in["label"].str() : std::string());
+        row->add_child(n);
+    }
 }
 
 /* NCombatRoom.PositionEnemies. */
@@ -895,6 +1033,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         update_bounds(c);
         refresh_health_bar(c, player, d["player_powers"]);
         set_nameplate_text(c.nameplate, player["name"].str());
+        make_powers(c, d["player_powers"]);
         ally_nodes.push_back(c);
         player_ = c;
     }
@@ -909,6 +1048,8 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         update_bounds(c);
         refresh_health_bar(c, es[i], es[i]["powers"]);
         set_nameplate_text(c.nameplate, es[i]["name"].str());
+        make_intents(c, es[i]["intents"], (int)i);
+        make_powers(c, es[i]["powers"]);
         enemy_nodes.push_back(c);
         enemies_.push_back(c);
     }

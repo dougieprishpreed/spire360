@@ -439,11 +439,17 @@ def cmd_build(a):
 
     version = ""
     rel = [f for f in files if f.endswith("release_info.json")]
-    if rel:
-        try:
+    try:
+        if rel:
             version = json.loads(src.read(rel[0])).get("version", "")
-        except Exception:  # noqa: BLE001
-            pass
+        else:
+            # The game keeps it next to the .pck (the install folder).
+            beside = os.path.join(os.path.dirname(os.path.abspath(a.pack)), "release_info.json")
+            if os.path.isfile(beside):
+                with open(beside, encoding="utf-8") as f:
+                    version = json.load(f).get("version", "")
+    except Exception:  # noqa: BLE001
+        pass
 
     textures, fonts, spine, audio, text = [], [], [], [], []
     for f in files:
