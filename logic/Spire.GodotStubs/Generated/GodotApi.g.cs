@@ -351,9 +351,6 @@ namespace Godot
         public static string[] GetFilesAt(string p0) { return default; }
         public static string[] GetDirectoriesAt(string p0) { return default; }
         public global::Godot.Error Remove(string p0) { return default; }
-        public global::Godot.Error ListDirBegin() { return default; }
-        public string GetNext() { return default; }
-        public bool CurrentIsDir() { return default; }
         public static global::Godot.Error CopyAbsolute(string p0, string p1, int p2 = -1) { return default; }
     }
     public static partial class DisplayServer

@@ -415,12 +415,45 @@ public partial class DirAccess : global::Godot.RefCounted
     public static Error MakeDirAbsolute(string path) { try { Directory.CreateDirectory(path); return Error.Ok; } catch { return Error.Failed; } }
     public static Error MakeDirRecursiveAbsolute(string path) { try { Directory.CreateDirectory(path); return Error.Ok; } catch { return Error.Failed; } }
     public Error MakeDirRecursive(string path) { try { Directory.CreateDirectory(Path.Combine(_path, path)); return Error.Ok; } catch { return Error.Failed; } }
-    public static DirAccess? Open(string path) => Directory.Exists(path) ? new DirAccess(path) : null;
+    // Spire360: res:// folders are inside the game's .pck, which the logic
+    // does not have. The adapter sets ResFiles to list them from the
+    // converter's data/res_dirs.json (the .pck's own file order, which is
+    // the order Godot lists them in): the combat background picker reads one.
+    public static Func<string, string[]?>? ResFiles;
+    public static DirAccess? Open(string path)
+    {
+        if (path.StartsWith("res://"))
+        {
+            var files = ResFiles?.Invoke(path.Substring(6).TrimEnd('/'));
+            return files != null ? new DirAccess(path, files) : null;
+        }
+        return Directory.Exists(path) ? new DirAccess(path) : null;
+    }
     private readonly string _path;
+    private readonly string[]? _resFiles;
+    private int _next = -1;
     private DirAccess(string path) { _path = path; }
+    private DirAccess(string path, string[] files) { _path = path; _resFiles = files; }
     public DirAccess() { _path = ""; }
-    public string[] GetFiles() { try { return Directory.GetFiles(_path).Select(Path.GetFileName).ToArray()!; } catch { return Array.Empty<string>(); } }
-    public string[] GetDirectories() { try { return Directory.GetDirectories(_path).Select(Path.GetFileName).ToArray()!; } catch { return Array.Empty<string>(); } }
+    public string[] GetFiles()
+    {
+        if (_resFiles != null) return (string[])_resFiles.Clone();
+        try { return Directory.GetFiles(_path).Select(Path.GetFileName).ToArray()!; } catch { return Array.Empty<string>(); }
+    }
+    public string[] GetDirectories()
+    {
+        if (_resFiles != null) return Array.Empty<string>();
+        try { return Directory.GetDirectories(_path).Select(Path.GetFileName).ToArray()!; } catch { return Array.Empty<string>(); }
+    }
+    public Error ListDirBegin() { _next = 0; return Error.Ok; }
+    public string GetNext()
+    {
+        var files = _resFiles ?? GetFiles();
+        if (_next < 0 || _next >= files.Length) return "";
+        return files[_next++];
+    }
+    public bool CurrentIsDir() => false;
+    public void ListDirEnd() { _next = -1; }
 }
 
 // Animation

@@ -1804,6 +1804,88 @@ public partial class RunDriver
         };
     }
 
+    // res:// folder listings for the game code that reads folders (the
+    // combat background picker): data/res_dirs.json, written by the converter.
+    private static Dictionary<string, string[]>? _resDirs;
+
+    private static void EnsureResFiles()
+    {
+        if (Godot.DirAccess.ResFiles != null) return;
+        Godot.DirAccess.ResFiles = dir =>
+        {
+            if (_resDirs == null)
+            {
+                _resDirs = new Dictionary<string, string[]>();
+                try
+                {
+                    var path = Path.Combine(DataDir.Root, "res_dirs.json");
+                    using var doc = System.Text.Json.JsonDocument.Parse(File.Exists(path) ? File.ReadAllText(path) : "{}");
+                    foreach (var kv in doc.RootElement.EnumerateObject())
+                        if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            _resDirs[kv.Name] = kv.Value.EnumerateArray().Select(x => x.GetString() ?? "").ToArray();
+                }
+                catch (Exception ex) { Log($"res_dirs.json: {ex.Message}"); }
+            }
+            return _resDirs.TryGetValue(dir, out var files) ? files : null;
+        };
+    }
+
+    // What the combat screen needs beyond the decision: the encounter, its
+    // camera, and the background the game picks for this map point (the
+    // game's own picker, with the room's seed: same layers as on PC).
+    private Dictionary<string, object?>? _combatView;
+    private EncounterModel? _combatViewFor;
+
+    [System.Diagnostics.CodeAnalysis.DynamicDependency("GetBackgroundAssets", typeof(EncounterModel))]
+    private Dictionary<string, object?>? CombatView()
+    {
+        try
+        {
+            var enc = (_runState?.CurrentRoom as CombatRoom)?.Encounter;
+            var act = _runState?.Act;
+            if (enc == null || act == null) return null;
+            if (ReferenceEquals(enc, _combatViewFor)) return _combatView;
+            EnsureResFiles();
+            Dictionary<string, object?>? bg = null;
+            try
+            {
+                uint mix = 0;
+                var coord = _runState!.CurrentMapCoord;
+                if (coord.HasValue) mix = (uint)(coord.Value.row + coord.Value.col * 747);
+                var rng = new MegaCrit.Sts2.Core.Random.Rng(_runState.Rng.Seed + mix);
+                var get = typeof(EncounterModel).GetMethod("GetBackgroundAssets", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (get?.Invoke(enc, new object[] { act, rng }) is BackgroundAssets assets)
+                {
+                    static string Res(string? p) => p == null ? "" : p.StartsWith("res://") ? p.Substring(6) : p;
+                    bg = new Dictionary<string, object?>
+                    {
+                        ["scene"] = Res(assets.BackgroundScenePath),
+                        ["layers"] = assets.BgLayers.Select(Res).ToList(),
+                        ["fg"] = assets.FgLayer != null ? Res(assets.FgLayer) : null,
+                    };
+                }
+            }
+            catch (Exception ex) { Log($"CombatView background: {(ex.InnerException ?? ex).Message}"); }
+            var off = enc.GetCameraOffset();
+            _combatViewFor = enc;
+            _combatView = new Dictionary<string, object?>
+            {
+                ["encounter"] = enc.Id.Entry,
+                ["camera_scaling"] = enc.GetCameraScaling(),
+                ["camera_offset"] = new List<float> { off.X, off.Y },
+                ["has_scene"] = enc.HasScene,
+                ["fully_center_players"] = enc.FullyCenterPlayers,
+                ["background"] = bg,
+            };
+            return _combatView;
+        }
+        catch (Exception ex)
+        {
+            Log($"CombatView: {ex.Message}");
+            return null;
+        }
+    }
+
     private Dictionary<string, object?> CombatPlayState(Player player)
     {
         var pcs = player.PlayerCombatState;
@@ -2009,6 +2091,7 @@ public partial class RunDriver
                     // creature, stable for the whole combat.
                     ["id"] = e.Monster?.Id.Entry,
                     ["combat_id"] = e.CombatId,
+                    ["slot"] = string.IsNullOrEmpty(e.SlotName) ? null : e.SlotName,
                     ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
                     ["hp"] = e.CurrentHp,
                     ["max_hp"] = e.MaxHp,
@@ -2042,6 +2125,7 @@ public partial class RunDriver
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
+            ["view"] = CombatView(),
         };
 
         // Character-specific mechanics

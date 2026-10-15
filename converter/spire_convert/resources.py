@@ -41,6 +41,9 @@ class DirSource:
     def list(self):
         return sorted(self.files)
 
+    def ordered(self):
+        return sorted(self.files)  # an extracted folder has no .pck order
+
 
 class PckSource:
     def __init__(self, pck):
@@ -60,6 +63,10 @@ class PckSource:
 
     def list(self):
         return sorted(self.pck.entries)
+
+    def ordered(self):
+        """Paths in the .pck's own order (Godot lists folders in that order)."""
+        return list(self.pck.entries)
 
 
 def strip_res(path):

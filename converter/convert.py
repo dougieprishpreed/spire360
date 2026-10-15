@@ -542,6 +542,17 @@ def cmd_build(a):
             except Exception as e:  # noqa: BLE001
                 report["errors"][p] = f"{type(e).__name__}: {e}"
 
+    # Folder listings the logic's game code reads (the combat background
+    # picker lists scenes/backgrounds/<name>/layers), in .pck order.
+    res_dirs = {}
+    for f in src.ordered():
+        parts = f.split("/")
+        if len(parts) == 5 and parts[0] == "scenes" and parts[1] == "backgrounds" and parts[3] == "layers":
+            res_dirs.setdefault("/".join(parts[:4]), []).append(parts[4])
+    os.makedirs(os.path.join(a.out, "data"), exist_ok=True)
+    with open(os.path.join(a.out, "data", "res_dirs.json"), "w", encoding="utf-8") as fh:
+        json.dump(res_dirs, fh, indent=0)
+
     # Localization for the logic (data/localization/<lang>/*.json).
     loc = [f for f in files if f.startswith("localization/") and f.endswith(".json")]
     for f in loc:
