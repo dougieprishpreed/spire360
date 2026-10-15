@@ -69,7 +69,19 @@ public partial struct Color
     public static Color Transparent { get; } = new(0, 0, 0, 0);
 
     public Color(float r, float g, float b, float a = 1f) { R = r; G = g; B = b; A = a; }
-    public Color(string htmlColor) { R = 1; G = 1; B = 1; A = 1; }
+    // Spire360: Godot's Color(string) for hex codes ("#RGB", "RGBA", "RRGGBB",
+    // "RRGGBBAA", optional '#'); names are not needed by the logic: white.
+    public Color(string htmlColor)
+    {
+        R = 1; G = 1; B = 1; A = 1;
+        var h = htmlColor?.TrimStart('#') ?? "";
+        if (h.Length != 3 && h.Length != 4 && h.Length != 6 && h.Length != 8) return;
+        foreach (var ch in h) if (!Uri.IsHexDigit(ch)) return;
+        int Digit(int i) => Convert.ToInt32(h.Substring(i, 1), 16);
+        float Comp(int i) => h.Length <= 4 ? Digit(i) * 17 / 255f : Convert.ToInt32(h.Substring(i * 2, 2), 16) / 255f;
+        R = Comp(0); G = Comp(1); B = Comp(2);
+        if (h.Length == 4 || h.Length == 8) A = Comp(3);
+    }
     // Godot's Color(Color, float) — recolor with a new alpha. Used by VFX helpers
     // (e.g. Liquid Memories' discard-pile selection); missing overload throws
     // MissingMethodException in headless (issue #72).

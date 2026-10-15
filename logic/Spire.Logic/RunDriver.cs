@@ -1834,6 +1834,60 @@ public partial class RunDriver
     // camera, and the background the game picks for this map point (the
     // game's own picker, with the room's seed: same layers as on PC).
     private Dictionary<string, object?>? _combatView;
+    // Presentation inputs (engine/game/combat_screen.cpp), from the game's
+    // own view code so the console draws what the game would.
+
+    // NPower.RefreshAmount: the icon's label.
+    private Dictionary<string, object?> PowerView(PowerModel pw)
+    {
+        var d = new Dictionary<string, object?>
+        {
+            ["id"] = pw.Id.Entry,
+            ["name"] = _loc.Power(pw.Id.Entry),
+            ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
+            ["amount"] = pw.Amount,
+        };
+        try
+        {
+            d["visible"] = pw.IsVisible;
+            d["counter"] = pw.StackType == MegaCrit.Sts2.Core.Entities.Powers.PowerStackType.Counter;
+            d["display_amount"] = pw.DisplayAmount;
+            var c = pw.AmountLabelColor;
+            d["amount_color"] = new[] { c.R, c.G, c.B, c.A };
+        }
+        catch (Exception ex) { Log($"PowerView {pw.Id.Entry}: {ex.Message}"); }
+        return d;
+    }
+
+    // NIntent.UpdateVisuals: the animation (IntentAnimData), the particle
+    // texture and the value label.
+    [System.Diagnostics.CodeAnalysis.DynamicDependency("get_SpritePath", typeof(MegaCrit.Sts2.Core.MonsterMoves.Intents.AbstractIntent))]
+    private static void AddIntentView(Dictionary<string, object?> d, MegaCrit.Sts2.Core.MonsterMoves.Intents.AbstractIntent intent,
+                                      IEnumerable<Creature> targets, Creature owner)
+    {
+        try
+        {
+            var anim = intent.GetAnimation(targets, owner);
+            d["animation"] = anim;
+            string? sprite;
+            if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent)
+            {
+                // AttackIntent.GetTexture picks the same tier as GetAnimation.
+                sprite = "atlases/intent_atlas.sprites/attack/intent_" + anim + ".tres";
+            }
+            else
+            {
+                var prop = typeof(MegaCrit.Sts2.Core.MonsterMoves.Intents.AbstractIntent)
+                    .GetProperty("SpritePath", BindingFlags.NonPublic | BindingFlags.Instance);
+                sprite = prop?.GetValue(intent) as string;
+            }
+            d["sprite"] = sprite != null ? "images/" + sprite.TrimStart('/') : null;
+            if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent || intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.StatusIntent)
+                d["label"] = intent.GetIntentLabel(targets, owner).GetFormattedText() ?? "";
+        }
+        catch (Exception ex) { Log($"IntentView: {(ex.InnerException ?? ex).Message}"); }
+    }
+
     private EncounterModel? _combatViewFor;
 
     [System.Diagnostics.CodeAnalysis.DynamicDependency("GetBackgroundAssets", typeof(EncounterModel))]
@@ -2044,6 +2098,7 @@ public partial class RunDriver
                             {
                                 ["type"] = intent.IntentType.ToString(),
                             };
+                            if (playerCreatures != null) AddIntentView(intentInfo, intent, playerCreatures, e);
                             // Get damage for attack intents
                             if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent atk && playerCreatures != null)
                             {
@@ -2075,13 +2130,7 @@ public partial class RunDriver
                 catch { }
 
                 // Enemy powers
-                var ePowers = e.Powers?.Select(pw => new Dictionary<string, object?>
-                {
-                    ["id"] = pw.Id.Entry,
-                    ["name"] = _loc.Power(pw.Id.Entry),
-                    ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
-                    ["amount"] = pw.Amount,
-                }).ToList();
+                var ePowers = e.Powers?.Select(PowerView).ToList();
 
                 return new Dictionary<string, object?>
                 {
@@ -2099,17 +2148,11 @@ public partial class RunDriver
                     ["intents"] = intents.Count > 0 ? intents : null,
                     ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
                     ["powers"] = ePowers?.Count > 0 ? ePowers : null,
-                };
+                }.WithCreatureView(e);
             }).ToList() ?? new();
 
         // Player powers/buffs
-        var playerPowers = player.Creature?.Powers?.Select(pw => new Dictionary<string, object?>
-        {
-            ["id"] = pw.Id.Entry,
-            ["name"] = _loc.Power(pw.Id.Entry),
-            ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
-            ["amount"] = pw.Amount,
-        }).ToList();
+        var playerPowers = player.Creature?.Powers?.Select(PowerView).ToList();
 
         var result = new Dictionary<string, object?>
         {
@@ -2121,7 +2164,7 @@ public partial class RunDriver
             ["max_energy"] = pcs?.MaxEnergy ?? 0,
             ["hand"] = hand,
             ["enemies"] = enemies,
-            ["player"] = PlayerSummary(player),
+            ["player"] = player.Creature != null ? PlayerSummary(player).WithCreatureView(player.Creature) : PlayerSummary(player),
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
@@ -3182,4 +3225,26 @@ public partial class RunDriver
     }
 
     #endregion
+}
+
+internal static class CreatureViewExtensions
+{
+    // NCreatureStateDisplay / NHealthBar inputs beyond hp and block: the
+    // HP display mode, the poison preview, the monster's bar width and
+    // visibility.
+    public static Dictionary<string, object?> WithCreatureView(this Dictionary<string, object?> d, Creature c)
+    {
+        try
+        {
+            d["hp_display"] = c.HpDisplay.ToString();
+            d["poison_next_turn"] = c.GetPower<PoisonPower>()?.CalculateTotalDamageNextTurn() ?? 0;
+            if (c.Monster != null)
+            {
+                d["hp_bar_reduction"] = c.Monster.HpBarSizeReduction;
+                d["health_bar_visible"] = c.Monster.IsHealthBarVisible;
+            }
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[SIM] CreatureView: {ex.Message}"); }
+        return d;
+    }
 }
