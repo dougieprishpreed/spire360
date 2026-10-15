@@ -1,7 +1,7 @@
 # Handoff
 
-Rewritten each session; kept short. Plan: [docs/PLAN.md](docs/PLAN.md).
-Why things are the way they are: [docs/DECISIONS.md](docs/DECISIONS.md).
+Rewritten each session; kept short. Plan: [PLAN.md](PLAN.md); decisions: [DECISIONS.md](DECISIONS.md).
+Why things are the way they are: [DECISIONS.md](DECISIONS.md).
 
 ## State (pinned game build v0.111.0)
 
