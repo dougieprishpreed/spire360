@@ -49,11 +49,14 @@ WASI_SDK_PATH): `build_logic.py --stage patch,wasm,c,native`.
 - Next size ideas: `IlcOptimizationPreference=Size` (measure speed too);
   shared throw helper for stripped bodies.
 
-**M2 (console logic run): ready to build.** `xdk\build.cmd logic_runner`
-after `build_logic.py` (stages up to `c`), with `data\localization` copied
-to `<xex folder>\spire360_logic\data\localization`. Writes the selfplay
-timing report to `game:\spire360_logic\result.txt`. Not yet run; expect a
-long XDK compile (279 MB of C; /MP on).
+**M2 (console logic run): done in Xenia, 2026-10-15.** logic_runner plays
+a seeded Ironclad self-play (seed x360) to the same result as the PC build:
+63 steps, defeat on act 1 floor 5, identical action counts, 0 errors.
+Xenia timings (not hardware): start of run 8.9 s, action avg 28.6 ms, p95
+159 ms, max 338 ms (PC native: 1.1 s and 2.3 ms); GC heap 13 MB. Build:
+48 min compile, 6 s link once /DEBUG and /OPT:ICF are off (with them the
+32-bit linker died, LNK1000); logic.c needs tools/w2c2_fix_tables.py
+(C1002 otherwise; the c stage runs it). Next: hardware timings.
 
 **Converter (M3): reads everything, builds the pack; needs the user's pack
 to run at full scale.** `converter/convert.py survey|texture|build`
@@ -120,7 +123,9 @@ holds, for the converter:
    ~13 levels darker than the PC render, even the clear colour (display
    gamma in Xenia? check on hardware). logic_runner hit C1002 on logic.c
    (fixed by tools/w2c2_fix_tables.py, c918979; 10 seeded runs identical).
-   Next: rebuild both and rerun.
+   Rerun 2026-10-15: main menu animates (Spine) on the console; logic_runner
+   passes (see M2). The darker output in Xenia fits (x - 16) * 1.07 (black
+   level), not our renderer: the PC render matches the game.
 2. A new bundle (`convert.py bundle`, now with the Spine page images), a
    new `convert.py survey` report (it now lists the Spine features of all
    164 skeletons), and a 1920x1080 screenshot of the game's main menu (the
