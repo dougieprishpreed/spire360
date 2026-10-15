@@ -126,17 +126,13 @@ top of xdk/build.cmd (the projects compile every .cpp in engine\*).
 
 ## Waiting on the user
 
-1. (2026-10-15) A bundle for the combat UI, hand, intents and powers
-   (globs: scenes/combat|cards|ui/*.tscn, intent/power/controller/card
-   atlases, materials/cards|ui, sprite_fonts, card_template).
-2. spire_view rebuilt and run in Xenia (checks the D3D9 canvas-group code:
-   render target on PC D3D9, EDRAM surface + Resolve on the 360).
-3. Logic rebuild (protocol changed) and `xdk\build.cmd spire360` (first
-   build of logic_lib takes over an hour); run with out\ copied to
-   game:\spire\. Send game:\spire360.txt and screenshots.
-
-Earlier results: spire_view drew all scenes in Xenia (output ~13 levels
-darker: Xenia's black level, not ours); logic_runner passed M2.
+1. (2026-10-15) spire360.xex ran in Xenia (title -> Neow -> map -> combat,
+   logic 9 s to the first decision) but with a stale out\logic\c: their
+   build_logic stopped at the wasm stage (WASI_SDK_PATH unset) after
+   SMOKE PASS. build_logic now finds C:\wasi-sdk-29.0-x86_64-windows and
+   ends with BUILD_LOGIC OK / FAILED. Next run: logic rebuild, pack
+   rebuild (atlas sprites from .tpsheet: pad glyphs, intents), spire360.
+   The native (w2c2) logic here carries every view field (checked).
 
 ## Next (agent)
 
@@ -191,7 +187,13 @@ darker: Xenia's black level, not ours); logic_runner passed M2.
   display/colours, glow). Specs from the game's scripts are summarised in
   the scratchpad (spec_combat_ui.md, spec_hand.md); key numbers belong in
   the code comments when ported.
-- Next: combat UI overlay (energy, piles, end turn, controller glyphs),
+- Combat UI at rest, hand of cards (card_view), the card glow shader and
+  pad play in combat (focus, targeting, end turn) match the game's
+  screenshot. Converter: atlas sprites come from the .tpsheet files (the
+  game's AtlasResourceLoader), not the .tres in the .pck.
+- Next: intents and power icons (NIntent, NPower), top bar, the map and
+  reward screens; then the rest of the plain-list screens.
+- Older next list: combat UI overlay (energy, piles, end turn, controller glyphs),
   hand and cards, intents and power icons (need a bundle with
   scenes/combat/*.tscn, scenes/cards/*.tscn, scenes/ui/*.tscn and the
   intent/power/card atlases), top bar. Then LogicLink + GameClient and the
