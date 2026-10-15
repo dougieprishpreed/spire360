@@ -2,6 +2,10 @@
  * renderer, for comparing against Godot's own render.
  *
  *   spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T]
+ *              [--spine-anim NAME] [--origin X Y]
+ * --spine-anim plays an animation (looping) on every SpineSprite (creatures
+ * get theirs from the game's logic); --origin moves the scene's root (a
+ * creature is drawn upward from 0, 0).
  *   spire_view <pack.s3p> <text> <out.png> --text <font> <size>
  *
  * --scale 1 renders at the design size (1920x1080) for diffs against a
@@ -13,6 +17,7 @@
 #include "../../engine/scene/controls.h"
 #include "../../engine/scene/scene.h"
 #include "../../engine/scene/script.h"
+#include "../../engine/scene/spine_sprite.h"
 #include "../../engine/scene/text_nodes.h"
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
@@ -49,15 +54,30 @@ static Node* text_scene(SceneLibrary& lib, const char* font, int size, const cha
     return root;
 }
 
+static void play_everywhere(Node* n, const char* anim) {
+    if (n->type == "SpineSprite" && !((SpineSprite*)n)->set_animation(anim, true, 0))
+        fprintf(stderr, "%s: no animation %s\n", n->path().c_str(), anim);
+    for (size_t i = 0; i < n->children.size(); ++i) play_everywhere(n->children[i], anim);
+}
+
 int main(int argc, char** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T]\n");
+        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y]\n");
         return 2;
     }
     float scale = 1.0f;
     int frames = 5; /* --time: seconds of process at 60 fps */
+    const char* spine_anim = NULL;
+    float origin_x = 0, origin_y = 0;
+    bool has_origin = false;
     for (int i = 4; i < argc; ++i) {
         if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
+        else if (strcmp(argv[i], "--spine-anim") == 0 && i + 1 < argc) spine_anim = argv[++i];
+        else if (strcmp(argv[i], "--origin") == 0 && i + 2 < argc) {
+            origin_x = (float)atof(argv[++i]);
+            origin_y = (float)atof(argv[++i]);
+            has_origin = true;
+        }
         else if (strcmp(argv[i], "--time") == 0 && i + 1 < argc) frames = (int)(atof(argv[++i]) * 60.0 + 0.5);
         else if (strcmp(argv[i], "--no-scripts") == 0) set_scripts_enabled(false); /* as Godot's render, without the game's C# */
     }
@@ -83,6 +103,8 @@ int main(int argc, char** argv) {
     SceneTree tree;
     tree.set_viewport(design, Xform2D::scaling(scale, scale));
     tree.root()->add_child(scene);
+    if (has_origin && scene->is_node2d()) ((Node2D*)scene)->position = Vec2(origin_x, origin_y);
+    if (spine_anim) play_everywhere(scene, spine_anim);
     tree.layout();
     /* Godot's reference render is taken on its 5th frame (tools/godot/shot.gd). */
     /* As the console loop does: process, then one layout pass, per frame. */

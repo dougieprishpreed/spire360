@@ -4,6 +4,8 @@
 #include "canvas.h"
 #include "scene.h"
 
+#include <math.h>
+
 namespace spire {
 
 SpineDataRes::~SpineDataRes() { delete data_; }
@@ -102,8 +104,95 @@ void SpineSprite::process(double dt) {
     float d = (float)dt * time_scale;
     state_.update(d);
     state_.apply(*skel_);
+    drive_bones();
     skel_->update(d);
     skel_->update_world_transform(SP_PHYSICS_UPDATE);
+    follow_bones();
+}
+
+bool SpineFollowNode::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "bone_name" || key == "slot_name") {
+        target = v.str();
+        index = -2;
+        return true;
+    }
+    if (key == "bone_mode") {
+        drive = v.i() == 1;
+        return true;
+    }
+    if (key == "enabled") {
+        enabled = v.b(true);
+        return true;
+    }
+    if (key == "debug_thickness" || key == "debug_color") return true;
+    return Node2D::set(key, v, ctx);
+}
+
+SpineFollowNode* SpineSprite::follow_node(Node* n) {
+    if (n->type != "SpineBoneNode" && n->type != "SpineSlotNode") return NULL;
+    SpineFollowNode* f = (SpineFollowNode*)n;
+    if (f->index == -2) {
+        const SpSkeletonData* d = skel_->data();
+        if (f->is_slot) {
+            int s = d->find_slot(f->target);
+            f->index = s >= 0 ? d->slots[s].bone : -1;
+        } else {
+            f->index = d->find_bone(f->target);
+        }
+        if (f->index < 0) log_warn("%s: no %s %s", f->path().c_str(), f->is_slot ? "slot" : "bone", f->target.c_str());
+    }
+    return f->index >= 0 && f->enabled ? f : NULL;
+}
+
+/* Drive: the node's position and rotation (sprite space) become the bone's
+ * world position and rotation, written as its local pose. */
+void SpineSprite::drive_bones() {
+    for (size_t i = 0; i < children.size(); ++i) {
+        SpineFollowNode* f = follow_node(children[i]);
+        if (!f || !f->drive || f->is_slot) continue;
+        SpBone& b = skel_->bones[f->index];
+        float pa, pb, pc, pd, pwx, pwy;
+        if (b.parent >= 0) {
+            const SpBone& p = skel_->bones[b.parent];
+            pa = p.a;
+            pb = p.b;
+            pc = p.c;
+            pd = p.d;
+            pwx = p.world_x;
+            pwy = p.world_y;
+        } else {
+            pa = skel_->sx();
+            pb = 0;
+            pc = 0;
+            pd = skel_->sy();
+            pwx = skel_->x;
+            pwy = skel_->y;
+        }
+        float det = pa * pd - pb * pc;
+        if (det == 0) continue;
+        float ia = pd / det, ib = -pb / det, ic = -pc / det, id = pa / det;
+        float dx = f->position.x - pwx, dy = f->position.y - pwy;
+        b.x = ia * dx + ib * dy;
+        b.y = ic * dx + id * dy;
+        float wx = cosf(f->rotation), wy = sinf(f->rotation);
+        float lx = ia * wx + ib * wy, ly = ic * wx + id * wy;
+        b.rotation = atan2f(ly, lx) * 57.2957795f;
+    }
+}
+
+/* Follow: the node takes the bone's world transform (sprite space). */
+void SpineSprite::follow_bones() {
+    for (size_t i = 0; i < children.size(); ++i) {
+        SpineFollowNode* f = follow_node(children[i]);
+        if (!f || f->drive) continue;
+        const SpBone& b = skel_->bones[f->index];
+        f->position = Vec2(b.world_x, b.world_y);
+        f->rotation = atan2f(b.c, b.a);
+        f->scale = Vec2(sqrtf(b.a * b.a + b.c * b.c), sqrtf(b.b * b.b + b.d * b.d));
+        f->skew = atan2f(b.d, b.b) - f->rotation - 1.57079633f;
+        while (f->skew > 3.14159265f) f->skew -= 6.28318531f;
+        while (f->skew < -3.14159265f) f->skew += 6.28318531f;
+    }
 }
 
 void SpineSprite::draw(Canvas& c) {

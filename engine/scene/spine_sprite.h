@@ -31,6 +31,8 @@ private:
     std::vector<ImageTextureRes*> pages_;
 };
 
+class SpineFollowNode;
+
 class SpineSprite : public Node2D {
 public:
     SpineSprite();
@@ -49,6 +51,9 @@ public:
 
 private:
     bool ensure();
+    void drive_bones();
+    void follow_bones();
+    SpineFollowNode* follow_node(Node* n);
     SceneLibrary* lib_;
     SpSkeleton* skel_;
     SpAnimationState state_;
@@ -60,6 +65,21 @@ private:
     SpClipper clipper_;
     std::vector<float> cpos_, cuv_;
     std::vector<int> ctris_;
+};
+
+/* spine-godot's SpineBoneNode / SpineSlotNode, children of a SpineSprite:
+ * follow a bone (a slot's bone) each frame, or (bone_mode 1, "drive") move
+ * the bone to the node. A slot node's children draw with the sprite (after
+ * it, or behind it with show_behind_parent), not at the slot's place in the
+ * draw order. */
+class SpineFollowNode : public Node2D {
+public:
+    explicit SpineFollowNode(bool slot) : is_slot(slot), drive(false), enabled(true), index(-2) {}
+    bool is_slot;
+    std::string target; /* bone_name / slot_name */
+    bool drive, enabled;
+    int index;          /* resolved bone index (-1: none, -2: not yet) */
+    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
 };
 
 } /* namespace spire */

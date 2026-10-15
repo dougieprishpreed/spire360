@@ -337,6 +337,8 @@ Node* SceneLibrary::create_node(const std::string& type) {
     if (type == "CPUParticles2D") return new Particles2D(false);
     if (type == "GPUParticles2D") return new Particles2D(true);
     if (type == "SpineSprite") return new SpineSprite();
+    if (type == "SpineBoneNode") return new SpineFollowNode(false);
+    if (type == "SpineSlotNode") return new SpineFollowNode(true);
     if (godot_is_a(type, "Container")) return new Container();
     if (godot_is_a(type, "Control")) return new Control();
     if (godot_is_a(type, "Node2D")) return new Node2D();
@@ -366,7 +368,7 @@ static bool is_native(const std::string& type) {
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
            type == "RichTextLabel" || type == "Sprite2D" || type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
-           type == "GPUParticles2D" || type == "SpineSprite" ||
+           type == "GPUParticles2D" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||
            type == "Control";
 }
 
