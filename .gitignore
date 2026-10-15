@@ -29,3 +29,16 @@ data/
 xdk/build_logs/
 xdk/probe/probe_results.txt
 
+# Godot download for fonts (convert.py fetch-godot)
+converter/.cache/
+# Visual Studio / XDK build folders and files
+xdk/*/Release/
+xdk/*/Debug/
+ipch/
+*.sdf
+*.suo
+*.user
+# local logs and archives (bundles, uploads)
+*.log
+*.zip
+*.zip.[0-9][0-9][0-9]
