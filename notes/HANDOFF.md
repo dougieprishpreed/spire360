@@ -123,6 +123,10 @@ The user downloads the branch as a zip from GitHub and extracts it over
 the folder (no git). Deleted or renamed source files therefore stay on
 their disk: whenever one is removed, add it to the stale-file list at the
 top of xdk/build.cmd (the projects compile every .cpp in engine\*).
+Every extract also re-dates every file: build.cmd keeps w2c2_base.h's date
+while its contents are unchanged (out\logic\w2c2_base.h.stamp), or the
+whole translated logic would recompile (over an hour) after each update.
+Any other header the translated C includes needs the same treatment.
 
 ## Waiting on the user
 

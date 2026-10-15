@@ -16,7 +16,8 @@ rem                            Both link logic_lib (the runtime and the
 rem                            translated logic), built first and
 rem                            incrementally: an unchanged compile is kept
 rem                            (it takes over an hour); set SPIRE_REBUILD=1
-rem                            to start over.
+rem                            to start over. Stopping a build (Ctrl+C) is
+rem                            safe: the next run carries on.
 rem
 rem Logs: xdk\build_logs\<project>.log  (send these if anything fails)
 setlocal enabledelayedexpansion
@@ -43,6 +44,29 @@ for %%F in (engine\spine\spine.cpp) do (
   if exist "%XDKDIR%..\%%F" (
     echo Removing %%F ^(from an older version, no longer used^)
     del "%XDKDIR%..\%%F"
+  )
+)
+
+rem A zip extracted over the folder gives every file a new date, and all of
+rem the translated logic (out\logic\c, over an hour to compile) includes
+rem w2c2_base.h: while that header's contents are unchanged, keep the date
+rem it was built with (out\logic\w2c2_base.h.stamp: contents and date), so
+rem logic_lib does not compile everything again. The first time, the date of
+rem the generated logic.h (older than any compile of it) stands in.
+set "W2C2H=%XDKDIR%..\third_party\w2c2\w2c2\w2c2_base.h"
+set "LOGICH=%XDKDIR%..\out\logic\c\logic.h"
+set "STAMP=%XDKDIR%..\out\logic\w2c2_base.h.stamp"
+if exist "%LOGICH%" (
+  if not exist "%STAMP%" (
+    copy /y "%W2C2H%" "%STAMP%" >nul
+    powershell -NoProfile -Command "(Get-Item -LiteralPath '%STAMP%').LastWriteTime = (Get-Item -LiteralPath '%LOGICH%').LastWriteTime"
+  )
+  fc /b "%W2C2H%" "%STAMP%" >nul 2>&1
+  if errorlevel 1 (
+    echo w2c2_base.h has changed: logic_lib compiles again
+    copy /y "%W2C2H%" "%STAMP%" >nul
+  ) else (
+    powershell -NoProfile -Command "(Get-Item -LiteralPath '%W2C2H%').LastWriteTime = (Get-Item -LiteralPath '%STAMP%').LastWriteTime"
   )
 )
 
