@@ -42,7 +42,7 @@ import time
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from spire_convert import ctex, fonts as fontconv, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
+from spire_convert import atlas, ctex, fonts as fontconv, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
 from spire_convert import spine as spinefmt  # noqa: E402
 from spire_convert.pck import Pck  # noqa: E402
 
@@ -304,6 +304,11 @@ def dependencies(src, res, roots):
         if p in seen:
             continue
         seen.add(p)
+        sheet = atlas.sheet_for_sprite(p)
+        if sheet:
+            # The game cuts atlas sprites from the sheet (atlas.py), the
+            # .tres at that path may not even exist.
+            stack.append(sheet)
         if src.exists(p + ".import"):
             out.append(p + ".import")
         real = res.resolve(p)
@@ -321,6 +326,11 @@ def dependencies(src, res, roots):
                     path = res.uid_path(e["uid"]) or path
                 if path and not path.endswith((".cs", ".gd")):
                     stack.append(resources.strip_res(path))
+        elif real.endswith(".tpsheet"):
+            try:
+                stack.extend(atlas.page_images(src.read(real)))
+            except Exception:  # noqa: BLE001
+                pass
         elif real.endswith(".spatlas"):
             # Spine atlases load their page images by name, next to the atlas.
             try:
@@ -356,6 +366,9 @@ def cmd_bundle(a):
         for r in roots:
             r = resources.strip_res(r)
             expanded += sorted(f for f in listing if fnmatch.fnmatchcase(f, r)) if any(ch in r for ch in "*?[") else [r]
+        # A glob over an atlas's sprites may match nothing in the .pck (the
+        # game cuts them from the sheet): take the sheet.
+        expanded += sorted({s for s in (atlas.sheet_for_sprite(resources.strip_res(r)) for r in roots) if s})
         roots = expanded
     files = dependencies(src, res, roots)
     extra = [f for f in ("project.binary", ".godot/uid_cache.bin") if src.exists(f)]
@@ -478,9 +491,22 @@ def cmd_build(a):
                 if done % 200 == 0 or done == len(textures):
                     print(f"  textures {done}/{len(textures)} ({time.time() - t0:.0f} s)", flush=True)
 
-        for f in text:
+        # Atlas sprites as the game's AtlasResourceLoader serves them: from
+        # the .tpsheet, in place of any .tres file at the same path.
+        sprite_text = {}
+        for f in files:
+            if atlas.is_sheet(f):
+                try:
+                    for name, t in atlas.sprites(src.read(f), f):
+                        if wanted(name):
+                            sprite_text[name] = t
+                except Exception as e:  # noqa: BLE001
+                    report["errors"][f] = f"{type(e).__name__}: {e}"
+        text = [f for f in text if f not in sprite_text]
+        for f in text + sorted(sprite_text):
             try:
-                tr = variant.parse_text(src.read(f).decode("utf-8"))
+                body = sprite_text[f] if f in sprite_text else src.read(f).decode("utf-8")
+                tr = variant.parse_text(body)
                 add(f, s3p.TYPE_SCENE, json.dumps(scenes.to_json(tr, res), separators=(",", ":")).encode("utf-8"))
             except Exception as e:  # noqa: BLE001
                 report["errors"][f] = f"{type(e).__name__}: {e}"

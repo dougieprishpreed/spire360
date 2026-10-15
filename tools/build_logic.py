@@ -175,10 +175,31 @@ def stage_aot(a):
          "-p:PublishAot=true", "-o", os.path.join(OUT, "aot-" + rid), "-nologo"])
 
 
-def stage_wasm(a):
+def find_wasi_sdk():
+    """WASI_SDK_PATH, else wasi-sdk 29 where docs/LOGIC_BUILD.md puts it
+    (or next to the repository, or in the home folder)."""
     sdk = os.environ.get("WASI_SDK_PATH")
+    if sdk:
+        return sdk
+    names = ["wasi-sdk-29.0-x86_64-windows", "wasi-sdk-29.0-x86_64-linux", "wasi-sdk-29.0-arm64-linux",
+             "wasi-sdk-29.0-x86_64-macos", "wasi-sdk-29.0-arm64-macos", "wasi-sdk-29.0", "wasi-sdk"]
+    roots = [os.path.join(os.path.splitdrive(ROOT)[0] or "C:", os.sep), "C:" + os.sep, ROOT,
+             os.path.dirname(ROOT), os.path.expanduser("~"), "/opt"]
+    exe = "clang.exe" if os.name == "nt" else "clang"
+    for r in roots:
+        for n in names:
+            d = os.path.join(r, n)
+            if os.path.exists(os.path.join(d, "bin", exe)):
+                print(f"(wasi-sdk: {d})")
+                return d
+    return None
+
+
+def stage_wasm(a):
+    sdk = find_wasi_sdk()
     if not sdk:
-        sys.exit("set WASI_SDK_PATH to a wasi-sdk 29 install (the folder that contains bin/ and share/)")
+        sys.exit("wasi-sdk 29 not found: extract it to C:\\wasi-sdk-29.0-x86_64-windows (docs/LOGIC_BUILD.md) "
+                 "or set WASI_SDK_PATH to the folder that contains bin/ and share/")
     clang = os.path.join(sdk, "bin", "clang" + (".exe" if os.name == "nt" else ""))
     if not os.path.exists(clang):
         sys.exit(f"WASI_SDK_PATH={sdk} has no bin/{os.path.basename(clang)}; point it at the extracted wasi-sdk folder")
@@ -350,7 +371,18 @@ def main():
         sys.exit("--game-dir is required for the copy stage")
     for s in stages:
         print(f"== {s}", flush=True)
-        globals()["stage_" + s](a)
+        try:
+            globals()["stage_" + s](a)
+        except SystemExit as e:
+            if e.code in (0, None):
+                raise
+            print(f"\n{e.code}" if isinstance(e.code, str) else "", flush=True)
+            print(f"BUILD_LOGIC FAILED in stage {s}", flush=True)
+            sys.exit(1)
+    done = "BUILD_LOGIC OK: " + ", ".join(stages)
+    if "c" in stages:
+        done += " (out/logic/c is ready for the XDK build)"
+    print(done, flush=True)
 
 
 if __name__ == "__main__":

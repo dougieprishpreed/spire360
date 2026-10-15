@@ -39,9 +39,16 @@ player's game code: keep them local.
 
    The first run downloads the ILCompiler.LLVM packages (a few hundred MB)
    and takes several minutes. `data\` (the extracted tables) is git-ignored.
-6. The end of `build_logic.log` should show `SMOKE PASS`,
-   `logic.wasm: <n> KB, core module (good)`, the import audit and the number
-   of C files. Send `build_logic.log` either way.
+6. The last line of `build_logic.log` must be `BUILD_LOGIC OK: ...` (it
+   names the stages run; for the console, `c` must be among them). Before
+   it come `SMOKE PASS`, `logic.wasm: <n> KB, core module (good)`, the
+   import audit and the number of C files. `BUILD_LOGIC FAILED in stage
+   ...` means the stages after it did not run: `out\logic\c` is still the
+   previous build. Send `build_logic.log` either way.
+
+   `WASI_SDK_PATH` can be left unset when wasi-sdk is extracted to
+   `C:\wasi-sdk-29.0-x86_64-windows` (or next to the repository): the
+   script finds it.
 
 WSL (Ubuntu) works as well, with the Linux wasi-sdk tarball and the game at
 `/mnt/f/Program Files (x86)/Slay the Spire 2`.
