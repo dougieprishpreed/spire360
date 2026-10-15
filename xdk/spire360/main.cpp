@@ -8,8 +8,11 @@
 //
 // Pad: on the title screen A starts a run. In a run: D-pad picks, A
 // confirms, Y ends the turn. Back writes the log now; Back + Start quits.
+// Debugging: Back + X cycles the canvas group modes (D3D9Renderer::
+// set_group_debug), Back + Y turns the gamma ramp off and on.
 #include <xtl.h>
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -83,6 +86,20 @@ static unsigned pad_bits(const XINPUT_GAMEPAD& g) {
     return b;
 }
 
+/* The console's TV output shows the frame darker than a PC monitor (the
+ * Xenia screenshots measure about 2.5 / 2.2 in gamma against the game's
+ * colours), so the display ramp lifts it back: out = in^(2.2 / 2.5). */
+static void set_gamma(IDirect3DDevice9* dev, bool on) {
+    D3DGAMMARAMP ramp;
+    for (int i = 0; i < 256; ++i) {
+        double v = i / 255.0;
+        if (on) v = pow(v, 2.2 / 2.5);
+        WORD w = (WORD)(v * 65535.0 + 0.5);
+        ramp.red[i] = ramp.green[i] = ramp.blue[i] = w;
+    }
+    dev->SetGammaRamp(0, 0, &ramp);
+}
+
 void __cdecl main() {
     set_log_sink(engine_log);
     logf("spire360 starting");
@@ -101,6 +118,8 @@ void __cdecl main() {
         flush_log();
         return;
     }
+    bool gamma = true;
+    set_gamma(dev, gamma);
     D3D9Renderer renderer;
     std::string err;
     if (!renderer.init(dev, &err)) {
@@ -152,6 +171,16 @@ void __cdecl main() {
         prev = held;
         if ((held & PadState::BACK) && (held & PadState::START)) break;
         if (pad.pressed & PadState::BACK) flush_log();
+        if ((held & PadState::BACK) && (pad.pressed & PadState::X)) {
+            renderer.set_group_debug((renderer.group_debug() + 1) % D3D9Renderer::GROUP_DEBUG_MODES);
+            pad.pressed &= ~PadState::X;
+        }
+        if ((held & PadState::BACK) && (pad.pressed & PadState::Y)) {
+            gamma = !gamma;
+            set_gamma(dev, gamma);
+            logf("gamma ramp %s", gamma ? "on" : "off");
+            pad.pressed &= ~PadState::Y;
+        }
 
         if (!game && (pad.pressed & (PadState::A | PadState::START))) {
             if (title) {

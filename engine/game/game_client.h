@@ -84,6 +84,7 @@ private:
     CombatScreen* combat_; /* the combat screen's state while it is shown */
     int hand_focus_;       /* kept across decisions, as the game's _lastFocusedHolderIdx */
     int target_;           /* combat targeting: enemy index, -1 when not targeting */
+    int last_target_;      /* the enemy last aimed at (combat_id; NCombatRoom.LastTargetedCreature) */
     Json decision_;
     std::vector<Choice> choices_;
     size_t focus_;

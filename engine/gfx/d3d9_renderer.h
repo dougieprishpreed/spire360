@@ -53,6 +53,16 @@ public:
 
     long draw_calls() const { return draws_; }
 
+    /* Debugging the canvas groups on the console: how they are drawn.
+     * 0 normal; 1 groups off (the children unmasked); 2 the layer through
+     * the mask's quads (the mask's alpha ignored); 3 normal, and the layer
+     * texture over the whole frame; 4 the whole surface resolved; 5 as 4,
+     * and the layer texture over the frame. The first groups after a
+     * change are logged. */
+    enum { GROUP_DEBUG_MODES = 6 };
+    void set_group_debug(int mode);
+    int group_debug() const { return group_debug_; }
+
 private:
     struct GpuVertex {
         float x, y, u, v;
@@ -88,6 +98,8 @@ private:
     IDirect3DSurface9* main_rt_;
     bool group_failed_;
     RECT group_rect_;
+    D3D9Texture group_view_; /* group_tex_ as a Texture (debug view) */
+    int group_debug_, group_log_;
     int width_, height_;
     long draws_;
 };

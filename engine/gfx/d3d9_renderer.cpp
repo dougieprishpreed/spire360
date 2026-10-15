@@ -22,7 +22,7 @@ namespace spire {
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
       cm_on_(false), ripple_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
-      group_failed_(false), width_(0), height_(0), draws_(0) {
+      group_failed_(false), group_debug_(0), group_log_(0), width_(0), height_(0), draws_(0) {
     msdf_[0] = 16;
     msdf_[1] = 0;
     memset(cm_, 0, sizeof(cm_));
@@ -235,13 +235,39 @@ void D3D9Renderer::begin(int width, int height, const Color& c) {
 }
 
 void D3D9Renderer::end() {
+    if ((group_debug_ == 3 || group_debug_ == 5) && group_tex_) {
+        /* The layer texture over a black frame. */
+        set_clip(NULL);
+        set_color_matrix(NULL);
+        set_ripple(NULL);
+        group_view_.tex = group_tex_;
+        group_view_.width = group_view_.orig_width = width_;
+        group_view_.height = group_view_.orig_height = height_;
+        float w = (float)width_, h = (float)height_;
+        Vertex q[6];
+        Vec2 p[4] = { Vec2(0, 0), Vec2(w, 0), Vec2(w, h), Vec2(0, h) };
+        Vec2 uv[4] = { Vec2(0, 0), Vec2(1, 0), Vec2(1, 1), Vec2(0, 1) };
+        static const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+        for (int i = 0; i < 6; ++i) q[i] = Vertex(p[idx[i]], uv[idx[i]], Color(0, 0, 0, 1));
+        draw_triangles(NULL, q, 6, BLEND_MIX, 0);
+        for (int i = 0; i < 6; ++i) q[i].color = Color(1, 1, 1, 1);
+        draw_triangles(&group_view_, q, 6, BLEND_MIX, DRAW_NEAREST);
+    }
     flush();
+    tex_ = NULL;
     dev_->EndScene();
+}
+
+void D3D9Renderer::set_group_debug(int mode) {
+    group_debug_ = mode;
+    group_log_ = 4;
+    log_info("d3d9: canvas group debug mode %d", mode);
 }
 
 /* ---- canvas groups ---- */
 
 void D3D9Renderer::release_group_target() {
+    group_view_.tex = NULL;
     RELEASE(group_rt_);
     RELEASE(group_tex_);
     RELEASE(main_rt_);
@@ -275,7 +301,7 @@ bool D3D9Renderer::make_group_target() {
 }
 
 bool D3D9Renderer::begin_group(const Rect2& b) {
-    if (main_rt_ || !make_group_target()) return false;
+    if (group_debug_ == 1 || main_rt_ || !make_group_target()) return false;
     flush();
     if (FAILED(dev_->GetRenderTarget(0, &main_rt_))) {
         main_rt_ = NULL;
@@ -299,6 +325,11 @@ bool D3D9Renderer::begin_group(const Rect2& b) {
     group_rect_.top = y0;
     group_rect_.right = x1;
     group_rect_.bottom = y1;
+    if (group_log_ > 0) {
+        --group_log_;
+        log_info("d3d9: group (%.1f, %.1f, %.1f x %.1f) -> rect %ld,%ld - %ld,%ld of %dx%d", b.pos.x, b.pos.y, b.size.x,
+                 b.size.y, x0, y0, x1, y1, width_, height_);
+    }
     dev_->SetRenderTarget(0, group_rt_);
     /* SetRenderTarget resets the viewport and scissor; apply_state sets the
      * scissor again. Clear the whole target (fast on both). */
@@ -312,7 +343,9 @@ void D3D9Renderer::end_group() {
     if (!main_rt_) return;
     flush();
 #if defined(_XBOX)
-    if (group_rect_.right > group_rect_.left && group_rect_.bottom > group_rect_.top) {
+    if (group_debug_ >= 4) {
+        dev_->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, group_tex_, NULL, 0, 0, NULL, 1.0f, 0, NULL);
+    } else if (group_rect_.right > group_rect_.left && group_rect_.bottom > group_rect_.top) {
         D3DRECT src = { group_rect_.left, group_rect_.top, group_rect_.right, group_rect_.bottom };
         D3DPOINT dst = { group_rect_.left, group_rect_.top };
         dev_->Resolve(D3DRESOLVE_RENDERTARGET0, &src, group_tex_, &dst, 0, 0, NULL, 1.0f, 0, NULL);
@@ -390,7 +423,9 @@ void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, Blen
 }
 
 void D3D9Renderer::apply_state() {
+    bool group = (flags_ & DRAW_GROUP) && group_tex_ && !main_rt_;
     IDirect3DTexture9* t = tex_ && tex_->tex ? tex_->tex : white_;
+    if (group && group_debug_ == 2) t = white_;
     dev_->SetTexture(0, t);
     DWORD addr = (flags_ & DRAW_REPEAT) ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
     DWORD filt = (flags_ & DRAW_NEAREST) ? D3DTEXF_POINT : D3DTEXF_LINEAR;
@@ -399,7 +434,6 @@ void D3D9Renderer::apply_state() {
     dev_->SetSamplerState(0, D3DSAMP_MINFILTER, filt);
     dev_->SetSamplerState(0, D3DSAMP_MAGFILTER, filt);
     dev_->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-    bool group = (flags_ & DRAW_GROUP) && group_tex_ && !main_rt_;
     if (group) {
         dev_->SetTexture(1, group_tex_);
         dev_->SetSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);

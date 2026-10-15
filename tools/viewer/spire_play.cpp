@@ -6,9 +6,9 @@
  *              [--character Ironclad] [--seed S] [--steps N] [--scale S] [--auto SEED]
  *              [--pad A,RIGHT,A,Y,...]
  *
- * --pad presses those buttons one per frame while a decision is shown (a
- * frame is also saved after each, NNNN_pad_KK.png), then auto-play takes
- * over.
+ * --pad presses those buttons one at a time while a decision is shown (the
+ * screen half a second after each is saved, NNNN_pad_KK.png), then
+ * auto-play takes over.
  *
  * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision)
  * per screen, and logic.log (the logic's stderr). The logic's working
@@ -122,8 +122,13 @@ int main(int argc, char** argv) {
         int before = game.decision_count();
         game.update(pad);
         if (pad.pressed && game.decision_count() == before) {
-            /* The screen after this press (focus, targeting). */
+            /* The screen half a second after this press (focus, targeting:
+             * their moves and tweens). */
             tree.layout();
+            for (int f = 0; f < 30; ++f) {
+                tree.process(1.0 / 60.0);
+                tree.layout(1);
+            }
             sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
             tree.render(canvas);
             sw.end();

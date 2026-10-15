@@ -139,7 +139,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), screen_(NULL), combat_(NULL), hand_focus_(-1), target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
+    : lib_(lib), tree_(tree), link_(link), screen_(NULL), combat_(NULL), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
       rng_(1), decisions_(0), errors_(0) {}
 
 GameClient::~GameClient() {
@@ -244,10 +244,11 @@ void GameClient::choose_automatically() {
     pick(next_rand() % n);
 }
 
-/* Combat with a pad, as the game plays it: the hand has the focus (left /
- * right), A plays the focused card or, for a single-enemy card with a
- * choice of targets, starts targeting (left / right pick the enemy, A
- * plays, B cancels); Y ends the turn. */
+/* Combat with a pad, as the game plays it (NPlayerHand, NControllerCardPlay):
+ * the hand has the focus (left / right); A takes the focused card to the
+ * centre: a single-enemy card aims at an enemy (the last one aimed at, else
+ * the first; left / right change it), other cards show what they hit; A
+ * again plays it, B puts it back. Y ends the turn. */
 void GameClient::combat_input(const PadState& pad) {
     const Json& hand = decision_["hand"];
     const Json& enemies = decision_["enemies"];
@@ -255,17 +256,31 @@ void GameClient::combat_input(const PadState& pad) {
     int ne = (int)enemies.size();
     int focus = combat_->hand_focus() < 0 ? n / 2 : combat_->hand_focus();
     if (focus >= n) focus = n - 1;
-    if (target_ >= 0) {
-        if ((pad.pressed & PadState::LEFT) && ne > 0) target_ = (target_ + ne - 1) % ne;
-        if ((pad.pressed & PadState::RIGHT) && ne > 0) target_ = (target_ + 1) % ne;
-        combat_->show_target(target_);
+    if (combat_->playing()) {
+        const Json& card = hand[(size_t)focus];
+        bool single = card["target_type"].str() == "AnyEnemy";
+        if (single && ne > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
+            /* Focus moves between the targets' hitboxes (no wrap). */
+            int step = (pad.pressed & PadState::LEFT) ? -1 : 1;
+            for (int t = target_ + step; t >= 0 && t < ne; t += step)
+                if (combat_->set_play_target(t)) {
+                    target_ = t;
+                    break;
+                }
+        }
         if (pad.pressed & PadState::B) {
+            combat_->end_play();
             target_ = -1;
-            combat_->show_target(-1);
-        } else if ((pad.pressed & PadState::A) && focus >= 0) {
-            send(action("play_card", format("\"card_index\":%d,\"target_index\":%d", hand[(size_t)focus]["index"].i(),
-                                            enemies[(size_t)target_]["index"].i())));
-            target_ = -1;
+        } else if (pad.pressed & PadState::A) {
+            /* NCardPlay.TryPlayCard: LastTargetedCreature. */
+            const std::string& type = card["target_type"].str();
+            if (single) last_target_ = enemies[(size_t)target_]["combat_id"].i(-1);
+            else if (type == "AllEnemies" || type == "AllAllies") last_target_ = -1;
+            if (single)
+                send(action("play_card", format("\"card_index\":%d,\"target_index\":%d", card["index"].i(),
+                                                enemies[(size_t)target_]["index"].i())));
+            else
+                send(action("play_card", format("\"card_index\":%d", card["index"].i())));
         }
         return;
     }
@@ -276,15 +291,27 @@ void GameClient::combat_input(const PadState& pad) {
     }
     if ((pad.pressed & PadState::A) && focus >= 0 && focus < n) {
         const Json& card = hand[(size_t)focus];
+        /* NControllerCardPlay.Start: an unplayable card stays in the hand. */
         if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) return;
-        if (card["target_type"].str() == "AnyEnemy" && ne > 1) {
+        const std::string& type = card["target_type"].str();
+        if (type == "AnyEnemy") {
+            if (ne == 0) return;
             target_ = 0;
-            combat_->show_target(0);
-        } else if (card["target_type"].str() == "AnyEnemy" && ne == 1) {
-            send(action("play_card", format("\"card_index\":%d,\"target_index\":%d", card["index"].i(),
-                                            enemies[(size_t)0]["index"].i())));
+            for (int i = 0; i < ne; ++i)
+                if (enemies[(size_t)i]["combat_id"].i(-2) == last_target_) target_ = i;
+        } else if (type == "AnyAlly") {
+            return; /* no other player to aim at */
         } else {
-            send(action("play_card", format("\"card_index\":%d", card["index"].i())));
+            target_ = -1;
+        }
+        combat_->begin_play(focus, type, target_);
+        if (type == "AnyEnemy" && !combat_->set_play_target(target_)) {
+            /* Not shown (its scene failed to load): the first that is. */
+            for (int t = 0; t < ne; ++t)
+                if (combat_->set_play_target(t)) {
+                    target_ = t;
+                    break;
+                }
         }
     } else if (pad.pressed & PadState::Y) {
         send(action("end_turn"));

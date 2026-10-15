@@ -3,6 +3,7 @@
 #include "loc.h"
 
 #include "../scene/controls.h"
+#include "../scene/tree.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
@@ -15,7 +16,24 @@
 
 namespace spire {
 
-CombatScreen::CombatScreen(SceneLibrary* lib) : lib_(lib), hand_focus_(-1) {}
+static const float PI_F = 3.14159265f;
+
+/* Calls CombatScreen::process from the scene tree's frame (the screen's
+ * root holds it; the screen outlives its tree). */
+class CombatDriver : public ScriptBehavior {
+public:
+    explicit CombatDriver(CombatScreen* s) : screen_(s) {}
+    virtual void process(Node*, double dt) { screen_->process(dt); }
+
+private:
+    CombatScreen* screen_;
+};
+
+CombatScreen::CombatScreen(SceneLibrary* lib)
+    : lib_(lib), hand_focus_(-1), hand_box_(NULL), play_card_(-1), play_single_(false), play_target_(-1), arrow_(NULL),
+      arrow_head_(NULL) {
+    player_.node = NULL;
+}
 
 static std::string lower(std::string s) {
     for (size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
@@ -65,6 +83,9 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.player = player;
     out.hp_bar_reduction = 0;
     out.max_fg_width = 0;
+    out.reticle = NULL;
+    out.nameplate = NULL;
+    out.center = NULL;
     Node* n = instance(lib_, "scenes/combat/creature.tscn");
     if (!n || !n->is_control()) {
         delete n;
@@ -129,6 +150,8 @@ void CombatScreen::update_bounds(Creature& c) {
     Control* hit = ctl(c.node, "Hitbox");
     if (hit) place(hit, pos.x, pos.y, size.x, size.y);
     Control* ret = ctl(c.node, "SelectionReticle");
+    c.reticle = ret;
+    c.center = vis->find_unique("CenterPos");
     if (ret) {
         place(ret, pos.x, pos.y, size.x, size.y);
         ret->pivot_offset = size * 0.5f;
@@ -146,6 +169,7 @@ void CombatScreen::update_bounds(Creature& c) {
     Control* hb = ctl(sd, "HealthBar");     /* NHealthBar */
     if (!sd || !hb) return;
     Control* name = ctl(sd, "NameplateContainer");
+    c.nameplate = name;
     if (name) name->modulate.a = 0; /* shown on hover */
     /* NHealthBar's origin in the creature: the state display's, plus its
      * own (anchored to the state display's empty rect). */
@@ -567,6 +591,7 @@ void CombatScreen::build_hand(Node* ui, const Json& d) {
     holders_.clear();
     Node* hand = ui ? find_named(ui, "Hand") : NULL;
     Node* box = hand ? hand->find_unique("CardHolderContainer") : NULL;
+    hand_box_ = box && box->is_control() ? (Control*)box : NULL;
     if (!box) return;
     const Json& cards = d["hand"];
     for (size_t i = 0; i < cards.size() && i < 10; ++i) {
@@ -584,9 +609,13 @@ void CombatScreen::build_hand(Node* ui, const Json& d) {
         Node* index = h->find_unique("HandIndex");
         if (index && index->is_canvas_item()) ((CanvasItem*)index)->visible = false;
         box->add_child(h);
-        holders_.push_back(h);
+        Holder hd;
+        hd.node = h;
+        hd.angle = hd.to_angle = 0;
+        hd.scale = hd.to_scale = 1;
+        holders_.push_back(hd);
     }
-    layout_hand();
+    layout_hand(true);
 }
 
 void CombatScreen::set_hand_focus(int index) {
@@ -594,42 +623,234 @@ void CombatScreen::set_hand_focus(int index) {
     layout_hand();
 }
 
-void CombatScreen::layout_hand() {
+static float hitbox_height(Control* holder) {
+    Control* hit = ctl(holder, "Hitbox");
+    return hit ? offset_size(hit).y : 422.0f;
+}
+
+/* The holders' targets; snap: there at once (a new screen). */
+void CombatScreen::layout_hand(bool snap) {
     int n = (int)holders_.size();
     if (n == 0) return;
     int focus = hand_focus_ < 0 ? n / 2 : (hand_focus_ >= n ? n - 1 : hand_focus_);
     float scale = 0.8f * (n <= 7 ? 1.0f : n == 8 ? 0.95f : n == 9 ? 0.9f : 0.85f);
     for (int i = 0; i < n; ++i) {
-        Control* h = holders_[i];
+        Holder& h = holders_[i];
+        if (i == play_card_) continue; /* centred by begin_play */
         float x = HAND_POS[n - 1][i][0], y = HAND_POS[n - 1][i][1];
         float angle = HAND_ANGLE[n - 1][i], sc = scale;
-        h->z_index = 0;
+        h.node->z_index = 0;
         if (i == focus) {
-            Control* hit = ctl(h, "Hitbox");
-            y = -(hit ? offset_size(hit).y : 422.0f) * 0.5f + 2.0f;
+            y = -hitbox_height(h.node) * 0.5f + 2.0f;
             angle = 0;
             sc = 1;
-            h->z_index = 1;
+            h.node->z_index = 1;
         } else {
             int dist = i < focus ? focus - i : i - focus;
             float push = 100.0f * (1.0f - minf(1.0f, (float)dist / 4.0f));
             x += i < focus ? -push : push;
         }
-        place(h, x, y, 0, 0);
-        h->rotation = angle * 3.14159265f / 180.0f;
-        h->scale = Vec2(sc, sc);
+        h.to_pos = Vec2(x, y);
+        h.to_angle = angle;
+        h.to_scale = sc;
+        if (snap) {
+            h.pos = h.to_pos;
+            h.angle = angle;
+            h.scale = sc;
+        }
+    }
+    if (snap) process(0);
+}
+
+/* Godot's Transform2D.affine_inverse. */
+static Xform2D inverse(const Xform2D& t) {
+    float det = t.x.x * t.y.y - t.y.x * t.x.y;
+    if (det == 0) return Xform2D();
+    float id = 1.0f / det;
+    Xform2D r(Vec2(t.y.y * id, -t.x.y * id), Vec2(-t.y.x * id, t.x.x * id), Vec2(0, 0));
+    r.origin = r.basis_xform(t.origin) * -1.0f;
+    return r;
+}
+
+static Vec2 global_pos(Node* n) {
+    return n && n->is_canvas_item() ? ((CanvasItem*)n)->global_transform().origin : Vec2(0, 0);
+}
+
+/* NSelectionReticle.OnSelect / OnDeselect. */
+void CombatScreen::select_reticle(Creature& c, bool on) {
+    Control* r = c.reticle;
+    if (!r) return;
+    if (on) {
+        tweens_.kill(&r->modulate.a);
+        r->modulate = Color(1, 1, 1, 1);
+        tweens_.tween_from(&r->scale, Vec2(0.9f, 0.9f), Vec2(1, 1), 0.5f, TRANS_EXPO, EASE_OUT);
+    } else {
+        tweens_.tween(&r->modulate.a, 0.0f, 0.2f, TRANS_SINE, EASE_OUT);
+        tweens_.tween(&r->scale, Vec2(1.05f, 1.05f), 0.2f, TRANS_SINE, EASE_OUT);
     }
 }
 
-/* NSelectionReticle.OnSelect / OnDeselect, at rest. */
-void CombatScreen::show_target(int enemy) {
-    for (size_t i = 0; i < reticles_.size(); ++i)
-        if (reticles_[i]) reticles_[i]->modulate.a = (int)i == enemy ? 1.0f : 0.0f;
+/* NCreatureStateDisplay.ShowNameplate / HideNameplate. */
+void CombatScreen::show_nameplate(Creature& c, bool on) {
+    if (c.nameplate) tweens_.tween(&c.nameplate->modulate.a, on ? 1.0f : 0.0f, on ? 0.15f : 0.2f);
+}
+
+void CombatScreen::begin_play(int card, const std::string& target_type, int target) {
+    if (card < 0 || card >= (int)holders_.size()) return;
+    end_play();
+    play_card_ = card;
+    /* NCardPlay.CenterCard: the bottom centre of the screen, 3/4 size. */
+    Holder& h = holders_[card];
+    Vec2 centre(960.0f, 1080.0f - hitbox_height(h.node) * 0.75f / 2.0f);
+    h.to_pos = hand_box_ ? inverse(hand_box_->global_transform()).xform(centre) : centre;
+    h.to_angle = 0;
+    h.to_scale = 0.75f;
+    h.node->z_index = 1;
+    if (target_type == "AnyEnemy") {
+        /* NTargetManager.StartTargeting (controller): the arrow starts at the
+         * card and follows the hovered creature. */
+        play_single_ = true;
+        if (arrow_) {
+            arrow_->visible = true;
+            arrow_pos_ = arrow_to_ = global_pos(h.node);
+            arrow_->modulate = Color(1, 1, 1, 1);
+            arrow_head_->scale = Vec2(0.95f, 0.95f);
+        }
+        set_play_target(target);
+        return;
+    }
+    /* NCardPlay.ShowMultiCreatureTargetingVisuals. */
+    play_single_ = false;
+    if (target_type == "AllEnemies" || target_type == "RandomEnemy") {
+        for (size_t i = 0; i < enemies_.size(); ++i) select_reticle(enemies_[i], true);
+    } else if (target_type == "Self" || target_type == "AllAllies") {
+        select_reticle(player_, true);
+    }
+}
+
+bool CombatScreen::set_play_target(int enemy) {
+    if (!play_single_ || enemy < 0 || enemy >= (int)enemies_.size() || !enemies_[enemy].node) return false;
+    if (enemy == play_target_) return true;
+    if (play_target_ >= 0) {
+        /* NTargetManager.OnCreatureUnhovered + NCreature.OnUnfocus */
+        select_reticle(enemies_[play_target_], false);
+        show_nameplate(enemies_[play_target_], false);
+    }
+    play_target_ = enemy;
+    /* OnCreatureHovered: highlight, reticle, the arrow to VfxSpawnPosition. */
+    Creature& c = enemies_[enemy];
+    select_reticle(c, true);
+    show_nameplate(c, true);
+    if (arrow_) {
+        arrow_->modulate = Color(0xE6 / 255.0f, 0x1E / 255.0f, 0x1B / 255.0f); /* StsColors.targetingArrowEnemy */
+        arrow_head_->scale = Vec2(0.95f, 0.95f);
+        tweens_.tween(&arrow_head_->scale, Vec2(1.05f, 1.05f), 1.0f, TRANS_ELASTIC, EASE_OUT);
+        arrow_to_ = c.center ? global_pos(c.center) : global_pos(c.node);
+    }
+    return true;
+}
+
+void CombatScreen::end_play() {
+    if (play_card_ < 0) return;
+    for (size_t i = 0; i < enemies_.size(); ++i)
+        if (enemies_[i].reticle && enemies_[i].reticle->modulate.a > 0) select_reticle(enemies_[i], false);
+    if (player_.reticle && player_.reticle->modulate.a > 0) select_reticle(player_, false);
+    if (play_target_ >= 0 && play_target_ < (int)enemies_.size()) show_nameplate(enemies_[play_target_], false);
+    if (arrow_) {
+        tweens_.kill(&arrow_head_->scale);
+        arrow_->visible = false;
+    }
+    play_card_ = -1;
+    play_target_ = -1;
+    play_single_ = false;
+    layout_hand();
+}
+
+/* NTargetingArrow._Ready: the segments and the head (StopDrawing: hidden). */
+Node2D* CombatScreen::make_arrow() {
+    Resource* seg = lib_->ext("images/ui/combat/targeting_arrow_segment.png");
+    Resource* head = lib_->ext("images/ui/combat/targeting_arrow_head.png");
+    Node2D* arrow = (Node2D*)SceneLibrary::create_node("Node2D");
+    arrow->name = "TargetingArrow";
+    arrow->visible = false;
+    arrow->z_index = 2; /* over the played card (its holder: 1) */
+    arrow_segments_.clear();
+    for (int i = 0; i < 20; ++i) {
+        Sprite2D* s = (Sprite2D*)SceneLibrary::create_node("Sprite2D");
+        Resource* tex = i < 19 ? seg : head;
+        s->texture = tex && tex->is_texture() ? (Texture2DRes*)tex : NULL;
+        arrow->add_child(s);
+        if (i < 19) arrow_segments_.push_back(s);
+        else arrow_head_ = s;
+    }
+    arrow_head_->scale = Vec2(0.95f, 0.95f);
+    return arrow;
+}
+
+static Vec2 rotated(const Vec2& v, float a) {
+    float c = cosf(a), s = sinf(a);
+    return Vec2(v.x * c - v.y * s, v.x * s + v.y * c);
+}
+
+static float angle_of(const Vec2& v) { return atan2f(v.y, v.x); }
+
+static Vec2 bezier(const Vec2& v0, const Vec2& v1, const Vec2& c0, float t) {
+    return v0 * ((1 - t) * (1 - t)) + c0 * (2 * (1 - t) * t) + v1 * (t * t);
+}
+
+/* NTargetingArrow.UpdateArrowPosition + UpdateSegments. */
+void CombatScreen::update_arrow(const Vec2& target) {
+    Vec2 from = global_pos(holders_[play_card_].node);
+    float rot = arrow_head_->rotation;
+    arrow_head_->position = target + rotated(Vec2(0, 88), rot);
+    Vec2 final_pos = target + rotated(Vec2(0, 40), rot);
+    Vec2 head = arrow_head_->position, control;
+    control.x = from.x - (head.x - from.x) * 0.25f;
+    control.y = from.y > 540.0f ? head.y + (head.y - from.y) * 0.5f : head.y * 0.75f + from.y * 0.25f;
+    arrow_head_->rotation = angle_of(target - control) + PI_F / 2;
+    for (int i = 0; i < 19; ++i) {
+        Node2D* s = arrow_segments_[i];
+        float sc = 0.28f + (0.42f - 0.28f) * ((float)i * 2.0f / 19.0f); /* Mathf.Lerp, unclamped */
+        s->scale = Vec2(sc, sc);
+        s->position = bezier(from, final_pos, control, (float)i / 20.0f);
+        if (i > 0) s->rotation = angle_of(s->position - arrow_segments_[i - 1]->position) + PI_F / 2;
+    }
+    arrow_segments_[0]->rotation = angle_of(arrow_segments_[0]->position - arrow_segments_[1]->position) - PI_F / 2;
+}
+
+/* NHandCardHolder.AnimPosition / AnimAngle / AnimScale (lerps at 7, 10
+ * and 8 per second), the tweens, NTargetingArrow._Process (14). */
+void CombatScreen::process(double dt) {
+    float t = (float)dt;
+    tweens_.update(dt);
+    for (size_t i = 0; i < holders_.size(); ++i) {
+        Holder& h = holders_[i];
+        h.pos = h.pos + (h.to_pos - h.pos) * minf(1.0f, t * 7.0f);
+        Vec2 d = h.to_pos - h.pos;
+        if (d.x * d.x + d.y * d.y < 1.0f) h.pos = h.to_pos;
+        h.angle += (h.to_angle - h.angle) * minf(1.0f, t * 10.0f);
+        if (fabsf(h.angle - h.to_angle) < 0.1f) h.angle = h.to_angle;
+        h.scale += (h.to_scale - h.scale) * minf(1.0f, t * 8.0f);
+        if (fabsf(h.to_scale - h.scale) < 0.002f) h.scale = h.to_scale;
+        place(h.node, h.pos.x, h.pos.y, 0, 0);
+        h.node->rotation = h.angle * PI_F / 180.0f;
+        h.node->scale = Vec2(h.scale, h.scale);
+    }
+    if (arrow_ && arrow_->visible && play_card_ >= 0) {
+        arrow_pos_ = arrow_pos_ + (arrow_to_ - arrow_pos_) * minf(1.0f, t * 14.0f);
+        update_arrow(arrow_pos_);
+    }
 }
 
 static void play_idle(Node* n) {
     if (n->type == "SpineSprite") ((SpineSprite*)n)->set_animation("idle_loop", true, 0);
     for (size_t i = 0; i < n->children.size(); ++i) play_idle(n->children[i]);
+}
+
+/* NCreatureStateDisplay.SetCreature: the nameplate's text. */
+static void set_nameplate_text(Control* nameplate, const std::string& name) {
+    Node* label = nameplate ? nameplate->find_unique("NameplateLabel") : NULL;
+    if (label && label->type == "Label") ((Label*)label)->set_text(name);
 }
 
 Node* CombatScreen::build(const Json& d, std::string* error) {
@@ -666,33 +887,42 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
 
     /* Allies: the player (pets later). */
     std::vector<Creature> ally_nodes, enemy_nodes;
-    reticles_.clear();
+    enemies_.clear();
     const Json& player = d["player"];
     Creature c;
     if (make_creature(player["character"].is_string() ? player["character"].str() : std::string("ironclad"), true, c)) {
         allies->add_child(c.node);
         update_bounds(c);
         refresh_health_bar(c, player, d["player_powers"]);
+        set_nameplate_text(c.nameplate, player["name"].str());
         ally_nodes.push_back(c);
+        player_ = c;
     }
     const Json& es = d["enemies"];
     for (size_t i = 0; i < es.size(); ++i) {
         if (!make_creature(es[i]["id"].str(), false, c)) {
-            reticles_.push_back(NULL); /* keep reticles_[i] = enemy i */
+            enemies_.push_back(c); /* node NULL: keeps enemies_[i] = enemy i */
             continue;
         }
         c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
         enemies->add_child(c.node);
-        reticles_.push_back(ctl(c.node, "SelectionReticle"));
         update_bounds(c);
         refresh_health_bar(c, es[i], es[i]["powers"]);
+        set_nameplate_text(c.nameplate, es[i]["name"].str());
         enemy_nodes.push_back(c);
+        enemies_.push_back(c);
     }
     setup_combat_ui(root, d);
     build_hand(find_named(root, "CombatUi"), d);
     position_players(ally_nodes, scaling, view["fully_center_players"].b());
     position_enemies(enemy_nodes, scaling);
     play_idle(root);
+    arrow_ = make_arrow();
+    root->add_child(arrow_);
+    Node* driver = SceneLibrary::create_node("Node");
+    driver->name = "CombatDriver";
+    driver->behavior = new CombatDriver(this);
+    root->add_child(driver);
     return root;
 }
 

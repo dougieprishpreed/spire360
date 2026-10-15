@@ -126,13 +126,16 @@ top of xdk/build.cmd (the projects compile every .cpp in engine\*).
 
 ## Waiting on the user
 
-1. (2026-10-15) spire360.xex ran in Xenia (title -> Neow -> map -> combat,
-   logic 9 s to the first decision) but with a stale out\logic\c: their
-   build_logic stopped at the wasm stage (WASI_SDK_PATH unset) after
-   SMOKE PASS. build_logic now finds C:\wasi-sdk-29.0-x86_64-windows and
-   ends with BUILD_LOGIC OK / FAILED. Next run: logic rebuild, pack
-   rebuild (atlas sprites from .tpsheet: pad glyphs, intents), spire360.
-   The native (w2c2) logic here carries every view field (checked).
+1. (2026-10-15) spire360 with the fresh logic plays in Xenia (title ->
+   Neow -> map -> combat, cards played). Found there: the health bars'
+   canvas group draws nothing on the console (the bar's own pre-group
+   draws are wiped too: the background shows through the mask), and the
+   frame is darker than the PC render by a gamma of ~1.14 (2.5/2.2).
+   Sent: a gamma ramp (Back + Y toggles), the group debug modes
+   (Back + X cycles D3D9Renderer::set_group_debug 0-5, logged), and the
+   game's two-press card play. Waiting for screenshots of each mode and
+   spire360.txt. Shader and VS outputs checked in xenia.log (fine); the
+   1280x720 group texture is created and reloaded each frame there.
 
 ## Next (agent)
 
@@ -191,8 +194,18 @@ top of xdk/build.cmd (the projects compile every .cpp in engine\*).
   pad play in combat (focus, targeting, end turn) match the game's
   screenshot. Converter: atlas sprites come from the .tpsheet files (the
   game's AtlasResourceLoader), not the .tres in the .pck.
+- Pad card play as NControllerCardPlay: A centres the card (3/4 size),
+  single-enemy cards aim NTargetingArrow (19 bezier segments + head, lerp
+  14/s) at the target's CenterPos with its reticle and nameplate (last
+  target remembered as LastTargetedCreature); other cards mark all
+  enemies or the player; A plays, B returns. Hand holders lerp like
+  NHandCardHolder (7/10/8 per second). engine/scene/tween: Godot's
+  easing (sine, expo, elastic). Card descriptions do not yet follow the
+  target (SetPreviewTarget: needs a per-target description from the
+  logic).
 - Next: intents and power icons (NIntent, NPower), top bar, the map and
-  reward screens; then the rest of the plain-list screens.
+  reward screens; then the rest of the plain-list screens. The pack
+  header's game version reads empty on the console (check).
 - Older next list: combat UI overlay (energy, piles, end turn, controller glyphs),
   hand and cards, intents and power icons (need a bundle with
   scenes/combat/*.tscn, scenes/cards/*.tscn, scenes/ui/*.tscn and the
