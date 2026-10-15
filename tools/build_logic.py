@@ -206,7 +206,9 @@ def stage_wasm(a):
     out = os.path.join(OUT, "wasm")
     # A wasm-tools / wasi-experimental workload would otherwise take over the
     # wasi-wasm RID from the ILCompiler.LLVM packages.
-    env = dict(os.environ, MSBuildEnableWorkloadResolver="false")
+    # The ILCompiler.LLVM targets read WASI_SDK_PATH themselves: pass on
+    # the one found here.
+    env = dict(os.environ, MSBuildEnableWorkloadResolver="false", WASI_SDK_PATH=sdk)
     # Global properties win over the SDK's own defaults: a core module that
     # imports WASI preview1 (+ CoreLib's few preview2 clock/poll functions),
     # not a preview2 component.
@@ -377,6 +379,11 @@ def main():
             if e.code in (0, None):
                 raise
             print(f"\n{e.code}" if isinstance(e.code, str) else "", flush=True)
+            print(f"BUILD_LOGIC FAILED in stage {s}", flush=True)
+            sys.exit(1)
+        except subprocess.CalledProcessError as e:
+            # The failing tool printed its own errors above.
+            print(f"\n{os.path.basename(str(e.cmd[0]))} exited with {e.returncode}", flush=True)
             print(f"BUILD_LOGIC FAILED in stage {s}", flush=True)
             sys.exit(1)
     done = "BUILD_LOGIC OK: " + ", ".join(stages)
