@@ -33,12 +33,18 @@ public:
         msdf_outline_ = outline;
     }
 
+    virtual bool begin_group(const Rect2& bounds);
+    virtual void end_group();
+
     const Image& framebuffer() const { return fb_; }
     long triangles_drawn() const { return tris_; }
 
 private:
     void triangle(SwTexture* tex, const Vertex& a, const Vertex& b, const Vertex& c, BlendMode blend, int flags);
     Image fb_;
+    Image layer_;   /* the canvas group layer */
+    Image* target_; /* fb_, or layer_ inside a group */
+    int gx0_, gy0_, gx1_, gy1_; /* the group's pixel bounds */
     bool clip_on_;
     int cx0_, cy0_, cx1_, cy1_;
     long tris_;

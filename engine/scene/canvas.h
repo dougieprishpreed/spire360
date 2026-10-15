@@ -49,6 +49,8 @@ public:
     Texture* gpu_texture(ImageTextureRes* img);
     Renderer* renderer() const { return r_; }
     long draw_calls() const { return calls_; }
+    /* Count the draws without sending them (does an item draw anything?). */
+    void set_count_only(bool on) { count_only_ = on; }
 
 private:
     void image_quad(ImageTextureRes* img, Rect2 dst, Rect2 src, const Color& mod, int extra_flags);
@@ -62,6 +64,7 @@ private:
     BlendMode blend_;
     int tex_flags_;
     long calls_;
+    bool count_only_;
     std::vector<Vertex> verts_;
 };
 

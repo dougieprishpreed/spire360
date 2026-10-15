@@ -1,6 +1,7 @@
 /* SceneTree: the viewport's nodes, laid out like Godot's (anchors,
  * containers, minimum sizes) and drawn in Godot's canvas order (tree order,
- * show_behind_parent, z_index, clip_contents, modulate inheritance). */
+ * show_behind_parent, z_index, clip_contents, clip_children, modulate
+ * inheritance). */
 #ifndef SPIRE_TREE_H
 #define SPIRE_TREE_H
 
@@ -35,11 +36,12 @@ private:
     void layout_node(Node* n);
     void process_node(Node* n, double dt);
     void collect(Node* n, const Xform2D& xf, const Color& mod, int z, const Rect2* clip, MaterialRes* mat,
-                 std::vector<DrawItem>& out);
+                 bool in_group, std::vector<DrawItem>& out);
 
     Node root_;
     Vec2 design_size_;
     Xform2D to_screen_;
+    Canvas* canvas_; /* during render */
 };
 
 } /* namespace spire */

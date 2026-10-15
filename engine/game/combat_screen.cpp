@@ -3,6 +3,7 @@
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
+#include "../scene/text_nodes.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -57,6 +58,8 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.visuals = NULL;
     out.width = 0;
     out.player = player;
+    out.hp_bar_reduction = 0;
+    out.max_fg_width = 0;
     Node* n = instance(lib_, "scenes/combat/creature.tscn");
     if (!n || !n->is_control()) {
         delete n;
@@ -79,6 +82,130 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.node = (Control*)n;
     out.visuals = v;
     return true;
+}
+
+static Control* ctl(Node* scope, const char* unique) {
+    Node* n = scope ? scope->find_unique(unique) : NULL;
+    return n && n->is_control() ? (Control*)n : NULL;
+}
+
+/* Position / Size of a control with its anchors together (all the creature
+ * scene's controls): the offsets are the rect. */
+static void place(Control* c, float x, float y, float w, float h) {
+    c->offset[SIDE_LEFT] = x;
+    c->offset[SIDE_TOP] = y;
+    c->offset[SIDE_RIGHT] = x + w;
+    c->offset[SIDE_BOTTOM] = y + h;
+}
+
+static Vec2 offset_pos(const Control* c) { return Vec2(c->offset[SIDE_LEFT], c->offset[SIDE_TOP]); }
+static Vec2 offset_size(const Control* c) {
+    return Vec2(c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP]);
+}
+
+static Color hex(unsigned v) {
+    return Color(((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f, 1.0f);
+}
+
+static const float HP_BAR_INSET = 10.0f; /* NHealthBar._foregroundContainerInset */
+
+/* NCreature.UpdateBounds + NCreatureStateDisplay.SetCreatureBounds +
+ * NHealthBar.UpdateLayoutForCreatureBounds, in the creature's coordinates
+ * (the visuals sit at its origin). */
+void CombatScreen::update_bounds(Creature& c) {
+    Node* vis = c.visuals;
+    Node* bnode = vis ? vis->find_unique("Bounds") : NULL;
+    if (!bnode || !bnode->is_control()) return;
+    Control* b = (Control*)bnode;
+    Vec2 vs = vis->is_node2d() ? ((Node2D*)vis)->scale : Vec2(1, 1);
+    Vec2 size(offset_size(b).x * vs.x, offset_size(b).y * vs.y);
+    Vec2 pos(b->offset[SIDE_LEFT] * vs.x, b->offset[SIDE_TOP] * vs.y);
+    c.hitbox = Rect2(pos, size);
+    Control* hit = ctl(c.node, "Hitbox");
+    if (hit) place(hit, pos.x, pos.y, size.x, size.y);
+    Control* ret = ctl(c.node, "SelectionReticle");
+    if (ret) {
+        place(ret, pos.x, pos.y, size.x, size.y);
+        ret->pivot_offset = size * 0.5f;
+        ret->modulate.a = 0; /* NSelectionReticle._Ready */
+    }
+    Control* intents = ctl(c.node, "Intents");
+    Node* ipos = vis->get_node("IntentPos");
+    if (intents && ipos && ipos->is_node2d()) {
+        Vec2 isz = offset_size(intents);
+        Vec2 p = ((Node2D*)ipos)->position - isz * 0.5f;
+        place(intents, p.x, p.y * vs.x, isz.x, isz.y);
+    }
+
+    Control* sd = ctl(c.node, "HealthBar"); /* NCreatureStateDisplay */
+    Control* hb = ctl(sd, "HealthBar");     /* NHealthBar */
+    if (!sd || !hb) return;
+    Control* name = ctl(sd, "NameplateContainer");
+    if (name) name->modulate.a = 0; /* shown on hover */
+    /* NHealthBar's origin in the creature: the state display's, plus its
+     * own (anchored to the state display's empty rect). */
+    Vec2 hb_origin = offset_pos(sd) + offset_pos(hb);
+    float v = 24.0f - c.hp_bar_reduction;
+    Control* bar = ctl(hb, "HpBarContainer");
+    if (bar) {
+        place(bar, pos.x - v * 0.5f - hb_origin.x, bar->offset[SIDE_TOP], size.x + v, offset_size(bar).y);
+        c.max_fg_width = size.x + v - HP_BAR_INSET;
+    }
+    Control* block = ctl(hb, "BlockContainer");
+    if (block) {
+        Vec2 bs = offset_size(block);
+        place(block, pos.x - bs.x * 0.5f - hb_origin.x, block->offset[SIDE_TOP], bs.x, bs.y);
+    }
+}
+
+/* NHealthBar.RefreshValues (RefreshBlockUi, RefreshForeground,
+ * RefreshMiddleground, RefreshText) at rest: the tweens' end values. */
+void CombatScreen::refresh_health_bar(Creature& c, const Json& e) {
+    Control* sd = ctl(c.node, "HealthBar");
+    Control* hb = ctl(sd, "HealthBar");
+    if (!hb) return;
+    int hp = e["hp"].i(), max_hp = e["max_hp"].i(), blk = e["block"].i();
+    Control* fg = ctl(hb, "HpForeground");
+    Control* mid = ctl(hb, "HpMiddleground");
+    Control* poison = ctl(hb, "PoisonForeground");
+    Control* doom = ctl(hb, "DoomForeground");
+    Control* outline = ctl(hb, "BlockOutline");
+    Control* block = ctl(hb, "BlockContainer");
+    Node* hp_label = hb->find_unique("HpLabel");
+    Node* block_label = hb->find_unique("BlockLabel");
+    float max_w = c.max_fg_width;
+    /* GetFgWidth */
+    float w = max_hp <= 0 ? 0.0f : maxf((float)hp / (float)max_hp * max_w, hp > 0 ? 12.0f : 0.0f);
+
+    if (blk <= 0) {
+        if (block) block->visible = false;
+        if (outline) outline->visible = false;
+        if (fg) fg->self_modulate = hex(0xF1373E);
+    } else {
+        if (outline) outline->visible = true;
+        if (fg) fg->self_modulate = hex(0x3B6FA3);
+        if (block) block->visible = true;
+        if (block_label && block_label->type == "Label") ((Label*)block_label)->set_text(format("%d", blk));
+    }
+    /* Poison and Doom previews need the poison's next-turn damage (not in
+     * the protocol yet): hidden. */
+    if (poison) poison->visible = false;
+    if (doom) doom->visible = false;
+    if (fg) {
+        fg->visible = hp > 0;
+        fg->offset[SIDE_RIGHT] = w - max_w;
+    }
+    if (mid) {
+        mid->visible = hp > 0;
+        if (fg) mid->offset[SIDE_RIGHT] = fg->offset[SIDE_RIGHT] - 2.0f;
+    }
+    if (hp_label && hp_label->type == "Label") {
+        Label* l = (Label*)hp_label;
+        Color outline_c = blk > 0 ? hex(0x1B3045) : hex(0x900000);
+        l->add_theme_color_override("font_color", Color(1, 0.964706f, 0.886275f)); /* StsColors.cream */
+        l->add_theme_color_override("font_outline_color", outline_c);
+        l->set_text(hp > 0 ? format("%d/%d", hp, max_hp) : std::string("Dead"));
+    }
 }
 
 /* NCombatRoom.PositionEnemies. */
@@ -183,12 +310,17 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     Creature c;
     if (make_creature(player["character"].is_string() ? player["character"].str() : std::string("ironclad"), true, c)) {
         allies->add_child(c.node);
+        update_bounds(c);
+        refresh_health_bar(c, player);
         ally_nodes.push_back(c);
     }
     const Json& es = d["enemies"];
     for (size_t i = 0; i < es.size(); ++i) {
         if (!make_creature(es[i]["id"].str(), false, c)) continue;
+        c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
         enemies->add_child(c.node);
+        update_bounds(c);
+        refresh_health_bar(c, es[i]);
         enemy_nodes.push_back(c);
     }
     position_players(ally_nodes, scaling, view["fully_center_players"].b());

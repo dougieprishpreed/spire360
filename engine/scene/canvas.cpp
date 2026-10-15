@@ -7,7 +7,7 @@
 namespace spire {
 
 Canvas::Canvas(Renderer* r, const Pack* pack)
-    : r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0) {}
+    : r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false) {}
 
 void Canvas::set_item(const Xform2D& xform, const Color& modulate, BlendMode blend, int tex_flags) {
     xform_ = xform;
@@ -44,7 +44,7 @@ void Canvas::emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2&
     v[3] = v[0];
     v[4] = v[2];
     v[5] = Vertex(d, Vec2(uv0.x, uv1.y), c);
-    r_->draw_triangles(tex, v, 6, blend_, flags | tex_flags_);
+    if (!count_only_) r_->draw_triangles(tex, v, 6, blend_, flags | tex_flags_);
     ++calls_;
 }
 
@@ -142,7 +142,9 @@ static void np_axis(float size, float src0, float src_size, float mb, float me, 
     *c0 = (int)out.size();
     float area = x2 - x1;
     float src_area = src_size - mb - me;
-    if (area > 0 && src_area > 0) {
+    /* A source centre of zero width still stretches (the shader samples the
+     * seam between the margins); tiling needs a centre to repeat. */
+    if (area > 0 && (src_area > 0 || (src_area == 0 && mode != AXIS_TILE))) {
         if (mode == AXIS_TILE) {
             for (float p = 0; p < area; p += src_area) {
                 float len = minf(src_area, area - p);
@@ -213,7 +215,7 @@ void Canvas::draw_msdf(ImageTextureRes* page, const Rect2& dst, const Rect2& uv,
     Texture* tex = gpu_texture(page);
     if (!tex) return;
     Vec2 ts = page->size();
-    r_->set_msdf(px_range, outline);
+    if (!count_only_) r_->set_msdf(px_range, outline);
     emit_quad(tex, dst.pos, dst.end(), Vec2(uv.pos.x / ts.x, uv.pos.y / ts.y),
               Vec2((uv.pos.x + uv.size.x) / ts.x, (uv.pos.y + uv.size.y) / ts.y), modulate_ * color, DRAW_MSDF);
 }
@@ -226,7 +228,7 @@ void Canvas::draw_colored_triangles(const std::vector<Vec2>& v, const std::vecto
         int k = idx[i];
         verts_[i] = Vertex(xform_.xform(v[k]), Vec2(0, 0), modulate_ * colors[k]);
     }
-    r_->draw_triangles(NULL, &verts_[0], (int)verts_.size(), blend_, tex_flags_);
+    if (!count_only_) r_->draw_triangles(NULL, &verts_[0], (int)verts_.size(), blend_, tex_flags_);
     ++calls_;
 }
 
@@ -240,7 +242,7 @@ void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, co
         int k = idx[i];
         verts_[i] = Vertex(xform_.xform(v[k]), uv[k], modulate_ * (colors.empty() ? Color() : colors[k]));
     }
-    r_->draw_triangles(tex, &verts_[0], (int)verts_.size(), blend_, tex_flags_);
+    if (!count_only_) r_->draw_triangles(tex, &verts_[0], (int)verts_.size(), blend_, tex_flags_);
     ++calls_;
 }
 

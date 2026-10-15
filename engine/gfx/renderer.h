@@ -10,8 +10,9 @@ namespace spire {
 
 enum BlendMode { BLEND_MIX, BLEND_ADD, BLEND_SUB, BLEND_MUL, BLEND_PREMULT_ALPHA };
 
-/* draw_triangles flags */
-enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2, DRAW_MSDF = 4 };
+/* draw_triangles flags. DRAW_GROUP: composite the canvas group layer
+ * through this draw's alpha (see begin_group). */
+enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2, DRAW_MSDF = 4, DRAW_GROUP = 8 };
 
 class Texture {
 public:
@@ -46,6 +47,15 @@ public:
      * shaders such as the game's hsv.gdshader): rgb' = M * rgb + offset * a,
      * m = 3 rows of (r, g, b, offset). NULL: identity. */
     virtual void set_color_matrix(const float* m) = 0;
+    /* Canvas groups (Godot's clip_children). Draws between begin_group and
+     * end_group go to a transparent offscreen layer instead of the screen.
+     * Later draws flagged DRAW_GROUP composite that layer through their own
+     * alpha: out = layer(pixel) * texel.a * colour.a, premultiplied over the
+     * screen. bounds: the screen area the group and its mask stay inside.
+     * One group at a time; false if groups are unavailable (the caller then
+     * draws the children unmasked). */
+    virtual bool begin_group(const Rect2& bounds) = 0;
+    virtual void end_group() = 0;
     virtual void end() = 0;
 };
 

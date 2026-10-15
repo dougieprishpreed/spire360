@@ -178,11 +178,10 @@ static Node* find_unique_in(Node* n, const Node* owner, const std::string& name)
 }
 
 Node* Node::find_unique(const std::string& n) {
-    /* %Name resolves in the owner's scene: this node's owner, or this node if
-     * it is a scene root. */
-    Node* o = unique_name || !owner ? (owner ? owner : this) : owner;
-    Node* r = find_unique_in(o, o, n);
-    if (!r && owner && o != this) r = find_unique_in(this, this, n);
+    /* Godot's %Name: the nodes this node owns (it is a scene's root), then
+     * its owner's. */
+    Node* r = find_unique_in(this, this, n);
+    if (!r && owner) r = find_unique_in(owner, owner, n);
     return r;
 }
 
@@ -592,6 +591,14 @@ FontRes* Control::theme_font(const char* name) {
 StyleBoxRes* Control::theme_stylebox(const char* name) {
     Resource* r = theme_resource("styles", name);
     return r && r->is_stylebox() ? (StyleBoxRes*)r : NULL;
+}
+
+void Control::add_theme_color_override(const std::string& name, const Color& c) {
+    std::string k = "colors/" + name;
+    std::string text = format("{\"t\":\"Color\",\"v\":[%.9g,%.9g,%.9g,%.9g]}", c.r, c.g, c.b, c.a);
+    Json& j = code_overrides[k];
+    j = Json::parse(text.c_str(), text.size(), NULL);
+    override_values[k] = &j;
 }
 
 bool Control::has_theme_color_override(const char* name) const {

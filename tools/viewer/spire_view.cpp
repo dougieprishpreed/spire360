@@ -124,6 +124,10 @@ int main(int argc, char** argv) {
     tree.set_viewport(design, Xform2D::scaling(scale, scale));
     tree.root()->add_child(scene);
     if (has_origin && scene->is_node2d()) ((Node2D*)scene)->position = Vec2(origin_x, origin_y);
+    if (has_origin && scene->is_control()) {
+        tree.layout(1);
+        ((Control*)scene)->set_position(Vec2(origin_x, origin_y));
+    }
     if (spine_anim) play_everywhere(scene, spine_anim);
     tree.layout();
     /* Godot's reference render is taken on its 5th frame (tools/godot/shot.gd). */

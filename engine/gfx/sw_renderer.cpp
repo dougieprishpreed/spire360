@@ -1,11 +1,12 @@
 #include "sw_renderer.h"
 
 #include <math.h>
+#include <string.h>
 
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false) {}
+    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false) {}
 
 Texture* SwRenderer::create_texture(const TextureData& d) {
     SwTexture* t = new SwTexture();
@@ -36,7 +37,33 @@ void SwRenderer::begin(int w, int h, const Color& c) {
     }
     clip_on_ = false;
     tris_ = 0;
+    target_ = &fb_;
 }
+
+bool SwRenderer::begin_group(const Rect2& b) {
+    if (layer_.w != fb_.w || layer_.h != fb_.h) {
+        layer_.resize(fb_.w, fb_.h);
+        for (size_t i = 0; i < layer_.px.size(); ++i) layer_.px[i] = 0;
+    } else {
+        /* What the previous group could have drawn. */
+        for (int y = gy0_; y < gy1_ && gx1_ > gx0_; ++y) memset(layer_.at(gx0_, y), 0, (size_t)(gx1_ - gx0_) * 4);
+    }
+    /* Pixels whose centres the bounds contain, like the triangle coverage. */
+    gx0_ = (int)floorf(b.pos.x + 0.5f);
+    gy0_ = (int)floorf(b.pos.y + 0.5f);
+    gx1_ = (int)floorf(b.pos.x + b.size.x + 0.5f);
+    gy1_ = (int)floorf(b.pos.y + b.size.y + 0.5f);
+    if (gx0_ < 0) gx0_ = 0;
+    if (gy0_ < 0) gy0_ = 0;
+    if (gx1_ > fb_.w) gx1_ = fb_.w;
+    if (gy1_ > fb_.h) gy1_ = fb_.h;
+    if (gx1_ < gx0_) gx1_ = gx0_;
+    if (gy1_ < gy0_) gy1_ = gy0_;
+    target_ = &layer_;
+    return true;
+}
+
+void SwRenderer::end_group() { target_ = &fb_; }
 
 void SwRenderer::set_clip(const Rect2* r) {
     clip_on_ = r != NULL;
@@ -110,6 +137,13 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
         if (x1 > cx1_) x1 = cx1_;
         if (y1 > cy1_) y1 = cy1_;
     }
+    if (target_ == &layer_ || (flags & DRAW_GROUP)) {
+        /* Group draws and their mask stay inside the group's bounds. */
+        if (x0 < gx0_) x0 = gx0_;
+        if (y0 < gy0_) y0 = gy0_;
+        if (x1 > gx1_) x1 = gx1_;
+        if (y1 > gy1_) y1 = gy1_;
+    }
     /* Coverage is tested at the pixel centre nudged by a tiny odd offset, so a
      * point never lies exactly on an edge: triangles sharing an edge (the two
      * halves of a quad) cover each pixel exactly once. */
@@ -161,7 +195,16 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
             } else {
                 s[0] = s[1] = s[2] = s[3] = 1.0f;
             }
-            if (cm_on_) {
+            if (flags & DRAW_GROUP) {
+                /* The layer (premultiplied) through the mask's alpha. */
+                const u8* l = layer_.at(x, y);
+                float m = s[3] * col[3];
+                s[0] = l[0] * (1.0f / 255.0f) * m;
+                s[1] = l[1] * (1.0f / 255.0f) * m;
+                s[2] = l[2] * (1.0f / 255.0f) * m;
+                s[3] = l[3] * (1.0f / 255.0f) * m;
+                col[0] = col[1] = col[2] = col[3] = 1.0f;
+            } else if (cm_on_) {
                 float r = s[0], g = s[1], b = s[2];
                 s[0] = cm_[0] * r + cm_[1] * g + cm_[2] * b + cm_[3] * s[3];
                 s[1] = cm_[4] * r + cm_[5] * g + cm_[6] * b + cm_[7] * s[3];
@@ -171,7 +214,7 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
             float sa = s[3] * col[3];
             float sr = s[0] * col[0] * col[3], sg = s[1] * col[1] * col[3], sb = s[2] * col[2] * col[3];
             if (sa <= 0.0f && blend == BLEND_MIX) continue;
-            u8* d = fb_.at(x, y);
+            u8* d = target_->at(x, y);
             float dr = d[0] / 255.0f, dg = d[1] / 255.0f, db = d[2] / 255.0f, da = d[3] / 255.0f;
             float r, g, b, a;
             switch (blend) {

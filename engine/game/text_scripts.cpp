@@ -183,7 +183,9 @@ public:
     }
     virtual void ready(Node*) { adjust(); }
     virtual void resized(Control*) {
-        if (!adjusted_ || fabsf(last_size_.x - label_->size.x) > 0.01f || fabsf(last_size_.y - label_->size.y) > 0.01f)
+        /* SetTextAutoSize: a new text is fitted again too. */
+        if (!adjusted_ || fabsf(last_size_.x - label_->size.x) > 0.01f || fabsf(last_size_.y - label_->size.y) > 0.01f ||
+            last_text_ != label_->text)
             adjust();
     }
 
@@ -206,6 +208,7 @@ private:
         if (!enabled_) return;
         adjusted_ = true;
         last_size_ = label_->size;
+        last_text_ = label_->text;
         if (!too_big(max_)) {
             set_size(max_);
             return;
@@ -224,6 +227,7 @@ private:
     int min_, max_, last_set_;
     bool adjusted_;
     Vec2 last_size_;
+    std::string last_text_;
     Json size_json_;
 };
 

@@ -132,6 +132,9 @@ public:
     std::string theme_type_variation;
     std::map<std::string, const Json*> override_values;  /* "colors/font_color" -> value */
     std::map<std::string, Resource*> override_resources; /* fonts, styles, icons */
+    /* AddThemeColorOverride from code ("font_color"). */
+    void add_theme_color_override(const std::string& name, const Color& c);
+    std::map<std::string, Json> code_overrides; /* storage for the above */
 
     /* Layout state (Godot's pos_cache / size_cache). */
     Vec2 position, size;

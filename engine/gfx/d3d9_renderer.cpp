@@ -2,6 +2,7 @@
 
 #include "../core/pack.h"
 
+#include <math.h>
 #include <string.h>
 
 #if defined(_XBOX)
@@ -20,11 +21,13 @@ namespace spire {
 
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
-      cm_on_(false), clip_on_(false), dirty_(true), width_(0), height_(0), draws_(0) {
+      cm_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
+      group_failed_(false), width_(0), height_(0), draws_(0) {
     msdf_[0] = 16;
     msdf_[1] = 0;
     memset(cm_, 0, sizeof(cm_));
     memset(&clip_, 0, sizeof(clip_));
+    memset(&group_rect_, 0, sizeof(group_rect_));
 }
 
 D3D9Renderer::~D3D9Renderer() { shutdown(); }
@@ -36,6 +39,7 @@ D3D9Renderer::~D3D9Renderer() { shutdown(); }
     } while (0)
 
 void D3D9Renderer::shutdown() {
+    release_group_target();
     RELEASE(vs_);
     RELEASE(ps_);
     RELEASE(decl_);
@@ -199,6 +203,7 @@ void D3D9Renderer::destroy_texture(Texture* t) {
 /* ---- frame ---- */
 
 void D3D9Renderer::begin(int width, int height, const Color& c) {
+    if (width != width_ || height != height_) release_group_target();
     width_ = width;
     height_ = height;
     draws_ = 0;
@@ -221,6 +226,8 @@ void D3D9Renderer::begin(int width, int height, const Color& c) {
     float vp[4] = { 2.0f / width, -2.0f / height, -1.0f - 1.0f / width, 1.0f + 1.0f / height };
 #endif
     dev_->SetVertexShaderConstantF(0, vp, 1);
+    float inv[4] = { 1.0f / width, 1.0f / height, 0, 0 };
+    dev_->SetVertexShaderConstantF(1, inv, 1);
     clip_on_ = false;
     dirty_ = true;
     batch_.clear();
@@ -229,6 +236,90 @@ void D3D9Renderer::begin(int width, int height, const Color& c) {
 void D3D9Renderer::end() {
     flush();
     dev_->EndScene();
+}
+
+/* ---- canvas groups ---- */
+
+void D3D9Renderer::release_group_target() {
+    RELEASE(group_rt_);
+    RELEASE(group_tex_);
+    RELEASE(main_rt_);
+    group_failed_ = false;
+}
+
+bool D3D9Renderer::make_group_target() {
+    if (group_tex_) return true;
+    if (group_failed_ || !dev_) return false;
+#if defined(_XBOX)
+    /* EDRAM: the back buffer sits at tile 0 (no depth buffer); the group
+     * surface goes after it. */
+    D3DSURFACE_PARAMETERS sp;
+    memset(&sp, 0, sizeof(sp));
+    sp.Base = XGSurfaceSize(width_, height_, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE);
+    if (FAILED(dev_->CreateRenderTarget(width_, height_, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &group_rt_,
+                                        &sp)) ||
+        FAILED(dev_->CreateTexture(width_, height_, 1, 0, D3DFMT_A8R8G8B8, 0, &group_tex_, NULL))) {
+#else
+    if (FAILED(dev_->CreateTexture(width_, height_, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                   &group_tex_, NULL)) ||
+        FAILED(group_tex_->GetSurfaceLevel(0, &group_rt_))) {
+#endif
+        log_warn("d3d9: no canvas group target; clip_children draws unmasked");
+        RELEASE(group_rt_);
+        RELEASE(group_tex_);
+        group_failed_ = true;
+        return false;
+    }
+    return true;
+}
+
+bool D3D9Renderer::begin_group(const Rect2& b) {
+    if (main_rt_ || !make_group_target()) return false;
+    flush();
+    if (FAILED(dev_->GetRenderTarget(0, &main_rt_))) {
+        main_rt_ = NULL;
+        return false;
+    }
+    /* The bounds in whole pixels, grown to the resolve granularity (Xenos
+     * resolves 8x8-aligned rectangles; 32 keeps clear and resolve simple). */
+    long x0 = (long)floorf(b.pos.x), y0 = (long)floorf(b.pos.y);
+    long x1 = (long)ceilf(b.pos.x + b.size.x), y1 = (long)ceilf(b.pos.y + b.size.y);
+    x0 &= ~31L;
+    y0 &= ~31L;
+    x1 = (x1 + 31) & ~31L;
+    y1 = (y1 + 31) & ~31L;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > width_) x1 = width_;
+    if (y1 > height_) y1 = height_;
+    if (x1 < x0) x1 = x0;
+    if (y1 < y0) y1 = y0;
+    group_rect_.left = x0;
+    group_rect_.top = y0;
+    group_rect_.right = x1;
+    group_rect_.bottom = y1;
+    dev_->SetRenderTarget(0, group_rt_);
+    /* SetRenderTarget resets the viewport and scissor; apply_state sets the
+     * scissor again. Clear the whole target (fast on both). */
+    dev_->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    dev_->Clear(0, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    dirty_ = true;
+    return true;
+}
+
+void D3D9Renderer::end_group() {
+    if (!main_rt_) return;
+    flush();
+#if defined(_XBOX)
+    if (group_rect_.right > group_rect_.left && group_rect_.bottom > group_rect_.top) {
+        D3DRECT src = { group_rect_.left, group_rect_.top, group_rect_.right, group_rect_.bottom };
+        D3DPOINT dst = { group_rect_.left, group_rect_.top };
+        dev_->Resolve(D3DRESOLVE_RENDERTARGET0, &src, group_tex_, &dst, 0, 0, NULL, 1.0f, 0, NULL);
+    }
+#endif
+    dev_->SetRenderTarget(0, main_rt_);
+    RELEASE(main_rt_);
+    dirty_ = true;
 }
 
 void D3D9Renderer::set_clip(const Rect2* r) {
@@ -298,6 +389,18 @@ void D3D9Renderer::apply_state() {
     dev_->SetSamplerState(0, D3DSAMP_MINFILTER, filt);
     dev_->SetSamplerState(0, D3DSAMP_MAGFILTER, filt);
     dev_->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    bool group = (flags_ & DRAW_GROUP) && group_tex_ && !main_rt_;
+    if (group) {
+        dev_->SetTexture(1, group_tex_);
+        dev_->SetSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        dev_->SetSamplerState(1, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        dev_->SetSamplerState(1, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        dev_->SetSamplerState(1, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        dev_->SetSamplerState(1, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    } else {
+        /* never sample the target being drawn */
+        dev_->SetTexture(1, NULL);
+    }
     switch (blend_) {
     case BLEND_ADD:
         dev_->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
@@ -327,7 +430,7 @@ void D3D9Renderer::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
-    float c[20] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, 0, 0,
+    float c[20] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f, 0,
                     msdf_[0], msdf_[1], tw, th,
                     cm_[0], cm_[1], cm_[2], cm_[3],
                     cm_[4], cm_[5], cm_[6], cm_[7],
