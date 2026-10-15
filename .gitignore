@@ -29,5 +29,3 @@ data/
 xdk/build_logs/
 xdk/probe/probe_results.txt
 
-# local planning notes (not part of the project)
-notes/
