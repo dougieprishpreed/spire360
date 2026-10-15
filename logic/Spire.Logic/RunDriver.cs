@@ -1837,6 +1837,64 @@ public partial class RunDriver
     // Presentation inputs (engine/game/combat_screen.cpp), from the game's
     // own view code so the console draws what the game would.
 
+    // NCard.UpdateVisuals for a card in a pile: what the card shows (title,
+    // the formatted description, portrait, frame and energy orb, cost
+    // colours, the hand's glow).
+    private static void AddCardView(Dictionary<string, object?> d, CardModel c, PileType pile)
+    {
+        static string Res(string p) => p.StartsWith("res://") ? p.Substring(6) : p;
+        static float[] Rgba(Godot.Color col) => new[] { col.R, col.G, col.B, col.A };
+        try
+        {
+            d["title"] = c.Title;
+            d["upgrade_level"] = c.CurrentUpgradeLevel;
+            d["portrait"] = Res(c.PortraitPath);
+            d["pool"] = c.Pool.Title;
+            d["energy_outline"] = Rgba(c.Pool.EnergyOutlineColor);
+            d["frame_material"] = c.VisualCardPool.CardFrameMaterialPath;
+            d["energy_icon"] = c.VisualCardPool.EnergyColorName;
+            d["cost_display"] = c.EnergyCost.CostsX ? "X" : c.EnergyCost.GetWithModifiers(CostModifiers.All).ToString();
+            d["cost_just_upgraded"] = c.EnergyCost.WasJustUpgraded;
+            d["star_display"] = c.HasStarCostX ? "X" : c.GetStarCostWithModifiers().ToString();
+            d["star_just_upgraded"] = c.WasStarCostJustUpgraded;
+            if (c.CombatState != null)
+            {
+                d["cost_color"] = MegaCrit.Sts2.Core.Helpers.Models.CardCostHelper.GetEnergyCostColor(c, c.CombatState).ToString();
+                d["star_color"] = MegaCrit.Sts2.Core.Helpers.Models.CardCostHelper.GetStarCostColor(c, c.CombatState).ToString();
+            }
+            if (pile == PileType.Hand)
+            {
+                bool canPlay = c.CanPlay(out var reason, out _);
+                // UnplayableReasonExtensions.HasResourceCostReason (internal)
+                bool costReason = reason.HasFlag(UnplayableReason.EnergyCostTooHigh) || reason.HasFlag(UnplayableReason.StarCostTooHigh);
+                d["unplayable_icon"] = !canPlay && !costReason;
+                bool play = c.Owner?.PlayerCombatState?.Phase == MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Play;
+                d["glow"] = c.ShouldGlowRed && play ? "red"
+                          : canPlay && c.ShouldGlowGold && play ? "gold"
+                          : canPlay ? "playable" : "none";
+            }
+            c.DynamicVars.ClearPreview();
+            c.UpdateDynamicVarPreview(MegaCrit.Sts2.Core.Entities.Cards.CardPreviewMode.Normal, c.CurrentTarget, c.DynamicVars);
+            if (c.Enchantment != null)
+            {
+                c.Enchantment.DynamicVars.ClearPreview();
+                c.UpdateDynamicVarPreview(MegaCrit.Sts2.Core.Entities.Cards.CardPreviewMode.Normal, c.CurrentTarget, c.Enchantment.DynamicVars);
+            }
+            d["description_bbcode"] = c.GetDescriptionForPile(pile, c.CurrentTarget);
+        }
+        catch (Exception ex) { Log($"CardView {c.Id.Entry}: {(ex.InnerException ?? ex).Message}"); }
+        finally
+        {
+            // As the stats above: leave the live card without a preview.
+            try
+            {
+                c.DynamicVars.ClearPreview();
+                c.Enchantment?.DynamicVars.ClearPreview();
+            }
+            catch { }
+        }
+    }
+
     // NPower.RefreshAmount: the icon's label.
     private Dictionary<string, object?> PowerView(PowerModel pw)
     {
@@ -2077,6 +2135,7 @@ public partial class RunDriver
             }
             if (damageByTarget != null && damageByTarget.Count > 0)
                 cardInfo["damage_by_target"] = damageByTarget;
+            AddCardView(cardInfo, c, PileType.Hand);
             return cardInfo;
         }).ToList() ?? new();
 
