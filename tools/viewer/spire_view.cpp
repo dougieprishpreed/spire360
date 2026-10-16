@@ -12,6 +12,7 @@
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
 #include "../../engine/game/combat_screen.h"
+#include "../../engine/game/card_select_screen.h"
 #include "../../engine/game/event_screen.h"
 #include "../../engine/game/map_screen.h"
 #include "../../engine/game/reward_screen.h"
@@ -68,11 +69,12 @@ static void play_everywhere(Node* n, const char* anim) {
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y] [--hand-focus I]\n");
+        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y] [--hand-focus I] [--pad A,RIGHT,...]\n");
         return 2;
     }
     float scale = 1.0f;
     int frames = 5; /* --time: seconds of process at 60 fps */
+    std::vector<unsigned> pad_script;
     const char* spine_anim = NULL;
     float origin_x = 0, origin_y = 0;
     int hand_focus = -1;
@@ -87,6 +89,25 @@ int main(int argc, char** argv) {
             has_origin = true;
         }
         else if (strcmp(argv[i], "--time") == 0 && i + 1 < argc) frames = (int)(atof(argv[++i]) * 60.0 + 0.5);
+        else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
+            static const struct {
+                const char* name;
+                unsigned bit;
+            } names[] = { { "A", PadState::A },     { "B", PadState::B },       { "X", PadState::X },
+                          { "Y", PadState::Y },     { "LEFT", PadState::LEFT }, { "RIGHT", PadState::RIGHT },
+                          { "UP", PadState::UP },   { "DOWN", PadState::DOWN }, { "START", PadState::START },
+                          { "LB", PadState::LB },   { "RB", PadState::RB } };
+            std::string list = argv[++i];
+            size_t at = 0;
+            while (at <= list.size()) {
+                size_t comma = list.find(',', at);
+                if (comma == std::string::npos) comma = list.size();
+                std::string tok = list.substr(at, comma - at);
+                for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k)
+                    if (tok == names[k].name) pad_script.push_back(names[k].bit);
+                at = comma + 1;
+            }
+        }
         else if (strcmp(argv[i], "--no-scripts") == 0) set_scripts_enabled(false); /* as Godot's render, without the game's C# */
     }
     install_game_scripts();
@@ -108,6 +129,7 @@ int main(int argc, char** argv) {
     for (int i = 4; i + 2 < argc; ++i)
         if (strcmp(argv[i], "--text") == 0) scene = text_scene(lib, argv[i + 1], atoi(argv[i + 2]), argv[2], &design);
     /* A decision JSON (one line of the logic's output): its screen. */
+    RunScreen* ported = NULL;
     size_t alen = strlen(argv[2]);
     if (!scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
         FILE* jf = fopen(argv[2], "rb");
@@ -127,12 +149,19 @@ int main(int argc, char** argv) {
         } else if (d["decision"].str() == "card_reward") {
             CardRewardScreen* rs = new CardRewardScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);
+            ported = rs;
+        } else if (d["decision"].str() == "card_select") {
+            CardSelectScreen* cs = new CardSelectScreen(&lib); /* lives as long as the scene */
+            scene = cs->build(d, &err);
+            ported = cs;
         } else if (d["decision"].str() == "event_choice") {
             EventScreen* es = new EventScreen(&lib); /* lives as long as the scene */
             scene = es->build(d, &err);
+            ported = es;
         } else if (d["decision"].str() == "map_select") {
             MapScreen* ms = new MapScreen(&lib); /* lives as long as the scene */
             scene = ms->build(d, &err);
+            ported = ms;
         } else if (err.empty()) {
             err = "no screen for decision " + d["decision"].str();
         }
@@ -172,6 +201,18 @@ int main(int argc, char** argv) {
     for (int f = 0; f < frames; ++f) {
         tree.process(1.0 / 60.0);
         tree.layout(1);
+    }
+    /* --pad A,RIGHT,...: each press after half a second, then --time again
+     * before the picture; the screen's commands are printed. */
+    for (size_t k = 0; ported && k < pad_script.size(); ++k) {
+        PadState pad;
+        pad.pressed = pad.held = pad_script[k];
+        std::string cmd = ported->input(pad);
+        if (!cmd.empty()) printf("command: %s\n", cmd.c_str());
+        for (int f = 0; f < (k + 1 < pad_script.size() ? 30 : frames); ++f) {
+            tree.process(1.0 / 60.0);
+            tree.layout(1);
+        }
     }
     SwRenderer sw;
     Canvas canvas(&sw, &pack);

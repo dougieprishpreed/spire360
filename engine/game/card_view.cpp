@@ -219,4 +219,13 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
     return card;
 }
 
+void set_card_highlight(Node* card, bool on) {
+    if (!card) return;
+    CanvasItem* glow = item(card, "Highlight");
+    if (!glow) return;
+    glow->visible = on;
+    glow->shader_params["width"] = on ? 0.075f : 0.0f;
+    glow->modulate = Color(0, 0.957f, 0.988f, 0.98f);
+}
+
 } /* namespace spire */

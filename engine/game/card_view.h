@@ -15,6 +15,10 @@ class SceneLibrary;
 /* A new card node (the caller owns it), NULL if card.tscn is missing. */
 Node* make_card(SceneLibrary* lib, const Json& card);
 
+/* NCardHighlight.AnimShow / AnimHide in its default (cyan) colour: a card
+ * picked on a selection screen. */
+void set_card_highlight(Node* card, bool on);
+
 } /* namespace spire */
 
 #endif

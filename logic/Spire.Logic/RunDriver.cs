@@ -1570,6 +1570,7 @@ public partial class RunDriver
                     ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card),
+                    ["upgrade_preview"] = _cardSelector.PendingKind == "upgrade" ? UpgradePreviewView(card) : null,
                 });
             }).ToList();
 
@@ -3031,6 +3032,42 @@ public partial class RunDriver
     }
 
     /// <summary>Compute what a card would look like after upgrading (stats + cost + description).</summary>
+    // NUpgradePreview's right-hand card: an upgraded copy shown with
+    // NCard.ShowUpgradePreview (the changed values in green). The copy comes
+    // from the canonical card, outside any card scope, as GetUpgradedInfo's.
+    private static Dictionary<string, object?>? UpgradePreviewView(CardModel card)
+    {
+        if (!card.IsUpgradable) return null;
+        try
+        {
+            var clone = ModelDb.GetById<CardModel>(card.Id).ToMutable();
+            for (int i = 0; i < card.CurrentUpgradeLevel; i++)
+            {
+                clone.UpgradeInternal();
+                clone.FinalizeUpgradeInternal();
+            }
+            clone.UpgradeInternal();
+            clone.UpgradePreviewType = card.Pile?.IsCombatPile == true
+                ? MegaCrit.Sts2.Core.Entities.Cards.CardUpgradePreviewType.Combat
+                : MegaCrit.Sts2.Core.Entities.Cards.CardUpgradePreviewType.Deck;
+            var d = new Dictionary<string, object?>
+            {
+                ["type"] = clone.Type.ToString(),
+                ["rarity"] = clone.Rarity.ToString(),
+            };
+            AddCardView(d, clone, PileType.None);
+            clone.DynamicVars.ClearPreview();
+            clone.UpdateDynamicVarPreview(MegaCrit.Sts2.Core.Entities.Cards.CardPreviewMode.Upgrade, null, clone.DynamicVars);
+            d["description_bbcode"] = clone.GetDescriptionForUpgradePreview();
+            return d;
+        }
+        catch (Exception ex)
+        {
+            Spire.Logic.Log.Warn($"upgrade preview {card.Id}: {ex.Message}");
+            return null;
+        }
+    }
+
     private Dictionary<string, object?>? GetUpgradedInfo(CardModel card)
     {
         if (!card.IsUpgradable) return null;

@@ -6,6 +6,7 @@
 #include "../scene/text_nodes.h"
 #include "../scene/tree.h"
 #include "combat_screen.h"
+#include "card_select_screen.h"
 #include "event_screen.h"
 #include "map_screen.h"
 #include "reward_screen.h"
@@ -244,6 +245,25 @@ void GameClient::show(const Json& d) {
         screen_ = s->build(d, &err);
         if (!screen_) {
             log_warn("card reward screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "card_select") {
+        /* In a fight, over the fight. */
+        Node* room = NULL;
+        const std::string& rt = d["context"]["room_type"].str();
+        bool in_fight = rt == "Monster" || rt == "Elite" || rt == "Boss";
+        if (in_fight && !last_combat_.is_null()) {
+            room_ = new CombatScreen(lib_);
+            room = room_->build(last_combat_, &err);
+        }
+        CardSelectScreen* s = new CardSelectScreen(lib_);
+        s->set_background(room);
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("card select screen: %s", err.c_str());
             delete ported_;
             ported_ = NULL;
         }
