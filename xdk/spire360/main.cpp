@@ -18,6 +18,7 @@
 
 #include "../../engine/core/pack.h"
 #include "../../engine/game/game.h"
+#include "../../engine/game/character_select.h"
 #include "../../engine/game/title_screen.h"
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/loc.h"
@@ -152,18 +153,26 @@ void __cdecl main() {
     SceneTree* tree = new SceneTree();
     tree->set_viewport(Vec2(1920, 1080), Xform2D::scaling(2.0f / 3.0f, 2.0f / 3.0f));
 
-    /* The main menu until a run starts; back to it after the run. */
+    /* The main menu until a run starts; back to it after the run. The
+     * client exists from the start: it asks the logic for the character
+     * select screen's data at once (the game data loads meanwhile). */
     TitleScreen menu(lib);
     Node* title = menu.build(pack.game_version(), &err);
     if (title) tree->root()->add_child(title);
     else logf("main menu: %s", err.c_str());
     tree->layout();
     SrtLink link;
-    GameClient* game = NULL;
+    GameClient* game = new GameClient(lib, tree, &link);
+    game->request_characters();
+    CharacterSelectScreen chars(lib);
+    Node* char_select = NULL;
+    int chars_version = 0;
+    std::string last_character;
     unsigned prev = 0;
     double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, wait_start = 0;
     int frames = 0, shown = 0;
     bool starting = false; /* a run asked for, its first screen not here yet */
+    bool in_run = false;
     for (;;) {
         XINPUT_STATE xs;
         ZeroMemory(&xs, sizeof(xs));
@@ -185,54 +194,95 @@ void __cdecl main() {
             pad.pressed &= ~PadState::Y;
         }
 
-        if (title) {
-            TitleScreen::Action a = menu.input(pad);
-            if (a == TitleScreen::QUIT) break;
-            if (a == TitleScreen::START_RUN) {
-                /* The menu stays until the run's first screen. */
-                menu.set_starting();
+        if (game->characters_version() != chars_version) {
+            chars_version = game->characters_version();
+            chars.set_data(game->characters());
+            logf("characters: %d (logic %.0f ms)", (int)game->characters()["characters"].size(), now_ms() - t0);
+        }
+        if (char_select && !starting) {
+            /* The character select screen over the menu. */
+            CharacterSelectScreen::Action a = chars.input(pad);
+            if (a == CharacterSelectScreen::BACK) {
+                last_character = chars.selected();
+                tree->root()->remove_child(char_select);
+                delete char_select;
+                char_select = NULL;
+                menu.set_covered(false);
+            } else if (a == CharacterSelectScreen::EMBARK) {
+                last_character = chars.selected();
+                chars.set_starting();
                 starting = true;
-                if (!game) game = new GameClient(lib, tree, &link);
                 std::string seed = format("%08X", (unsigned)GetTickCount());
-                logf("run: %s, seed %s", menu.character(), seed.c_str());
-                game->start_run(menu.character(), seed);
+                logf("run: %s, seed %s", chars.character().c_str(), seed.c_str());
+                game->start_run(chars.character(), seed);
                 wait_start = now_ms();
             }
             pad.pressed = 0;
-        } else if (game && game->menu_requested()) {
+        } else if (title && !starting) {
+            TitleScreen::Action a = menu.input(pad);
+            if (a == TitleScreen::QUIT) break;
+            if (a == TitleScreen::SINGLEPLAYER) {
+                char_select = chars.build(game->characters(), last_character, &err);
+                if (char_select) {
+                    menu.set_covered(true);
+                    tree->root()->add_child(char_select);
+                    tree->layout();
+                } else {
+                    /* No character select scene in the pack: the first character. */
+                    logf("character select: %s", err.c_str());
+                    menu.set_covered(true);
+                    starting = true;
+                    std::string seed = format("%08X", (unsigned)GetTickCount());
+                    game->start_run("Ironclad", seed);
+                    wait_start = now_ms();
+                }
+            }
+            pad.pressed = 0;
+        } else if (in_run && game->menu_requested()) {
             /* The run is over: back to the main menu. */
             game->clear_screen();
+            in_run = false;
             title = menu.build(pack.game_version(), &err);
             if (title) {
                 tree->root()->add_child(title);
             } else {
                 std::string seed = format("%08X", (unsigned)GetTickCount());
-                logf("run: %s, seed %s", menu.character(), seed.c_str());
-                game->start_run(menu.character(), seed);
+                logf("run: Ironclad, seed %s", seed.c_str());
+                game->start_run("Ironclad", seed);
+                starting = true;
                 wait_start = now_ms();
             }
             tree->layout();
             pad.pressed = 0;
-        } else if (!game && (pad.pressed & (PadState::A | PadState::START))) {
+        } else if (!title && !in_run && !starting && (pad.pressed & (PadState::A | PadState::START))) {
             /* No main menu in the pack: A starts a run. */
-            game = new GameClient(lib, tree, &link);
             std::string seed = format("%08X", (unsigned)GetTickCount());
-            logf("run: %s, seed %s", menu.character(), seed.c_str());
-            game->start_run(menu.character(), seed);
+            logf("run: Ironclad, seed %s", seed.c_str());
+            game->start_run("Ironclad", seed);
+            starting = true;
             wait_start = now_ms();
             pad.pressed = 0;
         }
-        if (game && (!title || starting)) {
+        {
             bool was_busy = game->busy();
-            game->update(pad);
+            game->update(in_run ? pad : PadState());
             if (game->decision_count() != shown) {
                 shown = game->decision_count();
-                if (starting && title) {
-                    tree->root()->remove_child(title);
-                    delete title;
-                    title = NULL;
+                if (starting) {
+                    /* The run's first screen: the menus go. */
+                    if (char_select) {
+                        tree->root()->remove_child(char_select);
+                        delete char_select;
+                        char_select = NULL;
+                    }
+                    if (title) {
+                        tree->root()->remove_child(title);
+                        delete title;
+                        title = NULL;
+                    }
+                    starting = false;
+                    in_run = true;
                 }
-                starting = false;
                 logf("decision %d: %s (logic %.0f ms)", shown, game->decision()["decision"].str().c_str(),
                      now_ms() - wait_start);
                 tree->layout();

@@ -37,6 +37,8 @@ void place(Control* c, float x, float y, float w, float h);
 Vec2 offset_pos(const Control* c);
 Vec2 offset_size(const Control* c);
 Color hex(unsigned rgb);
+/* Rng.Chaotic: a different number every time (seeded from the clock). */
+unsigned chaotic_rand();
 /* A full-screen Control (anchors 0..1), named. */
 Control* full_rect_control(const char* name);
 

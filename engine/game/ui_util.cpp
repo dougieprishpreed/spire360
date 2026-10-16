@@ -7,6 +7,7 @@
 #include "../scene/text_nodes.h"
 
 #include <ctype.h>
+#include <time.h>
 #include <set>
 
 namespace spire {
@@ -41,6 +42,15 @@ Control* ctl(Node* scope, const char* unique) {
 void set_label(Node* n, const std::string& text) {
     if (n && n->type == "Label") ((Label*)n)->set_text(text);
     else if (n && n->type == "RichTextLabel") ((RichTextLabel*)n)->text = text;
+}
+
+unsigned chaotic_rand() {
+    static unsigned state = 0;
+    if (!state) state = ((unsigned)time(NULL) * 2654435761u) ^ (unsigned)clock() ^ 0x9E3779B9u;
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    return state;
 }
 
 void warn_missing(const std::string& path) {

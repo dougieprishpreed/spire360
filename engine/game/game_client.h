@@ -39,6 +39,12 @@ public:
     ~GameClient();
 
     void start_run(const std::string& character, const std::string& seed);
+    /* Asks the logic for the character select screen's data (it also loads
+     * the game data, so the run starts sooner); characters() has it once
+     * the answer is in (characters_version() counts answers). */
+    void request_characters();
+    const Json& characters() const { return characters_; }
+    int characters_version() const { return characters_version_; }
     /* Takes the run's screen out of the tree (back to the main menu); a
      * new start_run follows. */
     void clear_screen();
@@ -96,6 +102,9 @@ private:
     unsigned rng_;
     int decisions_, errors_;
     std::string error_, pending_start_;
+    bool want_characters_;
+    Json characters_;
+    int characters_version_;
 };
 
 } /* namespace spire */

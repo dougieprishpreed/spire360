@@ -8,25 +8,11 @@
 
 namespace spire {
 
-static const struct {
-    const char* id;  /* start_run's character */
-    const char* loc; /* characters.json */
-} CHARACTERS[] = { { "Ironclad", "IRONCLAD" }, { "Silent", "SILENT" }, { "Defect", "DEFECT" },
-                   { "Regent", "REGENT" },     { "Necrobinder", "NECROBINDER" } };
-static const int CHARACTER_COUNT = (int)(sizeof(CHARACTERS) / sizeof(CHARACTERS[0]));
-
 /* StsColors.cream / gold. */
 static const unsigned CREAM = 0xFFF6E2, GOLD = 0xEFC851;
 
 TitleScreen::TitleScreen(SceneLibrary* lib)
-    : lib_(lib), reticle_l_(NULL), reticle_r_(NULL), focus_(-1), character_(0) {}
-
-const char* TitleScreen::character() const { return CHARACTERS[character_].id; }
-
-void TitleScreen::set_character(const std::string& id) {
-    for (int i = 0; i < CHARACTER_COUNT; ++i)
-        if (id == CHARACTERS[i].id) character_ = i;
-}
+    : lib_(lib), reticle_l_(NULL), reticle_r_(NULL), focus_(-1), covered_(false) {}
 
 Node* TitleScreen::build(const std::string& version, std::string* error) {
     buttons_.clear();
@@ -68,16 +54,8 @@ Node* TitleScreen::build(const std::string& version, std::string* error) {
     reticle_l_ = rl && rl->is_control() ? (Control*)rl : NULL;
     reticle_r_ = rr && rr->is_control() ? (Control*)rr : NULL;
     menu->add_child(frame_driver(this));
-    refresh_label();
+    covered_ = false;
     return menu;
-}
-
-/* Singleplayer reads "Singleplayer: < The Ironclad >" while the character
- * select screen is not ported. */
-void TitleScreen::refresh_label() {
-    if (labels_.empty() || !labels_[0]) return;
-    std::string name = Loc::get("characters", (std::string(CHARACTERS[character_].loc) + ".title").c_str());
-    set_label(labels_[0], Loc::get("main_menu_ui", "SINGLE_PLAYER") + ":  < " + name + " >");
 }
 
 /* NMainMenuTextButton.OnFocus (gold, 1.05) and NMainMenu's carets. */
@@ -112,18 +90,19 @@ void TitleScreen::focus(int i) {
     }
 }
 
-void TitleScreen::set_starting() {
-    for (size_t i = 0; i < labels_.size(); ++i)
-        if (labels_[i]) labels_[i]->modulate.a = 0.5f;
-    if (reticle_l_) reticle_l_->modulate.a = 0;
-    if (reticle_r_) reticle_r_->modulate.a = 0;
-    tweens_.clear();
-    focus_ = -2;
+void TitleScreen::set_covered(bool covered) {
+    covered_ = covered;
+    if (covered) {
+        tweens_.clear();
+        focus_ = -1; /* focused again (carets back) when uncovered */
+    }
+    if (reticle_l_) reticle_l_->modulate.a = covered ? 0.0f : 1.0f;
+    if (reticle_r_) reticle_r_->modulate.a = covered ? 0.0f : 1.0f;
 }
 
 TitleScreen::Action TitleScreen::input(const PadState& pad) {
-    if (focus_ == -2) return NONE; /* starting */
-    if (buttons_.empty()) return (pad.pressed & (PadState::A | PadState::START)) ? START_RUN : NONE;
+    if (covered_) return NONE;
+    if (buttons_.empty()) return (pad.pressed & (PadState::A | PadState::START)) ? SINGLEPLAYER : NONE;
     if (focus_ < 0) {
         focus(0);
         return NONE;
@@ -131,16 +110,7 @@ TitleScreen::Action TitleScreen::input(const PadState& pad) {
     int n = (int)buttons_.size();
     if (pad.pressed & PadState::UP) focus((focus_ + n - 1) % n);
     if (pad.pressed & PadState::DOWN) focus((focus_ + 1) % n);
-    if (focus_ == 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
-        character_ = (pad.pressed & PadState::LEFT) ? (character_ + CHARACTER_COUNT - 1) % CHARACTER_COUNT
-                                                    : (character_ + 1) % CHARACTER_COUNT;
-        refresh_label();
-        /* The label's width changed: the carets follow on the next frame. */
-        int f = focus_;
-        focus_ = -1;
-        focus(f);
-    }
-    if (pad.pressed & (PadState::A | PadState::START)) return focus_ == 0 ? START_RUN : QUIT;
+    if (pad.pressed & (PadState::A | PadState::START)) return focus_ == 0 ? SINGLEPLAYER : QUIT;
     return NONE;
 }
 

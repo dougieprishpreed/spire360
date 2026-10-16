@@ -157,7 +157,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0) {}
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0) {}
 
 GameClient::~GameClient() {
     if (screen_) {
@@ -174,6 +174,11 @@ void GameClient::start_run(const std::string& character, const std::string& seed
     std::string cmd = "{\"cmd\":\"start_run\",\"character\":" + quoted(character) + ",\"seed\":" + quoted(seed) + "}";
     if (ready_) send(cmd);
     else pending_start_ = cmd; /* sent after the logic's "ready" */
+}
+
+void GameClient::request_characters() {
+    if (ready_) send("{\"cmd\":\"characters\"}");
+    else want_characters_ = true; /* sent after the logic's "ready" */
 }
 
 void GameClient::send(const std::string& command) {
@@ -200,10 +205,18 @@ void GameClient::update(const PadState& pad) {
         if (type == "ready") {
             ready_ = true;
             waiting_ = false;
+            if (want_characters_) {
+                want_characters_ = false;
+                send("{\"cmd\":\"characters\"}");
+            }
             if (!pending_start_.empty()) {
                 send(pending_start_);
                 pending_start_.clear();
             }
+        } else if (type == "characters") {
+            waiting_ = false;
+            characters_ = msg;
+            ++characters_version_;
         } else if (type == "decision") {
             waiting_ = false;
             show(msg);

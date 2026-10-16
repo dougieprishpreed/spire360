@@ -303,6 +303,7 @@ DEFAULT_BUNDLE = [
     "images/ui/run_history/*.png", "images/ui/rest_site/*.png", "images/ui/game_over_screen/*.png",
     "images/events/neow.png", "images/events/this_or_that.png", "images/ui/reward_screen/*.png",
     "scenes/screens/game_over_screen/*.tscn", "scenes/orbs/*.tscn", "scenes/orbs/orb_visuals/*.tscn",
+    "images/packed/character_select/*.png", "images/packed/sprite_fonts/*.png",
 ]
 
 

@@ -144,6 +144,9 @@ internal static class Program
                     Protocol.Str(cmd, "seed"),
                     Protocol.Str(cmd, "lang", "en")!);
 
+            case "characters":
+                return sim.Characters(Protocol.Str(cmd, "lang", "en")!);
+
             case "action":
                 return sim.ExecuteAction(Protocol.Str(cmd, "action") ?? "", Protocol.Args(cmd));
 

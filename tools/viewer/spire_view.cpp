@@ -19,6 +19,7 @@
 #include "../../engine/game/reward_screen.h"
 #include "../../engine/game/rewards_screen.h"
 #include "../../engine/game/game_over_screen.h"
+#include "../../engine/game/character_select.h"
 #include "../../engine/game/top_bar.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
@@ -133,6 +134,7 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--text") == 0) scene = text_scene(lib, argv[i + 1], atoi(argv[i + 2]), argv[2], &design);
     /* A decision JSON (one line of the logic's output): its screen. */
     RunScreen* ported = NULL;
+    CharacterSelectScreen* charsel = NULL;
     size_t alen = strlen(argv[2]);
     if (!scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
         FILE* jf = fopen(argv[2], "rb");
@@ -144,7 +146,11 @@ int main(int argc, char** argv) {
             fclose(jf);
         }
         Json d = Json::parse(text.c_str(), text.size(), &err);
-        if (d["decision"].str() == "combat_play") {
+        if (d["type"].str() == "characters") {
+            /* The logic's characters answer: the character select screen. */
+            charsel = new CharacterSelectScreen(&lib); /* lives as long as the scene */
+            scene = charsel->build(d, "", &err);
+        } else if (d["decision"].str() == "combat_play") {
             /* Lives as long as the scene (it drives its animations). */
             CombatScreen* cs = new CombatScreen(&lib);
             cs->set_hand_focus(hand_focus);
@@ -221,13 +227,18 @@ int main(int argc, char** argv) {
     }
     /* --pad A,RIGHT,...: each press after half a second, then --time again
      * before the picture; the screen's commands are printed. */
-    for (size_t k = 0; (ported || title) && k < pad_script.size(); ++k) {
+    for (size_t k = 0; (ported || title || charsel) && k < pad_script.size(); ++k) {
         PadState pad;
         pad.pressed = pad.held = pad_script[k];
         std::string cmd = ported ? ported->input(pad) : std::string();
         if (title) {
             TitleScreen::Action a = title->input(pad);
-            if (a != TitleScreen::NONE) cmd = a == TitleScreen::START_RUN ? std::string("start ") + title->character() : "quit";
+            if (a != TitleScreen::NONE) cmd = a == TitleScreen::SINGLEPLAYER ? "singleplayer" : "quit";
+        }
+        if (charsel) {
+            CharacterSelectScreen::Action a = charsel->input(pad);
+            if (a == CharacterSelectScreen::BACK) cmd = "back";
+            if (a == CharacterSelectScreen::EMBARK) cmd = "start " + charsel->character();
         }
         if (!cmd.empty()) printf("command: %s\n", cmd.c_str());
         for (int f = 0; f < (k + 1 < pad_script.size() ? 30 : frames); ++f) {

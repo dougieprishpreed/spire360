@@ -7,7 +7,6 @@
 #include "../scene/scene.h"
 #include "../scene/text_nodes.h"
 
-#include <time.h>
 
 namespace spire {
 
@@ -19,16 +18,6 @@ static Control* as_control(Node* n) { return n && n->is_control() ? (Control*)n 
 
 /* A random entry of a loc table's numbered keys (prefix0, prefix1, ... or
  * prefix00, prefix01, ...): LocTable.GetLocStringsWithPrefix + a random pick. */
-static unsigned next_random() {
-    /* Rng.Chaotic: different every time (the clock, mixed). */
-    static unsigned state = 0;
-    if (!state) state = (unsigned)time(NULL) * 2654435761u ^ (unsigned)clock() ^ 0x9E3779B9u;
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    return state;
-}
-
 static std::string random_loc(const char* table, const char* prefix, bool two_digits) {
     std::vector<std::string> found;
     for (int i = 0; i < 100; ++i) {
@@ -38,7 +27,7 @@ static std::string random_loc(const char* table, const char* prefix, bool two_di
         found.push_back(text);
     }
     if (found.empty()) return std::string();
-    return found[(size_t)(next_random() % (unsigned)found.size())];
+    return found[(size_t)(chaotic_rand() % (unsigned)found.size())];
 }
 
 GameOverScreen::GameOverScreen(SceneLibrary* lib)
