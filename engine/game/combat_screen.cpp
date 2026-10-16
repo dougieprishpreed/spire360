@@ -963,6 +963,85 @@ static void play_idle(Node* n) {
     for (size_t i = 0; i < n->children.size(); ++i) play_idle(n->children[i]);
 }
 
+/* NOrbManager (scenes/orbs/orb_manager.tscn) on the player: one NOrb per
+ * slot (OrbQueue.Capacity), the channelled orbs first, on an arc above the
+ * creature (TweenLayout's places at rest). */
+void CombatScreen::make_orbs(Creature& c, const Json& orbs, int slots) {
+    if (slots <= 0 || !c.node || !c.visuals) return;
+    Node* manager = instance(lib_, "scenes/orbs/orb_manager.tscn");
+    if (!manager || !manager->is_control()) {
+        delete manager;
+        return;
+    }
+    Control* m = (Control*)manager;
+    /* NCreature.SetOrbManagerPosition: the visuals' %OrbPos (else the
+     * intents' place), scaled as the visuals are (at most 1.25). */
+    Vec2 vscale(1, 1);
+    if (c.visuals->is_node2d()) vscale = ((Node2D*)c.visuals)->scale;
+    Node* pos = c.visuals->find_unique("OrbPos");
+    if (!pos) pos = c.visuals->find_unique("IntentPos");
+    Vec2 at = pos && pos->is_node2d() ? ((Node2D*)pos)->position : Vec2(0, 0);
+    float k = vscale.x < 1.25f ? vscale.x : 1.25f;
+    for (int s = 0; s < 4; ++s) m->anchor[s] = 0;
+    m->scale = vscale.x > 1.0f ? Vec2(1, 1) : Vec2(vscale.x + (1 - vscale.x) * 0.5f, vscale.y + (1 - vscale.y) * 0.5f);
+    m->set_position(at * k);
+    c.node->add_child(m);
+    Node* box = m->find_unique("Orbs");
+    if (!box) box = m;
+    /* TweenLayout: an arc of 125 degrees from -150 to -25, radius 225 at 3
+     * slots up to 300 at 10. */
+    float radius = 225.0f + (300.0f - 225.0f) * ((float)slots - 3.0f) / 7.0f;
+    float span = 125.0f, step = slots > 1 ? span / (float)(slots - 1) : 0.0f;
+    for (int i = 0; i < slots; ++i) {
+        Node* o = instance(lib_, "scenes/orbs/orb.tscn");
+        if (!o || !o->is_control()) {
+            delete o;
+            break;
+        }
+        Control* oc = (Control*)o;
+        const Json* model = i < (int)orbs.size() ? &orbs[(size_t)i] : NULL;
+        /* NOrb._Ready: the local player's are at 0.85. */
+        oc->scale = oc->scale * 0.85f;
+        float a = (-25.0f - span) * 3.14159265f / 180.0f;
+        oc->set_position(Vec2(-cosf(a), sinf(a)) * radius);
+        span -= step;
+        Node* outline = o->find_unique("Outline");
+        Node* passive = o->find_unique("PassiveAmount");
+        Node* evoke = o->find_unique("EvokeAmount");
+        hide(o->find_unique("SelectionReticle"));
+        if (!model) {
+            /* An empty slot: its outline only. */
+            set_visible(passive, false);
+            set_visible(evoke, false);
+            set_visible(outline, true);
+        } else {
+            /* UpdateVisuals: the orb's sprite (OrbModel.CreateSprite,
+             * scenes/orbs/orb_visuals/<id>.tscn) idling, its numbers. */
+            set_visible(outline, false);
+            set_visible(o->find_unique("LabelContainer"), true);
+            std::string id = lower((*model)["id"].str());
+            Node* sprite = instance(lib_, "scenes/orbs/orb_visuals/" + id + ".tscn");
+            Node* vc = o->find_unique("VisualContainer");
+            if (sprite && vc) vc->add_child(sprite);
+            else delete sprite;
+            int pv = (*model)["passive"].i(), ev = (*model)["evoke"].i();
+            set_label(passive, format("%d", pv));
+            set_label(evoke, format("%d", ev));
+            if (id == "plasma_orb") {
+                set_visible(passive, false);
+                set_visible(evoke, false);
+            } else if (id == "dark_orb") {
+                set_visible(passive, true);
+                set_visible(evoke, true);
+            } else {
+                set_visible(passive, true);
+                set_visible(evoke, false);
+            }
+        }
+        box->add_child(o);
+    }
+}
+
 /* NCreatureStateDisplay.SetCreature: the nameplate's text. */
 static void set_nameplate_text(Control* nameplate, const std::string& name) {
     Node* label = nameplate ? nameplate->find_unique("NameplateLabel") : NULL;
@@ -1015,6 +1094,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         refresh_health_bar(c, player, player_powers);
         set_nameplate_text(c.nameplate, player["name"].str());
         make_powers(c, player_powers);
+        if (!aftermath_) make_orbs(c, d["orbs"], d["orb_slots"].i(0));
         ally_nodes.push_back(c);
         player_ = c;
     }

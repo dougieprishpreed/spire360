@@ -2379,7 +2379,7 @@ public partial class RunDriver
         {
             // Defect: Orbs
             var orbQueue = pcs?.OrbQueue;
-            if (orbQueue?.Orbs?.Count > 0)
+            if (orbQueue != null && (orbQueue.Orbs?.Count > 0 || orbQueue.Capacity > 0))
             {
                 result["orbs"] = orbQueue.Orbs.Select((orb, i) => new Dictionary<string, object?>
                 {
