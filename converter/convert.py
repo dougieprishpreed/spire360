@@ -10,7 +10,7 @@
   convert.py texture <pck | dir> <res://path.png> <out.png> [--level N]
       Decodes one texture to a PNG (to check the decoder by eye).
 
-  convert.py bundle <pck> <out.zip> [scene res paths or globs...] [--max-mb 45]
+  convert.py bundle <pck> <out.zip> [scene res paths or globs...] [--max-mb 45] [--have old.zip]
       A scene and everything it references (recursively: scenes, resources,
       textures with their .import stubs, fonts, Spine data), plus project
       settings and English localization, as a zip laid out like the pack.
@@ -310,6 +310,7 @@ DEFAULT_BUNDLE = [
     # relics' big icons.
     "scenes/creature_visuals/*.tscn", "scenes/backgrounds/*.tscn", "images/events/*.png",
     "images/atlases/card_atlas.sprites/*.tres", "images/relics/*.png",
+    "images/atlases/potion_outline_atlas.sprites/*.tres", "images/packed/map/*.png",
 ]
 
 
@@ -388,8 +389,11 @@ def cmd_bundle(a):
             if any(ch in r for ch in "*?["):
                 # A glob over a folder of images matches their .import stubs:
                 # take the images (the stub alone does not bring the texture).
+                # The .pck has no "x.png", only "x.png.import": match the
+                # glob against the stub's name without ".import".
                 expanded += sorted({f[:-len(".import")] if f.endswith(".import") else f
-                                    for f in listing if fnmatch.fnmatchcase(f, r)})
+                                    for f in listing
+                                    if fnmatch.fnmatchcase(f[:-len(".import")] if f.endswith(".import") else f, r)})
             else:
                 expanded.append(r)
         # A glob over an atlas's sprites may match nothing in the .pck (the
@@ -399,11 +403,21 @@ def cmd_bundle(a):
     files = dependencies(src, res, roots)
     extra = [f for f in ("project.binary", ".godot/uid_cache.bin") if src.exists(f)]
     extra += [f for f in src.list() if f.startswith("localization/eng/")]
+    # --have: bundles already sent; only what they lack is written (merged
+    # over them, the result is the whole set).
+    have = set()
+    for h in a.have or []:
+        with zipfile.ZipFile(h) as hz:
+            have.update(n for n in hz.namelist() if n not in ("bundle_info.json", "res_dirs.json"))
     budget = a.max_mb * 1024 * 1024
     total = 0
     skipped = []
+    already = 0
     with zipfile.ZipFile(a.out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in extra + sorted(set(files), key=lambda x: (x.startswith(".godot/imported"), src.size(x))):
+            if f in have:
+                already += 1
+                continue
             size = src.size(f)
             if total + size > budget and f.startswith(".godot/imported"):
                 skipped.append(f)
@@ -412,7 +426,8 @@ def cmd_bundle(a):
             total += size
         z.writestr("bundle_info.json", json.dumps({"roots": roots, "skipped": skipped}, indent=1))
         z.writestr("res_dirs.json", json.dumps(res_dir_listing(src), indent=0))
-    print(f"{len(files)} files for {len(roots)} scene(s); {human(total)} written to {a.out}"
+    print(f"{len(files)} files for {len(roots)} scene(s)"
+          + (f", {already} already in --have" if have else "") + f"; {human(total)} written to {a.out}"
           + (f"; {len(skipped)} largest imported files left out (over --max-mb)" if skipped else ""))
 
 
@@ -659,6 +674,7 @@ def main():
     bu.add_argument("out")
     bu.add_argument("scenes", nargs="*")
     bu.add_argument("--max-mb", type=float, default=45)
+    bu.add_argument("--have", action="append", help="a bundle zip already sent (repeatable): leave out its files")
     b = sub.add_parser("build")
     b.add_argument("pack")
     b.add_argument("out")

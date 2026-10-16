@@ -1000,8 +1000,10 @@ void CombatScreen::make_orbs(Creature& c, const Json& orbs, int slots) {
         }
         Control* oc = (Control*)o;
         const Json* model = i < (int)orbs.size() ? &orbs[(size_t)i] : NULL;
-        /* NOrb._Ready: the local player's are at 0.85. */
+        /* NOrb._Ready: the local player's are at 0.85. The anchors (0.5 in
+         * a parent of no size) as 0: placed before it has its parent. */
         oc->scale = oc->scale * 0.85f;
+        for (int s = 0; s < 4; ++s) oc->anchor[s] = 0;
         float a = (-25.0f - span) * 3.14159265f / 180.0f;
         oc->set_position(Vec2(-cosf(a), sinf(a)) * radius);
         span -= step;
