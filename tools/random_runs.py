@@ -109,6 +109,11 @@ def act(rng, state):
     if d == "rest_site":
         opts = [o for o in state.get("options", []) if o.get("is_enabled", True)]
         return a("choose_option", option_index=rng.choice(opts)["index"]) if opts else a("leave_room")
+    if d == "rewards":
+        # Every reward in turn (the card reward opens its own decision), then
+        # Proceed: what the old automatic collection did, no random draws.
+        left = [r for r in state.get("rewards", []) if not r.get("skipped")]
+        return a("take_reward", reward_index=left[0]["index"]) if left else a("proceed")
     if d == "card_reward":
         cards = state.get("cards", [])
         if cards and rng.random() < 0.8:

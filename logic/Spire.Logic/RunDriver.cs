@@ -56,8 +56,7 @@ public partial class RunDriver
     private bool _eventOptionChosen;
     private int _lastEventOptionCount;
 
-    // Pending rewards for card selection (populated after combat, before proceeding)
-    private List<Reward>? _pendingRewards;
+    // The card reward screen open (a fight's, from the rewards decision)
     private CardReward? _pendingCardReward;
     private bool _rewardsProcessed;
     private int _goldBeforeCombat;
@@ -122,10 +121,8 @@ public partial class RunDriver
             Sched.Run(() => RunManager.Instance.EnterAct(0, doTransition: false));
             Log("Entered Act 0");
 
-            // Rewards an event offers (Neow's Lost Coffer...): each taken in
-            // turn as the game's test path does, then what is left skipped as
-            // the rewards screen's Proceed does (a skipped card reward used to
-            // throw "The RewardsSet is not complete").
+            // Rewards an event offers (Neow's Lost Coffer...): the rewards
+            // decision until the player proceeds (Rewards.cs).
             RewardsSet.testSelector = OfferRewardsHeadless;
 
             // Register card selector for cards that need player choice
@@ -142,15 +139,6 @@ public partial class RunDriver
         }
     }
 
-    private static async Task OfferRewardsHeadless(RewardsSet set)
-    {
-        var sync = RunManager.Instance.RewardsSetSynchronizer;
-        foreach (var reward in set.Rewards.ToList())
-            await sync.SelectLocalReward(reward);
-        if (!sync.IsRewardsSetCompleted(set))
-            sync.SkipLocalRewardsSet();
-    }
-
     /// <summary>
     /// A new run in the same process (the console's main menu after a run):
     /// the game's own clean-up (RunManager.CleanUp, as quitting to the menu
@@ -163,7 +151,7 @@ public partial class RunDriver
         _runState = null;
         _turnStarted = _combatEnded = _eventOptionChosen = false;
         _lastEventOptionCount = 0;
-        _pendingRewards = null;
+        ClearRewards();
         _pendingCardReward = null;
         _rewardsProcessed = false;
         _pendingBundles = null;
@@ -767,6 +755,8 @@ public partial class RunDriver
                     return DoSelectCardReward(player, args);
                 case "skip_card_reward":
                     return DoSkipCardReward(player);
+                case "take_reward":
+                    return DoTakeReward(player, args);
                 case "buy_card":
                     return DoBuyCard(player, args);
                 case "buy_relic":
@@ -815,7 +805,7 @@ public partial class RunDriver
         _pendingCardReward = null;
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
-        _pendingRewards = null;
+        ClearRewards();
         _lastKnownHp = player.Creature?.CurrentHp ?? 0;
 
         var col = Convert.ToInt32(args["col"]);
@@ -1006,8 +996,10 @@ public partial class RunDriver
         }
         catch (Exception ex) { Log($"Add card to deck: {ex.Message}"); }
 
+        if (_cardFromList) _rewardList?.Remove(_pendingCardReward);
+        _cardFromList = false;
         _pendingCardReward = null;
-        // Check if more rewards pending
+        // Back to the rewards screen
         return DetectDecisionPoint();
     }
 
@@ -1025,7 +1017,10 @@ public partial class RunDriver
         if (_pendingCardReward != null)
         {
             Log("Skipping card reward");
-            _pendingCardReward.OnSkipped();
+            // From the rewards screen: it stays there, marked; Proceed skips it.
+            if (_cardFromList) _rewardSkipped.Add(_pendingCardReward);
+            else _pendingCardReward.OnSkipped();
+            _cardFromList = false;
             _pendingCardReward = null;
         }
         return DetectDecisionPoint();
@@ -1368,6 +1363,9 @@ public partial class RunDriver
                 Sched.Pump();
                 Sched.Pump();
                 WaitForActionExecutor();
+                // Rewards it offered first (the rewards screen; Proceed goes to the map).
+                if (_rewardList != null)
+                    return DetectDecisionPoint();
                 ForceToMap();
                 return MapSelectState();
             }
@@ -1467,6 +1465,9 @@ public partial class RunDriver
     private Dictionary<string, object?> DoProceed(Player player)
     {
         Log("Proceeding");
+
+        var fromRewards = ProceedFromRewards(player);
+        if (fromRewards != null) return fromRewards;
 
         // Check if we need to move to next act (boss defeated)
         var room = _runState?.CurrentRoom;
@@ -1640,6 +1641,10 @@ public partial class RunDriver
         {
             return CardRewardState(player, _runState.CurrentRoom as CombatRoom);
         }
+
+        // The rewards screen (a fight's or an event's)
+        var rewardsState = PendingRewardsState();
+        if (rewardsState != null) return rewardsState;
 
         // Check if RunManager reports game over (victory)
         if (RunManager.Instance.IsGameOver)
@@ -2421,8 +2426,8 @@ public partial class RunDriver
         Log($"Post-combat: RoomType={combatRoom.RoomType}, IsPreFinished={combatRoom.IsPreFinished}");
         Sched.Pump();
 
-        // Generate rewards manually instead of using TestMode auto-accept
-        if (_pendingRewards == null && !_rewardsProcessed)
+        // The room's rewards (the rewards screen) until the player proceeds
+        if (_rewardList == null && !_rewardsProcessed)
         {
             _goldBeforeCombat = player.Gold;
             try
@@ -2431,40 +2436,20 @@ public partial class RunDriver
                 // build 23372702: GenerateWithoutOffering() now returns Task (void);
                 // generated rewards live on rewardsSet.Rewards afterwards.
                 Sched.Run(() => rewardsSet.GenerateWithoutOffering());
-                var rewards = rewardsSet.Rewards;
                 Sched.Pump();
-
-                // Auto-collect gold and potions, but present card choices to agent
-                var cardRewards = new List<CardReward>();
-                foreach (var reward in rewards)
-                {
-                    if (reward is GoldReward || reward is MegaCrit.Sts2.Core.Rewards.RelicReward
-                        || reward is MegaCrit.Sts2.Core.Rewards.PotionReward)
-                    {
-                        try { Sched.Run(() => reward.SelectUnsynchronized()); Sched.Pump(); }
-                        catch (Exception ex) { Log($"Auto-collect reward: {ex.Message}"); }
-                    }
-                    else if (reward is CardReward cr)
-                    {
-                        cardRewards.Add(cr);
-                    }
-                }
-
-                if (cardRewards.Count > 0)
-                {
-                    _pendingCardReward = cardRewards[0];
-                    _pendingRewards = rewards;
-                    return CardRewardState(player, combatRoom);
-                }
-
-                _pendingRewards = null;
+                ClearRewards();
+                _rewardList = rewardsSet.Rewards.ToList();
+                if (_rewardList.Count > 0)
+                    return RewardsState();
+                ClearRewards();
             }
             catch (Exception ex) { Log($"Generate rewards: {ex.Message}"); }
         }
+        if (_rewardList != null)
+            return RewardsState();
 
-        // No more pending rewards — proceed
+        // Rewards done — proceed
         _pendingCardReward = null;
-        _pendingRewards = null;
         _rewardsProcessed = true;
 
         // Boss → next act, OR final victory after the last act's boss (#81). Act index is
@@ -2989,6 +2974,7 @@ public partial class RunDriver
         }
         catch (Exception ex) { Log($"Treasure relic pick: {ex.Message}"); }
 
+        _autoRewards = true;
         try
         {
             Sched.Run(() => treasureRoom.DoNormalRewards());
@@ -3012,6 +2998,7 @@ public partial class RunDriver
             catch (Exception retryEx) { Log($"Treasure rewards retry failed: {retryEx.Message}"); }
         }
         catch (Exception ex) { Log($"Treasure rewards: {ex.Message}"); }
+        finally { _autoRewards = false; }
 
         ForceToMap();
         return MapSelectState();

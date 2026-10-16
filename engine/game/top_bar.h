@@ -8,6 +8,8 @@
 
 #include "../core/json.h"
 
+#include <string>
+
 namespace spire {
 
 class Node;
@@ -17,6 +19,12 @@ class SceneLibrary;
  * if top_bar.tscn is missing. in_map_room: the act-start map (the map
  * button is disabled there). */
 Node* make_top_bar(SceneLibrary* lib, const Json& decision, bool in_map_room);
+/* NPotion (scenes/potions/potion.tscn, 60x60, pivot at its centre) showing
+ * a potion's atlas image and outline; NULL without the scene. */
+Node* make_potion(SceneLibrary* lib, const std::string& potion_id);
+/* A relic's atlas icon and outline on relic.tscn's %Icon (or any
+ * TextureRect with an %Outline child). */
+void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id);
 
 } /* namespace spire */
 

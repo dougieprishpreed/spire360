@@ -2,10 +2,9 @@
  * card_reward decision in a row under the "Choose a Card" banner, the Skip
  * alternative, over the room the fight was in (dimmed by the overlays'
  * backstop). Left / right move the focus (wrapping), A takes the focused
- * card, B or Start skips.
- *
- * The rewards list before it (gold, potions, relics: NRewardsScreen) is not
- * shown: the logic collects those itself and offers only the card reward. */
+ * card, B or Start skips (CardRewardAlternative's hotkeys: ui_cancel and
+ * mega_pause_and_back). It opens from the rewards screen (RewardsScreen),
+ * which comes back after it. */
 #ifndef SPIRE_REWARD_SCREEN_H
 #define SPIRE_REWARD_SCREEN_H
 

@@ -153,6 +153,11 @@ internal static class SelfPlay
                                                         && !Equals(Get(o, "is_enabled"), false)).ToList();
                 return opts.Count > 0 ? ("choose_option", A(("option_index", Int(opts[rng.Next(opts.Count)], "index")))) : ("leave_room", null);
             }
+            case "rewards":
+            {
+                var left = List(s, "rewards").Where(r => !Equals(Get(r, "skipped"), true)).ToList();
+                return left.Count > 0 ? ("take_reward", A(("reward_index", Int(left[0], "index")))) : ("proceed", null);
+            }
             case "card_reward":
             {
                 var cards = List(s, "cards");

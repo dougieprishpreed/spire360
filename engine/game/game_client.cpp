@@ -11,6 +11,7 @@
 #include "map_screen.h"
 #include "potion_menu.h"
 #include "reward_screen.h"
+#include "rewards_screen.h"
 #include "top_bar.h"
 #include "logic_link.h"
 
@@ -100,6 +101,12 @@ std::vector<Choice> GameClient::choices(const Json& d) {
             out.push_back(choice(label, action("choose_option", format("\"option_index\":%d", os[i]["index"].i()))));
         }
         if (out.empty()) out.push_back(choice("Leave", action("leave_room")));
+    } else if (kind == "rewards") {
+        const Json& rs = d["rewards"];
+        for (size_t i = 0; i < rs.size(); ++i)
+            out.push_back(choice(rs[i]["label"].str() + (rs[i]["skipped"].b() ? " (skipped)" : ""),
+                                 action("take_reward", format("\"reward_index\":%d", rs[i]["index"].i()))));
+        if (d["can_skip"].b(true) || rs.size() == 0) out.push_back(choice("Proceed", action("proceed")));
     } else if (kind == "card_reward") {
         const Json& cs = d["cards"];
         for (size_t i = 0; i < cs.size(); ++i)
@@ -148,7 +155,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
       rng_(1), decisions_(0), errors_(0) {}
 
 GameClient::~GameClient() {
@@ -159,6 +166,7 @@ GameClient::~GameClient() {
     delete combat_;
     delete ported_;
     delete room_;
+    delete behind_;
 }
 
 void GameClient::start_run(const std::string& character, const std::string& seed) {
@@ -213,8 +221,34 @@ void GameClient::update(const PadState& pad) {
     else handle_input(pad);
 }
 
+/* What shows behind an overlay screen (rewards, card reward): the fight's
+ * room after it (aftermath: the player's state as it is now), else the
+ * event's room; NULL for none. */
+Node* GameClient::overlay_background(const Json& d, bool aftermath) {
+    std::string err;
+    const std::string& rt = d["context"]["room_type"].str();
+    bool in_fight = rt == "Monster" || rt == "Elite" || rt == "Boss";
+    if (in_fight && !last_combat_.is_null()) {
+        room_ = new CombatScreen(lib_);
+        if (aftermath) room_->set_aftermath(d["player"]);
+        return room_->build(last_combat_, &err);
+    }
+    if (rt == "Event" && !last_event_.is_null()) {
+        behind_ = new EventScreen(lib_);
+        Node* n = behind_->build(last_event_, &err);
+        if (!n) {
+            delete behind_;
+            behind_ = NULL;
+        }
+        return n;
+    }
+    return NULL;
+}
+
 void GameClient::show(const Json& d) {
     potions_.detach();
+    std::string prev_kind = decision_["decision"].str();
+    if (prev_kind == "rewards" && ported_) reward_focus_ = ((RewardsScreen*)ported_)->focused();
     decision_ = d;
     choices_ = choices(d);
     focus_ = 0;
@@ -230,19 +264,31 @@ void GameClient::show(const Json& d) {
     ported_ = NULL;
     delete room_;
     room_ = NULL;
+    delete behind_;
+    behind_ = NULL;
     target_ = -1;
     std::string err;
     const std::string& kind = d["decision"].str();
-    if (kind == "card_reward") {
-        /* Over the room the fight was in (an event's reward: no room). */
-        Node* room = NULL;
-        if (!last_combat_.is_null() && !d["from_event"].b()) {
-            room_ = new CombatScreen(lib_);
-            room_->set_aftermath(d["player"]);
-            room = room_->build(last_combat_, &err);
+    if (kind == "rewards") {
+        /* Over the room; a new rewards screen continues the last one (a
+         * reward taken) without its slide-in; back from the card reward
+         * screen it slides in again (AfterOverlayShown). */
+        RewardsScreen* s = new RewardsScreen(lib_);
+        s->set_background(overlay_background(d, true));
+        bool again = prev_kind == "rewards" || prev_kind == "card_reward";
+        s->set_continuing(prev_kind != "rewards", again ? reward_focus_ : 0);
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("rewards screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
         }
+    }
+    if (kind == "card_reward") {
+        /* Over the room (the fight's or the event's). */
         CardRewardScreen* s = new CardRewardScreen(lib_);
-        s->set_background(room);
+        s->set_background(overlay_background(d, true));
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {
@@ -252,16 +298,11 @@ void GameClient::show(const Json& d) {
         }
     }
     if (kind == "card_select") {
-        /* In a fight, over the fight. */
-        Node* room = NULL;
+        /* In a fight, over the fight (as it is). */
         const std::string& rt = d["context"]["room_type"].str();
         bool in_fight = rt == "Monster" || rt == "Elite" || rt == "Boss";
-        if (in_fight && !last_combat_.is_null()) {
-            room_ = new CombatScreen(lib_);
-            room = room_->build(last_combat_, &err);
-        }
         CardSelectScreen* s = new CardSelectScreen(lib_);
-        s->set_background(room);
+        s->set_background(in_fight ? overlay_background(d, false) : NULL);
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {
@@ -271,6 +312,7 @@ void GameClient::show(const Json& d) {
         }
     }
     if (kind == "event_choice") {
+        last_event_ = d;
         ported_ = new EventScreen(lib_);
         screen_ = ported_->build(d, &err);
         if (!screen_) {
@@ -323,9 +365,12 @@ void GameClient::clear_screen() {
     ported_ = NULL;
     delete room_;
     room_ = NULL;
+    delete behind_;
+    behind_ = NULL;
     decision_ = Json();
     choices_.clear();
     last_combat_ = Json();
+    last_event_ = Json();
 }
 
 void GameClient::pick(size_t i) {

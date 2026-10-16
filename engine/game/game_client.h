@@ -63,6 +63,7 @@ public:
 private:
     void send(const std::string& command);
     void show(const Json& d);
+    Node* overlay_background(const Json& d, bool aftermath);
     void pick(size_t i);
     unsigned next_rand();
     void choose_automatically();
@@ -79,7 +80,10 @@ private:
     CombatScreen* combat_; /* the combat screen's state while it is shown */
     RunScreen* ported_;    /* another ported screen while it is shown */
     CombatScreen* room_;   /* the room behind an overlay (after a fight) */
+    RunScreen* behind_;    /* another screen behind an overlay (an event's) */
     Json last_combat_;     /* the last combat_play decision (its room) */
+    Json last_event_;      /* the last event_choice decision (its room) */
+    int reward_focus_;     /* the rewards screen's focus, kept while it is up */
     int hand_focus_;       /* kept across decisions, as the game's _lastFocusedHolderIdx */
     int target_;           /* combat targeting: enemy index, -1 when not targeting */
     int last_target_;      /* the enemy last aimed at (combat_id; NCombatRoom.LastTargetedCreature) */

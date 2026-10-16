@@ -301,7 +301,7 @@ DEFAULT_BUNDLE = [
     "scenes/ui/ancient_name_banner.tscn", "images/atlases/relic_atlas.sprites/*.tres",
     "images/atlases/relic_outline_atlas.sprites/*.tres", "images/atlases/potion_atlas.sprites/*.tres",
     "images/ui/run_history/*.png", "images/ui/rest_site/*.png", "images/ui/game_over_screen/*.png",
-    "images/events/neow.png", "images/events/this_or_that.png",
+    "images/events/neow.png", "images/events/this_or_that.png", "images/ui/reward_screen/*.png",
 ]
 
 

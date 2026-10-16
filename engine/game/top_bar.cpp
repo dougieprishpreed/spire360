@@ -55,6 +55,33 @@ static void top_button(SceneLibrary* lib, Node* button, const char* glyph, bool 
     }
 }
 
+Node* make_potion(SceneLibrary* lib, const std::string& potion_id) {
+    Node* p = instance(lib, "scenes/potions/potion.tscn");
+    if (!p || !p->is_control()) {
+        delete p;
+        return NULL;
+    }
+    Control* pc = (Control*)p;
+    /* At the parent's top-left (the scene centres it in the viewport). */
+    for (int k = 0; k < 4; ++k) pc->anchor[k] = 0;
+    place(pc, 0, 0, 60, 60);
+    pc->pivot_offset = Vec2(30, 30);
+    std::string id = lower(potion_id);
+    Node* image = p->find_unique("Image");
+    set_texture(lib, image, "images/atlases/potion_atlas.sprites/" + id + ".tres");
+    if (image) set_texture(lib, image->find_unique("Outline"), "images/atlases/potion_outline_atlas.sprites/" + id + ".tres");
+    hide(p->find_unique("Juice"));
+    hide(p->find_unique("Overlay"));
+    hide(p->find_unique("Bottle"));
+    return p;
+}
+
+void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id) {
+    std::string id = lower(relic_id);
+    set_texture(lib, icon, "images/atlases/relic_atlas.sprites/" + id + ".tres");
+    if (icon) set_texture(lib, icon->find_unique("Outline"), "images/atlases/relic_outline_atlas.sprites/" + id + ".tres");
+}
+
 /* NPotionContainer: one holder per slot (player.max_potions), a potion
  * (potion.tscn, 0.9 scale, centred) in the slots that have one. */
 static void make_potions(SceneLibrary* lib, Node* bar, const Json& player) {
@@ -81,25 +108,15 @@ static void make_potions(SceneLibrary* lib, Node* bar, const Json& player) {
         }
         hide(h->find_unique("SelectionReticle"));
         if (pot) {
-            Node* p = instance(lib, "scenes/potions/potion.tscn");
-            if (p && p->is_control()) {
+            Node* p = make_potion(lib, (*pot)["id"].str());
+            if (p) {
                 Control* pc = (Control*)p;
                 /* Position (-30, -30) from the holder's centre. */
                 pc->anchor[SIDE_LEFT] = pc->anchor[SIDE_RIGHT] = 0.5f;
                 pc->anchor[SIDE_TOP] = pc->anchor[SIDE_BOTTOM] = 0.5f;
                 place(pc, -30, -30, 60, 60);
-                pc->pivot_offset = Vec2(30, 30);
                 pc->scale = Vec2(0.9f, 0.9f);
-                std::string id = lower((*pot)["id"].str());
-                Node* image = p->find_unique("Image");
-                set_texture(lib, image, "images/atlases/potion_atlas.sprites/" + id + ".tres");
-                if (image) set_texture(lib, image->find_unique("Outline"), "images/atlases/potion_outline_atlas.sprites/" + id + ".tres");
-                hide(p->find_unique("Juice"));
-                hide(p->find_unique("Overlay"));
-                hide(p->find_unique("Bottle"));
                 h->add_child(p);
-            } else {
-                delete p;
             }
         }
         holders->add_child(h);
@@ -122,10 +139,7 @@ static Node* make_relics(SceneLibrary* lib, const Json& player) {
             break;
         }
         ((Control*)r)->custom_minimum_size = Vec2(68, 68);
-        std::string id = lower(relics[i]["id"].str());
-        Node* icon = r->find_unique("Icon");
-        set_texture(lib, icon, "images/atlases/relic_atlas.sprites/" + id + ".tres");
-        if (icon) set_texture(lib, icon->find_unique("Outline"), "images/atlases/relic_outline_atlas.sprites/" + id + ".tres");
+        set_relic_icon(lib, r->find_unique("Icon"), relics[i]["id"].str());
         row->add_child(r);
     }
     return row;
