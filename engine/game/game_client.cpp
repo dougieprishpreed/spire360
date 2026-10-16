@@ -404,9 +404,10 @@ Node* GameClient::plain_screen(const Json& d) {
     if (d["event_name"].is_string()) title += ": " + d["event_name"].str();
     const Json& ctx = d["context"];
     if (ctx.is_object()) title += format("   (act %d, floor %d)", ctx["act"].i(), ctx["floor"].i());
-    root->add_child(text(title, 120, 80, 40));
+    /* Under the top bar (80 px) and the relic row (68 px). */
+    root->add_child(text(title, 120, 170, 40));
     for (size_t i = 0; i < choices_.size(); ++i) {
-        Label* l = text(choices_[i].label, 160, 180 + 56.0f * (float)i, 32);
+        Label* l = text(choices_[i].label, 160, 260 + 56.0f * (float)i, 32);
         l->name = format("Choice%d", (int)i);
         root->add_child(l);
     }

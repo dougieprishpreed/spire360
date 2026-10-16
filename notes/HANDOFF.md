@@ -130,15 +130,22 @@ Any other header the translated C includes needs the same treatment.
 
 ## Waiting on the user
 
-1. (2026-10-15) Builds take the user over an hour each time (logic_lib
-   was recompiling: zip extracts re-date w2c2_base.h; fixed in build.cmd,
-   unconfirmed). The user asked for much more progress per build. Their
-   last run: the arrow, reticles and gamma ramp work; the health bars were
-   invisible because every texture of 16 texels or less was uploaded into
-   the packed mip tail's place (XGTILE_NONPACKED fix, 0da3488). Next build
-   carries a logic change too (card view fields on reward / select /
-   bundle / shop cards, description_by_target, description_multi,
-   max_potions, ascension; JIT: 15 seeded runs unchanged).
+1. (2026-10-16) A build with: the small-texture fix (health bars, solid
+   colours), intents, powers, the game's two-press card play with per-target
+   card text, the top bar and relic row on every run screen, the card
+   reward screen, the gamma ramp, split frame timings. The logic changed
+   (card view fields on reward / select / bundle / shop cards,
+   description_by_target / _multi, max_potions, ascension, the run
+   context's point_type, total_floor, ancient, second_boss; JIT: 15 seeded
+   runs unchanged), so build_logic and a full logic_lib compile. Asked for
+   xdk\build_logs\logic_lib.log (why builds take over an hour) and a
+   bundle of the scenes / atlases missing here (map, events, rewards rows,
+   potion holder, run.tscn, intent / controller / relic / potion atlases,
+   run_history icons).
+2. Usage: the user's quota drained when five spec agents and a native
+   build ran at once. One background job at a time, only when it saves
+   real work. Specs written so far: scratchpad spec_top_bar.md,
+   spec_rewards.md (the map / events / card-select specs were cut off).
 
 ## Next (agent)
 
