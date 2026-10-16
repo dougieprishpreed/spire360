@@ -6,7 +6,7 @@
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false) {
+    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false) {
     for (int i = 0; i < 4; ++i) ripple_[i] = 0;
 }
 
@@ -121,6 +121,50 @@ static void sample(const Image& img, float u, float v, int flags, float out[4]) 
     }
 }
 
+/* A fire texture's texel (NULL: white), repeating or clamped. */
+static void fire_texel(const Texture* t, float u, float v, bool repeat, float out[4]) {
+    if (!t) {
+        out[0] = out[1] = out[2] = out[3] = 1.0f;
+        return;
+    }
+    sample(((const SwTexture*)t)->img, u, v, repeat ? DRAW_REPEAT : 0, out);
+}
+
+static float smoothstepf(float e0, float e1, float x) {
+    float t = e1 != e0 ? (x - e0) / (e1 - e0) : (x >= e1 ? 1.0f : 0.0f);
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/* vfx_stepped_shader_fire_*'s fragment() at uv: straight colour, alpha. */
+static void fire_fragment(const FireParams& f, const Image* base, float u, float v, int flags, float out[4]) {
+    float t[4];
+    fire_texel(f.noise2, u * f.noise2_uv[0] + f.noise2_uv[2], v * f.noise2_uv[1] + f.noise2_uv[3], true, t);
+    float n2 = f.strength[1] * t[2];
+    fire_texel(f.noise1, u * f.noise1_uv[0] + f.noise1_uv[2], v * f.noise1_uv[1] + f.noise1_uv[3], true, t);
+    float n1 = f.strength[0] * t[2];
+    fire_texel(f.noise_mask, u * f.mask_uv[0] + f.mask_uv[2], (v - 0.04f) * f.mask_uv[1] + 0.04f + f.mask_uv[3], false, t);
+    float m = f.strength[2] > 0.5f ? 1.0f - t[2] : t[2];
+    float a = n1 * n2 + m;
+    float d[4], d1[4], dm[4];
+    fire_texel(f.dist2, u * f.dist2_uv[0] + f.dist2_uv[2], v * f.dist2_uv[1] + f.dist2_uv[3], true, d);
+    fire_texel(f.dist1, u * f.dist1_uv[0] + f.dist1_uv[2], v * f.dist1_uv[1] + f.dist1_uv[3], true, d1);
+    fire_texel(f.dist_mask, u * f.dist_mask_uv[0] + f.dist_mask_uv[2], v * f.dist_mask_uv[1] + f.dist_mask_uv[3], false, dm);
+    float du = (d[0] * f.dist_strength[1] + d1[0] * f.dist_strength[0]) * dm[0];
+    float dv = (d[1] * f.dist_strength[1] + d1[1] * f.dist_strength[0]) * dm[1];
+    float b[4] = { 1, 1, 1, 1 };
+    if (base) sample(*base, u + du, v + dv, flags, b);
+    float val = a * b[2];
+    if (f.strength[3] > 0.5f) {
+        float s = smoothstepf(f.steps[0], f.steps[1], 1.0f - val);
+        for (int k = 0; k < 3; ++k) out[k] = f.outer[k] * (s + f.inner[k]);
+    } else {
+        float s = smoothstepf(f.steps[0], f.steps[1], val);
+        for (int k = 0; k < 3; ++k) out[k] = f.outer[k] + s * f.inner[k];
+    }
+    out[3] = smoothstepf(f.steps[2], f.steps[3], val);
+}
+
 void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, const Vertex& C, BlendMode blend, int flags) {
     float area = (B.pos.x - A.pos.x) * (C.pos.y - A.pos.y) - (C.pos.x - A.pos.x) * (B.pos.y - A.pos.y);
     if (fabsf(area) < 1e-6f) return;
@@ -196,6 +240,20 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 }
             } else {
                 s[0] = s[1] = s[2] = s[3] = 1.0f;
+            }
+            if (fire_on_) {
+                /* The stepped fire: its colour (straight) and alpha, the
+                 * vertex colour's alpha only. */
+                float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                float f[4];
+                fire_fragment(fire_, tex ? &tex->img : NULL, u, v, flags, f);
+                float fa = f[3] < 0 ? 0 : (f[3] > 1 ? 1 : f[3]);
+                s[0] = f[0] * fa;
+                s[1] = f[1] * fa;
+                s[2] = f[2] * fa;
+                s[3] = fa;
+                col[0] = col[1] = col[2] = 1.0f;
             }
             if (gm_ && tex) {
                 /* The gradient map: the texel's (straight) red through the

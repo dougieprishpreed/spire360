@@ -30,6 +30,25 @@ struct Vertex {
     Vertex(const Vec2& p, const Vec2& t, const Color& c) : pos(p), uv(t), color(c) {}
 };
 
+/* The game's stepped fire shaders (shaders/vfx/vfx_stepped_shader_fire_*):
+ * two scrolling noise textures times a mask, the texture read through two
+ * scrolling distortions, thresholded into an inner and an outer colour.
+ * Textures NULL: white (Godot's default for an unset sampler). Each *_uv is
+ * scale.xy, offset.xy (the panning's offset already at this time). */
+struct FireParams {
+    Texture* noise1;
+    Texture* noise2;
+    Texture* noise_mask;  /* clamped */
+    Texture* dist1;
+    Texture* dist2;
+    Texture* dist_mask;   /* clamped */
+    float noise1_uv[4], noise2_uv[4], mask_uv[4], dist1_uv[4], dist2_uv[4], dist_mask_uv[4];
+    float strength[4];    /* noise1, noise2, invert mask (0/1), dark variant (0/1) */
+    float dist_strength[4]; /* dist1, dist2 */
+    float steps[4];       /* inner step x, y; outer step x, y */
+    float inner[4], outer[4];
+};
+
 class Renderer {
 public:
     virtual ~Renderer() {}
@@ -64,6 +83,9 @@ public:
      * alpha); the alpha is the texel's red (alpha_from_red) or its alpha.
      * The vertex colour multiplies the result. NULL: off. */
     virtual void set_gradient_map(Texture* lut, bool alpha_from_red) = 0;
+    /* The stepped fire (FireParams); NULL: off. The draw's texture is the
+     * shader's TEXTURE; the vertex colour's alpha fades it. */
+    virtual void set_fire(const FireParams* p) = 0;
     virtual void set_ripple(const float* p) = 0;
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;

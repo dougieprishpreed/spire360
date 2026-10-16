@@ -90,6 +90,35 @@ static Texture* gradient_lut(Canvas& c, Resource* gradient) {
     return t;
 }
 
+/* A sampler2D parameter as a renderer texture (NULL: unset, white). */
+static Texture* param_texture(Canvas& c, const MaterialRes* m, const char* name) {
+    Resource* r = shader_param_resource(m, name);
+    if (!r || !r->is_texture()) return NULL;
+    ImageTextureRes* img = NULL;
+    if (r->kind == Resource::RES_IMAGE_TEXTURE) {
+        img = (ImageTextureRes*)r;
+    } else {
+        Texture2DRes* t = (Texture2DRes*)r;
+        Rect2 dst, src;
+        t->get_rect_region(Rect2(Vec2(), t->size()), Rect2(Vec2(), t->size()), dst, src, &img);
+    }
+    return img ? c.gpu_texture(img) : NULL;
+}
+
+/* A texture's uv: scale, and the offset its panning has moved it by now
+ * (kept within 0..1: the textures repeat). */
+static void scroll_uv(const MaterialRes* m, const char* scale, const char* pan, const char* offset, Vec2 global,
+                      float out[4]) {
+    Vec2 s = shader_param_vec2(m, scale, Vec2(1, 1));
+    Vec2 p = pan ? shader_param_vec2(m, pan, Vec2(1, 1)) : Vec2(0, 0);
+    Vec2 o = offset ? shader_param_vec2(m, offset, Vec2(0, 0)) : Vec2(0, 0);
+    float t = (float)g_shader_time;
+    out[0] = s.x;
+    out[1] = s.y;
+    out[2] = o.x + global.x + (pan ? fmodf(p.x * t, 1.0f) : 0.0f);
+    out[3] = o.y + global.y + (pan ? fmodf(p.y * t, 1.0f) : 0.0f);
+}
+
 typedef float M3[3][3];
 
 static void mul(const M3 a, const M3 b, M3 out) {
@@ -221,6 +250,52 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.renderer()->set_gradient_map(gradient_lut(c, shader_param_resource(m, "lut")), false);
         return true;
     }
+    if (m->shader == "shaders/vfx/vfx_stepped_shader_fire_add.tres" ||
+        m->shader == "shaders/vfx/vfx_stepped_shader_fire_flat.tres" ||
+        m->shader == "shaders/vfx/vfx_stepped_shader_fire_dark.tres") {
+        /* The stepped fire (FireParams; add: blend_add, see shader_blend). The
+         * dark variant moves every panning by GlobalOffset. */
+        bool dark = m->shader == "shaders/vfx/vfx_stepped_shader_fire_dark.tres";
+        Vec2 g = dark ? shader_param_vec2(m, "GlobalOffset", Vec2(0, 0)) : Vec2(0, 0);
+        FireParams f;
+        f.noise1 = param_texture(c, m, "Noise1Texture");
+        f.noise2 = param_texture(c, m, "Noise2Texture");
+        f.noise_mask = param_texture(c, m, "NoiseMask");
+        f.dist1 = param_texture(c, m, "Distortion1Texture");
+        f.dist2 = param_texture(c, m, "Distortion2Texture");
+        f.dist_mask = param_texture(c, m, "DistortionMask");
+        scroll_uv(m, "Noise1Scaling", "Noise1Panning", NULL, g, f.noise1_uv);
+        scroll_uv(m, "Noise2Scaling", "Noise2Panning", NULL, g, f.noise2_uv);
+        scroll_uv(m, "NoiseMaskScale", NULL, "NoiseMaskOffset", Vec2(0, 0), f.mask_uv);
+        scroll_uv(m, "Distortion1Scale", "Distortion1Panning", NULL, g, f.dist1_uv);
+        scroll_uv(m, "Distortion2Scale", "Distortion2Panning", NULL, g, f.dist2_uv);
+        scroll_uv(m, "DistortionMaskScale", NULL, "DistortionMaskOffset", Vec2(0, 0), f.dist_mask_uv);
+        f.strength[0] = param(m, "Noise1Strength", 1.0f);
+        f.strength[1] = param(m, "Noise2Strength", 1.0f);
+        f.strength[2] = param(m, "InvertNoiseMask", 1.0f) != 0.0f ? 1.0f : 0.0f;
+        f.strength[3] = dark ? 1.0f : 0.0f;
+        f.dist_strength[0] = param(m, "Distortion1Strength", 0.02f);
+        f.dist_strength[1] = param(m, "Distortion2Strength", 0.02f);
+        f.dist_strength[2] = f.dist_strength[3] = 0;
+        Vec2 inner_step = shader_param_vec2(m, "InnerColorStep", Vec2(0.3f, 0.4f));
+        Vec2 outer_step = shader_param_vec2(m, "OuterStep", Vec2(0.1f, 0.2f));
+        f.steps[0] = inner_step.x;
+        f.steps[1] = inner_step.y;
+        f.steps[2] = outer_step.x;
+        f.steps[3] = outer_step.y;
+        Color in = param_color(m, "InnerColor", Color(1, 0.85f, 0, 1));
+        Color out = param_color(m, "OuterColor", Color(1, 0, 0, 1));
+        f.inner[0] = in.r;
+        f.inner[1] = in.g;
+        f.inner[2] = in.b;
+        f.inner[3] = in.a;
+        f.outer[0] = out.r;
+        f.outer[1] = out.g;
+        f.outer[2] = out.b;
+        f.outer[3] = out.a;
+        c.renderer()->set_fire(&f);
+        return true;
+    }
     if (m->shader == "shaders/card_ripple.gdshader") {
         /* render_mode blend_add: shader_blend. */
         float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),
@@ -234,6 +309,10 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
 /* Blend modes from a shader's render_mode (the tree applies the item's
  * blend after shader_begin). */
 bool shader_blend(const MaterialRes* m, BlendMode* out) {
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/vfx_stepped_shader_fire_add.tres") {
+        *out = BLEND_ADD;
+        return true;
+    }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/card_ripple.gdshader") {
         *out = BLEND_ADD;
         return true;
@@ -246,6 +325,7 @@ void shader_end(Canvas& c, const MaterialRes* m) {
         c.set_color_matrix(NULL);
         c.set_ripple(NULL);
         c.renderer()->set_gradient_map(NULL, false);
+        c.renderer()->set_fire(NULL);
     }
 }
 

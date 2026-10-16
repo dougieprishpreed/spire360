@@ -34,6 +34,12 @@ VsOut vs_main(VsIn i) {
 sampler2D g_tex : register(s0);
 sampler2D g_group : register(s1);     // the canvas group layer (premultiplied)
 sampler2D g_lut : register(s2);       // gradient map (256x1, straight alpha)
+sampler2D g_fn1 : register(s3);       // stepped fire: noise 1, noise 2, noise mask,
+sampler2D g_fn2 : register(s4);       // distortion 1, distortion 2, distortion mask
+sampler2D g_fmask : register(s5);
+sampler2D g_fd1 : register(s6);
+sampler2D g_fd2 : register(s7);
+sampler2D g_fdmask : register(s8);
 float4 g_mode : register(c0);         // x: colour matrix on, y: MSDF on, z: group mask, w: ripple
 float4 g_msdf : register(c1);         // x: px_range, y: outline, zw: texture size
 float4 g_cm0 : register(c2);          // colour matrix rows: rgb' = M * rgb + offset * a
@@ -41,12 +47,44 @@ float4 g_cm1 : register(c3);
 float4 g_cm2 : register(c4);
 float4 g_ripple : register(c5);       // phase, modulo, ease, width (card_ripple.gdshader)
 float4 g_gm : register(c6);           // x: gradient map on, y: alpha from the red
+float4 g_fire : register(c7);         // x: stepped fire on
+float4 g_fn1p : register(c8);         // each texture's scale.xy, offset.zw
+float4 g_fn2p : register(c9);
+float4 g_fmaskp : register(c10);
+float4 g_fd1p : register(c11);
+float4 g_fd2p : register(c12);
+float4 g_fdmaskp : register(c13);
+float4 g_fstr : register(c14);        // noise 1, noise 2 strength, invert mask, dark variant
+float4 g_fdstr : register(c15);       // distortion 1, 2 strength
+float4 g_fsteps : register(c16);      // inner step xy, outer step zw
+float4 g_finner : register(c17);
+float4 g_fouter : register(c18);
 
 float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
 
 float4 ps_main(VsOut i) : COLOR {
+    if (g_fire.x > 0.5) {
+        // The game's stepped fire shaders (shaders/vfx/vfx_stepped_shader_fire_*).
+        float2 uv = i.uv;
+        float n2 = g_fstr.y * tex2D(g_fn2, uv * g_fn2p.xy + g_fn2p.zw).b;
+        float n1 = g_fstr.x * tex2D(g_fn1, uv * g_fn1p.xy + g_fn1p.zw).b;
+        float m = tex2D(g_fmask, (uv - float2(0.0, 0.04)) * g_fmaskp.xy + float2(0.0, 0.04) + g_fmaskp.zw).b;
+        m = lerp(m, 1.0 - m, g_fstr.z);
+        float a = n1 * n2 + m;
+        float2 d = tex2D(g_fd2, uv * g_fd2p.xy + g_fd2p.zw).xy * g_fdstr.y +
+                   tex2D(g_fd1, uv * g_fd1p.xy + g_fd1p.zw).xy * g_fdstr.x;
+        float2 dm = tex2D(g_fdmask, uv * g_fdmaskp.xy + g_fdmaskp.zw).xy;
+        float v = a * tex2D(g_tex, uv + d * dm).b;
+        float3 rgb;
+        if (g_fstr.w > 0.5)
+            rgb = g_fouter.rgb * (smoothstep(g_fsteps.x, g_fsteps.y, 1.0 - v) + g_finner.rgb);
+        else
+            rgb = g_fouter.rgb + smoothstep(g_fsteps.x, g_fsteps.y, v) * g_finner.rgb;
+        float fa = saturate(smoothstep(g_fsteps.z, g_fsteps.w, v)) * i.color.a;
+        return float4(rgb * fa, fa);
+    }
     float4 t = tex2D(g_tex, i.uv);
     if (g_gm.x > 0.5) {
         // The game's grayscale / flipbook VFX shaders: the red through the

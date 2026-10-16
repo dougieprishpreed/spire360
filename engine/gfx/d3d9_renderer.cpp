@@ -24,7 +24,7 @@ namespace spire {
 
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
-      cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
+      cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
       group_failed_(false), group_debug_(0), group_log_(0), width_(0), height_(0), draws_(0) {
     msdf_[0] = 16;
     msdf_[1] = 0;
@@ -250,6 +250,7 @@ void D3D9Renderer::end() {
         set_color_matrix(NULL);
         set_ripple(NULL);
         set_gradient_map(NULL, false);
+        set_fire(NULL);
         group_view_.tex = group_tex_;
         group_view_.width = group_view_.orig_width = width_;
         group_view_.height = group_view_.orig_height = height_;
@@ -418,6 +419,15 @@ void D3D9Renderer::set_gradient_map(Texture* lut, bool alpha_from_red) {
     dirty_ = true;
 }
 
+void D3D9Renderer::set_fire(const FireParams* p) {
+    if (!p && !fire_on_) return;
+    if (p && fire_on_ && memcmp(p, &fire_, sizeof(fire_)) == 0) return;
+    flush();
+    fire_on_ = p != NULL;
+    if (p) fire_ = *p;
+    dirty_ = true;
+}
+
 void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) {
     D3D9Texture* t = (D3D9Texture*)tex;
     if (t != tex_ || blend != blend_ || flags != flags_) {
@@ -464,6 +474,24 @@ void D3D9Renderer::apply_state() {
         /* never sample the target being drawn */
         dev_->SetTexture(1, NULL);
     }
+    /* The stepped fire's textures (s3..s8): noises and distortions
+     * repeat, the masks clamp; unset ones are white. */
+    if (fire_on_) {
+        Texture* ft[6] = { fire_.noise1, fire_.noise2, fire_.noise_mask, fire_.dist1, fire_.dist2, fire_.dist_mask };
+        for (int k = 0; k < 6; ++k) {
+            D3D9Texture* t = (D3D9Texture*)ft[k];
+            DWORD stage = (DWORD)(3 + k);
+            dev_->SetTexture(stage, t && t->tex ? t->tex : white_);
+            DWORD a = (k == 2 || k == 5) ? D3DTADDRESS_CLAMP : D3DTADDRESS_WRAP;
+            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSU, a);
+            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSV, a);
+            dev_->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        }
+    } else {
+        for (DWORD stage = 3; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
+    }
     /* The gradient map's lut (s2): 256x1, linear, clamped. */
     dev_->SetTexture(2, gm_ && gm_->tex ? gm_->tex : NULL);
     if (gm_ && gm_->tex) {
@@ -502,7 +530,7 @@ void D3D9Renderer::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
-    float c[28] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
+    float c[76] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
                     ripple_on_ ? 1.0f : 0.0f,
                     msdf_[0], msdf_[1], tw, th,
                     cm_[0], cm_[1], cm_[2], cm_[3],
@@ -510,7 +538,15 @@ void D3D9Renderer::apply_state() {
                     cm_[8], cm_[9], cm_[10], cm_[11],
                     ripple_[0], ripple_[1], ripple_[2], ripple_[3],
                     gm_ && gm_->tex ? 1.0f : 0.0f, gm_red_ ? 1.0f : 0.0f, 0.0f, 0.0f };
-    dev_->SetPixelShaderConstantF(0, c, 7);
+    /* c7..c18: the stepped fire. */
+    c[28] = fire_on_ ? 1.0f : 0.0f;
+    c[29] = c[30] = c[31] = 0.0f;
+    const float* fv[11] = { fire_.noise1_uv, fire_.noise2_uv, fire_.mask_uv, fire_.dist1_uv, fire_.dist2_uv,
+                            fire_.dist_mask_uv, fire_.strength, fire_.dist_strength, fire_.steps, fire_.inner,
+                            fire_.outer };
+    for (int k = 0; k < 11; ++k)
+        for (int j = 0; j < 4; ++j) c[32 + k * 4 + j] = fire_on_ ? fv[k][j] : 0.0f;
+    dev_->SetPixelShaderConstantF(0, c, 19);
     dirty_ = false;
 }
 

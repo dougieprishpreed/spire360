@@ -37,6 +37,10 @@ public:
         gm_ = (SwTexture*)lut;
         gm_red_ = alpha_from_red;
     }
+    virtual void set_fire(const FireParams* p) {
+        fire_on_ = p != NULL;
+        if (p) fire_ = *p;
+    }
     virtual void set_msdf(float px_range, float outline) {
         msdf_range_ = px_range;
         msdf_outline_ = outline;
@@ -64,6 +68,8 @@ private:
     float ripple_[4];
     SwTexture* gm_; /* gradient map lut (straight alpha), NULL: off */
     bool gm_red_;
+    bool fire_on_;
+    FireParams fire_;
 };
 
 } /* namespace spire */
