@@ -176,29 +176,12 @@
       "optional": true
     },
     {
-      "id": "loc.has_entry",
-      "action": "return_const",
-      "value": true,
-      "type": "MegaCrit.Sts2.Core.Localization.LocTable",
-      "method": "HasEntry",
-      "optional": true
-    },
-    {
       "id": "loc.is_local_key",
       "action": "return_const",
       "value": true,
       "type": "MegaCrit.Sts2.Core.Localization.LocTable",
       "method": "IsLocalKey",
       "optional": true
-    },
-    {
-      "id": "loc.exists",
-      "action": "return_const",
-      "value": true,
-      "type": "MegaCrit.Sts2.Core.Localization.LocString",
-      "method": "Exists",
-      "optional": true,
-      "all_overloads": true
     },
     {
       "id": "loc.get_loc_strings_with_prefix",

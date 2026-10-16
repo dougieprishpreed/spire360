@@ -2495,6 +2495,10 @@ public partial class RunDriver
         }
     }
 
+    // Event rooms whose ancient has had its say (its dialogue goes with the
+    // first page only).
+    private readonly HashSet<EventRoom> _ancientDialogueShown = new HashSet<EventRoom>();
+
     private Dictionary<string, object?> EventChoiceState(EventRoom eventRoom)
     {
         var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
@@ -2633,6 +2637,23 @@ public partial class RunDriver
                     catch { }
                 }
 
+                // The button's text as NEventOptionButton._Ready writes it:
+                // the event's vars in, title and description formatted.
+                string? textBbcode = null;
+                try
+                {
+                    if (opt.Description != null) localEvent.DynamicVars.AddTo(opt.Description);
+                    if (opt.Title != null) localEvent.DynamicVars.AddTo(opt.Title);
+                    var ft = opt.Title?.GetFormattedText();
+                    var fd = opt.Description?.GetFormattedText() ?? "";
+                    var tag = opt.IsLocked ? "red" : "gold";
+                    textBbcode = string.IsNullOrEmpty(ft) ? fd : $"[{tag}][b]{ft}[/b][/{tag}]\n{fd}";
+                }
+                catch (Exception ex) { Log($"event option text: {ex.Message}"); }
+                bool willKill = false;
+                try { willKill = localEvent.Owner != null && (opt.WillKillPlayer?.Invoke(localEvent.Owner) ?? false); }
+                catch { }
+
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -2641,6 +2662,9 @@ public partial class RunDriver
                     ["text_key"] = opt.TextKey,
                     ["is_locked"] = opt.IsLocked,
                     ["vars"] = optVars?.Count > 0 ? optVars : null,
+                    ["text_bbcode"] = textBbcode,
+                    ["relic"] = opt.Relic?.Id.Entry.ToLowerInvariant(),
+                    ["will_kill"] = willKill,
                 };
             }).ToList();
 
@@ -2659,6 +2683,68 @@ public partial class RunDriver
                 eventDesc = d;
         }
 
+        // What NEventRoom shows: the layout, the portrait's id, the title and
+        // the description formatted as SetDescription does; for an ancient,
+        // its banner and dialogue.
+        static float[] Rgba(Godot.Color col) => new[] { col.R, col.G, col.B, col.A };
+        string? titleText = null, descBbcode = null;
+        try
+        {
+            titleText = localEvent.Title.GetFormattedText();
+            var desc = localEvent.Description;
+            if (desc != null && desc.Exists())
+            {
+                localEvent.Owner?.Character.AddDetailsTo(desc);
+                desc.Add("IsMultiplayer", false);
+                localEvent.DynamicVars.AddTo(desc);
+                descBbcode = desc.GetFormattedText();
+            }
+        }
+        catch (Exception ex) { Log($"event text: {ex.Message}"); }
+        Dictionary<string, object?>? ancient = null;
+        if (localEvent is AncientEventModel ancientModel)
+        {
+            ancient = new Dictionary<string, object?>();
+            try
+            {
+                ancient["title"] = ancientModel.Title.GetFormattedText();
+                ancient["epithet"] = ancientModel.Epithet.GetFormattedText();
+                ancient["dialogue_color"] = Rgba(ancientModel.DialogueColor);
+                var character = ancientModel.Owner?.Character ?? _runState!.Players[0].Character;
+                ancient["character_dialogue_color"] = Rgba(character.DialogueColor);
+                // A first visit's dialogue (the game picks one of the valid ones
+                // with the chaotic rng and the player's visit counts); the
+                // ancient talks only while its first page is open.
+                if (!_ancientDialogueShown.Contains(eventRoom))
+                {
+                    var lines = new List<Dictionary<string, object?>>();
+                    var dialogue = ancientModel.DialogueSet.GetValidDialogues(character.Id, 0, 0,
+                        !ancientModel.AnyCharacterDialogueBlacklist.Contains(character)).FirstOrDefault();
+                    if (dialogue != null)
+                        foreach (var line in dialogue.Lines)
+                        {
+                            string? text = null;
+                            if (line.LineText != null)
+                            {
+                                line.LineText.Add("Act1Name", _runState!.Acts[0].Title);
+                                character.AddDetailsTo(line.LineText);
+                                ancientModel.DynamicVars.AddTo(line.LineText);
+                                text = line.LineText.GetFormattedText();
+                            }
+                            lines.Add(new Dictionary<string, object?>
+                            {
+                                ["speaker"] = line.Speaker.ToString(),
+                                ["text"] = text,
+                                ["next"] = line.NextButtonText?.GetFormattedText(),
+                            });
+                        }
+                    ancient["dialogue"] = lines;
+                    _ancientDialogueShown.Add(eventRoom);
+                }
+            }
+            catch (Exception ex) { Log($"ancient: {ex.Message}"); }
+        }
+
         return new Dictionary<string, object?>
         {
             ["type"] = "decision",
@@ -2668,6 +2754,12 @@ public partial class RunDriver
             ["description"] = eventDesc,
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
+            ["event_id"] = localEvent.Id?.Entry.ToLowerInvariant(),
+            ["layout"] = localEvent.LayoutType.ToString(),
+            ["button_color"] = Rgba(localEvent.ButtonColor),
+            ["title_text"] = titleText,
+            ["description_bbcode"] = descBbcode,
+            ["ancient"] = ancient,
         };
     }
 
