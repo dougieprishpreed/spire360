@@ -34,8 +34,10 @@
       <AdditionalIncludeDirectories>$(SpireRoot)out\logic\c;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <!-- No debug information: for 270 MB of translated code it is much of
            the compile, and with /MP every compiler waits on the one PDB
-           (mspdbsrv). Logic crashes are found on the PC build of the same C. -->
-      <DebugInformationFormat>None</DebugInformationFormat>
+           (mspdbsrv). Logic crashes are found on the PC build of the same C.
+           VS2010 has no "None" value (that came with VS2012): an empty value
+           is how it says no /Z option. -->
+      <DebugInformationFormat></DebugInformationFormat>
       <!-- C4102 (unreferenced label): w2c2 emits ~70,000, all harmless; the
            console printing them slows the build. -->
       <DisableSpecificWarnings>4102;%(DisableSpecificWarnings)</DisableSpecificWarnings>
