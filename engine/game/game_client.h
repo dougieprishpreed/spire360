@@ -92,6 +92,9 @@ private:
     Json last_combat_;     /* the last combat_play decision (its room) */
     Json last_event_;      /* the last event_choice decision (its room) */
     int reward_focus_;     /* the rewards screen's focus, kept while it is up */
+    bool shop_open_;       /* the shop's inventory open, and its focused slot */
+    std::string shop_kind_;
+    int shop_index_;
     int hand_focus_;       /* kept across decisions, as the game's _lastFocusedHolderIdx */
     int target_;           /* combat targeting: enemy index, -1 when not targeting */
     int last_target_;      /* the enemy last aimed at (combat_id; NCombatRoom.LastTargetedCreature) */

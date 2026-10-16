@@ -2837,6 +2837,7 @@ public partial class RunDriver
         var inv = merchantRoom.GetLocalInventory();
         if (inv == null) { ForceToMap(); return MapSelectState(); }
 
+        int characterCards = inv.CharacterCardEntries.Count;
         var cards = inv.CharacterCardEntries.Concat(inv.ColorlessCardEntries)
             .Select((e, i) =>
             {
@@ -2878,6 +2879,7 @@ public partial class RunDriver
                     ["cost"] = e.Cost,
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
+                    ["colorless"] = i >= characterCards,
                 });
             }).ToList();
 
@@ -2912,6 +2914,7 @@ public partial class RunDriver
             ["relics"] = relics,
             ["potions"] = potions,
             ["card_removal_cost"] = removal?.Cost,
+            ["card_removal_used"] = removal?.Used ?? true,
             ["player"] = PlayerSummary(player),
         };
     }

@@ -13,6 +13,7 @@
 #include "potion_menu.h"
 #include "reward_screen.h"
 #include "rewards_screen.h"
+#include "shop_screen.h"
 #include "top_bar.h"
 #include "logic_link.h"
 
@@ -156,7 +157,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0) {}
 
 GameClient::~GameClient() {
@@ -263,6 +264,12 @@ void GameClient::show(const Json& d) {
     potions_.detach();
     std::string prev_kind = decision_["decision"].str();
     if (prev_kind == "rewards" && ported_) reward_focus_ = ((RewardsScreen*)ported_)->focused();
+    if (prev_kind == "shop" && ported_) {
+        ShopScreen* shop = (ShopScreen*)ported_;
+        shop_open_ = shop->inventory_open();
+        shop_kind_ = shop->focused_kind();
+        shop_index_ = shop->focused_index();
+    }
     decision_ = d;
     choices_ = choices(d);
     focus_ = 0;
@@ -340,6 +347,20 @@ void GameClient::show(const Json& d) {
         screen_ = ported_->build(d, &err);
         if (!screen_) {
             log_warn("map screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "shop") {
+        /* After a purchase (or the card removal's selection) the inventory
+         * stays open where it was. */
+        ShopScreen* s = new ShopScreen(lib_);
+        bool again = prev_kind == "shop" || prev_kind == "card_select";
+        s->set_state(again && shop_open_, shop_kind_, shop_index_);
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("shop screen: %s", err.c_str());
             delete ported_;
             ported_ = NULL;
         }

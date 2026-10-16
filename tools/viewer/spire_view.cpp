@@ -20,6 +20,7 @@
 #include "../../engine/game/rewards_screen.h"
 #include "../../engine/game/game_over_screen.h"
 #include "../../engine/game/character_select.h"
+#include "../../engine/game/shop_screen.h"
 #include "../../engine/game/top_bar.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
@@ -159,6 +160,10 @@ int main(int argc, char** argv) {
             CardRewardScreen* rs = new CardRewardScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);
             ported = rs;
+        } else if (d["decision"].str() == "shop") {
+            ShopScreen* ss = new ShopScreen(&lib); /* lives as long as the scene */
+            scene = ss->build(d, &err);
+            ported = ss;
         } else if (d["decision"].str() == "game_over") {
             GameOverScreen* gs = new GameOverScreen(&lib); /* lives as long as the scene */
             scene = gs->build(d, &err);
