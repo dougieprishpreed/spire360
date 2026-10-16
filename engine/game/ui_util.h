@@ -1,0 +1,47 @@
+/* Small helpers the ported screens share: scene instances, lookups, labels,
+ * pad glyphs, placing controls. */
+#ifndef SPIRE_UI_UTIL_H
+#define SPIRE_UI_UTIL_H
+
+#include "../core/base.h"
+#include "../scene/script.h"
+
+namespace spire {
+
+class Control;
+class Node;
+class SceneLibrary;
+
+std::string lower(std::string s);
+/* A scene instance; logs and returns NULL if it cannot be made. */
+Node* instance(SceneLibrary* lib, const std::string& path);
+/* The first node named `name` under n (depth first, n included). */
+Node* find_named(Node* n, const char* name);
+/* %Unique under scope, if it is a Control. */
+Control* ctl(Node* scope, const char* unique);
+/* Label / RichTextLabel text. */
+void set_label(Node* n, const std::string& text);
+/* NHotkeyIcon.UpdateInput with a controller: the xbox_360 glyph shown
+ * (controller_atlas sprites: "a", "b", "y", "lt", ...), the key hidden. */
+void show_glyph(SceneLibrary* lib, Node* hotkey_icon, const char* glyph);
+/* A control's offsets as its rect (anchors together). */
+void place(Control* c, float x, float y, float w, float h);
+Vec2 offset_pos(const Control* c);
+Vec2 offset_size(const Control* c);
+Color hex(unsigned rgb);
+/* A full-screen Control (anchors 0..1), named. */
+Control* full_rect_control(const char* name);
+
+/* Something run each frame by the scene tree (a screen's animations). */
+class FrameListener {
+public:
+    virtual ~FrameListener() {}
+    virtual void frame(double dt) = 0;
+};
+/* A plain Node (always processed) that calls listener->frame each frame;
+ * add it to the screen's tree. The listener must outlive the tree. */
+Node* frame_driver(FrameListener* listener);
+
+} /* namespace spire */
+
+#endif

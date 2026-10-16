@@ -13,6 +13,7 @@
 #define SPIRE_GAME_CLIENT_H
 
 #include "../core/json.h"
+#include "run_screen.h"
 
 namespace spire {
 
@@ -21,17 +22,6 @@ class LogicLink;
 class Node;
 class SceneLibrary;
 class SceneTree;
-
-/* Controller state for one frame (Xbox 360 pad). */
-struct PadState {
-    enum {
-        A = 1 << 0, B = 1 << 1, X = 1 << 2, Y = 1 << 3, LB = 1 << 4, RB = 1 << 5, LT = 1 << 6, RT = 1 << 7,
-        UP = 1 << 8, DOWN = 1 << 9, LEFT = 1 << 10, RIGHT = 1 << 11, START = 1 << 12, BACK = 1 << 13
-    };
-    unsigned held;
-    unsigned pressed; /* went down this frame */
-    PadState() : held(0), pressed(0) {}
-};
 
 /* Something the player can do now: a label for the plain screen and the
  * protocol command. */

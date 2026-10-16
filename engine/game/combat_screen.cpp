@@ -1,6 +1,7 @@
 #include "combat_screen.h"
 #include "card_view.h"
 #include "loc.h"
+#include "ui_util.h"
 
 #include "../scene/controls.h"
 #include "../scene/tree.h"
@@ -34,18 +35,6 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     : lib_(lib), hand_focus_(-1), hand_box_(NULL), play_card_(-1), play_single_(false), play_target_(-1), arrow_(NULL),
       arrow_head_(NULL) {
     player_.node = NULL;
-}
-
-static std::string lower(std::string s) {
-    for (size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
-    return s;
-}
-
-static Node* instance(SceneLibrary* lib, const std::string& path) {
-    std::string err;
-    Node* n = lib->instantiate(path, &err);
-    if (!n) log_warn("combat: %s", err.c_str());
-    return n;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -109,29 +98,6 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.node = (Control*)n;
     out.visuals = v;
     return true;
-}
-
-static Control* ctl(Node* scope, const char* unique) {
-    Node* n = scope ? scope->find_unique(unique) : NULL;
-    return n && n->is_control() ? (Control*)n : NULL;
-}
-
-/* Position / Size of a control with its anchors together (all the creature
- * scene's controls): the offsets are the rect. */
-static void place(Control* c, float x, float y, float w, float h) {
-    c->offset[SIDE_LEFT] = x;
-    c->offset[SIDE_TOP] = y;
-    c->offset[SIDE_RIGHT] = x + w;
-    c->offset[SIDE_BOTTOM] = y + h;
-}
-
-static Vec2 offset_pos(const Control* c) { return Vec2(c->offset[SIDE_LEFT], c->offset[SIDE_TOP]); }
-static Vec2 offset_size(const Control* c) {
-    return Vec2(c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP]);
-}
-
-static Color hex(unsigned v) {
-    return Color(((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f, 1.0f);
 }
 
 static const float HP_BAR_INSET = 10.0f; /* NHealthBar._foregroundContainerInset */
@@ -325,7 +291,6 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     l->set_text(format("%d/%d", hp, max_hp));
 }
 
-static void set_label(Node* n, const std::string& text);
 
 /* ---- powers (NPowerContainer, NPower) ---- */
 
@@ -523,23 +488,9 @@ void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bo
 
 /* ---- the combat UI (NCombatUi and its children at rest, player turn) ---- */
 
-static Node* find_named(Node* n, const char* name) {
-    if (n->name == name) return n;
-    for (size_t i = 0; i < n->children.size(); ++i) {
-        Node* r = find_named(n->children[i], name);
-        if (r) return r;
-    }
-    return NULL;
-}
-
 static Control* child_ctl(Node* n, const char* path) {
     Node* c = n ? n->get_node(path) : NULL;
     return c && c->is_control() ? (Control*)c : NULL;
-}
-
-static void set_label(Node* n, const std::string& text) {
-    if (n && n->type == "Label") ((Label*)n)->set_text(text);
-    else if (n && n->type == "RichTextLabel") ((RichTextLabel*)n)->text = text;
 }
 
 /* A control of the full-screen combat UI moved to a screen position, as the
@@ -549,19 +500,6 @@ static void place_on_screen(Control* c, const Vec2& pos) {
     float h = (c->anchor[SIDE_BOTTOM] - c->anchor[SIDE_TOP]) * 1080.0f + c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
     for (int i = 0; i < 4; ++i) c->anchor[i] = 0;
     place(c, pos.x, pos.y, w, h);
-}
-
-/* NHotkeyIcon.UpdateInput with a controller: the pad glyph shown, the
- * keyboard key hidden. Glyphs: controller_atlas xbox_360 (Xbox360Config). */
-static void show_glyph(SceneLibrary* lib, Node* hotkey_icon, const char* glyph) {
-    if (!hotkey_icon) return;
-    Node* pad = hotkey_icon->find_unique("ControllerIcon");
-    Node* key = hotkey_icon->find_unique("KeyboardIcon");
-    if (key && key->is_canvas_item()) ((CanvasItem*)key)->visible = false;
-    if (!pad || pad->type != "TextureRect") return;
-    Resource* r = lib->ext(std::string("images/atlases/controller_atlas.sprites/xbox_360/") + glyph + ".tres");
-    ((TextureRect*)pad)->texture = r && r->is_texture() ? (Texture2DRes*)r : NULL;
-    ((CanvasItem*)pad)->visible = r != NULL;
 }
 
 /* NEnergyCounter._Process / NStarCounter: the orb's rotation layers turn,

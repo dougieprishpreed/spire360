@@ -26,11 +26,14 @@ static std::string quoted(const std::string& s) {
     return out + "\"";
 }
 
-/* {"cmd":"action","action":name,"args":{args}}; args: "k":v pairs. */
-static std::string action(const char* name, const std::string& args = std::string()) {
+std::string protocol_action(const char* name, const std::string& args) {
     std::string s = std::string("{\"cmd\":\"action\",\"action\":\"") + name + "\"";
     if (!args.empty()) s += ",\"args\":{" + args + "}";
     return s + "}";
+}
+
+static std::string action(const char* name, const std::string& args = std::string()) {
+    return protocol_action(name, args);
 }
 
 static Choice choice(const std::string& label, const std::string& command, int card = -1, int target = -1) {
