@@ -39,6 +39,10 @@ Vec2 offset_size(const Control* c);
 Color hex(unsigned rgb);
 /* Rng.Chaotic: a different number every time (seeded from the clock). */
 unsigned chaotic_rand();
+/* NHoverTipSet's text tip (scenes/ui/hover_tip.tscn): a title (none:
+ * "") and a description (BBCode); NULL without the scene. Place it with
+ * place() or set_position on the screen's root. */
+Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::string& description);
 /* A full-screen Control (anchors 0..1), named. */
 Control* full_rect_control(const char* name);
 

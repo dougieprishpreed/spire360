@@ -144,6 +144,16 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.set_color_matrix(cm);
         return true;
     }
+    if (m->shader == "scenes/rest_site/rest_site_light_shader.gdshader") {
+        /* The campfire's light: the texture wobbled by a noise texture and
+         * dimmed by a flickering grey ramp (0.62..1), both scrolled by
+         * TIME. Here: the texture as it is, flickering about as much. */
+        float t = (float)g_shader_time;
+        float k = 0.84f + 0.1f * sinf(t * 7.3f) * sinf(t * 2.9f + 1.0f) + 0.05f * sinf(t * 13.1f);
+        float cm[12] = { k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0 };
+        c.set_color_matrix(cm);
+        return true;
+    }
     if (m->shader == "shaders/card_ripple.gdshader") {
         /* render_mode blend_add: shader_blend. */
         float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),

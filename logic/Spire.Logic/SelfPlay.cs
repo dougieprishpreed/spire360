@@ -153,6 +153,14 @@ internal static class SelfPlay
                                                         && !Equals(Get(o, "is_enabled"), false)).ToList();
                 return opts.Count > 0 ? ("choose_option", A(("option_index", Int(opts[rng.Next(opts.Count)], "index")))) : ("leave_room", null);
             }
+            case "treasure":
+                // Open, take the first relic, proceed: the old automatic pick.
+                return Str(s, "stage") switch
+                {
+                    "closed" => ("open_chest", null),
+                    "open" => ("pick_relic", A(("relic_index", 0))),
+                    _ => ("proceed", null),
+                };
             case "rewards":
             {
                 var left = List(s, "rewards").Where(r => !Equals(Get(r, "skipped"), true)).ToList();

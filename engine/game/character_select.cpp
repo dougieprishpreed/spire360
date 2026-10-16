@@ -79,7 +79,8 @@ Node* CharacterSelectScreen::build(const Json& characters, const std::string& se
         bt.icon = ctl(b, "Icon");
         bt.outline = ctl(b, "OutlineLocal");
         /* Init: CharacterModel.CharacterSelectIcon. */
-        set_texture(lib_, bt.icon, "images/packed/character_select/char_select_" + lower(bt.id) + ".png");
+        set_texture(lib_, bt.icon, "images/packed/character_select/char_select_" +
+                                       (bt.id == RANDOM_ID ? std::string("random") : lower(bt.id)) + ".png");
         /* _Ready: s 0.2, v 0.4 until a state is set; NotSelected: 0.2 / 0.8. */
         if (bt.icon) {
             bt.icon->shader_params["s"] = 0.2f;

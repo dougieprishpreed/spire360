@@ -17,8 +17,9 @@ class SceneLibrary;
 
 /* A new node (the caller owns it) holding the bar and the relic row, NULL
  * if top_bar.tscn is missing. in_map_room: the act-start map (the map
- * button is disabled there). */
-Node* make_top_bar(SceneLibrary* lib, const Json& decision, bool in_map_room);
+ * button is disabled there). before: the player as the decision before
+ * had them (null for none): the potions gained or used since animate. */
+Node* make_top_bar(SceneLibrary* lib, const Json& decision, bool in_map_room, const Json& before = Json());
 /* NPotion (scenes/potions/potion.tscn, 60x60, pivot at its centre) showing
  * a potion's atlas image and outline; NULL without the scene. */
 Node* make_potion(SceneLibrary* lib, const std::string& potion_id);

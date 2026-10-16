@@ -116,19 +116,29 @@ Needs `out\logic\c` (as logic_runner) and a converted pack. Copy the
 converter's whole output folder (`pack.s3p` and `data\`) to a `spire`
 folder next to the XEX: `game:\spire\pack.s3p`, `game:\spire\data\...`.
 
-The main menu: up/down between Singleplayer and Quit; on Singleplayer,
-left/right choose the character, A starts a run (a new seed each time; the
-menu stays dimmed while the logic starts it, ~10 s). After a game over, A
-returns to the menu. Screens not ported yet show the decision's choices as
-a list.
+The main menu: up/down between Singleplayer and Quit. Singleplayer opens
+the character select: left/right choose the character, A embarks (a new
+seed each time; the screen stays dimmed while the logic starts the run,
+~10 s), B goes back. After a game over, A on Continue shows the run
+summary, A on Main Menu returns to the menu.
 
 Controls in a run: D-pad or left stick move the focus, A confirms, B goes
-back. Combat: A takes a card (A again plays it, left/right aim), Y ends the
-turn, X opens the potions (A: drink, throw or discard). Card selection
-screens: A picks, Y confirms, B cancels. Back: write the log now; Back +
-Start: quit; Back + Y: gamma ramp on/off. The log is `game:\spire360.txt`
-(startup, each decision and how long the logic took, frame times, any
-texture missing from the pack).
+back, Y presses the proceed arrow (Skip / Proceed) where there is one.
+
+- Combat: A takes a card (A again plays it, left/right aim, B puts it
+  back), Y ends the turn, X opens the potions (A: drink, throw or discard).
+- Rewards after a fight: up/down choose, A takes a reward (a card reward
+  opens its own screen: A picks, B skips), Y skips the rest / proceeds.
+- Rest site: left/right choose an option, A uses it; then Y goes to the map.
+- Shop: A on the merchant opens the inventory (A buys, B closes it), Y
+  leaves.
+- Treasure: A opens the chest, A takes the relic (Y skips it), Y proceeds.
+- Card selection screens: A picks, Y confirms, B cancels.
+- Back: write the log now; Back + Start: quit; Back + Y: gamma ramp on/off.
+
+The log is `game:\spire360.txt` (startup, each decision and how long the
+logic took, frame times, any texture missing from the pack). Screens not
+ported yet show the decision's choices as a list.
 
 ## spire_view: the engine drawing the game's scenes on the console
 

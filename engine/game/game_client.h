@@ -91,6 +91,8 @@ private:
     RunScreen* behind_;    /* another screen behind an overlay (an event's) */
     Json last_combat_;     /* the last combat_play decision (its room) */
     Json last_event_;      /* the last event_choice decision (its room) */
+    Json last_rest_;       /* the last rest_site decision (its room) */
+    Json last_shop_;       /* the last shop decision (its room) */
     int reward_focus_;     /* the rewards screen's focus, kept while it is up */
     bool shop_open_;       /* the shop's inventory open, and its focused slot */
     std::string shop_kind_;

@@ -4,8 +4,20 @@
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
+#include "../scene/script.h"
+#include "../scene/tween.h"
 
 namespace spire {
+
+namespace {
+/* The bar's own animations (the potions'), run by the bar's node: its
+ * tweens go with it. */
+class BarAnimations : public ScriptBehavior {
+public:
+    TweenSet tweens;
+    virtual void process(Node*, double dt) { tweens.update(dt); }
+};
+} /* namespace */
 
 /* ImageHelper.GetRoomIconPath: images/ui/run_history/<suffix>.png, "" for
  * none (the act-start map room). */
@@ -82,9 +94,34 @@ void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id) 
     if (icon) set_texture(lib, icon->find_unique("Outline"), "images/atlases/relic_outline_atlas.sprites/" + id + ".tres");
 }
 
+static Control* as_ctl(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
+
+static const Json* potion_in_slot(const Json& potions, int slot) {
+    for (size_t i = 0; i < potions.size(); ++i)
+        if (potions[i]["index"].i() == slot) return &potions[i];
+    return NULL;
+}
+
+/* NPotion (potion.tscn) in a holder: at (-30, -30) from its centre, 0.9. */
+static Control* holder_potion(SceneLibrary* lib, Node* holder, const std::string& id) {
+    Node* p = make_potion(lib, id);
+    if (!p) return NULL;
+    Control* pc = (Control*)p;
+    pc->anchor[SIDE_LEFT] = pc->anchor[SIDE_RIGHT] = 0.5f;
+    pc->anchor[SIDE_TOP] = pc->anchor[SIDE_BOTTOM] = 0.5f;
+    place(pc, -30, -30, 60, 60);
+    pc->scale = Vec2(0.9f, 0.9f);
+    holder->add_child(p);
+    return pc;
+}
+
 /* NPotionContainer: one holder per slot (player.max_potions), a potion
- * (potion.tscn, 0.9 scale, centred) in the slots that have one. */
-static void make_potions(SceneLibrary* lib, Node* bar, const Json& player) {
+ * (potion.tscn, 0.9 scale, centred) in the slots that have one. With the
+ * player as the decision before had them: a potion new in its slot drops
+ * in (NPotion.PlayNewlyAcquiredAnimation: its container from 40 px lower,
+ * fading in), one gone shrinks away (NPotionHolder.RemoveUsedPotion: to
+ * scale 0 in 0.2 s, then the empty slot fades in). */
+static void make_potions(SceneLibrary* lib, Node* bar, const Json& player, const Json& before, TweenSet* tweens) {
     Node* holders = bar->find_unique("PotionHolders");
     if (!holders) holders = find_named(bar, "PotionHolders");
     if (!holders) return;
@@ -98,26 +135,30 @@ static void make_potions(SceneLibrary* lib, Node* bar, const Json& player) {
             delete h;
             return;
         }
-        const Json* pot = NULL;
-        for (size_t i = 0; i < potions.size(); ++i)
-            if (potions[i]["index"].i() == s) pot = &potions[i];
+        const Json* pot = potion_in_slot(potions, s);
+        const Json* was = before.is_object() ? potion_in_slot(before["potions"], s) : NULL;
+        bool gained = pot && before.is_object() && (!was || (*was)["id"].str() != (*pot)["id"].str());
+        bool lost = !pot && was;
         Node* empty = h->find_unique("EmptyIcon");
         if (empty && empty->is_canvas_item()) {
-            ((CanvasItem*)empty)->modulate.a = pot ? 0.0f : 1.0f;
+            CanvasItem* e = (CanvasItem*)empty;
+            e->modulate.a = pot ? 0.0f : 1.0f;
             if (empty->is_control()) ((Control*)empty)->scale = Vec2(0.9f, 0.9f);
+            if (lost && tweens) tweens->tween_from(&e->modulate.a, 0.0f, 1.0f, 0.2f, TRANS_LINEAR, EASE_IN_OUT, 0.2f);
         }
         hide(h->find_unique("SelectionReticle"));
         if (pot) {
-            Node* p = make_potion(lib, (*pot)["id"].str());
-            if (p) {
-                Control* pc = (Control*)p;
-                /* Position (-30, -30) from the holder's centre. */
-                pc->anchor[SIDE_LEFT] = pc->anchor[SIDE_RIGHT] = 0.5f;
-                pc->anchor[SIDE_TOP] = pc->anchor[SIDE_BOTTOM] = 0.5f;
-                place(pc, -30, -30, 60, 60);
-                pc->scale = Vec2(0.9f, 0.9f);
-                h->add_child(p);
+            Control* pc = holder_potion(lib, h, (*pot)["id"].str());
+            Control* box = pc ? as_ctl(pc->get_node("Container")) : NULL;
+            if (gained && tweens && box) {
+                tweens->tween_from(&box->modulate.a, 0.0f, 1.0f, 0.1f);
+                float top = box->offset[SIDE_TOP], bottom = box->offset[SIDE_BOTTOM];
+                tweens->tween_from(&box->offset[SIDE_TOP], top + 40, top, 0.35f, TRANS_BACK, EASE_OUT);
+                tweens->tween_from(&box->offset[SIDE_BOTTOM], bottom + 40, bottom, 0.35f, TRANS_BACK, EASE_OUT);
             }
+        } else if (lost && tweens) {
+            Control* pc = holder_potion(lib, h, (*was)["id"].str());
+            if (pc) tweens->tween_from(&pc->scale, Vec2(0.9f, 0.9f), Vec2(0, 0), 0.2f, TRANS_BACK, EASE_IN);
         }
         holders->add_child(h);
     }
@@ -145,9 +186,14 @@ static Node* make_relics(SceneLibrary* lib, const Json& player) {
     return row;
 }
 
-Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room) {
+Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Json& before) {
     Node* bar = instance(lib, "scenes/ui/top_bar.tscn");
     if (!bar) return NULL;
+    BarAnimations* anims = NULL;
+    if (before.is_object() && !bar->behavior) {
+        anims = new BarAnimations();
+        bar->behavior = anims;
+    }
     const Json& player = d["player"];
     const Json& ctx = d["context"];
     std::string character = lower(player["character"].is_string() ? player["character"].str() : std::string("ironclad"));
@@ -174,7 +220,7 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room) {
     set_label(bar->find_unique("HpLabel"), format("%d/%d", player["hp"].i(), player["max_hp"].i()));
     set_label(bar->find_unique("GoldLabel"), format("%d", player["gold"].i()));
 
-    make_potions(lib, bar, player);
+    make_potions(lib, bar, player, before, anims ? &anims->tweens : NULL);
     Node* shortcut = find_named(bar, "PotionShortcutButton");
     show_glyph(lib, shortcut ? shortcut->find_unique("HotkeyIcon") : NULL, "x");
 

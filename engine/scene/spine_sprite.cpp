@@ -112,6 +112,35 @@ bool SpineSprite::set_animation(const std::string& name, bool loop, int track) {
     return true;
 }
 
+void SpineSprite::set_track_fraction(int track, float fraction) {
+    const SpAnimation* a = state_.current(track);
+    if (a) state_.set_track_time(track, a->duration * fraction);
+}
+
+void SpineSprite::set_data(SceneLibrary* lib, SpineDataRes* res) {
+    delete skel_;
+    skel_ = NULL;
+    failed_ = false;
+    state_ = SpAnimationState();
+    data_res = res;
+    lib_ = lib;
+}
+
+bool SpineSprite::set_skin(const std::string& name) {
+    if (!ensure()) return false;
+    const SpSkin* skin = skel_->data()->find_skin(name);
+    if (!skin) return false;
+    skel_->set_skin(skin);
+    skel_->set_slots_to_setup_pose();
+    state_.apply(*skel_);
+    skel_->update_world_transform(SP_PHYSICS_UPDATE);
+    return true;
+}
+
+bool SpineSprite::has_animation(const std::string& name) {
+    return ensure() && skel_->data()->find_animation(name) != NULL;
+}
+
 void SpineSprite::process(double dt) {
     if (!ensure()) return;
     float d = (float)dt * time_scale;

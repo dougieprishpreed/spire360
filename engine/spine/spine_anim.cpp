@@ -478,6 +478,12 @@ float SpAnimationState::track_time(int ti) const {
     return tracks_[ti].cur.time;
 }
 
+void SpAnimationState::set_track_time(int ti, float t) {
+    if (ti < 0 || (size_t)ti >= tracks_.size() || !tracks_[ti].has_cur) return;
+    tracks_[ti].cur.time = t;
+    tracks_[ti].cur.last_time = -1;
+}
+
 bool SpAnimationState::track_complete(int ti) const {
     if (ti < 0 || (size_t)ti >= tracks_.size() || !tracks_[ti].has_cur) return true;
     const Entry& e = tracks_[ti].cur;

@@ -20,13 +20,15 @@ project is not affiliated with or endorsed by Mega Crit.
 
 ## Status
 
-Work in progress: **not playable yet.**
+Work in progress: **a first preview, playable with a controller.**
 
-- Tested in Xenia emulator: the game's logic
-  plays full seeded runs, identical to PC; the engine draws the game's
-  screens (animated main menu, combat room, cards, map, rewards, top bar).
-- Not done yet: connecting the screens to the running game, controller play,
-  sound, saving. Tested with Slay the Spire 2 v0.111.0.
+- A whole run plays: main menu, character select, Neow, the map, fights,
+  rewards, events, rest sites, shops, treasure rooms, bosses and the game
+  over screen, drawn as the game draws them. Seeded runs play out exactly as
+  on PC.
+- Not done yet: sound, saving, combat effects (attacks, potions), card and
+  power tooltips, multiplayer. Tested with Slay the Spire 2 v0.111.0.
+- Controls: [xdk/README.md](xdk/README.md#spire360-the-game).
 
 ## What you need
 

@@ -20,7 +20,9 @@
 #include "../../engine/game/rewards_screen.h"
 #include "../../engine/game/game_over_screen.h"
 #include "../../engine/game/character_select.h"
+#include "../../engine/game/rest_site_screen.h"
 #include "../../engine/game/shop_screen.h"
+#include "../../engine/game/treasure_screen.h"
 #include "../../engine/game/top_bar.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
@@ -164,6 +166,16 @@ int main(int argc, char** argv) {
             ShopScreen* ss = new ShopScreen(&lib); /* lives as long as the scene */
             scene = ss->build(d, &err);
             ported = ss;
+        } else if (d["decision"].str() == "rest_site") {
+            RestSiteScreen* rs = new RestSiteScreen(&lib); /* lives as long as the scene */
+            scene = rs->build(d, &err);
+            ported = rs;
+        } else if (d["decision"].str() == "treasure") {
+            /* "previous_stage" (a viewer-only key): the stage it comes from. */
+            TreasureScreen* ts = new TreasureScreen(&lib); /* lives as long as the scene */
+            ts->set_previous_stage(d["previous_stage"].str());
+            scene = ts->build(d, &err);
+            ported = ts;
         } else if (d["decision"].str() == "game_over") {
             GameOverScreen* gs = new GameOverScreen(&lib); /* lives as long as the scene */
             scene = gs->build(d, &err);
@@ -189,7 +201,9 @@ int main(int argc, char** argv) {
         }
     }
     if (scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
-        /* As the game client shows a run's screens: with the top bar. */
+        /* As the game client shows a run's screens: with the top bar
+         * ("previous_player", a viewer-only key: the player before, for the
+         * potion animations). */
         FILE* jf = fopen(argv[2], "rb");
         std::string text;
         if (jf) {
@@ -200,7 +214,7 @@ int main(int argc, char** argv) {
         }
         std::string e2;
         Json d = Json::parse(text.c_str(), text.size(), &e2);
-        Node* bar = d["player"].is_object() && d["decision"].str() != "game_over" ? make_top_bar(&lib, d, d["context"]["room_type"].str() == "Map") : NULL;
+        Node* bar = d["player"].is_object() && d["decision"].str() != "game_over" ? make_top_bar(&lib, d, d["context"]["room_type"].str() == "Map", d["previous_player"]) : NULL;
         if (bar) scene->add_child(bar);
     }
     /* "title": the preview's main menu (TitleScreen), --pad driving it. */

@@ -53,6 +53,13 @@ public:
     SpSkeleton* skeleton();
     SpAnimationState* animation_state();
     bool set_animation(const std::string& name, bool loop, int track);
+    /* The track's animation from a point of it (0..1 of its duration). */
+    void set_track_fraction(int track, float fraction);
+    bool has_animation(const std::string& name);
+    /* SetSkeletonDataRes from code (before anything is played). */
+    void set_data(SceneLibrary* lib, SpineDataRes* res);
+    /* Skeleton.SetSkin + SetSlotsToSetupPose; false without that skin. */
+    bool set_skin(const std::string& name);
 
 private:
     bool ensure();

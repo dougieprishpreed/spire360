@@ -12,9 +12,11 @@
 #include "map_screen.h"
 #include "potion_menu.h"
 #include "reward_screen.h"
+#include "rest_site_screen.h"
 #include "rewards_screen.h"
 #include "shop_screen.h"
 #include "top_bar.h"
+#include "treasure_screen.h"
 #include "logic_link.h"
 
 namespace spire {
@@ -103,6 +105,13 @@ std::vector<Choice> GameClient::choices(const Json& d) {
             out.push_back(choice(label, action("choose_option", format("\"option_index\":%d", os[i]["index"].i()))));
         }
         if (out.empty()) out.push_back(choice("Leave", action("leave_room")));
+    } else if (kind == "treasure") {
+        const std::string& stage = d["stage"].str();
+        if (stage == "closed") out.push_back(choice("Open the chest", action("open_chest")));
+        const Json& rs = d["relics"];
+        for (size_t i = 0; stage == "open" && i < rs.size(); ++i)
+            out.push_back(choice(rs[i]["title"].str(), action("pick_relic", format("\"relic_index\":%d", rs[i]["index"].i()))));
+        if (stage != "closed") out.push_back(choice(stage == "open" ? "Skip" : "Proceed", action("proceed")));
     } else if (kind == "rewards") {
         const Json& rs = d["rewards"];
         for (size_t i = 0; i < rs.size(); ++i)
@@ -248,6 +257,30 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
         if (aftermath) room_->set_aftermath(d["player"]);
         return room_->build(last_combat_, &err);
     }
+    if (rt == "RestSite" && !last_rest_.is_null()) {
+        /* The rest site as it was (the smith's upgrade, a relic's choice). */
+        RestSiteScreen* r = new RestSiteScreen(lib_);
+        r->set_passive();
+        behind_ = r;
+        Node* n = behind_->build(last_rest_, &err);
+        if (!n) {
+            delete behind_;
+            behind_ = NULL;
+        }
+        return n;
+    }
+    if (rt == "Shop" && !last_shop_.is_null()) {
+        /* The card removal: over the shop, its inventory open. */
+        ShopScreen* sh = new ShopScreen(lib_);
+        sh->set_state(true, "removal", 0);
+        behind_ = sh;
+        Node* n = behind_->build(last_shop_, &err);
+        if (!n) {
+            delete behind_;
+            behind_ = NULL;
+        }
+        return n;
+    }
     if (rt == "Event" && !last_event_.is_null()) {
         behind_ = new EventScreen(lib_);
         Node* n = behind_->build(last_event_, &err);
@@ -263,6 +296,8 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
 void GameClient::show(const Json& d) {
     potions_.detach();
     std::string prev_kind = decision_["decision"].str();
+    std::string prev_stage = decision_["stage"].str();
+    Json prev_player = decision_["player"];
     if (prev_kind == "rewards" && ported_) reward_focus_ = ((RewardsScreen*)ported_)->focused();
     if (prev_kind == "shop" && ported_) {
         ShopScreen* shop = (ShopScreen*)ported_;
@@ -319,11 +354,12 @@ void GameClient::show(const Json& d) {
         }
     }
     if (kind == "card_select") {
-        /* In a fight, over the fight (as it is). */
+        /* In a fight, over the fight (as it is); at the rest site or the
+         * shop, over the room. */
         const std::string& rt = d["context"]["room_type"].str();
         bool in_fight = rt == "Monster" || rt == "Elite" || rt == "Boss";
         CardSelectScreen* s = new CardSelectScreen(lib_);
-        s->set_background(in_fight ? overlay_background(d, false) : NULL);
+        s->set_background(in_fight || rt == "RestSite" || rt == "Shop" ? overlay_background(d, false) : NULL);
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {
@@ -342,6 +378,34 @@ void GameClient::show(const Json& d) {
             ported_ = NULL;
         }
     }
+    if (kind == "rest_site") {
+        /* Just chosen (from the room, or after the smith's selection): the
+         * choices fade out and the fire goes out. */
+        RestSiteScreen* s = new RestSiteScreen(lib_);
+        if ((prev_kind == "rest_site" || prev_kind == "card_select") && last_rest_["options"].size() > 0)
+            s->set_after_choice(last_rest_);
+        last_rest_ = d;
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("rest site screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "treasure") {
+        /* The change from the stage before (closed -> open -> done) is
+         * animated. */
+        TreasureScreen* s = new TreasureScreen(lib_);
+        if (prev_kind == "treasure") s->set_previous_stage(prev_stage);
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("treasure screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
     if (kind == "map_select") {
         ported_ = new MapScreen(lib_);
         screen_ = ported_->build(d, &err);
@@ -352,6 +416,7 @@ void GameClient::show(const Json& d) {
         }
     }
     if (kind == "shop") {
+        last_shop_ = d;
         /* After a purchase (or the card removal's selection) the inventory
          * stays open where it was. */
         ShopScreen* s = new ShopScreen(lib_);
@@ -390,7 +455,7 @@ void GameClient::show(const Json& d) {
     if (!screen_) screen_ = plain_screen(d);
     /* The top bar over every screen of the run. */
     if (d["player"].is_object() && kind != "game_over") {
-        Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map");
+        Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
         if (bar) screen_->add_child(bar);
     }
     potions_.attach(screen_, d["player"]);
@@ -418,6 +483,8 @@ void GameClient::clear_screen() {
     menu_requested_ = false;
     last_combat_ = Json();
     last_event_ = Json();
+    last_rest_ = Json();
+    last_shop_ = Json();
 }
 
 void GameClient::pick(size_t i) {

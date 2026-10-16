@@ -24,6 +24,20 @@ Node* instance(SceneLibrary* lib, const std::string& path) {
     return n;
 }
 
+Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::string& description) {
+    Node* n = instance(lib, "scenes/ui/hover_tip.tscn");
+    if (!n || !n->is_control()) {
+        delete n;
+        return NULL;
+    }
+    Node* t = n->find_unique("Title");
+    if (title.empty()) set_visible(t, false);
+    else set_label(t, title);
+    set_label(n->find_unique("Description"), description);
+    set_visible(n->find_unique("Icon"), false); /* the relic's own tip: no icon */
+    return (Control*)n;
+}
+
 Node* find_named(Node* n, const char* name) {
     if (!n) return NULL;
     if (n->name == name) return n;

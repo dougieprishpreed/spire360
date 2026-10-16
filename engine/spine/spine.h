@@ -358,6 +358,8 @@ public:
     const SpAnimation* current(int track) const;
     /* Seconds into the current animation of a track (-1: none). */
     float track_time(int track) const;
+    /* MegaTrackEntry.SetTrackTime: the current entry moved to t seconds. */
+    void set_track_time(int track, float t);
     bool track_complete(int track) const;
     float default_mix;
     float time_scale;

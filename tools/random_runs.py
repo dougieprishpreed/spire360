@@ -109,6 +109,12 @@ def act(rng, state):
     if d == "rest_site":
         opts = [o for o in state.get("options", []) if o.get("is_enabled", True)]
         return a("choose_option", option_index=rng.choice(opts)["index"]) if opts else a("leave_room")
+    if d == "treasure":
+        # Open, take the first relic, proceed: the old automatic pick.
+        stage = state.get("stage")
+        if stage == "closed":
+            return a("open_chest")
+        return a("pick_relic", relic_index=0) if stage == "open" else a("proceed")
     if d == "rewards":
         # Every reward in turn (the card reward opens its own decision), then
         # Proceed: what the old automatic collection did, no random draws.

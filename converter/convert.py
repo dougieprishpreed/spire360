@@ -311,6 +311,12 @@ DEFAULT_BUNDLE = [
     "scenes/creature_visuals/*.tscn", "scenes/backgrounds/*.tscn", "images/events/*.png",
     "images/atlases/card_atlas.sprites/*.tres", "images/relics/*.png",
     "images/atlases/potion_outline_atlas.sprites/*.tres", "images/packed/map/*.png",
+    # What the code loads by name: the acts' treasure chests, the effects
+    # (attacks, block, heal, coins...), the combat banners, potion popups,
+    # card overlays, encounter scenes and the rest of the UI scenes.
+    "animations/backgrounds/treasure_room/*.tres", "scenes/vfx/*.tscn", "scenes/combat/*.tscn",
+    "scenes/potions/*.tscn", "scenes/relics/*.tscn", "scenes/cards/*.tscn", "scenes/encounters/*.tscn",
+    "scenes/ui/*.tscn",
 ]
 
 

@@ -156,6 +156,7 @@ public partial class RunDriver
         _pendingCardReward = null;
         _rewardsProcessed = false;
         _restSiteDone = false;
+        ResetTreasure();
         _pendingBundles = null;
         _pendingBundleTcs = null;
         _combatView = null;
@@ -777,6 +778,10 @@ public partial class RunDriver
                     return DoUsePotion(player, args);
                 case "discard_potion":
                     return DoDiscardPotion(player, args);
+                case "open_chest":
+                    return DoOpenChest(player);
+                case "pick_relic":
+                    return DoPickRelic(player, args);
                 case "leave_room":
                     return DoLeaveRoom(player);
                 case "proceed":
@@ -805,6 +810,7 @@ public partial class RunDriver
         // Reset tracking for new room
         _rewardsProcessed = false;
         _restSiteDone = false;
+        ResetTreasure();
         _pendingCardReward = null;
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
@@ -1413,6 +1419,8 @@ public partial class RunDriver
 
     private Dictionary<string, object?> DoLeaveRoom(Player player)
     {
+        if (_runState?.CurrentRoom is TreasureRoom)
+            return LeaveTreasure();
         Log("Leaving room");
         try { Sched.Run(() => RunManager.Instance.ProceedFromTerminalRewardsScreen()); }
         catch { }
@@ -1468,6 +1476,9 @@ public partial class RunDriver
     private Dictionary<string, object?> DoProceed(Player player)
     {
         Log("Proceeding");
+
+        if (_runState?.CurrentRoom is TreasureRoom)
+            return LeaveTreasure();
 
         var fromRewards = ProceedFromRewards(player);
         if (fromRewards != null) return fromRewards;
@@ -2936,94 +2947,6 @@ public partial class RunDriver
             ["card_removal_used"] = removal?.Used ?? true,
             ["player"] = PlayerSummary(player),
         };
-    }
-
-    private Dictionary<string, object?> TreasureState(TreasureRoom treasureRoom)
-    {
-        // Treasure rooms give relics via TreasureRoomRelicSynchronizer
-        Log("Treasure room — collecting rewards");
-
-        WaitForActionExecutor();
-        Sched.Pump();
-
-        // TreasureRoom.EnterInternal opens a relic-picking session (BeginRelicPicking) that the
-        // headless must drive, otherwise (a) no relic is ever awarded and (b) the session stays
-        // open so the NEXT treasure room's BeginRelicPicking throws "relic picking session while
-        // one was already occurring!" (issue #56). Auto-pick the first offered relic: PickRelicLocally
-        // enqueues a PickRelicAction whose execution awards the relic and ends the session
-        // (OnPicked -> EndRelicVoting). An empty offer is closed with CompleteWithNoRelics.
-        try
-        {
-            var relicSync = RunManager.Instance.TreasureRoomRelicSynchronizer;
-            if (relicSync?.CurrentRelics != null)
-            {
-                // The actual relic grant normally lives in the UI node's RelicsAwarded handler
-                // (RelicCmd.Obtain per result), which is absent in headless. Capture the awarded
-                // results, then grant them ourselves after the pick resolves (granting inside the
-                // event — mid action-execution — risks re-entrancy).
-                List<MegaCrit.Sts2.Core.Entities.TreasureRelicPicking.RelicPickingResult>? awarded = null;
-                Action<List<MegaCrit.Sts2.Core.Entities.TreasureRelicPicking.RelicPickingResult>> capture = r => awarded = r;
-                relicSync.RelicsAwarded += capture;
-                try
-                {
-                    if (relicSync.CurrentRelics.Count > 0)
-                    {
-                        Log($"Auto-picking treasure relic 0 of {relicSync.CurrentRelics.Count}");
-                        relicSync.PickRelicLocally(0);
-                    }
-                    else
-                    {
-                        relicSync.CompleteWithNoRelics();
-                    }
-                    Sched.Pump();
-                    WaitForActionExecutor();
-                    Sched.Pump();
-                }
-                finally { relicSync.RelicsAwarded -= capture; }
-
-                if (awarded != null)
-                {
-                    foreach (var res in awarded)
-                    {
-                        if (res.relic != null && res.player != null)
-                            Sched.Run(() => RelicCmd.Obtain(res.relic.ToMutable(), res.player));
-                    }
-                    Sched.Pump();
-                    WaitForActionExecutor();
-                    Sched.Pump();
-                }
-            }
-        }
-        catch (Exception ex) { Log($"Treasure relic pick: {ex.Message}"); }
-
-        _autoRewards = true;
-        try
-        {
-            Sched.Run(() => treasureRoom.DoNormalRewards());
-            Sched.Pump();
-            Sched.Run(() => treasureRoom.DoExtraRewardsIfNeeded());
-            Sched.Pump();
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("relic picking session"))
-        {
-            // BUG-013: Relic session conflict — wait for pending session then retry
-            Log($"Relic session conflict, waiting and retrying: {ex.Message}");
-            WaitForActionExecutor();
-            Sched.Pump();
-            try
-            {
-                Sched.Run(() => treasureRoom.DoNormalRewards());
-                Sched.Pump();
-                Sched.Run(() => treasureRoom.DoExtraRewardsIfNeeded());
-                Sched.Pump();
-            }
-            catch (Exception retryEx) { Log($"Treasure rewards retry failed: {retryEx.Message}"); }
-        }
-        catch (Exception ex) { Log($"Treasure rewards: {ex.Message}"); }
-        finally { _autoRewards = false; }
-
-        ForceToMap();
-        return MapSelectState();
     }
 
     private Dictionary<string, object?> GameOverState(bool isVictory)
