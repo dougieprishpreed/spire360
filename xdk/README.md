@@ -116,12 +116,19 @@ Needs `out\logic\c` (as logic_runner) and a converted pack. Copy the
 converter's whole output folder (`pack.s3p` and `data\`) to a `spire`
 folder next to the XEX: `game:\spire\pack.s3p`, `game:\spire\data\...`.
 
-The title screen waits for A (or Start), then a run starts (Ironclad, a new
-seed each time). Screens the engine does not draw yet show the decision's
-choices as a list. D-pad or left stick: pick; A: confirm; Y: end turn;
-Back: write the log now; Back + Start: quit. The log is
-`game:\spire360.txt` (startup, each decision and how long the logic took,
-frame times).
+The main menu: up/down between Singleplayer and Quit; on Singleplayer,
+left/right choose the character, A starts a run (a new seed each time; the
+menu stays dimmed while the logic starts it, ~10 s). After a game over, A
+returns to the menu. Screens not ported yet show the decision's choices as
+a list.
+
+Controls in a run: D-pad or left stick move the focus, A confirms, B goes
+back. Combat: A takes a card (A again plays it, left/right aim), Y ends the
+turn, X opens the potions (A: drink, throw or discard). Card selection
+screens: A picks, Y confirms, B cancels. Back: write the log now; Back +
+Start: quit; Back + Y: gamma ramp on/off. The log is `game:\spire360.txt`
+(startup, each decision and how long the logic took, frame times, any
+texture missing from the pack).
 
 ## spire_view: the engine drawing the game's scenes on the console
 
