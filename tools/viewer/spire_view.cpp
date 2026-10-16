@@ -12,6 +12,7 @@
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
 #include "../../engine/game/combat_screen.h"
+#include "../../engine/game/map_screen.h"
 #include "../../engine/game/reward_screen.h"
 #include "../../engine/game/top_bar.h"
 #include "../../engine/game/game.h"
@@ -125,6 +126,9 @@ int main(int argc, char** argv) {
         } else if (d["decision"].str() == "card_reward") {
             CardRewardScreen* rs = new CardRewardScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);
+        } else if (d["decision"].str() == "map_select") {
+            MapScreen* ms = new MapScreen(&lib); /* lives as long as the scene */
+            scene = ms->build(d, &err);
         } else if (err.empty()) {
             err = "no screen for decision " + d["decision"].str();
         }

@@ -1686,11 +1686,58 @@ public partial class RunDriver
                     .Select(c => new List<int> { (int)c.coord.col, (int)c.coord.row }).ToList(),
             };
             var cur = _runState?.CurrentMapCoord;
+            // NMapScreen.SetMap's jitter: the run seed's "map_jitter_<act>"
+            // stream, two floats per point in GetAllMapPoints order.
+            var points = map.GetAllMapPoints().Select(Point).ToList();
+            try
+            {
+                if (_runState != null)
+                {
+                    var rng = new MegaCrit.Sts2.Core.Random.Rng(_runState.Rng.Seed, $"map_jitter_{_runState.CurrentActIndex}");
+                    foreach (var pd in points)
+                    {
+                        float jx = rng.NextFloat(-21f, 21f);
+                        float jy = rng.NextFloat(-25f, 25f);
+                        pd["jitter"] = new[] { jx, jy };
+                    }
+                    // NNormalMapPoint.UpdateIcon: a visited "?" shows the room it was.
+                    var hist = _runState.MapPointHistory;
+                    if (hist.Count > _runState.CurrentActIndex)
+                    {
+                        var entries = hist[_runState.CurrentActIndex];
+                        foreach (var pd in points)
+                        {
+                            int row = (int)pd["row"]!;
+                            if ((string?)pd["type"] == "Unknown" && row < entries.Count &&
+                                (_runState.VisitedMapCoords?.Any(c => c.col == (int)pd["col"]! && c.row == row) ?? false))
+                                pd["room"] = entries[row].Rooms.FirstOrDefault()?.RoomType.ToString();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { Log($"MapView jitter: {ex.Message}"); }
+            Dictionary<string, object?>? look = null;
+            try
+            {
+                var act = _runState?.Act;
+                static float[] Rgba(Godot.Color c) => new[] { c.R, c.G, c.B, c.A };
+                static string Res(string p) => p.StartsWith("res://") ? p.Substring(6) : p;
+                if (act != null)
+                    look = new Dictionary<string, object?>
+                    {
+                        ["bg"] = new[] { Res(act.MapTopBgPath), Res(act.MapMidBgPath), Res(act.MapBotBgPath) },
+                        ["bg_color"] = Rgba(act.MapBgColor),
+                        ["traveled_color"] = Rgba(act.MapTraveledColor),
+                        ["untraveled_color"] = Rgba(act.MapUntraveledColor),
+                    };
+            }
+            catch (Exception ex) { Log($"MapView look: {ex.Message}"); }
             return new Dictionary<string, object?>
             {
                 ["cols"] = map.GetColumnCount(),
                 ["rows"] = map.GetRowCount(),
-                ["points"] = map.GetAllMapPoints().Select(Point).ToList(),
+                ["look"] = look,
+                ["points"] = points,
                 ["start"] = Point(map.StartingMapPoint),
                 ["boss"] = Point(map.BossMapPoint),
                 ["second_boss"] = map.SecondBossMapPoint != null ? Point(map.SecondBossMapPoint) : null,

@@ -6,6 +6,7 @@
 #include "../scene/text_nodes.h"
 #include "../scene/tree.h"
 #include "combat_screen.h"
+#include "map_screen.h"
 #include "reward_screen.h"
 #include "top_bar.h"
 #include "logic_link.h"
@@ -242,6 +243,15 @@ void GameClient::show(const Json& d) {
         screen_ = s->build(d, &err);
         if (!screen_) {
             log_warn("card reward screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "map_select") {
+        ported_ = new MapScreen(lib_);
+        screen_ = ported_->build(d, &err);
+        if (!screen_) {
+            log_warn("map screen: %s", err.c_str());
             delete ported_;
             ported_ = NULL;
         }

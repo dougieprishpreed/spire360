@@ -22,6 +22,21 @@ static float param(const MaterialRes* m, const char* name, float fallback) {
     return m->props->has(k.c_str()) ? jv_float((*m->props)[k.c_str()], fallback) : fallback;
 }
 
+/* A colour parameter: the item's "<name>.r/g/b" overrides, else the
+ * material's. */
+static Color param_color(const MaterialRes* m, const char* name, const Color& fallback) {
+    Color c = fallback;
+    if (m->props) {
+        std::string k = std::string("shader_parameter/") + name;
+        if (m->props->has(k.c_str())) jv_color((*m->props)[k.c_str()], c);
+    }
+    std::string n = name;
+    c.r = param(m, (n + ".r").c_str(), c.r);
+    c.g = param(m, (n + ".g").c_str(), c.g);
+    c.b = param(m, (n + ".b").c_str(), c.b);
+    return c;
+}
+
 typedef float M3[3][3];
 
 static void mul(const M3 a, const M3 b, M3 out) {
@@ -89,6 +104,43 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         float k = param(m, "pulse", 0.0f) == 1.0f ? fabsf(sinf((float)g_shader_time * 3.0f)) * 0.2f : 0.0f;
         if (k == 0.0f) return true;
         float cm[12] = { 1, 0, 0, k, 0, 1, 0, k, 0, 0, 1, k };
+        c.set_color_matrix(cm);
+        return true;
+    }
+    if (m->shader == "shaders/relic.gdshader") {
+        /* rgb += |sin(3 TIME)| * 0.2 while pulse == 1; is_used: the
+         * average grey; is_wax: that grey * (1, 0.8, 0.8). */
+        float k = param(m, "pulse", 0.0f) == 1.0f ? fabsf(sinf((float)g_shader_time * 3.0f)) * 0.2f : 0.0f;
+        bool used = param(m, "is_used", 0.0f) == 1.0f, wax = param(m, "is_wax", 0.0f) == 1.0f;
+        if (k == 0.0f && !used && !wax) return true;
+        float cm[12] = { 1, 0, 0, k, 0, 1, 0, k, 0, 0, 1, k };
+        if (used || wax) {
+            static const float tint[3] = { 1.0f, 0.8f, 0.8f };
+            for (int r = 0; r < 3; ++r) {
+                float w = wax ? tint[r] : 1.0f;
+                cm[r * 4 + 0] = cm[r * 4 + 1] = cm[r * 4 + 2] = w / 3.0f;
+                cm[r * 4 + 3] = w * k;
+            }
+        }
+        c.set_color_matrix(cm);
+        return true;
+    }
+    if (m->shader == "scenes/ui/normal_map_point.gdshader") {
+        /* Texels within 0.5 of initial_color become map_color. The icons
+         * are two-tone (a dark body, light features near initial_color):
+         * per channel, the line through the dark tone (kept) and
+         * initial_color (to map_color), which also keeps the edges'
+         * antialiasing. */
+        Color from = param_color(m, "initial_color", Color(0.705882f, 0.615686f, 0.537255f, 1));
+        Color to = param_color(m, "map_color", from);
+        static const float dark[3] = { 0.17f, 0.13f, 0.08f };
+        const float f[3] = { from.r, from.g, from.b }, t[3] = { to.r, to.g, to.b };
+        float cm[12] = { 0 };
+        for (int r = 0; r < 3; ++r) {
+            float k = f[r] - dark[r] > 0.01f ? (t[r] - dark[r]) / (f[r] - dark[r]) : 1.0f;
+            cm[r * 4 + r] = k;
+            cm[r * 4 + 3] = dark[r] * (1 - k);
+        }
         c.set_color_matrix(cm);
         return true;
     }

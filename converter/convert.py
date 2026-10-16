@@ -365,7 +365,13 @@ def cmd_bundle(a):
         expanded = []
         for r in roots:
             r = resources.strip_res(r)
-            expanded += sorted(f for f in listing if fnmatch.fnmatchcase(f, r)) if any(ch in r for ch in "*?[") else [r]
+            if any(ch in r for ch in "*?["):
+                # A glob over a folder of images matches their .import stubs:
+                # take the images (the stub alone does not bring the texture).
+                expanded += sorted({f[:-len(".import")] if f.endswith(".import") else f
+                                    for f in listing if fnmatch.fnmatchcase(f, r)})
+            else:
+                expanded.append(r)
         # A glob over an atlas's sprites may match nothing in the .pck (the
         # game cuts them from the sheet): take the sheet.
         expanded += sorted({s for s in (atlas.sheet_for_sprite(resources.strip_res(r)) for r in roots) if s})
