@@ -36,6 +36,7 @@ CardSelectScreen::CardSelectScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), row_(false), min_(0), max_(1), cancelable_(false), focus_(-1), columns_(1),
       rows_(NULL), scroll_(0), scroll_to_(0), lim_lo_(0), lim_hi_(0), grid_h_(1000), preview_(false), preview_box_(NULL),
       single_box_(NULL), multi_box_(NULL) {
+    root_ = NULL;
     Button none = { NULL, 0, 0, 0, false };
     close_ = confirm_ = preview_cancel_ = preview_confirm_ = none;
 }
@@ -93,6 +94,7 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
     tweens_.clear();
 
     Control* root = full_rect_control("CardSelectScreen");
+    root_ = root;
     if (background_) {
         root->add_child(background_);
         background_ = NULL;
@@ -251,6 +253,7 @@ void CardSelectScreen::focus(int i) {
     tweens_.kill(&h->scale);
     h->scale = Vec2(HOVER_SCALE, HOVER_SCALE);
     h->z_index = 1;
+    tips_.show_for_card(lib_, root_, h, decision_["cards"][(size_t)i]["tips"]);
     if (!row_) {
         /* NCardGrid.ProcessGuiFocus: the focused row to the middle. */
         float y = h->offset[SIDE_TOP];
@@ -281,6 +284,7 @@ void CardSelectScreen::toggle(int i) {
 /* PreviewSelection: the picked cards over the dimmed grid, or (one card to
  * upgrade) the card before and after. */
 void CardSelectScreen::open_preview() {
+    tips_.hide();
     Control* box = order_.size() == 1 && single_box_ ? single_box_ : multi_box_;
     if (!box) return;
     preview_ = true;
@@ -423,6 +427,7 @@ std::string CardSelectScreen::input(const PadState& pad) {
 
 void CardSelectScreen::frame(double dt) {
     tweens_.update(dt);
+    tips_.frame();
     if (!rows_) return;
     /* NCardGrid.UpdateScrollPosition: lerp at 15/s, snapping close in. */
     if (fabsf(scroll_ - scroll_to_) > 0.1f) {

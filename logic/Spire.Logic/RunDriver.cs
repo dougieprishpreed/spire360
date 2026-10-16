@@ -1959,8 +1959,35 @@ public partial class RunDriver
     // NCard.UpdateVisuals for a card in a pile: what the card shows (title,
     // the formatted description, portrait, frame and energy orb, cost
     // colours, the hand's glow).
+    /// <summary>
+    /// A model's hover tips (NHoverTipSet's text tips: title, description,
+    /// debuff look), duplicates removed as the game does; card previews are
+    /// not included. Null when there are none.
+    /// </summary>
+    private static List<Dictionary<string, object?>>? Tips(Func<IEnumerable<MegaCrit.Sts2.Core.HoverTips.IHoverTip>> get)
+    {
+        try
+        {
+            var list = new List<Dictionary<string, object?>>();
+            foreach (var t in MegaCrit.Sts2.Core.HoverTips.IHoverTip.RemoveDupes(get()))
+            {
+                if (t is not MegaCrit.Sts2.Core.HoverTips.HoverTip h) continue;
+                list.Add(new Dictionary<string, object?>
+                {
+                    ["title"] = h.Title,
+                    ["description"] = h.Description,
+                    ["debuff"] = h.IsDebuff ? true : null,
+                    ["power"] = (h.CanonicalModel as PowerModel)?.Id.Entry,
+                });
+            }
+            return list.Count > 0 ? list : null;
+        }
+        catch { return null; }
+    }
+
     private static void AddCardView(Dictionary<string, object?> d, CardModel c, PileType pile)
     {
+        d["tips"] = Tips(() => c.HoverTips);
         static string Res(string p) => p.StartsWith("res://") ? p.Substring(6) : p;
         static float[] Rgba(Godot.Color col) => new[] { col.R, col.G, col.B, col.A };
         try
@@ -2056,6 +2083,7 @@ public partial class RunDriver
             ["name"] = _loc.Power(pw.Id.Entry),
             ["description"] = _loc.Bilingual("powers", pw.Id.Entry + ".description"),
             ["amount"] = pw.Amount,
+            ["tips"] = Tips(() => pw.HoverTips),
         };
         try
         {
@@ -3129,6 +3157,7 @@ public partial class RunDriver
                     ["name"] = _loc.Relic(r.Id.Entry),
                     ["description"] = _loc.Bilingual("relics", r.Id.Entry + ".description"),
                     ["vars"] = vars.Count > 0 ? vars : null,
+                    ["tips"] = Tips(() => r.HoverTips),
                 };
             }).ToList(),
             ["potions"] = player.Potions?.Select((p, i) =>

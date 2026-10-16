@@ -19,13 +19,16 @@ static const float HOVER_SCALE = 1.0f;
 static const float CARD_ROW_X = 960.0f, CARD_ROW_Y = 590.0f;
 
 CardRewardScreen::CardRewardScreen(SceneLibrary* lib)
-    : lib_(lib), background_(NULL), focus_(0), can_skip_(true) {}
+    : lib_(lib), background_(NULL), focus_(0), can_skip_(true) {
+    root_ = NULL;
+}
 
 Node* CardRewardScreen::build(const Json& d, std::string* error) {
     decision_ = d;
     holders_.clear();
     scales_.clear();
     Control* root = full_rect_control("CardRewardScreen");
+    root_ = root;
     if (background_) {
         root->add_child(background_);
         background_ = NULL;
@@ -104,6 +107,7 @@ void CardRewardScreen::focus(int i) {
     tweens_.kill(&h->scale);
     h->scale = Vec2(HOVER_SCALE, HOVER_SCALE);
     h->z_index = 1;
+    tips_.show_for_card(lib_, root_, h, decision_["cards"][(size_t)i]["tips"]);
 }
 
 std::string CardRewardScreen::input(const PadState& pad) {
@@ -117,6 +121,9 @@ std::string CardRewardScreen::input(const PadState& pad) {
     return std::string();
 }
 
-void CardRewardScreen::frame(double dt) { tweens_.update(dt); }
+void CardRewardScreen::frame(double dt) {
+    tweens_.update(dt);
+    tips_.frame();
+}
 
 } /* namespace spire */

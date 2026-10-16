@@ -7,6 +7,7 @@
 #include "../scene/text_nodes.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <time.h>
 #include <set>
 
@@ -36,6 +37,68 @@ Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::
     set_label(n->find_unique("Description"), description);
     set_visible(n->find_unique("Icon"), false); /* the relic's own tip: no icon */
     return (Control*)n;
+}
+
+Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
+    if (tips.size() == 0) return NULL;
+    Control* box = (Control*)SceneLibrary::create_node("VBoxContainer");
+    box->name = "HoverTipSet";
+    box->add_theme_constant_override("separation", 5);
+    box->mouse_filter = 2;
+    for (size_t i = 0; i < tips.size(); ++i) {
+        Control* t = make_hover_tip(lib, tips[i]["title"].str(), tips[i]["description"].str());
+        if (!t) continue;
+        Node* bg = tips[i]["debuff"].b() ? t->find_unique("Bg") : NULL;
+        if (bg && bg->is_canvas_item()) {
+            /* IsDebuff: the background through materials/ui/hover_tip_debuff
+             * (the hsv shader: a red tint). */
+            Resource* m = lib->ext("materials/ui/hover_tip_debuff.tres");
+            if (m && (m->kind == Resource::RES_SHADER_MATERIAL || m->kind == Resource::RES_CANVAS_ITEM_MATERIAL))
+                ((CanvasItem*)bg)->material = (MaterialRes*)m;
+        }
+        box->add_child(t);
+    }
+    if (box->children.empty()) {
+        delete box;
+        return NULL;
+    }
+    return box;
+}
+
+void TipFollower::show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips) {
+    hide();
+    if (!parent || !holder) return;
+    tips_ = make_tip_set(lib, tips);
+    if (!tips_) return;
+    owner_ = holder;
+    tips_->z_index = 10;
+    tips_->modulate.a = 0; /* placed on the next frame, after the layout */
+    parent->add_child(tips_);
+}
+
+void TipFollower::hide() {
+    if (tips_) {
+        if (tips_->parent) tips_->parent->remove_child(tips_);
+        delete tips_;
+    }
+    tips_ = NULL;
+    owner_ = NULL;
+}
+
+void TipFollower::frame() {
+    if (!tips_ || !owner_) return;
+    Xform2D xf = owner_->global_transform();
+    float s = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
+    Vec2 c = xf.origin;
+    float w = tips_->size.x, h = tips_->size.y;
+    /* The card: 300 x 422 about the holder's origin. */
+    float x = c.x + 150.0f * s + 10.0f;
+    if (c.x > 1920.0f * 0.75f || x + w > 1920.0f) x = c.x - 150.0f * s - 10.0f - w;
+    float y = c.y - 211.0f * s;
+    if (y + h > 1080.0f) y = 1080.0f - h;
+    if (y < 0) y = 0;
+    tips_->set_position(Vec2(x, y));
+    tips_->modulate.a = 1;
 }
 
 Node* find_named(Node* n, const char* name) {

@@ -44,6 +44,8 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     vfx_box_ = NULL;
     places_ = NULL;
     final_ = false;
+    tips_ = NULL;
+    tips_for_ = -2;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -723,6 +725,26 @@ void CombatScreen::build_hand(Node* ui, const Json& d) {
 void CombatScreen::set_hand_focus(int index) {
     hand_focus_ = index;
     layout_hand();
+    refresh_tips();
+}
+
+/* The tips of the focused card (none while a card is being played). */
+void CombatScreen::refresh_tips() {
+    int n = (int)holders_.size();
+    int focus = n == 0 || play_card_ >= 0 || aiming_ ? -1 : (hand_focus_ < 0 ? n / 2 : (hand_focus_ >= n ? n - 1 : hand_focus_));
+    if (focus == tips_for_) return;
+    tips_for_ = focus;
+    if (tips_) {
+        if (tips_->parent) tips_->parent->remove_child(tips_);
+        delete tips_;
+        tips_ = NULL;
+    }
+    if (focus < 0 || !root_) return;
+    tips_ = make_tip_set(lib_, hand_[(size_t)focus]["tips"]);
+    if (!tips_) return;
+    tips_->z_index = 10;
+    tips_->modulate.a = 0; /* placed on the next frame, after the layout */
+    root_->add_child(tips_);
 }
 
 static float hitbox_height(Control* holder) {
@@ -835,6 +857,7 @@ void CombatScreen::begin_play(int card, const std::string& target_type, int targ
     } else if (target_type == "Self" || target_type == "AllAllies") {
         select_reticle(player_, true);
     }
+    refresh_tips();
 }
 
 /* A potion aimed with the pad (NTargetManager from the potion's holder):
@@ -859,6 +882,7 @@ void CombatScreen::begin_aim(const Vec2& from, const std::string& target_type, i
         for (size_t i = 0; i < enemies_.size(); ++i) select_reticle(enemies_[i], true);
     else
         select_reticle(player_, true);
+    refresh_tips();
 }
 
 bool CombatScreen::set_play_target(int enemy) {
@@ -903,6 +927,7 @@ void CombatScreen::end_play() {
     play_target_ = -1;
     play_single_ = false;
     layout_hand();
+    refresh_tips();
 }
 
 /* NTargetingArrow._Ready: the segments and the head (StopDrawing: hidden). */
@@ -974,6 +999,23 @@ void CombatScreen::process(double dt) {
         place(h.node, h.pos.x, h.pos.y, 0, 0);
         h.node->rotation = h.angle * PI_F / 180.0f;
         h.node->scale = Vec2(h.scale, h.scale);
+    }
+    /* The tips follow their card: right of its hitbox (left of it past
+     * three quarters of the screen), kept above the screen's bottom. */
+    if (tips_ && tips_for_ >= 0 && tips_for_ < (int)holders_.size()) {
+        Control* hit = ctl(holders_[(size_t)tips_for_].node, "Hitbox");
+        if (hit) {
+            Xform2D xf = hit->global_transform();
+            float sx = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
+            Vec2 at = xf.origin;
+            float w = tips_->size.x, hgt = tips_->size.y;
+            float x = at.x > 1920.0f * 0.75f ? at.x - w - 10.0f : at.x + (offset_size(hit).x + 10.0f) * sx;
+            if (x + w > 1920.0f) x = at.x - w - 10.0f; /* CorrectHorizontalOverflow */
+            float y = at.y;
+            if (y + hgt > 1080.0f) y = 1080.0f - hgt;
+            tips_->set_position(Vec2(x, y));
+            tips_->modulate.a = 1;
+        }
     }
     /* The steps' cues as their time comes; the damage numbers fly
      * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
@@ -1160,6 +1202,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     numbers_.clear();
     root_ = root;
     vfx_box_ = ctl(root, "CombatVfxContainer");
+    hand_ = d["hand"];
+    tips_ = NULL;
+    tips_for_ = -2;
     std::vector<int> enemy_node_ids;
     ghosts_.clear();
     for (size_t i = 0; i < es.size(); ++i) {
@@ -1226,6 +1271,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     driver->name = "CombatDriver";
     driver->behavior = new CombatDriver(this);
     root->add_child(driver);
+    if (!aftermath_ && !final_) refresh_tips();
     return root;
 }
 

@@ -4,6 +4,7 @@
 #define SPIRE_UI_UTIL_H
 
 #include "../core/base.h"
+#include "../core/json.h"
 #include "../scene/script.h"
 
 namespace spire {
@@ -43,8 +44,28 @@ unsigned chaotic_rand();
  * "") and a description (BBCode); NULL without the scene. Place it with
  * place() or set_position on the screen's root. */
 Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::string& description);
+/* NHoverTipSet's text tips for a model (a decision's "tips": title,
+ * description), stacked 5 px apart; NULL when there are none. */
+Control* make_tip_set(SceneLibrary* lib, const Json& tips);
 /* A full-screen Control (anchors 0..1), named. */
 Control* full_rect_control(const char* name);
+
+/* A card's hover tips beside it (NHoverTipSet.SetAlignmentForCardHolder):
+ * right of the card, left of it past three quarters of the screen or when
+ * they would leave it; following the card (its holder's origin is the
+ * card's centre). The tips are nodes of the screen's tree. */
+class TipFollower {
+public:
+    TipFollower() : tips_(NULL), owner_(NULL) {}
+    void show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips);
+    void hide();
+    /* Each frame (after the layout). */
+    void frame();
+
+private:
+    Control* tips_;
+    Control* owner_;
+};
 
 /* Something run each frame by the scene tree (a screen's animations). */
 class FrameListener {

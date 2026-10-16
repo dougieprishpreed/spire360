@@ -33,6 +33,8 @@ private:
     Node* background_;
     Json decision_;
     std::vector<Control*> holders_;
+    Node* root_;
+    TipFollower tips_;
     std::vector<float> scales_;
     int focus_;
     bool can_skip_;

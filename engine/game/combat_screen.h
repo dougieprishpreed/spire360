@@ -177,6 +177,12 @@ private:
         double until; /* hidden then (QueueFree) */
     };
     std::vector<Banner> banners_;
+    /* The focused hand card's hover tips (NHandCardHolder.CreateHoverTips),
+     * following the card (SetAlignmentForCardHolder). */
+    void refresh_tips();
+    Json hand_;
+    Control* tips_;
+    int tips_for_;
 };
 
 } /* namespace spire */

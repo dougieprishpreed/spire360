@@ -60,6 +60,8 @@ private:
     int min_, max_;
     bool cancelable_;
     std::vector<Control*> holders_;
+    Node* root_;
+    TipFollower tips_;
     std::vector<Node*> cards_;
     std::vector<bool> picked_;
     std::vector<int> order_; /* picked, in the order picked */
