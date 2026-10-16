@@ -38,6 +38,9 @@ public:
     ~GameClient();
 
     void start_run(const std::string& character, const std::string& seed);
+    /* Takes the run's screen out of the tree (back to the main menu); a
+     * new start_run follows. */
+    void clear_screen();
     /* Plays by itself (tests): choices picked by a seeded generator. */
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
 

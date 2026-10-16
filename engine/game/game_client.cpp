@@ -307,6 +307,23 @@ void GameClient::show(const Json& d) {
     refresh_plain_screen();
 }
 
+void GameClient::clear_screen() {
+    if (screen_) {
+        if (screen_->parent) screen_->parent->remove_child(screen_);
+        delete screen_;
+        screen_ = NULL;
+    }
+    delete combat_;
+    combat_ = NULL;
+    delete ported_;
+    ported_ = NULL;
+    delete room_;
+    room_ = NULL;
+    decision_ = Json();
+    choices_.clear();
+    last_combat_ = Json();
+}
+
 void GameClient::pick(size_t i) {
     if (i >= choices_.size()) return;
     send(choices_[i].command);
@@ -444,6 +461,14 @@ Node* GameClient::plain_screen(const Json& d) {
     if (d["event_name"].is_string()) title += ": " + d["event_name"].str();
     const Json& ctx = d["context"];
     if (ctx.is_object()) title += format("   (act %d, floor %d)", ctx["act"].i(), ctx["floor"].i());
+    if (title == "game_over") {
+        /* The game over screen is not ported: the outcome, and A back to
+         * the main menu (the console app's loop). */
+        title = d["victory"].b() ? "Victory!" : format("Defeated on floor %d (act %d)", d["floor"].i(), d["act"].i(1));
+        root->add_child(text(title, 120, 400, 64));
+        root->add_child(text("A: main menu", 120, 520, 40));
+        return root;
+    }
     /* Under the top bar (80 px) and the relic row (68 px). */
     root->add_child(text(title, 120, 170, 40));
     for (size_t i = 0; i < choices_.size(); ++i) {

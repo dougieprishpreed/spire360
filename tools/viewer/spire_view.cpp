@@ -14,6 +14,7 @@
 #include "../../engine/game/combat_screen.h"
 #include "../../engine/game/card_select_screen.h"
 #include "../../engine/game/event_screen.h"
+#include "../../engine/game/title_screen.h"
 #include "../../engine/game/map_screen.h"
 #include "../../engine/game/reward_screen.h"
 #include "../../engine/game/top_bar.h"
@@ -181,6 +182,12 @@ int main(int argc, char** argv) {
         Node* bar = d["player"].is_object() ? make_top_bar(&lib, d, d["context"]["room_type"].str() == "Map") : NULL;
         if (bar) scene->add_child(bar);
     }
+    /* "title": the preview's main menu (TitleScreen), --pad driving it. */
+    TitleScreen* title = NULL;
+    if (!scene && strcmp(argv[2], "title") == 0) {
+        title = new TitleScreen(&lib);
+        scene = title->build(pack.game_version(), &err);
+    }
     if (!scene && err.empty()) scene = lib.instantiate(argv[2], &err);
     if (!scene) {
         fprintf(stderr, "%s\n", err.c_str());
@@ -204,10 +211,14 @@ int main(int argc, char** argv) {
     }
     /* --pad A,RIGHT,...: each press after half a second, then --time again
      * before the picture; the screen's commands are printed. */
-    for (size_t k = 0; ported && k < pad_script.size(); ++k) {
+    for (size_t k = 0; (ported || title) && k < pad_script.size(); ++k) {
         PadState pad;
         pad.pressed = pad.held = pad_script[k];
-        std::string cmd = ported->input(pad);
+        std::string cmd = ported ? ported->input(pad) : std::string();
+        if (title) {
+            TitleScreen::Action a = title->input(pad);
+            if (a != TitleScreen::NONE) cmd = a == TitleScreen::START_RUN ? std::string("start ") + title->character() : "quit";
+        }
         if (!cmd.empty()) printf("command: %s\n", cmd.c_str());
         for (int f = 0; f < (k + 1 < pad_script.size() ? 30 : frames); ++f) {
             tree.process(1.0 / 60.0);

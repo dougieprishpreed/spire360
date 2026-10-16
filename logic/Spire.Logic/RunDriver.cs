@@ -63,6 +63,7 @@ public partial class RunDriver
     private int _goldBeforeCombat;
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
+    private IDisposable? _selectorScope; // the game's selector stack holds _cardSelector while a run is on
 
     internal void AnnotateCardSelection(string kind, object?[] args, object? result) =>
         _cardSelector.Annotate(kind, args, result);
@@ -76,6 +77,8 @@ public partial class RunDriver
         {
             _loc.Lang = lang;
             EnsureModelDbInitialized();
+            if (_runState != null)
+                EndRun();
 
             var player = CreatePlayer(character);
             if (player == null)
@@ -120,7 +123,8 @@ public partial class RunDriver
             Log("Entered Act 0");
 
             // Register card selector for cards that need player choice
-            CardSelectCmd.UseSelector(_cardSelector);
+            _selectorScope?.Dispose();
+            _selectorScope = CardSelectCmd.UseSelector(_cardSelector);
             Hooks.Driver = this;
 
             // Now we should be at the map — detect decision point
@@ -130,6 +134,31 @@ public partial class RunDriver
         {
             return ErrorWithTrace("StartRun failed", ex);
         }
+    }
+
+    /// <summary>
+    /// A new run in the same process (the console's main menu after a run):
+    /// the game's own clean-up (RunManager.CleanUp, as quitting to the menu
+    /// does), then the driver's run state.
+    /// </summary>
+    private void EndRun()
+    {
+        try { RunManager.Instance.CleanUp(); }
+        catch (Exception ex) { Log($"EndRun: {ex.Message}"); }
+        _runState = null;
+        _turnStarted = _combatEnded = _eventOptionChosen = false;
+        _lastEventOptionCount = 0;
+        _pendingRewards = null;
+        _pendingCardReward = null;
+        _rewardsProcessed = false;
+        _pendingBundles = null;
+        _pendingBundleTcs = null;
+        _combatView = null;
+        _combatViewFor = null;
+        _ancientDialogueShown.Clear();
+        _cardSelector.CancelPending();
+        _selectorScope?.Dispose();
+        _selectorScope = null;
     }
 
     // ─── Test/Debug commands ───
@@ -363,7 +392,8 @@ public partial class RunDriver
 
             CombatManager.Instance.TurnStarted += _ => _turnStarted = true;
             CombatManager.Instance.CombatEnded += _ => _combatEnded = true;
-            CardSelectCmd.UseSelector(_cardSelector);
+            _selectorScope?.Dispose();
+            _selectorScope = CardSelectCmd.UseSelector(_cardSelector);
             Hooks.Driver = this;
 
             var savedRoom = _runState.CurrentRoom;

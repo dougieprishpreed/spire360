@@ -18,6 +18,7 @@
 
 #include "../../engine/core/pack.h"
 #include "../../engine/game/game.h"
+#include "../../engine/game/title_screen.h"
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/loc.h"
 #include "../../engine/game/logic_link.h"
@@ -151,8 +152,9 @@ void __cdecl main() {
     SceneTree* tree = new SceneTree();
     tree->set_viewport(Vec2(1920, 1080), Xform2D::scaling(2.0f / 3.0f, 2.0f / 3.0f));
 
-    /* The title screen until A; then the run's screens. */
-    Node* title = lib->instantiate("scenes/screens/main_menu.tscn", &err);
+    /* The main menu until a run starts; back to it after the run. */
+    TitleScreen menu(lib);
+    Node* title = menu.build(pack.game_version(), &err);
     if (title) tree->root()->add_child(title);
     else logf("main menu: %s", err.c_str());
     tree->layout();
@@ -182,20 +184,44 @@ void __cdecl main() {
             pad.pressed &= ~PadState::Y;
         }
 
-        if (!game && (pad.pressed & (PadState::A | PadState::START))) {
-            if (title) {
+        if (title) {
+            TitleScreen::Action a = menu.input(pad);
+            if (a == TitleScreen::QUIT) break;
+            if (a == TitleScreen::START_RUN) {
                 tree->root()->remove_child(title);
                 delete title;
                 title = NULL;
+                if (!game) game = new GameClient(lib, tree, &link);
+                std::string seed = format("%08X", (unsigned)GetTickCount());
+                logf("run: %s, seed %s", menu.character(), seed.c_str());
+                game->start_run(menu.character(), seed);
+                wait_start = now_ms();
             }
+            pad.pressed = 0;
+        } else if (game && game->game_over() && !game->busy() && (pad.pressed & (PadState::A | PadState::START))) {
+            /* The run is over: back to the main menu. */
+            game->clear_screen();
+            title = menu.build(pack.game_version(), &err);
+            if (title) {
+                tree->root()->add_child(title);
+            } else {
+                std::string seed = format("%08X", (unsigned)GetTickCount());
+                logf("run: %s, seed %s", menu.character(), seed.c_str());
+                game->start_run(menu.character(), seed);
+                wait_start = now_ms();
+            }
+            tree->layout();
+            pad.pressed = 0;
+        } else if (!game && (pad.pressed & (PadState::A | PadState::START))) {
+            /* No main menu in the pack: A starts a run. */
             game = new GameClient(lib, tree, &link);
             std::string seed = format("%08X", (unsigned)GetTickCount());
-            logf("run: Ironclad, seed %s", seed.c_str());
-            game->start_run("Ironclad", seed);
+            logf("run: %s, seed %s", menu.character(), seed.c_str());
+            game->start_run(menu.character(), seed);
             wait_start = now_ms();
             pad.pressed = 0;
         }
-        if (game) {
+        if (game && !title) {
             bool was_busy = game->busy();
             game->update(pad);
             if (game->decision_count() != shown) {
