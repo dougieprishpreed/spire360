@@ -142,6 +142,14 @@ Any other header the translated C includes needs the same treatment.
    bundle of the scenes / atlases missing here (map, events, rewards rows,
    potion holder, run.tscn, intent / controller / relic / potion atlases,
    run_history icons).
+   logic_lib.log arrived: 44 min, a full compile of all 69 translated
+   files (the logic changed). Since then: no debug info and /wd4102 for
+   logic_lib, and build_logic's c stage keeps unchanged files' dates.
+   Pushed since that build (all need the next build; the logic changed
+   again, so build_logic + logic_lib again): map screen, event screens
+   (default + Neow's ancient layout), event fields in event_choice, the
+   real LocTable.HasEntry / LocString.Exists (no longer patched to true).
+   JIT: 15 seeded runs play out identically.
 2. Usage: the user's quota drained when five spec agents and a native
    build ran at once. One background job at a time, only when it saves
    real work. Specs written so far: scratchpad spec_top_bar.md,
