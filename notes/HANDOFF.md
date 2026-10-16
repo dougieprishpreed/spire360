@@ -130,26 +130,23 @@ Any other header the translated C includes needs the same treatment.
 
 ## Waiting on the user
 
-1. (2026-10-16) A build with: the small-texture fix (health bars, solid
-   colours), intents, powers, the game's two-press card play with per-target
-   card text, the top bar and relic row on every run screen, the card
-   reward screen, the gamma ramp, split frame timings. The logic changed
-   (card view fields on reward / select / bundle / shop cards,
-   description_by_target / _multi, max_potions, ascension, the run
-   context's point_type, total_floor, ancient, second_boss; JIT: 15 seeded
-   runs unchanged), so build_logic and a full logic_lib compile. Asked for
-   xdk\build_logs\logic_lib.log (why builds take over an hour) and a
-   bundle of the scenes / atlases missing here (map, events, rewards rows,
-   potion holder, run.tscn, intent / controller / relic / potion atlases,
-   run_history icons).
-   logic_lib.log arrived: 44 min, a full compile of all 69 translated
-   files (the logic changed). Since then: no debug info and /wd4102 for
-   logic_lib, and build_logic's c stage keeps unchanged files' dates.
-   Pushed since that build (all need the next build; the logic changed
-   again, so build_logic + logic_lib again): map screen, event screens
-   (default + Neow's ancient layout), event fields in event_choice, the
-   real LocTable.HasEntry / LocString.Exists (no longer patched to true).
-   JIT: 15 seeded runs play out identically.
+1. (2026-10-16) The build of 01abc27 ran in Xenia: health bars, intents,
+   powers, top bar, card reward, card play all good. Not seen: the relic row
+   (no warning then; set_texture now logs every missing pack path once),
+   the game version (the pack predates the release_info fix: rebuild it).
+   logic_lib took 47 min (full compile, logic changed). Per frame: ~3.7 ms
+   process, ~12.7 ms draw (~450 calls), first decision ~10 s.
+   Next build (the user waits for "a first preview release candidate"):
+   build_logic + full logic_lib (logic changed again), rebuild the pack,
+   spire360. New since: main menu with character choice and back to it
+   after a run (StartRun cleans up the previous run), the menu kept while
+   the run starts, map screen, event screens (default + Neow), card
+   selection screens (grid / upgrade preview / choose a card), potions
+   (X), the event reward skip fix, card_select kind/prompt, potion usage.
+   Ask for: spire360.txt, screenshots of menu / Neow / map / a card select
+   / the potion popup, and a bundle5 (convert.py bundle's new default
+   roots: rest site, shop, treasure, rewards, game over, character select;
+   --max-mb 90 if it leaves the backgrounds out).
 2. Usage: the user's quota drained when five spec agents and a native
    build ran at once. One background job at a time, only when it saves
    real work. Specs written so far: scratchpad spec_top_bar.md,
