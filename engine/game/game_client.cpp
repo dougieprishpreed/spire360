@@ -6,6 +6,8 @@
 #include "../scene/text_nodes.h"
 #include "../scene/tree.h"
 #include "combat_screen.h"
+#include "reward_screen.h"
+#include "top_bar.h"
 #include "logic_link.h"
 
 namespace spire {
@@ -142,15 +144,17 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), screen_(NULL), combat_(NULL), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
+    : lib_(lib), tree_(tree), link_(link), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
       rng_(1), decisions_(0), errors_(0) {}
 
 GameClient::~GameClient() {
-    delete combat_;
     if (screen_) {
         screen_->parent->remove_child(screen_);
         delete screen_;
     }
+    delete combat_;
+    delete ported_;
+    delete room_;
 }
 
 void GameClient::start_run(const std::string& character, const std::string& seed) {
@@ -217,9 +221,33 @@ void GameClient::show(const Json& d) {
     }
     delete combat_;
     combat_ = NULL;
+    delete ported_;
+    ported_ = NULL;
+    delete room_;
+    room_ = NULL;
     target_ = -1;
     std::string err;
-    if (d["decision"].str() == "combat_play") {
+    const std::string& kind = d["decision"].str();
+    if (kind == "card_reward") {
+        /* Over the room the fight was in (an event's reward: no room). */
+        Node* room = NULL;
+        if (!last_combat_.is_null() && !d["from_event"].b()) {
+            room_ = new CombatScreen(lib_);
+            room_->set_aftermath(d["player"]);
+            room = room_->build(last_combat_, &err);
+        }
+        CardRewardScreen* s = new CardRewardScreen(lib_);
+        s->set_background(room);
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("card reward screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "combat_play") {
+        last_combat_ = d;
         combat_ = new CombatScreen(lib_);
         combat_->set_hand_focus(hand_focus_);
         screen_ = combat_->build(d, &err);
@@ -230,6 +258,11 @@ void GameClient::show(const Json& d) {
         }
     }
     if (!screen_) screen_ = plain_screen(d);
+    /* The top bar over every screen of the run. */
+    if (d["player"].is_object() && kind != "game_over") {
+        Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map");
+        if (bar) screen_->add_child(bar);
+    }
     tree_->root()->add_child(screen_);
     refresh_plain_screen();
 }
@@ -324,6 +357,11 @@ void GameClient::combat_input(const PadState& pad) {
 void GameClient::handle_input(const PadState& pad) {
     if (combat_) {
         combat_input(pad);
+        return;
+    }
+    if (ported_) {
+        std::string cmd = ported_->input(pad);
+        if (!cmd.empty()) send(cmd);
         return;
     }
     if (choices_.empty()) return;

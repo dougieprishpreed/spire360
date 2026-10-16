@@ -25,6 +25,7 @@ struct RtlCharFx {
     int relative_index; /* character index within the effect's span */
     double elapsed_time;
     const std::map<std::string, std::string>* env; /* tag options */
+    RtlCharFx() : visible(true), relative_index(0), elapsed_time(0), env(NULL) {}
 };
 typedef void (*RtlEffectFn)(RtlCharFx& fx);
 void register_rtl_effect(const char* name, RtlEffectFn fn);

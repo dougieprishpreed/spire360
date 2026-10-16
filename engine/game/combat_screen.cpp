@@ -32,7 +32,7 @@ private:
 };
 
 CombatScreen::CombatScreen(SceneLibrary* lib)
-    : lib_(lib), hand_focus_(-1), hand_box_(NULL), play_card_(-1), play_single_(false), play_target_(-1), arrow_(NULL),
+    : lib_(lib), hand_focus_(-1), aftermath_(false), hand_box_(NULL), play_card_(-1), play_single_(false), play_target_(-1), arrow_(NULL),
       arrow_head_(NULL) {
     player_.node = NULL;
 }
@@ -978,18 +978,22 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     /* Allies: the player (pets later). */
     std::vector<Creature> ally_nodes, enemy_nodes;
     enemies_.clear();
-    const Json& player = d["player"];
+    /* After the fight: the player as the reward decision has them, no powers. */
+    static const Json no_powers;
+    const Json& player = aftermath_ && aftermath_player_.is_object() ? aftermath_player_ : d["player"];
+    const Json& player_powers = aftermath_ ? no_powers : d["player_powers"];
     Creature c;
     if (make_creature(player["character"].is_string() ? player["character"].str() : std::string("ironclad"), true, c)) {
         allies->add_child(c.node);
         update_bounds(c);
-        refresh_health_bar(c, player, d["player_powers"]);
+        refresh_health_bar(c, player, player_powers);
         set_nameplate_text(c.nameplate, player["name"].str());
-        make_powers(c, d["player_powers"]);
+        make_powers(c, player_powers);
         ally_nodes.push_back(c);
         player_ = c;
     }
-    const Json& es = d["enemies"];
+    static const Json no_enemies;
+    const Json& es = aftermath_ ? no_enemies : d["enemies"];
     for (size_t i = 0; i < es.size(); ++i) {
         if (!make_creature(es[i]["id"].str(), false, c)) {
             enemies_.push_back(c); /* node NULL: keeps enemies_[i] = enemy i */
@@ -1005,8 +1009,13 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         enemy_nodes.push_back(c);
         enemies_.push_back(c);
     }
-    setup_combat_ui(root, d);
-    build_hand(find_named(root, "CombatUi"), d);
+    if (aftermath_) {
+        Node* ui = find_named(root, "CombatUi");
+        if (ui && ui->is_canvas_item()) ((CanvasItem*)ui)->visible = false;
+    } else {
+        setup_combat_ui(root, d);
+        build_hand(find_named(root, "CombatUi"), d);
+    }
     position_players(ally_nodes, scaling, view["fully_center_players"].b());
     position_enemies(enemy_nodes, scaling);
     play_idle(root);

@@ -3027,6 +3027,21 @@ public partial class RunDriver
         }
         catch { }
 
+        // NTopBar's room, floor and boss icons (NTopBarRoomIcon,
+        // NTopBarFloorIcon, NTopBarBossIcon).
+        try
+        {
+            var act = _runState.Act;
+            var point = _runState.CurrentMapPoint;
+            ctx["point_type"] = point?.PointType.ToString();
+            ctx["total_floor"] = _runState.TotalFloor;
+            ctx["ancient"] = act?.Ancient?.Id.Entry;
+            ctx["second_boss"] = act?.SecondBossEncounter?.Id.Entry;
+            ctx["at_second_boss"] = point != null && point == _runState.Map?.SecondBossMapPoint;
+            ctx["at_boss"] = point != null && point == _runState.Map?.BossMapPoint;
+        }
+        catch { }
+
         return ctx;
     }
 

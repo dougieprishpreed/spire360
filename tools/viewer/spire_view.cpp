@@ -12,6 +12,8 @@
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
 #include "../../engine/game/combat_screen.h"
+#include "../../engine/game/reward_screen.h"
+#include "../../engine/game/top_bar.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
 #include "../../engine/gfx/sw_renderer.h"
@@ -120,9 +122,27 @@ int main(int argc, char** argv) {
             CombatScreen* cs = new CombatScreen(&lib);
             cs->set_hand_focus(hand_focus);
             scene = cs->build(d, &err);
+        } else if (d["decision"].str() == "card_reward") {
+            CardRewardScreen* rs = new CardRewardScreen(&lib); /* lives as long as the scene */
+            scene = rs->build(d, &err);
         } else if (err.empty()) {
             err = "no screen for decision " + d["decision"].str();
         }
+    }
+    if (scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
+        /* As the game client shows a run's screens: with the top bar. */
+        FILE* jf = fopen(argv[2], "rb");
+        std::string text;
+        if (jf) {
+            char buf[65536];
+            size_t got;
+            while ((got = fread(buf, 1, sizeof(buf), jf)) > 0) text.append(buf, got);
+            fclose(jf);
+        }
+        std::string e2;
+        Json d = Json::parse(text.c_str(), text.size(), &e2);
+        Node* bar = d["player"].is_object() ? make_top_bar(&lib, d, d["context"]["room_type"].str() == "Map") : NULL;
+        if (bar) scene->add_child(bar);
     }
     if (!scene && err.empty()) scene = lib.instantiate(argv[2], &err);
     if (!scene) {

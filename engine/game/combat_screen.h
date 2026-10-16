@@ -26,6 +26,13 @@ class SceneLibrary;
 class CombatScreen {
 public:
     explicit CombatScreen(SceneLibrary* lib);
+    /* The room after the fight (behind the rewards): the background and
+     * the player only (as `player`, a later decision's summary, has them),
+     * no enemies, hand or combat UI. Set before build. */
+    void set_aftermath(const Json& player) {
+        aftermath_ = true;
+        aftermath_player_ = player;
+    }
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
     /* The controller's focused card in the hand (-1: the middle one); set
@@ -91,6 +98,8 @@ private:
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center);
     SceneLibrary* lib_;
     int hand_focus_;
+    bool aftermath_;
+    Json aftermath_player_;
     Control* hand_box_;               /* %CardHolderContainer */
     std::vector<Holder> holders_;     /* nodes in the built tree (not owned) */
     std::vector<Creature> enemies_;   /* the decision's enemies (node NULL: not shown) */

@@ -72,6 +72,9 @@ private:
     LogicLink* link_;
     Node* screen_;
     CombatScreen* combat_; /* the combat screen's state while it is shown */
+    RunScreen* ported_;    /* another ported screen while it is shown */
+    CombatScreen* room_;   /* the room behind an overlay (after a fight) */
+    Json last_combat_;     /* the last combat_play decision (its room) */
     int hand_focus_;       /* kept across decisions, as the game's _lastFocusedHolderIdx */
     int target_;           /* combat targeting: enemy index, -1 when not targeting */
     int last_target_;      /* the enemy last aimed at (combat_id; NCombatRoom.LastTargetedCreature) */
