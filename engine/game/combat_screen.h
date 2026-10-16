@@ -117,7 +117,8 @@ private:
     void make_powers(Creature& c, const Json& powers);
     void make_orbs(Creature& c, const Json& orbs, int slots);
     void position_enemies(std::vector<Creature>& c, float scaling, std::vector<Vec2>* out = NULL);
-    void position_players(std::vector<Creature>& c, float scaling, bool fully_center);
+    void position_players(std::vector<Creature>& c, float scaling, bool fully_center, Creature* osty = NULL,
+                          float osty_max_hp = 0);
     SceneLibrary* lib_;
     int hand_focus_;
     bool aftermath_;
@@ -126,6 +127,7 @@ private:
     std::vector<Holder> holders_;     /* nodes in the built tree (not owned) */
     std::vector<Creature> enemies_;   /* the decision's enemies (node NULL: not shown) */
     Creature player_;
+    Creature osty_;                   /* Necrobinder's Osty (node NULL: none) */
     TweenSet tweens_;
     int play_card_;                   /* the card being played, -1: none */
     bool aiming_;                     /* a potion aimed (begin_aim) */

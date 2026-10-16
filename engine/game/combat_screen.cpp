@@ -36,6 +36,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     : lib_(lib), hand_focus_(-1), aftermath_(false), hand_box_(NULL), play_card_(-1), aiming_(false), play_single_(false), play_target_(-1), arrow_(NULL),
       arrow_head_(NULL) {
     player_.node = NULL;
+    osty_.node = NULL;
     next_cue_ = 0;
     cue_t_ = 0;
     busy_until_ = 0;
@@ -458,7 +459,8 @@ void CombatScreen::position_enemies(std::vector<Creature>& cs, float scaling, st
 
 /* NCombatRoom.PositionPlayersAndPets, for the local player (pets come
  * later: Necrobinder's Osty). */
-void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bool fully_center) {
+void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bool fully_center, Creature* osty,
+                                    float osty_max_hp) {
     if (cs.empty()) return;
     float half = 960.0f / scaling, gap = 70.0f;
     int n = (int)cs.size();
@@ -488,6 +490,17 @@ void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bo
             int k = r * cols + c;
             if (k >= n) break;
             cs[k].node->set_position(Vec2(-x - cs[k].width * 0.5f, 200.0f - row_rise * (float)r));
+            if (k == 0 && osty && osty->node) {
+                /* PositionLocalPlayerOsty: the player 150 px further left,
+                 * Osty right of where the player was (GetOstyOffsetFromPlayer:
+                 * half the player's hitbox, plus 150..250 px by its max HP,
+                 * 75 px up). */
+                float t = clampf(osty_max_hp / 150.0f, 0.0f, 1.0f);
+                Vec2 off(cs[k].hitbox.size.x * 0.5f + 150.0f + 100.0f * t, -75.0f);
+                cs[k].node->set_position(Vec2(-x - cs[k].width * 0.5f - 150.0f, 200.0f - row_rise * (float)r));
+                osty->node->set_position(Vec2(-x, 200.0f - row_rise * (float)r) + off);
+                x += 100.0f;
+            }
             if (r > 0 && cs[k].visuals && cs[k].visuals->is_canvas_item())
                 ((CanvasItem*)cs[k].visuals)->modulate = Color(0.5f, 0.5f, 0.5f);
             x += cs[k].width + gap;
@@ -1121,6 +1134,22 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         ally_nodes.push_back(c);
         player_ = c;
     }
+    /* Necrobinder's Osty, while alive: its size by its max HP
+     * (OstyScaleToSize: 1x to 2x at 150). */
+    osty_.node = NULL;
+    const Json& osty = d["osty"];
+    float osty_max_hp = (float)osty["max_hp"].num(0);
+    if (!aftermath_ && osty.is_object() && osty["alive"].b() && make_creature("osty", false, c)) {
+        if (c.visuals && c.visuals->is_node2d()) {
+            float k = 1.0f + clampf(osty_max_hp / 150.0f, 0.0f, 1.0f);
+            ((Node2D*)c.visuals)->scale = ((Node2D*)c.visuals)->scale * k;
+        }
+        allies->add_child(c.node);
+        update_bounds(c);
+        refresh_health_bar(c, osty, no_powers);
+        set_nameplate_text(c.nameplate, osty["name"].str());
+        osty_ = c;
+    }
     static const Json no_enemies;
     const Json& es = aftermath_ ? no_enemies : d["enemies"];
     enemy_who_.clear();
@@ -1176,7 +1205,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         setup_combat_ui(root, d);
         build_hand(find_named(root, "CombatUi"), d);
     }
-    position_players(ally_nodes, scaling, view["fully_center_players"].b());
+    position_players(ally_nodes, scaling, view["fully_center_players"].b(), &osty_, osty_max_hp);
     /* Where the enemies stand: as before in this fight; laid out again
      * (all of them) when one has no place yet. */
     bool known = places_ != NULL && !enemy_nodes.empty();
@@ -1204,6 +1233,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
 
 CombatScreen::Creature* CombatScreen::creature_for(const std::string& who) {
     if (who == "player") return player_.node ? &player_ : NULL;
+    if (who == "osty") return osty_.node ? &osty_ : NULL;
     for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i)
         if (enemy_who_[i] == who) return enemies_[i].node ? &enemies_[i] : NULL;
     for (size_t i = 0; i < ghosts_.size(); ++i)
