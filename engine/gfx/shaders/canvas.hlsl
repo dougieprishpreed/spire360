@@ -1,6 +1,8 @@
 // Canvas shader for the D3D9 renderer (PC D3D9 and Xbox 360). One shader
 // for everything the canvas draws; textures hold straight alpha, the output
-// is premultiplied (blend states assume it). Mirrors the software renderer
+// is premultiplied (blend states assume it). The effect modes branch on
+// their constants ([branch], tex2Dlod: the textures have one level), so a
+// plain draw pays nothing for them. Mirrors the software renderer
 // (engine/gfx/sw_renderer.cpp) and Godot's canvas shader for MSDF text.
 //
 // PC: compiled at startup with D3DCompile. Xbox 360: compiled by the XDK's
@@ -68,18 +70,18 @@ float median3(float r, float g, float b) {
 }
 
 float4 ps_main(VsOut i) : COLOR {
-    if (g_fire.x > 0.5) {
+    [branch] if (g_fire.x > 0.5) {
         // The game's stepped fire shaders (shaders/vfx/vfx_stepped_shader_fire_*).
         float2 uv = i.uv;
-        float n2 = g_fstr.y * tex2D(g_fn2, uv * g_fn2p.xy + g_fn2p.zw).b;
-        float n1 = g_fstr.x * tex2D(g_fn1, uv * g_fn1p.xy + g_fn1p.zw).b;
-        float m = tex2D(g_fmask, (uv - float2(0.0, 0.04)) * g_fmaskp.xy + float2(0.0, 0.04) + g_fmaskp.zw).b;
+        float n2 = g_fstr.y * tex2Dlod(g_fn2, float4(uv * g_fn2p.xy + g_fn2p.zw, 0.0, 0.0)).b;
+        float n1 = g_fstr.x * tex2Dlod(g_fn1, float4(uv * g_fn1p.xy + g_fn1p.zw, 0.0, 0.0)).b;
+        float m = tex2Dlod(g_fmask, float4((uv - float2(0.0, 0.04)) * g_fmaskp.xy + float2(0.0, 0.04) + g_fmaskp.zw, 0.0, 0.0)).b;
         m = lerp(m, 1.0 - m, g_fstr.z);
         float a = n1 * n2 + m;
-        float2 d = tex2D(g_fd2, uv * g_fd2p.xy + g_fd2p.zw).xy * g_fdstr.y +
-                   tex2D(g_fd1, uv * g_fd1p.xy + g_fd1p.zw).xy * g_fdstr.x;
-        float2 dm = tex2D(g_fdmask, uv * g_fdmaskp.xy + g_fdmaskp.zw).xy;
-        float v = a * tex2D(g_tex, uv + d * dm).b;
+        float2 d = tex2Dlod(g_fd2, float4(uv * g_fd2p.xy + g_fd2p.zw, 0.0, 0.0)).xy * g_fdstr.y +
+                   tex2Dlod(g_fd1, float4(uv * g_fd1p.xy + g_fd1p.zw, 0.0, 0.0)).xy * g_fdstr.x;
+        float2 dm = tex2Dlod(g_fdmask, float4(uv * g_fdmaskp.xy + g_fdmaskp.zw, 0.0, 0.0)).xy;
+        float v = a * tex2Dlod(g_tex, float4(uv + d * dm, 0.0, 0.0)).b;
         float3 rgb;
         if (g_fstr.w > 0.5)
             rgb = g_fouter.rgb * (smoothstep(g_fsteps.x, g_fsteps.y, 1.0 - v) + g_finner.rgb);
@@ -88,16 +90,16 @@ float4 ps_main(VsOut i) : COLOR {
         float fa = saturate(smoothstep(g_fsteps.z, g_fsteps.w, v)) * i.color.a;
         return float4(rgb * fa, fa);
     }
-    if (g_vfx.x > 0.5) {
+    [branch] if (g_vfx.x > 0.5) {
         // The game's erosion particle shaders (vfx_ring_polar, vfx_poof, ...).
         float2 uv = i.uv;
-        if (g_vdist.w > 0.5) uv += tex2D(g_tex, uv + g_vdist.xy).b * g_vdist.z;
+        if (g_vdist.w > 0.5) uv += tex2Dlod(g_tex, float4(uv + g_vdist.xy, 0.0, 0.0)).b * g_vdist.z;
         if (g_vfx.y > 0.5) {
             float2 dir = uv - float2(0.5, 0.5);
             uv = frac(float2(length(dir) * 2.0, atan2(dir.y, dir.x) / 6.2831853));
         }
-        float4 e = tex2D(g_tex, uv);
-        float3 rgb = g_vfx.z > 0.5 ? tex2D(g_lut, float2(e.r, 0.5)).rgb : float3(1.0, 1.0, 1.0);
+        float4 e = tex2Dlod(g_tex, float4(uv, 0.0, 0.0));
+        float3 rgb = g_vfx.z > 0.5 ? tex2Dlod(g_lut, float4(e.r, 0.5, 0.0, 0.0)).rgb : float3(1.0, 1.0, 1.0);
         float ea = e.a;
         if (g_verosion.z > 0.5) {
             float ch = g_verosion.w > 0.5 ? e.a : e.r;
@@ -108,10 +110,10 @@ float4 ps_main(VsOut i) : COLOR {
         return float4(vc.rgb * vc.a, vc.a);
     }
     float4 t = tex2D(g_tex, i.uv);
-    if (g_gm.x > 0.5) {
+    [branch] if (g_gm.x > 0.5) {
         // The game's grayscale / flipbook VFX shaders: the red through the
         // gradient, the alpha from the red or the texel.
-        float4 l = tex2D(g_lut, float2(t.r, 0.5));
+        float4 l = tex2Dlod(g_lut, float4(t.r, 0.5, 0.0, 0.0));
         t = float4(l.rgb, g_gm.y > 0.5 ? t.r : t.a);
     }
     if (g_mode.z > 0.5) {
