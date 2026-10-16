@@ -55,6 +55,8 @@ public:
     /* Waiting for the logic's answer. */
     bool busy() const { return waiting_; }
     bool game_over() const { return decision_["decision"].str() == "game_over"; }
+    /* The game over screen's Main Menu was pressed (A on the plain one). */
+    bool menu_requested() const { return menu_requested_; }
     /* The last error the logic reported ("" if none). */
     const std::string& last_error() const { return error_; }
 
@@ -90,7 +92,7 @@ private:
     Json decision_;
     std::vector<Choice> choices_;
     size_t focus_;
-    bool waiting_, ready_, auto_;
+    bool waiting_, ready_, auto_, menu_requested_;
     unsigned rng_;
     int decisions_, errors_;
     std::string error_, pending_start_;

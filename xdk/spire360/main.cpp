@@ -199,7 +199,7 @@ void __cdecl main() {
                 wait_start = now_ms();
             }
             pad.pressed = 0;
-        } else if (game && game->game_over() && !game->busy() && (pad.pressed & (PadState::A | PadState::START))) {
+        } else if (game && game->menu_requested()) {
             /* The run is over: back to the main menu. */
             game->clear_screen();
             title = menu.build(pack.game_version(), &err);

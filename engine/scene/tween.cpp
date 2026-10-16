@@ -105,6 +105,28 @@ static float circ(TweenEase e, float t, float b, float c, float d) {
     return c / 2 * (sqrtf(1 - t * t) + 1) + b;
 }
 
+static float quart(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_IN) return c * powf(t / d, 4) + b;
+    if (e == EASE_OUT) return -c * (powf(t / d - 1, 4) - 1) + b;
+    t = t / d * 2;
+    if (t < 1) return c / 2 * powf(t, 4) + b;
+    return -c / 2 * (powf(t - 2, 4) - 2) + b;
+}
+
+static float spring_out(float t, float b, float c, float d) {
+    t /= d;
+    float s = 1.0f - t;
+    t = (sinf(t * 3.14159265f * (0.2f + 2.5f * t * t * t)) * powf(s, 2.2f) + t) * (1.0f + (1.2f * s));
+    return c * t + b;
+}
+
+static float spring(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_OUT) return spring_out(t, b, c, d);
+    if (e == EASE_IN) return c - spring_out(d - t, 0, c, d) + b;
+    if (t < d / 2) return c / 2 - spring_out(d - t * 2, 0, c / 2, d) + b;
+    return spring_out(t * 2 - d, b + c / 2, c / 2, d);
+}
+
 float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, float c, float d) {
     if (d <= 0) return b + c;
     switch (trans) {
@@ -114,6 +136,8 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
     case TRANS_BACK: return back(ease, t, b, c, d);
     case TRANS_CUBIC: return cubic(ease, t, b, c, d);
     case TRANS_CIRC: return circ(ease, t, b, c, d);
+    case TRANS_QUART: return quart(ease, t, b, c, d);
+    case TRANS_SPRING: return spring(ease, t, b, c, d);
     default: return c * t / d + b;
     }
 }

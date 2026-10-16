@@ -8,6 +8,7 @@
 #include "combat_screen.h"
 #include "card_select_screen.h"
 #include "event_screen.h"
+#include "game_over_screen.h"
 #include "map_screen.h"
 #include "potion_menu.h"
 #include "reward_screen.h"
@@ -155,7 +156,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0) {}
 
 GameClient::~GameClient() {
@@ -330,6 +331,17 @@ void GameClient::show(const Json& d) {
             ported_ = NULL;
         }
     }
+    if (kind == "game_over") {
+        GameOverScreen* s = new GameOverScreen(lib_);
+        s->set_background(overlay_background(d, true));
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("game over screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
     if (kind == "combat_play") {
         last_combat_ = d;
         combat_ = new CombatScreen(lib_);
@@ -369,6 +381,7 @@ void GameClient::clear_screen() {
     behind_ = NULL;
     decision_ = Json();
     choices_.clear();
+    menu_requested_ = false;
     last_combat_ = Json();
     last_event_ = Json();
 }
@@ -475,6 +488,11 @@ void GameClient::handle_input(const PadState& pad) {
     if (ported_) {
         std::string cmd = ported_->input(pad);
         if (!cmd.empty()) send(cmd);
+        if (game_over() && ((GameOverScreen*)ported_)->done()) menu_requested_ = true;
+        return;
+    }
+    if (game_over()) {
+        if (pad.pressed & (PadState::A | PadState::START)) menu_requested_ = true;
         return;
     }
     if (choices_.empty()) return;

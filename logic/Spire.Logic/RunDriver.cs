@@ -3011,7 +3011,7 @@ public partial class RunDriver
         // BUG-005: When player died, the engine resets HP to max. Use last known HP instead.
         if (!isVictory)
             summary["hp"] = _lastKnownHp > 0 ? 0 : (player.Creature?.CurrentHp ?? 0);
-        return new Dictionary<string, object?>
+        var d = new Dictionary<string, object?>
         {
             ["type"] = "decision",
             ["decision"] = "game_over",
@@ -3021,6 +3021,8 @@ public partial class RunDriver
             ["act"] = _runState.CurrentActIndex + 1,
             ["floor"] = _runState.ActFloor,
         };
+        AddGameOverDetails(d, isVictory);
+        return d;
     }
 
     #endregion

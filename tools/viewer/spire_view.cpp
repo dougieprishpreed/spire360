@@ -18,6 +18,7 @@
 #include "../../engine/game/map_screen.h"
 #include "../../engine/game/reward_screen.h"
 #include "../../engine/game/rewards_screen.h"
+#include "../../engine/game/game_over_screen.h"
 #include "../../engine/game/top_bar.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
@@ -152,6 +153,10 @@ int main(int argc, char** argv) {
             CardRewardScreen* rs = new CardRewardScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);
             ported = rs;
+        } else if (d["decision"].str() == "game_over") {
+            GameOverScreen* gs = new GameOverScreen(&lib); /* lives as long as the scene */
+            scene = gs->build(d, &err);
+            ported = gs;
         } else if (d["decision"].str() == "rewards") {
             RewardsScreen* rs = new RewardsScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);
@@ -184,7 +189,7 @@ int main(int argc, char** argv) {
         }
         std::string e2;
         Json d = Json::parse(text.c_str(), text.size(), &e2);
-        Node* bar = d["player"].is_object() ? make_top_bar(&lib, d, d["context"]["room_type"].str() == "Map") : NULL;
+        Node* bar = d["player"].is_object() && d["decision"].str() != "game_over" ? make_top_bar(&lib, d, d["context"]["room_type"].str() == "Map") : NULL;
         if (bar) scene->add_child(bar);
     }
     /* "title": the preview's main menu (TitleScreen), --pad driving it. */
