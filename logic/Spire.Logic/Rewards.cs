@@ -93,8 +93,6 @@ public partial class RunDriver
             if (sync.IsRewardsSetCompleted(_rewardSet))
             {
                 FinishRewardsSet();
-                // At a rest site the option is done: on to the map.
-                if (_runState?.CurrentRoom is RestSiteRoom) ForceToMap();
                 return null;
             }
         }
@@ -246,12 +244,6 @@ public partial class RunDriver
             }
             catch (Exception ex) { Log($"Skip rewards set: {ex.Message}"); }
             FinishRewardsSet();
-            if (_runState?.CurrentRoom is RestSiteRoom)
-            {
-                // The rest site's option is done (DoChooseOption went to the map).
-                ForceToMap();
-                return MapSelectState();
-            }
             return DetectDecisionPoint();
         }
         foreach (var r in _rewardList)

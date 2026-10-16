@@ -304,6 +304,12 @@ DEFAULT_BUNDLE = [
     "images/events/neow.png", "images/events/this_or_that.png", "images/ui/reward_screen/*.png",
     "scenes/screens/game_over_screen/*.tscn", "scenes/orbs/*.tscn", "scenes/orbs/orb_visuals/*.tscn",
     "images/packed/character_select/*.png", "images/packed/sprite_fonts/*.png",
+    "scenes/rooms/treasure_room/*.tscn", "scenes/ui/treasure_relic_holder.tscn",
+    # The large set ("bundle --max-mb 1000" for a split zip): every
+    # creature, combat background and event picture, card portraits and the
+    # relics' big icons.
+    "scenes/creature_visuals/*.tscn", "scenes/backgrounds/*.tscn", "images/events/*.png",
+    "images/atlases/card_atlas.sprites/*.tres", "images/relics/*.png",
 ]
 
 

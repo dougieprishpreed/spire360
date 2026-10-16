@@ -59,6 +59,7 @@ public partial class RunDriver
     // The card reward screen open (a fight's, from the rewards decision)
     private CardReward? _pendingCardReward;
     private bool _rewardsProcessed;
+    private bool _restSiteDone; // the rest site's choice is made: only Proceed is left
     private int _goldBeforeCombat;
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
@@ -154,6 +155,7 @@ public partial class RunDriver
         ClearRewards();
         _pendingCardReward = null;
         _rewardsProcessed = false;
+        _restSiteDone = false;
         _pendingBundles = null;
         _pendingBundleTcs = null;
         _combatView = null;
@@ -802,6 +804,7 @@ public partial class RunDriver
 
         // Reset tracking for new room
         _rewardsProcessed = false;
+        _restSiteDone = false;
         _pendingCardReward = null;
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
@@ -1197,10 +1200,10 @@ public partial class RunDriver
             Sched.Pump();
             Sched.Pump();
             WaitForActionExecutor();
-            // Force to map after SMITH completes (same pattern as HEAL)
-            Log("Card selection in rest site (SMITH), forcing to map");
-            ForceToMap();
-            return MapSelectState();
+            // SMITH done: the room stays with its proceed button (as after HEAL).
+            Log("Card selection in rest site (SMITH) done");
+            _restSiteDone = true;
+            return DetectDecisionPoint();
         }
 
         // Extra wait for shop card removal: the purchase task needs to finish
@@ -1363,11 +1366,11 @@ public partial class RunDriver
                 Sched.Pump();
                 Sched.Pump();
                 WaitForActionExecutor();
-                // Rewards it offered first (the rewards screen; Proceed goes to the map).
+                // The room stays (its proceed button); rewards it offered first.
+                _restSiteDone = true;
                 if (_rewardList != null)
                     return DetectDecisionPoint();
-                ForceToMap();
-                return MapSelectState();
+                return RestSiteState(restSiteRoom);
             }
         }
         // For events — use EventSynchronizer
@@ -2805,13 +2808,26 @@ public partial class RunDriver
     {
         var options = restRoom.Options;
         var player = _runState!.Players[0];
+        string? background = null;
+        try { background = _runState.Act.RestSiteBackgroundPath; } catch { }
 
-        if (options == null || options.Count == 0)
+        if (_restSiteDone || options == null || options.Count == 0)
         {
-            // Options empty = choice already made (synchronizer cleared them), go to map
-            Log("Rest site: options empty, proceeding to map");
-            ForceToMap();
-            return MapSelectState();
+            // The choice is made (the synchronizer cleared the options): the
+            // room stays with its proceed button (NRestSiteRoom.ShowProceedButton);
+            // leave_room goes to the map.
+            Log("Rest site: option done, waiting to proceed");
+            _restSiteDone = true;
+            return new Dictionary<string, object?>
+            {
+                ["type"] = "decision",
+                ["decision"] = "rest_site",
+                ["context"] = RunContext(),
+                ["options"] = new List<Dictionary<string, object?>>(),
+                ["done"] = true,
+                ["background"] = background,
+                ["player"] = PlayerSummary(player),
+            };
         }
 
         var optionList = options.Select((opt, i) => new Dictionary<string, object?>
@@ -2820,6 +2836,8 @@ public partial class RunDriver
             ["option_id"] = opt.OptionId,
             ["name"] = opt.GetType().Name,
             ["is_enabled"] = opt.IsEnabled,
+            ["title"] = SafeText(() => opt.Title.GetFormattedText()),
+            ["description"] = SafeText(() => opt.Description.GetFormattedText()),
         }).ToList();
 
         return new Dictionary<string, object?>
@@ -2828,6 +2846,7 @@ public partial class RunDriver
             ["decision"] = "rest_site",
             ["context"] = RunContext(),
             ["options"] = optionList,
+            ["background"] = background,
             ["player"] = PlayerSummary(player),
         };
     }
