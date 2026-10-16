@@ -12,7 +12,7 @@
 
 namespace spire {
 
-enum TweenTrans { TRANS_LINEAR, TRANS_SINE, TRANS_EXPO, TRANS_ELASTIC };
+enum TweenTrans { TRANS_LINEAR, TRANS_SINE, TRANS_EXPO, TRANS_ELASTIC, TRANS_BACK, TRANS_CUBIC, TRANS_CIRC };
 enum TweenEase { EASE_IN, EASE_OUT, EASE_IN_OUT };
 
 /* Godot's Tween.interpolate_value: t in [0, d] seconds, from b by c. */
@@ -20,14 +20,17 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
 
 class TweenSet {
 public:
-    /* Tweens *p to `to` over `seconds` (from its current value). */
-    void tween(float* p, float to, float seconds, TweenTrans trans = TRANS_LINEAR, TweenEase ease = EASE_IN_OUT);
-    /* The same from a given start (Godot's .From(v)). */
+    /* Tweens *p to `to` over `seconds`, from its value when it starts
+     * (after `delay` seconds: Godot's SetDelay, or intervals before it). */
+    void tween(float* p, float to, float seconds, TweenTrans trans = TRANS_LINEAR, TweenEase ease = EASE_IN_OUT,
+               float delay = 0);
+    /* The same from a given start (Godot's .From(v)), set when it starts. */
     void tween_from(float* p, float from, float to, float seconds, TweenTrans trans = TRANS_LINEAR,
-                    TweenEase ease = EASE_IN_OUT);
-    void tween(Vec2* p, const Vec2& to, float seconds, TweenTrans trans = TRANS_LINEAR, TweenEase ease = EASE_IN_OUT);
+                    TweenEase ease = EASE_IN_OUT, float delay = 0);
+    void tween(Vec2* p, const Vec2& to, float seconds, TweenTrans trans = TRANS_LINEAR, TweenEase ease = EASE_IN_OUT,
+               float delay = 0);
     void tween_from(Vec2* p, const Vec2& from, const Vec2& to, float seconds, TweenTrans trans = TRANS_LINEAR,
-                    TweenEase ease = EASE_IN_OUT);
+                    TweenEase ease = EASE_IN_OUT, float delay = 0);
     /* Stops the tween on *p (the value stays where it is). */
     void kill(float* p);
     void kill(Vec2* p);
@@ -36,9 +39,12 @@ public:
     bool running() const { return !items_.empty(); }
 
 private:
+    void add(float* p, float from, bool from_current, float to, float seconds, TweenTrans trans, TweenEase ease,
+             float delay);
     struct Item {
         float* p;
-        float from, to, seconds, t;
+        float from, to, seconds, t; /* t < 0: waiting out its delay */
+        bool from_current;          /* from: the value when it starts */
         TweenTrans trans;
         TweenEase ease;
     };

@@ -65,16 +65,6 @@ static Color json_rgba(const Json& c, const Color& fallback) {
     return Color((float)c[(size_t)0].num(), (float)c[1].num(), (float)c[2].num(), c.size() > 3 ? (float)c[3].num() : 1.0f);
 }
 
-static void set_texture(SceneLibrary* lib, Node* rect, const std::string& path) {
-    if (!rect || rect->type != "TextureRect") return;
-    Resource* r = lib->ext(path);
-    ((TextureRect*)rect)->texture = r && r->is_texture() ? (Texture2DRes*)r : NULL;
-}
-
-static void hide(Node* n) {
-    if (n && n->is_canvas_item()) ((CanvasItem*)n)->visible = false;
-}
-
 /* Control.Position set before the map has its size (as SetMap runs): with
  * the scenes' centre anchors the point lands at the screen's centre plus
  * the position. */

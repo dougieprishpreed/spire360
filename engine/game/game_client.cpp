@@ -6,6 +6,7 @@
 #include "../scene/text_nodes.h"
 #include "../scene/tree.h"
 #include "combat_screen.h"
+#include "event_screen.h"
 #include "map_screen.h"
 #include "reward_screen.h"
 #include "top_bar.h"
@@ -243,6 +244,15 @@ void GameClient::show(const Json& d) {
         screen_ = s->build(d, &err);
         if (!screen_) {
             log_warn("card reward screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "event_choice") {
+        ported_ = new EventScreen(lib_);
+        screen_ = ported_->build(d, &err);
+        if (!screen_) {
+            log_warn("event screen: %s", err.c_str());
             delete ported_;
             ported_ = NULL;
         }

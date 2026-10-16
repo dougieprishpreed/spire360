@@ -58,41 +58,100 @@ static float elastic(TweenEase e, float t, float b, float c, float d) {
     return a * sinf((t * d - s) * (2 * PI_F) / p) * 0.5f + c + b;
 }
 
+static float back(TweenEase e, float t, float b, float c, float d) {
+    const float s = 1.70158f;
+    if (e == EASE_IN) {
+        t /= d;
+        return c * t * t * ((s + 1) * t - s) + b;
+    }
+    if (e == EASE_OUT) {
+        t = t / d - 1;
+        return c * (t * t * ((s + 1) * t + s) + 1) + b;
+    }
+    const float s2 = s * 1.525f;
+    t /= d / 2;
+    if (t < 1) return c / 2 * (t * t * ((s2 + 1) * t - s2)) + b;
+    t -= 2;
+    return c / 2 * (t * t * ((s2 + 1) * t + s2) + 2) + b;
+}
+
+static float cubic(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_IN) {
+        t /= d;
+        return c * t * t * t + b;
+    }
+    if (e == EASE_OUT) {
+        t = t / d - 1;
+        return c * (t * t * t + 1) + b;
+    }
+    t /= d / 2;
+    if (t < 1) return c / 2 * t * t * t + b;
+    t -= 2;
+    return c / 2 * (t * t * t + 2) + b;
+}
+
+static float circ(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_IN) {
+        t /= d;
+        return -c * (sqrtf(1 - t * t) - 1) + b;
+    }
+    if (e == EASE_OUT) {
+        t = t / d - 1;
+        return c * sqrtf(1 - t * t) + b;
+    }
+    t /= d / 2;
+    if (t < 1) return -c / 2 * (sqrtf(1 - t * t) - 1) + b;
+    t -= 2;
+    return c / 2 * (sqrtf(1 - t * t) + 1) + b;
+}
+
 float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, float c, float d) {
     if (d <= 0) return b + c;
     switch (trans) {
     case TRANS_SINE: return sine(ease, t, b, c, d);
     case TRANS_EXPO: return expo(ease, t, b, c, d);
     case TRANS_ELASTIC: return elastic(ease, t, b, c, d);
+    case TRANS_BACK: return back(ease, t, b, c, d);
+    case TRANS_CUBIC: return cubic(ease, t, b, c, d);
+    case TRANS_CIRC: return circ(ease, t, b, c, d);
     default: return c * t / d + b;
     }
 }
 
-void TweenSet::tween(float* p, float to, float seconds, TweenTrans trans, TweenEase ease) {
-    tween_from(p, *p, to, seconds, trans, ease);
-}
-
-void TweenSet::tween_from(float* p, float from, float to, float seconds, TweenTrans trans, TweenEase ease) {
+void TweenSet::add(float* p, float from, bool from_current, float to, float seconds, TweenTrans trans,
+                   TweenEase ease, float delay) {
     kill(p);
     Item it;
     it.p = p;
     it.from = from;
+    it.from_current = from_current;
     it.to = to;
     it.seconds = seconds;
-    it.t = 0;
+    it.t = -delay;
     it.trans = trans;
     it.ease = ease;
-    *p = from;
+    if (delay <= 0 && !from_current) *p = from;
     items_.push_back(it);
 }
 
-void TweenSet::tween(Vec2* p, const Vec2& to, float seconds, TweenTrans trans, TweenEase ease) {
-    tween_from(p, *p, to, seconds, trans, ease);
+void TweenSet::tween(float* p, float to, float seconds, TweenTrans trans, TweenEase ease, float delay) {
+    add(p, *p, delay > 0, to, seconds, trans, ease, delay);
 }
 
-void TweenSet::tween_from(Vec2* p, const Vec2& from, const Vec2& to, float seconds, TweenTrans trans, TweenEase ease) {
-    tween_from(&p->x, from.x, to.x, seconds, trans, ease);
-    tween_from(&p->y, from.y, to.y, seconds, trans, ease);
+void TweenSet::tween_from(float* p, float from, float to, float seconds, TweenTrans trans, TweenEase ease,
+                          float delay) {
+    add(p, from, false, to, seconds, trans, ease, delay);
+}
+
+void TweenSet::tween(Vec2* p, const Vec2& to, float seconds, TweenTrans trans, TweenEase ease, float delay) {
+    tween(&p->x, to.x, seconds, trans, ease, delay);
+    tween(&p->y, to.y, seconds, trans, ease, delay);
+}
+
+void TweenSet::tween_from(Vec2* p, const Vec2& from, const Vec2& to, float seconds, TweenTrans trans, TweenEase ease,
+                          float delay) {
+    tween_from(&p->x, from.x, to.x, seconds, trans, ease, delay);
+    tween_from(&p->y, from.y, to.y, seconds, trans, ease, delay);
 }
 
 void TweenSet::kill(float* p) {
@@ -111,7 +170,17 @@ void TweenSet::kill(Vec2* p) {
 void TweenSet::update(double dt) {
     for (size_t i = 0; i < items_.size();) {
         Item& it = items_[i];
+        bool waiting = it.t < 0;
         it.t += (float)dt;
+        if (it.t < 0) {
+            ++i;
+            continue;
+        }
+        if (waiting) {
+            /* Started this frame: its start value is taken now. */
+            if (it.from_current) it.from = *it.p;
+            it.t = 0;
+        }
         if (it.t >= it.seconds) {
             *it.p = it.to;
             items_.erase(items_.begin() + (long)i);

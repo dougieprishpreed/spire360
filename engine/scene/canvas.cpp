@@ -142,9 +142,11 @@ static void np_axis(float size, float src0, float src_size, float mb, float me, 
     *c0 = (int)out.size();
     float area = x2 - x1;
     float src_area = src_size - mb - me;
-    /* A source centre of zero width still stretches (the shader samples the
-     * seam between the margins); tiling needs a centre to repeat. */
-    if (area > 0 && (src_area > 0 || (src_area == 0 && mode != AXIS_TILE))) {
+    /* A source centre of zero or negative width (margins wider than the
+     * texture) still stretches: the shader maps the centre linearly from
+     * the begin margin to the end one, backwards when they overlap. Tiling
+     * needs a centre to repeat. */
+    if (area > 0 && (src_area > 0 || (src_area <= 0 && mode == AXIS_STRETCH))) {
         if (mode == AXIS_TILE) {
             for (float p = 0; p < area; p += src_area) {
                 float len = minf(src_area, area - p);

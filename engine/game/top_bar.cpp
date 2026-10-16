@@ -7,16 +7,6 @@
 
 namespace spire {
 
-static void set_texture(SceneLibrary* lib, Node* rect, const std::string& path) {
-    if (!rect || rect->type != "TextureRect") return;
-    Resource* r = path.empty() ? NULL : lib->ext(path);
-    ((TextureRect*)rect)->texture = r && r->is_texture() ? (Texture2DRes*)r : NULL;
-}
-
-static void hide(Node* n) {
-    if (n && n->is_canvas_item()) ((CanvasItem*)n)->visible = false;
-}
-
 /* ImageHelper.GetRoomIconPath: images/ui/run_history/<suffix>.png, "" for
  * none (the act-start map room). */
 static std::string room_icon(const Json& ctx) {

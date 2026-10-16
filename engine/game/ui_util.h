@@ -21,6 +21,12 @@ Node* find_named(Node* n, const char* name);
 Control* ctl(Node* scope, const char* unique);
 /* Label / RichTextLabel text. */
 void set_label(Node* n, const std::string& text);
+/* A TextureRect's or NinePatchRect's texture from a pack path ("" or a
+ * missing one: none). */
+void set_texture(SceneLibrary* lib, Node* rect, const std::string& path);
+/* A canvas item shown or hidden (NULL: nothing). */
+void set_visible(Node* n, bool visible);
+inline void hide(Node* n) { set_visible(n, false); }
 /* NHotkeyIcon.UpdateInput with a controller: the xbox_360 glyph shown
  * (controller_atlas sprites: "a", "b", "y", "lt", ...), the key hidden. */
 void show_glyph(SceneLibrary* lib, Node* hotkey_icon, const char* glyph);

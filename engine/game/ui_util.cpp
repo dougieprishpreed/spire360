@@ -42,6 +42,18 @@ void set_label(Node* n, const std::string& text) {
     else if (n && n->type == "RichTextLabel") ((RichTextLabel*)n)->text = text;
 }
 
+void set_texture(SceneLibrary* lib, Node* rect, const std::string& path) {
+    if (!rect) return;
+    Resource* r = path.empty() ? NULL : lib->ext(path);
+    Texture2DRes* t = r && r->is_texture() ? (Texture2DRes*)r : NULL;
+    if (rect->type == "TextureRect") ((TextureRect*)rect)->texture = t;
+    else if (rect->type == "NinePatchRect") ((NinePatchRect*)rect)->texture = t;
+}
+
+void set_visible(Node* n, bool visible) {
+    if (n && n->is_canvas_item()) ((CanvasItem*)n)->visible = visible;
+}
+
 void show_glyph(SceneLibrary* lib, Node* hotkey_icon, const char* glyph) {
     if (!hotkey_icon) return;
     Node* pad = hotkey_icon->find_unique("ControllerIcon");
