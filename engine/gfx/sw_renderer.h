@@ -37,6 +37,10 @@ public:
         gm_ = (SwTexture*)lut;
         gm_red_ = alpha_from_red;
     }
+    virtual void set_vfx(const VfxParams* p) {
+        vfx_on_ = p != NULL;
+        if (p) vfx_ = *p;
+    }
     virtual void set_fire(const FireParams* p) {
         fire_on_ = p != NULL;
         if (p) fire_ = *p;
@@ -70,6 +74,8 @@ private:
     bool gm_red_;
     bool fire_on_;
     FireParams fire_;
+    bool vfx_on_;
+    VfxParams vfx_;
 };
 
 } /* namespace spire */

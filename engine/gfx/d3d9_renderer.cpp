@@ -24,7 +24,7 @@ namespace spire {
 
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
-      cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
+      cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
       group_failed_(false), group_debug_(0), group_log_(0), width_(0), height_(0), draws_(0) {
     msdf_[0] = 16;
     msdf_[1] = 0;
@@ -251,6 +251,7 @@ void D3D9Renderer::end() {
         set_ripple(NULL);
         set_gradient_map(NULL, false);
         set_fire(NULL);
+        set_vfx(NULL);
         group_view_.tex = group_tex_;
         group_view_.width = group_view_.orig_width = width_;
         group_view_.height = group_view_.orig_height = height_;
@@ -428,6 +429,15 @@ void D3D9Renderer::set_fire(const FireParams* p) {
     dirty_ = true;
 }
 
+void D3D9Renderer::set_vfx(const VfxParams* p) {
+    if (!p && !vfx_on_) return;
+    if (p && vfx_on_ && memcmp(p, &vfx_, sizeof(vfx_)) == 0) return;
+    flush();
+    vfx_on_ = p != NULL;
+    if (p) vfx_ = *p;
+    dirty_ = true;
+}
+
 void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) {
     D3D9Texture* t = (D3D9Texture*)tex;
     if (t != tex_ || blend != blend_ || flags != flags_) {
@@ -492,9 +502,11 @@ void D3D9Renderer::apply_state() {
     } else {
         for (DWORD stage = 3; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
     }
-    /* The gradient map's lut (s2): 256x1, linear, clamped. */
-    dev_->SetTexture(2, gm_ && gm_->tex ? gm_->tex : NULL);
-    if (gm_ && gm_->tex) {
+    /* The gradient map's lut (s2): 256x1, linear, clamped (the erosion
+     * shaders' lut uses it too). */
+    D3D9Texture* lut = gm_ && gm_->tex ? gm_ : (vfx_on_ && vfx_.lut ? (D3D9Texture*)vfx_.lut : NULL);
+    dev_->SetTexture(2, lut && lut->tex ? lut->tex : NULL);
+    if (lut && lut->tex) {
         dev_->SetSamplerState(2, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev_->SetSamplerState(2, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
         dev_->SetSamplerState(2, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
@@ -530,7 +542,7 @@ void D3D9Renderer::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
-    float c[76] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
+    float c[88] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
                     ripple_on_ ? 1.0f : 0.0f,
                     msdf_[0], msdf_[1], tw, th,
                     cm_[0], cm_[1], cm_[2], cm_[3],
@@ -546,7 +558,16 @@ void D3D9Renderer::apply_state() {
                             fire_.outer };
     for (int k = 0; k < 11; ++k)
         for (int j = 0; j < 4; ++j) c[32 + k * 4 + j] = fire_on_ ? fv[k][j] : 0.0f;
-    dev_->SetPixelShaderConstantF(0, c, 19);
+    /* c19..c21: the erosion particle shaders. */
+    c[76] = vfx_on_ ? 1.0f : 0.0f;
+    c[77] = vfx_on_ ? vfx_.polar : 0.0f;
+    c[78] = vfx_on_ && vfx_.lut ? 1.0f : 0.0f;
+    c[79] = 0.0f;
+    for (int j = 0; j < 4; ++j) {
+        c[80 + j] = vfx_on_ ? vfx_.erosion[j] : 0.0f;
+        c[84 + j] = vfx_on_ ? vfx_.distortion[j] : 0.0f;
+    }
+    dev_->SetPixelShaderConstantF(0, c, 22);
     dirty_ = false;
 }
 

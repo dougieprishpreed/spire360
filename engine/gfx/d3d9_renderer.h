@@ -49,6 +49,7 @@ public:
     virtual void set_ripple(const float* p);
     virtual void set_gradient_map(Texture* lut, bool alpha_from_red);
     virtual void set_fire(const FireParams* p);
+    virtual void set_vfx(const VfxParams* p);
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
     virtual void end();
@@ -93,6 +94,8 @@ private:
     bool gm_red_;
     bool fire_on_;
     FireParams fire_;
+    bool vfx_on_;
+    VfxParams vfx_;
     bool clip_on_;
     RECT clip_;
     bool dirty_;

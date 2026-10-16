@@ -502,6 +502,7 @@ void Particles2D::draw(Canvas& c) {
     if (sm) {
         if (sm->shader == "shaders/vfx/common/vfx_flipbook_shader.gdshader") fb = 1;
         if (sm->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader") fb = 2;
+        if (sm->shader == "shaders/vfx/common/vfx_common_particle_shader.gdshader") fb = 3;
         pivot = shader_param_vec2(sm, "pivot_offset", Vec2(0, 0));
         if (fb) {
             fb_frames = shader_param(sm, "frame_count", 9);
@@ -517,6 +518,11 @@ void Particles2D::draw(Canvas& c) {
     if (texture) texture->get_rect_region(Rect2(Vec2(), ts), Rect2(Vec2(), ts), dst, src, &img);
     if (texture && !img) return;
     Vec2 is = img ? img->size() : Vec2(1, 1);
+    /* The erosion shaders: each particle drawn on its own, eroded by the
+     * curve at its life. */
+    const VfxParams* vfx = shader_vfx();
+    CurveData erosion;
+    if (vfx && sm) CurveData::from(shader_param_resource(sm, "erosion_curve"), erosion);
     std::vector<Vec2> v, uv;
     std::vector<Color> col;
     std::vector<int> idx;
@@ -539,7 +545,9 @@ void Particles2D::draw(Canvas& c) {
             float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
             float prog = fb_curve.valid() ? fb_curve.sample(life) : 0.0f; /* hint_default_black */
             float frame;
-            if (fb == 1) {
+            if (fb == 3) {
+                frame = floorf(fb_frames * p.custom[2] * 0.99f);
+            } else if (fb == 1) {
                 frame = floorf((fb_frames * p.custom[2] + fb_frames * prog) * 0.99f);
             } else {
                 float fx = floorf(p.custom[2] * fb_size.y) / fb_size.y;
@@ -565,6 +573,21 @@ void Particles2D::draw(Canvas& c) {
         }
         int q[6] = { 0, 1, 2, 2, 3, 0 };
         for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
+        if (vfx && img) {
+            VfxParams one = *vfx;
+            float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
+            if (erosion.valid()) one.erosion[0] = erosion.sample(life);
+            c.renderer()->set_vfx(&one);
+            c.draw_triangles(img, v, uv, col, idx);
+            v.clear();
+            uv.clear();
+            col.clear();
+            idx.clear();
+        }
+    }
+    if (vfx && img) {
+        c.renderer()->set_vfx(vfx);
+        return;
     }
     if (img) c.draw_triangles(img, v, uv, col, idx);
     else c.draw_colored_triangles(v, idx, col);

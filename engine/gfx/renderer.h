@@ -49,6 +49,19 @@ struct FireParams {
     float inner[4], outer[4];
 };
 
+/* The game's erosion particle shaders (vfx_ring_polar, vfx_poof,
+ * vfx_common_particle...): the texture (read in polar coordinates about its
+ * centre, or through a scrolling distortion of itself), its colour from a
+ * gradient (lut: the red picks it; NULL: white), its alpha eroded:
+ * smoothstep(threshold, threshold + width, red or alpha); times the vertex
+ * colour. */
+struct VfxParams {
+    Texture* lut;
+    float polar;          /* 1: polar coordinates */
+    float erosion[4];     /* threshold, width, on (0/1), from the alpha (0/1: red) */
+    float distortion[4];  /* offset.xy (the panning now), strength, on (0/1) */
+};
+
 class Renderer {
 public:
     virtual ~Renderer() {}
@@ -86,6 +99,8 @@ public:
     /* The stepped fire (FireParams); NULL: off. The draw's texture is the
      * shader's TEXTURE; the vertex colour's alpha fades it. */
     virtual void set_fire(const FireParams* p) = 0;
+    /* The erosion particle shaders (VfxParams); NULL: off. */
+    virtual void set_vfx(const VfxParams* p) = 0;
     virtual void set_ripple(const float* p) = 0;
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;

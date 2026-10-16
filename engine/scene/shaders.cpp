@@ -119,6 +119,44 @@ static void scroll_uv(const MaterialRes* m, const char* scale, const char* pan, 
     out[3] = o.y + global.y + (pan ? fmodf(p.y * t, 1.0f) : 0.0f);
 }
 
+/* The erosion particle shaders' parameters while one is applied. */
+static VfxParams g_vfx;
+static bool g_vfx_on = false;
+
+const VfxParams* shader_vfx() { return g_vfx_on ? &g_vfx : NULL; }
+
+/* The erosion particle shaders: VfxParams from the material; the
+ * threshold here is the erosion curve's start (particles set theirs). */
+static bool vfx_shader(Canvas& c, const MaterialRes* m) {
+    const std::string& s = m->shader;
+    bool ring = s == "shaders/vfx/common/vfx_ring_polar_shader.gdshader";
+    bool poof = s == "shaders/vfx/common/vfx_poof_shader.gdshader";
+    bool common = s == "shaders/vfx/common/vfx_common_particle_shader.gdshader";
+    if (!ring && !poof && !common) return false;
+    VfxParams v;
+    v.lut = ring ? NULL : gradient_lut(c, shader_param_resource(m, "lut"));
+    v.polar = ring ? 1.0f : 0.0f;
+    CurveData curve;
+    CurveData::from(shader_param_resource(m, "erosion_curve"), curve);
+    v.erosion[0] = curve.valid() ? curve.sample(0) : 0.0f;
+    v.erosion[1] = param(m, "erosion_offset", ring ? 0.1f : 0.25f);
+    v.erosion[2] = 1.0f;
+    v.erosion[3] = common ? 1.0f : 0.0f;
+    v.distortion[0] = v.distortion[1] = v.distortion[2] = v.distortion[3] = 0.0f;
+    if (poof) {
+        Vec2 pan = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
+        float t = (float)g_shader_time;
+        v.distortion[0] = fmodf(pan.x * t, 1.0f);
+        v.distortion[1] = fmodf(pan.y * t, 1.0f);
+        v.distortion[2] = param(m, "distortion_strength", 0.0f);
+        v.distortion[3] = 1.0f;
+    }
+    g_vfx = v;
+    g_vfx_on = true;
+    c.renderer()->set_vfx(&v);
+    return true;
+}
+
 typedef float M3[3][3];
 
 static void mul(const M3 a, const M3 b, M3 out) {
@@ -296,6 +334,7 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.renderer()->set_fire(&f);
         return true;
     }
+    if (vfx_shader(c, m)) return true;
     if (m->shader == "shaders/card_ripple.gdshader") {
         /* render_mode blend_add: shader_blend. */
         float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),
@@ -326,6 +365,8 @@ void shader_end(Canvas& c, const MaterialRes* m) {
         c.set_ripple(NULL);
         c.renderer()->set_gradient_map(NULL, false);
         c.renderer()->set_fire(NULL);
+        c.renderer()->set_vfx(NULL);
+        g_vfx_on = false;
     }
 }
 

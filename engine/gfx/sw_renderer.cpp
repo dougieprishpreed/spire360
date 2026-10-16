@@ -6,7 +6,7 @@
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false) {
+    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false) {
     for (int i = 0; i < 4; ++i) ripple_[i] = 0;
 }
 
@@ -240,6 +240,46 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 }
             } else {
                 s[0] = s[1] = s[2] = s[3] = 1.0f;
+            }
+            if (vfx_on_ && tex) {
+                /* The erosion particle shaders (VfxParams): s as straight
+                 * colour times its alpha, premultiplied. */
+                float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                if (vfx_.distortion[3] > 0.5f) {
+                    float d[4];
+                    sample(tex->img, u + vfx_.distortion[0], v + vfx_.distortion[1], DRAW_REPEAT, d);
+                    u += d[2] * vfx_.distortion[2];
+                    v += d[2] * vfx_.distortion[2];
+                }
+                if (vfx_.polar > 0.5f) {
+                    float dx = u - 0.5f, dy = v - 0.5f;
+                    float r = sqrtf(dx * dx + dy * dy) * 2.0f, a = atan2f(dy, dx) / 6.2831853f;
+                    u = r - floorf(r);
+                    v = a - floorf(a);
+                }
+                float t[4];
+                sample(tex->img, u, v, flags, t);
+                float ta = t[3], tr = ta > 0 ? t[0] / ta : 0.0f;
+                float rgb[3] = { 1, 1, 1 };
+                if (vfx_.lut) {
+                    float l[4];
+                    sample(((SwTexture*)vfx_.lut)->img, clampf(tr, 0, 1), 0.5f, 0, l);
+                    rgb[0] = l[0];
+                    rgb[1] = l[1];
+                    rgb[2] = l[2];
+                }
+                float a = ta;
+                if (vfx_.erosion[2] > 0.5f) {
+                    float ch = vfx_.erosion[3] > 0.5f ? ta : tr;
+                    float w = vfx_.erosion[1] != 0 ? vfx_.erosion[1] : 0.0001f;
+                    float k = clampf((ch - vfx_.erosion[0]) / w, 0.0f, 1.0f);
+                    a = k * k * (3.0f - 2.0f * k);
+                }
+                s[0] = rgb[0] * a;
+                s[1] = rgb[1] * a;
+                s[2] = rgb[2] * a;
+                s[3] = a;
             }
             if (fire_on_) {
                 /* The stepped fire: its colour (straight) and alpha, the

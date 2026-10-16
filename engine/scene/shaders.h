@@ -23,6 +23,9 @@ void shader_end(Canvas& c, const MaterialRes* m);
 Resource* shader_param_resource(const MaterialRes* m, const char* name);
 float shader_param(const MaterialRes* m, const char* name, float fallback);
 Vec2 shader_param_vec2(const MaterialRes* m, const char* name, const Vec2& fallback);
+/* The erosion particle shader applied now (NULL: none): particles draw each
+ * one with its own erosion threshold. */
+const VfxParams* shader_vfx();
 /* The blend a ported shader's render_mode asks for (blend_add, ...). */
 bool shader_blend(const MaterialRes* m, BlendMode* out);
 

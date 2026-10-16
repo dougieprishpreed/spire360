@@ -59,6 +59,9 @@ float4 g_fdstr : register(c15);       // distortion 1, 2 strength
 float4 g_fsteps : register(c16);      // inner step xy, outer step zw
 float4 g_finner : register(c17);
 float4 g_fouter : register(c18);
+float4 g_vfx : register(c19);         // erosion particles: x on, y polar, z lut
+float4 g_verosion : register(c20);    // threshold, width, on, from the alpha
+float4 g_vdist : register(c21);       // distortion offset.xy, strength, on
 
 float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
@@ -84,6 +87,25 @@ float4 ps_main(VsOut i) : COLOR {
             rgb = g_fouter.rgb + smoothstep(g_fsteps.x, g_fsteps.y, v) * g_finner.rgb;
         float fa = saturate(smoothstep(g_fsteps.z, g_fsteps.w, v)) * i.color.a;
         return float4(rgb * fa, fa);
+    }
+    if (g_vfx.x > 0.5) {
+        // The game's erosion particle shaders (vfx_ring_polar, vfx_poof, ...).
+        float2 uv = i.uv;
+        if (g_vdist.w > 0.5) uv += tex2D(g_tex, uv + g_vdist.xy).b * g_vdist.z;
+        if (g_vfx.y > 0.5) {
+            float2 dir = uv - float2(0.5, 0.5);
+            uv = frac(float2(length(dir) * 2.0, atan2(dir.y, dir.x) / 6.2831853));
+        }
+        float4 e = tex2D(g_tex, uv);
+        float3 rgb = g_vfx.z > 0.5 ? tex2D(g_lut, float2(e.r, 0.5)).rgb : float3(1.0, 1.0, 1.0);
+        float ea = e.a;
+        if (g_verosion.z > 0.5) {
+            float ch = g_verosion.w > 0.5 ? e.a : e.r;
+            float k = saturate((ch - g_verosion.x) / max(g_verosion.y, 0.0001));
+            ea = k * k * (3.0 - 2.0 * k);
+        }
+        float4 vc = float4(rgb, ea) * i.color;
+        return float4(vc.rgb * vc.a, vc.a);
     }
     float4 t = tex2D(g_tex, i.uv);
     if (g_gm.x > 0.5) {

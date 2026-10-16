@@ -26,8 +26,12 @@ Work in progress: **a first preview, playable with a controller.**
   rewards, events, rest sites, shops, treasure rooms, bosses and the game
   over screen, drawn as the game draws them. Seeded runs play out exactly as
   on PC.
-- Not done yet: sound, saving, combat effects (attacks, potions), card and
-  power tooltips, multiplayer. Tested with Slay the Spire 2 v0.111.0.
+- Combat plays out as in the game: attack and hurt animations, the
+  effects, damage numbers, deaths, the turn banners; cards show their
+  keyword tips.
+- Not done yet: sound, saving, the Crystal Sphere minigame's own screen,
+  some background shaders, multiplayer. Tested with Slay the Spire 2
+  v0.111.0.
 - Controls: [xdk/README.md](xdk/README.md#spire360-the-game).
 
 ## What you need
