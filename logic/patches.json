@@ -191,6 +191,46 @@
       "optional": true
     },
     {
+      "id": "vfx.on_creature",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "PlayOnCreature",
+      "optional": true,
+      "note": "Records the effect the game would play at a creature's feet (it returns at once in test mode)."
+    },
+    {
+      "id": "vfx.on_creature_center",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "PlayOnCreatureCenter",
+      "optional": true,
+      "note": "Records the effect the game would play at a creature's centre."
+    },
+    {
+      "id": "vfx.on_side",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "PlayOnSide",
+      "optional": true,
+      "note": "Records the effect the game would play at the middle of a side."
+    },
+    {
+      "id": "vfx.full_screen",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "PlayFullScreenInCombat",
+      "optional": true,
+      "note": "Records a full-screen combat effect."
+    },
+    {
+      "id": "anim.trigger",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CreatureCmd",
+      "method": "TriggerAnim",
+      "optional": true,
+      "note": "Records a creature's animation trigger (Attack, Cast, Hit, ...)."
+    },
+    {
       "id": "cardselect.kind.choose_a_card",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",

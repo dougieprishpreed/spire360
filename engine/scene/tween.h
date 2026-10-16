@@ -13,7 +13,7 @@
 namespace spire {
 
 enum TweenTrans { TRANS_LINEAR, TRANS_SINE, TRANS_EXPO, TRANS_ELASTIC, TRANS_BACK, TRANS_CUBIC, TRANS_CIRC, TRANS_QUART,
-                  TRANS_SPRING };
+                  TRANS_SPRING, TRANS_QUAD };
 enum TweenEase { EASE_IN, EASE_OUT, EASE_IN_OUT };
 
 /* Godot's Tween.interpolate_value: t in [0, d] seconds, from b by c. */

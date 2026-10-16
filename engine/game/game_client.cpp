@@ -450,6 +450,12 @@ void GameClient::show(const Json& d) {
             log_warn("combat screen: %s", err.c_str());
             delete combat_;
             combat_ = NULL;
+        } else if (prev_kind == "combat_play") {
+            /* What the last command did: the cards' effects, the enemies'
+             * turn. */
+            combat_->play_steps(d["steps"]);
+        } else {
+            combat_->show_start_banner();
         }
     }
     if (!screen_) screen_ = plain_screen(d);
@@ -575,6 +581,9 @@ void GameClient::combat_input(const PadState& pad) {
 }
 
 void GameClient::handle_input(const PadState& pad) {
+    /* The last command's effects play out first (the game takes no input
+     * while its actions run). */
+    if (combat_ && combat_->busy()) return;
     /* The potions (X) on any screen with the top bar. */
     if (potions_.active()) {
         std::string cmd = potions_.input(pad, combat_, decision_["enemies"]);

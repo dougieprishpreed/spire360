@@ -24,7 +24,7 @@ namespace spire {
 
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
-      cm_on_(false), ripple_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
+      cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
       group_failed_(false), group_debug_(0), group_log_(0), width_(0), height_(0), draws_(0) {
     msdf_[0] = 16;
     msdf_[1] = 0;
@@ -249,6 +249,7 @@ void D3D9Renderer::end() {
         set_clip(NULL);
         set_color_matrix(NULL);
         set_ripple(NULL);
+        set_gradient_map(NULL, false);
         group_view_.tex = group_tex_;
         group_view_.width = group_view_.orig_width = width_;
         group_view_.height = group_view_.orig_height = height_;
@@ -408,6 +409,15 @@ void D3D9Renderer::set_ripple(const float* p) {
     dirty_ = true;
 }
 
+void D3D9Renderer::set_gradient_map(Texture* lut, bool alpha_from_red) {
+    D3D9Texture* t = (D3D9Texture*)lut;
+    if (t == gm_ && (!t || alpha_from_red == gm_red_)) return;
+    flush();
+    gm_ = t;
+    gm_red_ = alpha_from_red;
+    dirty_ = true;
+}
+
 void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) {
     D3D9Texture* t = (D3D9Texture*)tex;
     if (t != tex_ || blend != blend_ || flags != flags_) {
@@ -454,6 +464,15 @@ void D3D9Renderer::apply_state() {
         /* never sample the target being drawn */
         dev_->SetTexture(1, NULL);
     }
+    /* The gradient map's lut (s2): 256x1, linear, clamped. */
+    dev_->SetTexture(2, gm_ && gm_->tex ? gm_->tex : NULL);
+    if (gm_ && gm_->tex) {
+        dev_->SetSamplerState(2, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        dev_->SetSamplerState(2, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        dev_->SetSamplerState(2, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        dev_->SetSamplerState(2, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        dev_->SetSamplerState(2, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    }
     switch (blend_) {
     case BLEND_ADD:
         dev_->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
@@ -483,14 +502,15 @@ void D3D9Renderer::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
-    float c[24] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
+    float c[28] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
                     ripple_on_ ? 1.0f : 0.0f,
                     msdf_[0], msdf_[1], tw, th,
                     cm_[0], cm_[1], cm_[2], cm_[3],
                     cm_[4], cm_[5], cm_[6], cm_[7],
                     cm_[8], cm_[9], cm_[10], cm_[11],
-                    ripple_[0], ripple_[1], ripple_[2], ripple_[3] };
-    dev_->SetPixelShaderConstantF(0, c, 6);
+                    ripple_[0], ripple_[1], ripple_[2], ripple_[3],
+                    gm_ && gm_->tex ? 1.0f : 0.0f, gm_red_ ? 1.0f : 0.0f, 0.0f, 0.0f };
+    dev_->SetPixelShaderConstantF(0, c, 7);
     dirty_ = false;
 }
 

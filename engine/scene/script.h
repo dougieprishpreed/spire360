@@ -28,7 +28,14 @@ public:
     virtual void process(Node*, double dt) { (void)dt; }
 };
 
+/* A factory runs while its node's scene is being instantiated, after the
+ * node's properties are set (script exports are in node->extra). */
 typedef ScriptBehavior* (*ScriptFactory)(Node* node);
+/* In a factory: a resource reference from the node's scene ({"ext": ...},
+ * {"sub": ...}) resolved; NULL outside a factory or if missing. */
+class Resource;
+class Json;
+Resource* script_resource(const Json& v);
 void register_script(const char* res_path, ScriptFactory factory);
 ScriptBehavior* create_script(const std::string& res_path, Node* node); /* NULL if none */
 void set_scripts_enabled(bool on);

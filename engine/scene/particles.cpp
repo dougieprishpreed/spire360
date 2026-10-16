@@ -1,4 +1,5 @@
 #include "particles.h"
+#include "shaders.h"
 
 #include "canvas.h"
 #include "scene.h"
@@ -490,6 +491,26 @@ void Particles2D::draw(Canvas& c) {
         if (hf < 1) hf = 1;
         if (vf < 1) vf = 1;
     }
+    /* The game's flipbook VFX shaders: the frame from the particle's life
+     * (vfx_flipbook_shader / vfx_row_flipbook_shader's vertex()), the quad
+     * moved by pivot_offset texture sizes. */
+    int fb = 0; /* 1 flipbook, 2 row flipbook */
+    float fb_frames = 1;
+    Vec2 fb_size(1, 1), pivot(0, 0);
+    CurveData fb_curve;
+    const MaterialRes* sm = material && material->kind == Resource::RES_SHADER_MATERIAL ? material : NULL;
+    if (sm) {
+        if (sm->shader == "shaders/vfx/common/vfx_flipbook_shader.gdshader") fb = 1;
+        if (sm->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader") fb = 2;
+        pivot = shader_param_vec2(sm, "pivot_offset", Vec2(0, 0));
+        if (fb) {
+            fb_frames = shader_param(sm, "frame_count", 9);
+            fb_size = shader_param_vec2(sm, "flipbook_size", Vec2(3, 3));
+            if (fb_size.x < 1) fb_size.x = 1;
+            if (fb_size.y < 1) fb_size.y = 1;
+            CurveData::from(shader_param_resource(sm, "flipbook_curve"), fb_curve);
+        }
+    }
     /* the image and uv rect behind the texture */
     ImageTextureRes* img = NULL;
     Rect2 dst, src;
@@ -514,7 +535,25 @@ void Particles2D::draw(Canvas& c) {
             fu0 = fmodf(frame, (float)hf) / hf;
             fv0 = floorf((frame + 0.5f) / hf) / vf;
         }
-        Vec2 corners[4] = { Vec2(-h.x, -h.y), Vec2(h.x, -h.y), Vec2(h.x, h.y), Vec2(-h.x, h.y) };
+        if (fb) {
+            float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
+            float prog = fb_curve.valid() ? fb_curve.sample(life) : 0.0f; /* hint_default_black */
+            float frame;
+            if (fb == 1) {
+                frame = floorf((fb_frames * p.custom[2] + fb_frames * prog) * 0.99f);
+            } else {
+                float fx = floorf(p.custom[2] * fb_size.y) / fb_size.y;
+                float fy = floorf(prog * fb_size.x) / fb_size.x / fb_size.y;
+                frame = floorf((fx + fy) * fb_frames);
+            }
+            if (frame < 0) frame = 0;
+            fw = 1.0f / fb_size.x;
+            fh = 1.0f / fb_size.y;
+            fu0 = fmodf(frame, fb_size.x) / fb_size.x;
+            fv0 = floorf(frame / fb_size.x) / fb_size.y;
+        }
+        Vec2 po(pivot.x * ts.x, pivot.y * ts.y);
+        Vec2 corners[4] = { Vec2(-h.x, -h.y) + po, Vec2(h.x, -h.y) + po, Vec2(h.x, h.y) + po, Vec2(-h.x, h.y) + po };
         float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
         int base = (int)v.size();
         for (int k = 0; k < 4; ++k) {

@@ -2,9 +2,12 @@
 
 #include "canvas.h"
 #include "node.h"
+#include "particles.h"
+#include "scene.h"
 #include "value.h"
 
 #include <math.h>
+#include <map>
 
 namespace spire {
 
@@ -35,6 +38,56 @@ static Color param_color(const MaterialRes* m, const char* name, const Color& fa
     c.g = param(m, (n + ".g").c_str(), c.g);
     c.b = param(m, (n + ".b").c_str(), c.b);
     return c;
+}
+
+/* A sampler2D parameter's resource (NULL: unset). */
+Resource* shader_param_resource(const MaterialRes* m, const char* name) {
+    if (!m || !m->props) return NULL;
+    std::string k = std::string("shader_parameter/") + name;
+    if (!m->props->has(k.c_str())) return NULL;
+    SceneLibrary* lib = SceneLibrary::current();
+    return lib ? lib->resolve((*m->props)[k.c_str()], m->file) : NULL;
+}
+
+float shader_param(const MaterialRes* m, const char* name, float fallback) { return param(m, name, fallback); }
+
+Vec2 shader_param_vec2(const MaterialRes* m, const char* name, const Vec2& fallback) {
+    if (!m || !m->props) return fallback;
+    std::string k = std::string("shader_parameter/") + name;
+    if (!m->props->has(k.c_str())) return fallback;
+    const Json& v = (*m->props)[k.c_str()]["v"];
+    return v.size() >= 2 ? Vec2((float)v[(size_t)0].num(), (float)v[(size_t)1].num()) : fallback;
+}
+
+/* A gradient (GradientTexture1D) as a 256x1 lut for the renderer's
+ * gradient map, made once per gradient (and renderer). Unset: white
+ * (Godot's default for a sampler2D). */
+static Texture* gradient_lut(Canvas& c, Resource* gradient) {
+    typedef std::map<std::pair<Renderer*, Resource*>, Texture*> Cache;
+    static Cache cache;
+    std::pair<Renderer*, Resource*> key(c.renderer(), gradient);
+    Cache::iterator it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    GradientData g;
+    bool ok = gradient && GradientData::from(gradient, g) && g.valid();
+    TextureData td;
+    td.format = TEX_ARGB8;
+    td.flags = TEXF_DATA; /* straight alpha */
+    td.width = td.orig_width = 256;
+    td.height = td.orig_height = 1;
+    td.levels.resize(1);
+    td.levels[0].resize(256 * 4);
+    for (int i = 0; i < 256; ++i) {
+        Color col = ok ? g.at((float)i / 255.0f) : Color(1, 1, 1, 1);
+        u8* px = &td.levels[0][(size_t)i * 4]; /* B G R A */
+        px[0] = (u8)(clampf(col.b, 0, 1) * 255 + 0.5f);
+        px[1] = (u8)(clampf(col.g, 0, 1) * 255 + 0.5f);
+        px[2] = (u8)(clampf(col.r, 0, 1) * 255 + 0.5f);
+        px[3] = (u8)(clampf(col.a, 0, 1) * 255 + 0.5f);
+    }
+    Texture* t = c.renderer()->create_texture(td);
+    cache[key] = t;
+    return t;
 }
 
 typedef float M3[3][3];
@@ -154,6 +207,20 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.set_color_matrix(cm);
         return true;
     }
+    if (m->shader == "shaders/vfx/common/vfx_grayscale_particle_shader.gdshader") {
+        /* The texel's red through the lut, times the particle's colour;
+         * the alpha is the red. */
+        c.renderer()->set_gradient_map(gradient_lut(c, shader_param_resource(m, "lut")), true);
+        return true;
+    }
+    if (m->shader == "shaders/vfx/common/vfx_flipbook_shader.gdshader" ||
+        m->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader") {
+        /* The colour as above, the texel's alpha; the frame of the flipbook
+         * is the particles' (Particles2D::draw). Erosion and hue shift are
+         * not ported. */
+        c.renderer()->set_gradient_map(gradient_lut(c, shader_param_resource(m, "lut")), false);
+        return true;
+    }
     if (m->shader == "shaders/card_ripple.gdshader") {
         /* render_mode blend_add: shader_blend. */
         float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),
@@ -178,6 +245,7 @@ void shader_end(Canvas& c, const MaterialRes* m) {
     if (m && m->kind == Resource::RES_SHADER_MATERIAL) {
         c.set_color_matrix(NULL);
         c.set_ripple(NULL);
+        c.renderer()->set_gradient_map(NULL, false);
     }
 }
 

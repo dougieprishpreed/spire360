@@ -59,6 +59,11 @@ public:
      * sdf = mod(phase + a, modulo), b = a - sdf + smoothstep(0, ease, sdf) *
      * modulo, the output alpha is smoothstep(1 - width, 1, b). p = phase
      * (TIME * ripple_speed), modulo, ease, width; NULL: off. */
+    /* Gradient map (the game's grayscale and flipbook VFX shaders): the
+     * texel's red picks the colour from lut (a 256x1 texture, straight
+     * alpha); the alpha is the texel's red (alpha_from_red) or its alpha.
+     * The vertex colour multiplies the result. NULL: off. */
+    virtual void set_gradient_map(Texture* lut, bool alpha_from_red) = 0;
     virtual void set_ripple(const float* p) = 0;
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;

@@ -73,7 +73,7 @@ internal static class Steps
                 case bool or int or long or float or double or decimal: outArgs.Add(a); break;
                 case Enum e: outArgs.Add(e.ToString()); break;
                 case MegaCrit.Sts2.Core.Models.AbstractModel m: outArgs.Add(m.Id.ToString()); break;
-                case Creature c: outArgs.Add(c.IsPlayer ? "player" : "e" + IdOf(c)); break;
+                case Creature c: outArgs.Add(Who(c)); break;
                 default:
                     var tn = a.GetType().Name;
                     if (tn.StartsWith("N", StringComparison.Ordinal)) continue; // UI node receivers
@@ -83,6 +83,28 @@ internal static class Steps
         }
         if (_pendingUi.Count < 500)
             _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });
+    }
+
+    /// <summary>
+    /// How steps name a creature: "player", "osty", or "e" + its combat id
+    /// (the decision's enemies[].combat_id).
+    /// </summary>
+    public static string Who(Creature c)
+    {
+        if (c.IsPlayer) return "player";
+        var p = _player?.Invoke();
+        if (p != null && ReferenceEquals(p.Osty, c)) return "osty";
+        return c.CombatId.HasValue ? "e" + c.CombatId.Value : "e" + IdOf(c);
+    }
+
+    /// <summary>
+    /// A presentation cue the logic's own commands make (VfxCmd, CreatureCmd
+    /// animation triggers), recorded in order with the other cues.
+    /// </summary>
+    public static void Cue(Dictionary<string, object?> cue)
+    {
+        if (!Enabled || !RecordUi) return;
+        if (_pendingUi.Count < 500) _pendingUi.Add(cue);
     }
 
     /// <summary>A pacing delay the game asked for (Cmd.Wait / Task.Delay).</summary>
@@ -176,7 +198,7 @@ internal static class Steps
             foreach (var e in state.Enemies)
             {
                 if (e == null) continue;
-                AddCreature(s, "e" + IdOf(e), e, e.Monster?.Id.Entry);
+                AddCreature(s, Who(e), e, e.Monster?.Id.Entry);
             }
         }
         if (pcs != null)

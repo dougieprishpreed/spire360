@@ -12,6 +12,7 @@
 #include "../scene/script.h"
 #include "../scene/shaders.h"
 #include "../scene/text_nodes.h"
+#include "../spine/spine.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -35,6 +36,11 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     : lib_(lib), hand_focus_(-1), aftermath_(false), hand_box_(NULL), play_card_(-1), aiming_(false), play_single_(false), play_target_(-1), arrow_(NULL),
       arrow_head_(NULL) {
     player_.node = NULL;
+    next_cue_ = 0;
+    cue_t_ = 0;
+    busy_until_ = 0;
+    root_ = NULL;
+    vfx_box_ = NULL;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -952,6 +958,17 @@ void CombatScreen::process(double dt) {
         h.node->rotation = h.angle * PI_F / 180.0f;
         h.node->scale = Vec2(h.scale, h.scale);
     }
+    /* The steps' cues as their time comes; the damage numbers fly
+     * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
+    cue_t_ += dt;
+    while (next_cue_ < cues_.size() && cues_[next_cue_].at <= cue_t_) fire(cues_[next_cue_++]);
+    for (size_t i = 0; i < banners_.size(); ++i)
+        if (banners_[i].node->visible && cue_t_ >= banners_[i].until) banners_[i].node->visible = false;
+    for (size_t i = 0; i < numbers_.size(); ++i) {
+        FlyingNumber& n = numbers_[i];
+        n.node->position = n.node->position + n.velocity * t;
+        n.velocity = n.velocity + Vec2(0, 2000) * t;
+    }
     if (arrow_ && arrow_->visible && (play_card_ >= 0 || aiming_)) {
         arrow_pos_ = arrow_pos_ + (arrow_to_ - arrow_pos_) * minf(1.0f, t * 14.0f);
         update_arrow(arrow_pos_);
@@ -1102,7 +1119,16 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     }
     static const Json no_enemies;
     const Json& es = aftermath_ ? no_enemies : d["enemies"];
+    enemy_who_.clear();
+    cues_.clear();
+    next_cue_ = 0;
+    cue_t_ = 0;
+    busy_until_ = 0;
+    numbers_.clear();
+    root_ = root;
+    vfx_box_ = ctl(root, "CombatVfxContainer");
     for (size_t i = 0; i < es.size(); ++i) {
+        enemy_who_.push_back(format("e%d", es[i]["combat_id"].i(-1)));
         if (!make_creature(es[i]["id"].str(), false, c)) {
             enemies_.push_back(c); /* node NULL: keeps enemies_[i] = enemy i */
             continue;
@@ -1134,6 +1160,318 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     driver->behavior = new CombatDriver(this);
     root->add_child(driver);
     return root;
+}
+
+/* ---- step playback ---- */
+
+CombatScreen::Creature* CombatScreen::creature_for(const std::string& who) {
+    if (who == "player") return player_.node ? &player_ : NULL;
+    for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i)
+        if (enemy_who_[i] == who) return enemies_[i].node ? &enemies_[i] : NULL;
+    return NULL;
+}
+
+static Control* as_ctl(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
+
+static Vec2 global_origin(Node* n) {
+    return n && n->is_canvas_item() ? ((CanvasItem*)n)->global_transform().origin : Vec2(0, 0);
+}
+
+/* Where VfxCmd puts an effect: a creature's VfxSpawnPosition (%CenterPos)
+ * or its position (its feet), the middle of a side's creatures, the
+ * screen's centre. */
+bool CombatScreen::vfx_position(const Cue& c, Vec2* out) {
+    if (c.where == "screen") {
+        *out = Vec2(960, 540);
+        return true;
+    }
+    if (c.where == "side") {
+        Vec2 sum(0, 0);
+        int n = 0;
+        if (c.who == "player") {
+            if (player_.node && player_.center) {
+                sum = sum + global_origin(player_.center);
+                ++n;
+            }
+        } else {
+            for (size_t i = 0; i < enemies_.size(); ++i)
+                if (enemies_[i].node && enemies_[i].center) {
+                    sum = sum + global_origin(enemies_[i].center);
+                    ++n;
+                }
+        }
+        if (!n) return false;
+        *out = sum * (1.0f / (float)n);
+        return true;
+    }
+    Creature* cr = creature_for(c.who);
+    if (!cr) return false;
+    *out = c.where == "feet" || !cr->center ? global_origin(cr->node) : global_origin(cr->center);
+    return true;
+}
+
+static SpineSprite* first_spine(Node* n) {
+    if (!n) return NULL;
+    if (n->type == "SpineSprite") return (SpineSprite*)n;
+    for (size_t i = 0; i < n->children.size(); ++i) {
+        SpineSprite* s = first_spine(n->children[i]);
+        if (s) return s;
+    }
+    return NULL;
+}
+
+/* CreatureAnimator's default states (MonsterModel.GenerateAnimator): the
+ * trigger's animation, then idle_loop again (not after dying). */
+static const char* trigger_animation(const std::string& trigger) {
+    if (trigger == "Attack") return "attack";
+    if (trigger == "Cast") return "cast";
+    if (trigger == "Hit") return "hurt";
+    if (trigger == "Dead") return "die";
+    if (trigger == "Idle") return "idle_loop";
+    return NULL;
+}
+
+void CombatScreen::fire(const Cue& c) {
+    if (c.kind == CUE_BANNER) {
+        show_banner(c.name, c.amount);
+        return;
+    }
+    if (c.kind == CUE_ANIM) {
+        Creature* cr = creature_for(c.who);
+        SpineSprite* s = cr ? first_spine(cr->visuals) : NULL;
+        if (!s) return;
+        const char* name = trigger_animation(c.name);
+        std::string anim = name ? name : lower(c.name);
+        if (!s->set_animation(anim, false, 0)) return;
+        SpSkeleton* sk = s->skeleton();
+        const SpAnimation* idle = sk && anim != "die" ? sk->data()->find_animation("idle_loop") : NULL;
+        if (idle && s->animation_state()) s->animation_state()->add_animation(0, idle, true, 0);
+        return;
+    }
+    if (!vfx_box_) return;
+    Vec2 at;
+    if (!vfx_position(c, &at)) return;
+    if (c.kind == CUE_VFX) {
+        Node* fx = instance(lib_, "scenes/" + c.path + ".tscn");
+        if (!fx) return;
+        if (fx->is_node2d()) ((Node2D*)fx)->position = at;
+        else if (fx->is_control()) ((Control*)fx)->set_position(at);
+        vfx_box_->add_child(fx);
+        return;
+    }
+    /* CUE_DAMAGE: NDamageNumVfx (scenes/vfx/vfx_damage_num.tscn) 100 px
+     * above the centre, thrown up, red to cream, fading over 2 s. */
+    Node* num = instance(lib_, "scenes/vfx/vfx_damage_num.tscn");
+    if (!num || !num->is_node2d()) {
+        delete num;
+        return;
+    }
+    Node2D* n = (Node2D*)num;
+    float rx = (float)(chaotic_rand() % 2001) / 1000.0f - 1.0f, ry = (float)(chaotic_rand() % 2001) / 1000.0f - 1.0f;
+    n->position = at + Vec2(rx * 10.0f, -100.0f + ry * 5.0f);
+    n->rotation = ((float)(chaotic_rand() % 1001) / 100.0f - 5.0f) * PI_F / 180.0f;
+    Node* label = num->get_node("Label");
+    set_label(label, format("%d", c.amount));
+    if (label && label->is_control()) {
+        float k = 1.2f + (float)(chaotic_rand() % 101) / 1000.0f;
+        ((Control*)label)->scale = Vec2(k, k);
+    }
+    Color cream = hex(0xFFF6E2);
+    tweens_.tween(&n->modulate.r, cream.r, 0.5f, TRANS_CUBIC, EASE_OUT);
+    tweens_.tween(&n->modulate.g, cream.g, 0.5f, TRANS_CUBIC, EASE_OUT);
+    tweens_.tween(&n->modulate.b, cream.b, 0.5f, TRANS_CUBIC, EASE_OUT);
+    tweens_.tween(&n->modulate.a, 0.0f, 2.0f, TRANS_QUAD, EASE_IN);
+    tweens_.tween_from(&n->scale, Vec2(2.5f, 2.5f), Vec2(1, 1), 1.2f, TRANS_QUAD, EASE_OUT);
+    vfx_box_->add_child(num);
+    FlyingNumber f = { n, Vec2(rx * 100.0f, -700.0f - (float)(chaotic_rand() % 101)) };
+    numbers_.push_back(f);
+}
+
+void CombatScreen::add_cue(const Cue& c) {
+    /* Kept in time order (a banner may come after cues already added). */
+    std::vector<Cue>::iterator it = cues_.end();
+    while (it != cues_.begin() && (it - 1)->at > c.at) --it;
+    cues_.insert(it, c);
+}
+
+/* NPlayerTurnBanner / NEnemyTurnBanner / NCombatStartBanner (the scenes in
+ * scenes/combat), over everything. */
+void CombatScreen::show_banner(const std::string& kind, int round) {
+    if (!root_) return;
+    std::string path = "scenes/combat/" + kind + "_banner.tscn";
+    if (kind == "start") path = "scenes/combat/combat_start_banner.tscn";
+    if (kind == "player") path = "scenes/combat/player_turn_banner.tscn";
+    if (kind == "enemy") path = "scenes/combat/enemy_turn_banner.tscn";
+    Node* n = instance(lib_, path);
+    if (!n || !n->is_control()) {
+        delete n;
+        return;
+    }
+    Control* b = (Control*)n;
+    Control* label = as_ctl(n->get_node("Label"));
+    double life = 2.5;
+    if (kind == "player") {
+        /* Display: in (1 s), the title up and the turn number down 50 px
+         * (1.5 s), 0.4 s, out (0.3 s). */
+        set_label(label, Loc::get("gameplay_ui", "PLAYER_TURN"));
+        Control* turn = as_ctl(n->get_node("TurnNumber"));
+        std::string count = Loc::get("gameplay_ui", "TURN_COUNT");
+        size_t p = count.find("{turnNumber}");
+        if (p != std::string::npos) count.replace(p, 12, format("%d", round));
+        set_label(turn, count);
+        b->modulate.a = 0;
+        tweens_.tween(&b->modulate.a, 1.0f, 1.0f, TRANS_EXPO, EASE_OUT);
+        if (label) {
+            tweens_.tween(&label->offset[SIDE_TOP], label->offset[SIDE_TOP] - 50, 1.5f, TRANS_EXPO, EASE_OUT);
+            tweens_.tween(&label->offset[SIDE_BOTTOM], label->offset[SIDE_BOTTOM] - 50, 1.5f, TRANS_EXPO, EASE_OUT);
+        }
+        if (turn) {
+            tweens_.tween(&turn->offset[SIDE_TOP], turn->offset[SIDE_TOP] + 50, 1.5f, TRANS_EXPO, EASE_OUT);
+            tweens_.tween(&turn->offset[SIDE_BOTTOM], turn->offset[SIDE_BOTTOM] + 50, 1.5f, TRANS_EXPO, EASE_OUT);
+        }
+        tweens_.tween(&b->modulate.a, 0.0f, 0.3f, TRANS_SINE, EASE_OUT, 1.9f);
+        life = 2.2;
+    } else if (kind == "enemy") {
+        /* The title from 2x (0.75 s) fading in (1.3 s), then red while
+         * everything fades (1 s). */
+        set_label(label, Loc::get("gameplay_ui", "ENEMY_TURN"));
+        b->modulate.a = 0;
+        tweens_.tween(&b->modulate.a, 1.0f, 1.3f, TRANS_EXPO, EASE_OUT);
+        if (label) {
+            tweens_.tween_from(&label->scale, Vec2(2, 2), Vec2(1, 1), 0.75f, TRANS_EXPO, EASE_OUT);
+            tweens_.tween(&label->modulate.g, 0.0f, 1.0f, TRANS_EXPO, EASE_OUT, 1.3f);
+            tweens_.tween(&label->modulate.b, 0.0f, 1.0f, TRANS_EXPO, EASE_OUT, 1.3f);
+        }
+        tweens_.tween(&b->modulate.a, 0.0f, 1.0f, TRANS_CUBIC, EASE_OUT, 1.3f);
+        life = 2.3;
+    } else {
+        /* "Battle Start": the band and the title in after 0.3 s, the title
+         * out after 1.6 s; the player's turn banner at 2.6 s; the band out
+         * from 4.1 s. */
+        set_label(label, Loc::get("gameplay_ui", "BATTLE_START"));
+        Control* band = as_ctl(n->get_node("ColorRect"));
+        if (band) {
+            band->modulate.a = 0;
+            tweens_.tween(&band->modulate.a, 0.5f, 0.75f, TRANS_EXPO, EASE_OUT, 0.3f);
+            tweens_.tween_from(&band->scale, Vec2(1.2f, 1.2f), Vec2(1, 1), 0.75f, TRANS_EXPO, EASE_OUT, 0.3f);
+            tweens_.tween(&band->modulate.a, 0.0f, 1.0f, TRANS_CUBIC, EASE_OUT, 4.1f);
+        }
+        if (label) {
+            label->modulate.a = 0;
+            tweens_.tween(&label->modulate.a, 1.0f, 1.3f, TRANS_EXPO, EASE_OUT, 0.3f);
+            tweens_.tween_from(&label->scale, Vec2(2, 2), Vec2(1, 1), 0.75f, TRANS_EXPO, EASE_OUT, 0.3f);
+            tweens_.tween(&label->modulate.a, 0.0f, 1.0f, TRANS_CUBIC, EASE_OUT, 1.6f);
+        }
+        life = 5.1;
+    }
+    root_->add_child(n);
+    Banner bn = { b, cue_t_ + life };
+    banners_.push_back(bn);
+}
+
+void CombatScreen::show_start_banner() {
+    Cue c;
+    c.kind = CUE_BANNER;
+    c.amount = 1;
+    c.at = 0;
+    c.name = "start";
+    add_cue(c);
+    c.at = 2.6;
+    c.name = "player";
+    add_cue(c);
+}
+
+/* The steps as a timeline. The game's own pacing (the animation triggers'
+ * waits, Cmd.Wait) sets the times, shortened so a turn stays brisk. */
+void CombatScreen::play_steps(const Json& steps) {
+    cues_.clear();
+    next_cue_ = 0;
+    cue_t_ = 0;
+    double t = 0.05;
+    /* A new round in the steps: the enemies' turn came first (its banner,
+     * then their actions), the player's turn banner at the new round. */
+    bool new_round = false;
+    for (size_t i = 0; i < steps.size() && !new_round; ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k)
+            if (steps[i][k]["t"].str() == "round") new_round = true;
+    if (new_round) {
+        Cue b;
+        b.kind = CUE_BANNER;
+        b.name = "enemy";
+        b.amount = 0;
+        b.at = 0;
+        cues_.push_back(b);
+        t = 0.9;
+    }
+    for (size_t i = 0; i < steps.size(); ++i) {
+        const Json& step = steps[i];
+        bool any = false;
+        for (size_t k = 0; k < step.size(); ++k)
+            if (step[k]["t"].str() == "round") {
+                Cue b;
+                b.kind = CUE_BANNER;
+                b.name = "player";
+                b.amount = step[k]["to"].i();
+                b.at = t + 0.3;
+                cues_.push_back(b);
+                t += 0.3;
+            }
+        for (size_t k = 0; k < step.size(); ++k) {
+            const Json& ch = step[k];
+            const std::string& type = ch["t"].str();
+            Cue c;
+            c.at = t;
+            c.amount = 0;
+            if (type == "anim") {
+                c.kind = CUE_ANIM;
+                c.who = ch["who"].str();
+                c.name = ch["name"].str();
+                if (!creature_for(c.who)) continue;
+                cues_.push_back(c);
+                double w = ch["wait"].num(0);
+                t += w > 0.5 ? 0.5 : w;
+                any = true;
+            } else if (type == "vfx") {
+                c.kind = CUE_VFX;
+                c.path = ch["path"].str();
+                if (ch["side"].is_string()) {
+                    c.where = "side";
+                    c.who = ch["side"].str();
+                } else {
+                    c.who = ch["who"].str();
+                    c.where = ch["at"].str();
+                }
+                cues_.push_back(c);
+                any = true;
+            } else if (type == "hp" && ch["to"].i() < ch["from"].i()) {
+                c.kind = CUE_DAMAGE;
+                c.who = ch["who"].str();
+                c.where = "center";
+                c.amount = ch["from"].i() - ch["to"].i();
+                if (!creature_for(c.who)) continue;
+                cues_.push_back(c);
+                t += 0.12;
+                any = true;
+            } else if (type == "death") {
+                c.kind = CUE_ANIM;
+                c.who = ch["who"].str();
+                c.name = "Dead";
+                if (!creature_for(c.who)) continue;
+                cues_.push_back(c);
+                t += 0.3;
+                any = true;
+            } else if (type == "wait") {
+                double w = ch["ms"].num(0) / 1000.0;
+                t += w > 0.5 ? 0.5 : w;
+            }
+        }
+        if (any) t += 0.05;
+    }
+    /* The pad waits for the actions (not for the banners). */
+    busy_until_ = 0;
+    for (size_t i = 0; i < cues_.size(); ++i)
+        if (cues_[i].kind != CUE_BANNER && cues_[i].at > busy_until_) busy_until_ = cues_[i].at;
+    if (busy_until_ > 0) busy_until_ += 0.3;
 }
 
 } /* namespace spire */

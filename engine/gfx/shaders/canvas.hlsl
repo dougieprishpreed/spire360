@@ -33,12 +33,14 @@ VsOut vs_main(VsIn i) {
 
 sampler2D g_tex : register(s0);
 sampler2D g_group : register(s1);     // the canvas group layer (premultiplied)
+sampler2D g_lut : register(s2);       // gradient map (256x1, straight alpha)
 float4 g_mode : register(c0);         // x: colour matrix on, y: MSDF on, z: group mask, w: ripple
 float4 g_msdf : register(c1);         // x: px_range, y: outline, zw: texture size
 float4 g_cm0 : register(c2);          // colour matrix rows: rgb' = M * rgb + offset * a
 float4 g_cm1 : register(c3);
 float4 g_cm2 : register(c4);
 float4 g_ripple : register(c5);       // phase, modulo, ease, width (card_ripple.gdshader)
+float4 g_gm : register(c6);           // x: gradient map on, y: alpha from the red
 
 float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
@@ -46,6 +48,12 @@ float median3(float r, float g, float b) {
 
 float4 ps_main(VsOut i) : COLOR {
     float4 t = tex2D(g_tex, i.uv);
+    if (g_gm.x > 0.5) {
+        // The game's grayscale / flipbook VFX shaders: the red through the
+        // gradient, the alpha from the red or the texel.
+        float4 l = tex2D(g_lut, float2(t.r, 0.5));
+        t = float4(l.rgb, g_gm.y > 0.5 ? t.r : t.a);
+    }
     if (g_mode.z > 0.5) {
         // Godot's clip_children: the group layer through the mask's alpha.
         return tex2D(g_group, i.screen) * (t.a * i.color.a);

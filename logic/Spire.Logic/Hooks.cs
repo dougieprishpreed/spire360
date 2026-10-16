@@ -84,6 +84,30 @@ internal static class Hooks
             Spire.HookBridge.Hooks.RegisterAfter("cardselect.kind." + k, (a, r) => Driver?.AnnotateCardSelection(k, a, r));
         }
 
+        // VfxCmd: the effects the game would spawn (it returns at once in
+        // test mode); CreatureCmd.TriggerAnim: the creatures' animations.
+        Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature", (a, r) => VfxCue(a, "feet"));
+        Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature_center", (a, r) => VfxCue(a, "center"));
+        Spire.HookBridge.Hooks.RegisterAfter("vfx.on_side", (a, r) =>
+        {
+            if (a.Length > 1 && a[0] is CombatSide side && a[1] is string path)
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = path, ["side"] = side == CombatSide.Player ? "player" : "enemy" });
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("vfx.full_screen", (a, r) =>
+        {
+            if (a.Length > 0 && a[0] is string path)
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = path, ["at"] = "screen" });
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("anim.trigger", (a, r) =>
+        {
+            if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)
+                Steps.Cue(new Dictionary<string, object?>
+                {
+                    ["t"] = "anim", ["who"] = Steps.Who(c), ["name"] = name,
+                    ["wait"] = a.Length > 2 && a[2] is float w ? w : 0f,
+                });
+        });
+
         // CardSelectCmd.FromChooseABundleScreen(player, bundles): a bundle_select decision.
         Bridge.Register("cardselect.choose_bundle", a =>
         {
@@ -158,5 +182,14 @@ internal static class Hooks
     {
         public static void Register(string id, Func<object?[], object?> handler) =>
             Spire.HookBridge.Hooks.Register(id, handler);
+    }
+
+    /// <summary>VfxCmd.PlayOnCreature / PlayOnCreatureCenter(target, path): at the
+    /// creature's feet (its position) or its centre (VfxSpawnPosition); none
+    /// on the dead, as the game.</summary>
+    private static void VfxCue(object?[] a, string at)
+    {
+        if (a.Length > 1 && a[0] is Creature c && a[1] is string path && !c.IsDead)
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = path, ["who"] = Steps.Who(c), ["at"] = at });
     }
 }

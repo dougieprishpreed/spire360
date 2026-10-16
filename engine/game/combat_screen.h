@@ -57,6 +57,16 @@ public:
     /* Each frame (the screen's root calls it): the cards' moves, the
      * reticles' and nameplates' tweens, the arrow. */
     void process(double dt);
+    /* After build: what happened since the decision before (its "steps"),
+     * played back over the room as the game shows it: the creatures'
+     * animations, the effects (VfxCmd), damage numbers, deaths. */
+    void play_steps(const Json& steps);
+    /* The fight's first turn: "Battle Start", then the player's turn
+     * banner (NCombatStartBanner). */
+    void show_start_banner();
+    /* The playback is running (the pad waits for it; banners do not
+     * count). */
+    bool busy() const { return cue_t_ < busy_until_; }
 
 private:
     struct Creature {
@@ -121,6 +131,35 @@ private:
     std::vector<Node2D*> arrow_segments_;
     Node2D* arrow_head_;
     Vec2 arrow_pos_, arrow_to_;
+    /* Step playback. */
+    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER };
+    struct Cue {
+        double at;
+        int kind;
+        std::string who, path, name, where; /* where: center, feet, side, screen */
+        int amount;
+    };
+    struct FlyingNumber {
+        Node2D* node;
+        Vec2 velocity;
+    };
+    Creature* creature_for(const std::string& who);
+    bool vfx_position(const Cue& c, Vec2* out);
+    void fire(const Cue& c);
+    void show_banner(const std::string& kind, int round);
+    void add_cue(const Cue& c);
+    std::vector<Cue> cues_;
+    size_t next_cue_;
+    double cue_t_, busy_until_;
+    Node* root_;
+    std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */
+    Control* vfx_box_;                    /* %CombatVfxContainer (screen coordinates) */
+    std::vector<FlyingNumber> numbers_;
+    struct Banner {
+        Control* node;
+        double until; /* hidden then (QueueFree) */
+    };
+    std::vector<Banner> banners_;
 };
 
 } /* namespace spire */

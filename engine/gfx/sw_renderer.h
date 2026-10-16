@@ -33,6 +33,10 @@ public:
         if (p)
             for (int i = 0; i < 4; ++i) ripple_[i] = p[i];
     }
+    virtual void set_gradient_map(Texture* lut, bool alpha_from_red) {
+        gm_ = (SwTexture*)lut;
+        gm_red_ = alpha_from_red;
+    }
     virtual void set_msdf(float px_range, float outline) {
         msdf_range_ = px_range;
         msdf_outline_ = outline;
@@ -58,6 +62,8 @@ private:
     float cm_[12];
     bool ripple_on_;
     float ripple_[4];
+    SwTexture* gm_; /* gradient map lut (straight alpha), NULL: off */
+    bool gm_red_;
 };
 
 } /* namespace spire */

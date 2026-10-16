@@ -13,6 +13,12 @@
 
 namespace spire {
 
+/* The scene being instantiated, for script factories (script_resource). */
+static const PropCtx* g_script_ctx = NULL;
+
+Resource* script_resource(const Json& v) { return g_script_ctx ? g_script_ctx->resource(v) : NULL; }
+
+
 extern ThemeRes* g_default_theme;
 extern FontRes* g_default_font;
 
@@ -438,7 +444,11 @@ Node* SceneLibrary::instantiate_file(const SceneFile* f, int depth, std::string*
             const Json& v = props[key.c_str()];
             if (!node->set(key, v, ctx)) node->extra[key] = &v;
         }
-        if (!existing && !node->script.empty() && !node->behavior) node->behavior = create_script(node->script, node);
+        if (!existing && !node->script.empty() && !node->behavior) {
+            g_script_ctx = &ctx;
+            node->behavior = create_script(node->script, node);
+            g_script_ctx = NULL;
+        }
         if (i == 0) {
             root = node;
         } else if (!existing) {

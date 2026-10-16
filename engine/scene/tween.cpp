@@ -113,6 +113,21 @@ static float quart(TweenEase e, float t, float b, float c, float d) {
     return -c / 2 * (powf(t - 2, 4) - 2) + b;
 }
 
+static float quad(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_IN) {
+        t /= d;
+        return c * t * t + b;
+    }
+    if (e == EASE_OUT) {
+        t /= d;
+        return -c * t * (t - 2) + b;
+    }
+    t = t / d * 2;
+    if (t < 1) return c / 2 * t * t + b;
+    t -= 1;
+    return -c / 2 * (t * (t - 2) - 1) + b;
+}
+
 static float spring_out(float t, float b, float c, float d) {
     t /= d;
     float s = 1.0f - t;
@@ -138,13 +153,16 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
     case TRANS_CIRC: return circ(ease, t, b, c, d);
     case TRANS_QUART: return quart(ease, t, b, c, d);
     case TRANS_SPRING: return spring(ease, t, b, c, d);
+    case TRANS_QUAD: return quad(ease, t, b, c, d);
     default: return c * t / d + b;
     }
 }
 
 void TweenSet::add(float* p, float from, bool from_current, float to, float seconds, TweenTrans trans,
                    TweenEase ease, float delay) {
-    kill(p);
+    /* A tween starting now replaces the ones on *p; a delayed one waits
+     * (a sequence: in, then out) and takes over when it starts. */
+    if (delay <= 0) kill(p);
     Item it;
     it.p = p;
     it.from = from;
@@ -193,18 +211,28 @@ void TweenSet::kill(Vec2* p) {
 
 void TweenSet::update(double dt) {
     for (size_t i = 0; i < items_.size();) {
-        Item& it = items_[i];
-        bool waiting = it.t < 0;
-        it.t += (float)dt;
-        if (it.t < 0) {
+        bool waiting = items_[i].t < 0;
+        items_[i].t += (float)dt;
+        if (items_[i].t < 0) {
             ++i;
             continue;
         }
         if (waiting) {
-            /* Started this frame: its start value is taken now. */
-            if (it.from_current) it.from = *it.p;
-            it.t = 0;
+            /* Started this frame: the running tweens on the same value stop,
+             * its start value is taken now. */
+            float* p = items_[i].p;
+            for (size_t j = 0; j < items_.size();) {
+                if (j != i && items_[j].p == p && items_[j].t >= 0) {
+                    items_.erase(items_.begin() + (long)j);
+                    if (j < i) --i;
+                    continue;
+                }
+                ++j;
+            }
+            if (items_[i].from_current) items_[i].from = *items_[i].p;
+            items_[i].t = 0;
         }
+        Item& it = items_[i];
         if (it.t >= it.seconds) {
             *it.p = it.to;
             items_.erase(items_.begin() + (long)i);

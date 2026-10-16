@@ -47,6 +47,7 @@ public:
     virtual void set_msdf(float px_range, float outline);
     virtual void set_color_matrix(const float* m);
     virtual void set_ripple(const float* p);
+    virtual void set_gradient_map(Texture* lut, bool alpha_from_red);
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
     virtual void end();
@@ -87,6 +88,8 @@ private:
     float cm_[12];
     bool ripple_on_;
     float ripple_[4];
+    D3D9Texture* gm_; /* gradient map lut, NULL: off */
+    bool gm_red_;
     bool clip_on_;
     RECT clip_;
     bool dirty_;

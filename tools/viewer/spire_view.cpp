@@ -158,6 +158,8 @@ int main(int argc, char** argv) {
             CombatScreen* cs = new CombatScreen(&lib);
             cs->set_hand_focus(hand_focus);
             scene = cs->build(d, &err);
+            /* Its steps played back (--time picks the moment). */
+            if (scene) cs->play_steps(d["steps"]);
         } else if (d["decision"].str() == "card_reward") {
             CardRewardScreen* rs = new CardRewardScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);
