@@ -32,7 +32,7 @@ private:
 };
 
 CombatScreen::CombatScreen(SceneLibrary* lib)
-    : lib_(lib), hand_focus_(-1), aftermath_(false), hand_box_(NULL), play_card_(-1), play_single_(false), play_target_(-1), arrow_(NULL),
+    : lib_(lib), hand_focus_(-1), aftermath_(false), hand_box_(NULL), play_card_(-1), aiming_(false), play_single_(false), play_target_(-1), arrow_(NULL),
       arrow_head_(NULL) {
     player_.node = NULL;
 }
@@ -814,6 +814,30 @@ void CombatScreen::begin_play(int card, const std::string& target_type, int targ
     }
 }
 
+/* A potion aimed with the pad (NTargetManager from the potion's holder):
+ * the arrow from that point, the same targets as a card's. */
+void CombatScreen::begin_aim(const Vec2& from, const std::string& target_type, int target) {
+    end_play();
+    aiming_ = true;
+    aim_from_ = from;
+    if (target_type == "AnyEnemy") {
+        play_single_ = true;
+        if (arrow_) {
+            arrow_->visible = true;
+            arrow_pos_ = arrow_to_ = from;
+            arrow_->modulate = Color(1, 1, 1, 1);
+            arrow_head_->scale = Vec2(0.95f, 0.95f);
+        }
+        set_play_target(target);
+        return;
+    }
+    play_single_ = false;
+    if (target_type == "AllEnemies" || target_type == "RandomEnemy")
+        for (size_t i = 0; i < enemies_.size(); ++i) select_reticle(enemies_[i], true);
+    else
+        select_reticle(player_, true);
+}
+
 bool CombatScreen::set_play_target(int enemy) {
     if (!play_single_ || enemy < 0 || enemy >= (int)enemies_.size() || !enemies_[enemy].node) return false;
     if (enemy == play_target_) return true;
@@ -825,8 +849,10 @@ bool CombatScreen::set_play_target(int enemy) {
     play_target_ = enemy;
     /* OnCreatureHovered: highlight, reticle, the arrow to VfxSpawnPosition. */
     Creature& c = enemies_[enemy];
-    Holder& h = holders_[play_card_];
-    if (enemy < (int)h.text_by_target.size()) show_card_text(h, h.text_by_target[enemy]);
+    if (play_card_ >= 0) {
+        Holder& h = holders_[play_card_];
+        if (enemy < (int)h.text_by_target.size()) show_card_text(h, h.text_by_target[enemy]);
+    }
     select_reticle(c, true);
     show_nameplate(c, true);
     if (arrow_) {
@@ -839,7 +865,7 @@ bool CombatScreen::set_play_target(int enemy) {
 }
 
 void CombatScreen::end_play() {
-    if (play_card_ < 0) return;
+    if (play_card_ < 0 && !aiming_) return;
     for (size_t i = 0; i < enemies_.size(); ++i)
         if (enemies_[i].reticle && enemies_[i].reticle->modulate.a > 0) select_reticle(enemies_[i], false);
     if (player_.reticle && player_.reticle->modulate.a > 0) select_reticle(player_, false);
@@ -848,7 +874,8 @@ void CombatScreen::end_play() {
         tweens_.kill(&arrow_head_->scale);
         arrow_->visible = false;
     }
-    show_card_text(holders_[play_card_], holders_[play_card_].text);
+    if (play_card_ >= 0) show_card_text(holders_[play_card_], holders_[play_card_].text);
+    aiming_ = false;
     play_card_ = -1;
     play_target_ = -1;
     play_single_ = false;
@@ -889,7 +916,7 @@ static Vec2 bezier(const Vec2& v0, const Vec2& v1, const Vec2& c0, float t) {
 
 /* NTargetingArrow.UpdateArrowPosition + UpdateSegments. */
 void CombatScreen::update_arrow(const Vec2& target) {
-    Vec2 from = global_pos(holders_[play_card_].node);
+    Vec2 from = play_card_ >= 0 ? global_pos(holders_[play_card_].node) : aim_from_;
     float rot = arrow_head_->rotation;
     arrow_head_->position = target + rotated(Vec2(0, 88), rot);
     Vec2 final_pos = target + rotated(Vec2(0, 40), rot);
@@ -925,7 +952,7 @@ void CombatScreen::process(double dt) {
         h.node->rotation = h.angle * PI_F / 180.0f;
         h.node->scale = Vec2(h.scale, h.scale);
     }
-    if (arrow_ && arrow_->visible && play_card_ >= 0) {
+    if (arrow_ && arrow_->visible && (play_card_ >= 0 || aiming_)) {
         arrow_pos_ = arrow_pos_ + (arrow_to_ - arrow_pos_) * minf(1.0f, t * 14.0f);
         update_arrow(arrow_pos_);
     }

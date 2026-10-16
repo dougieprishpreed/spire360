@@ -9,6 +9,7 @@
 #include "card_select_screen.h"
 #include "event_screen.h"
 #include "map_screen.h"
+#include "potion_menu.h"
 #include "reward_screen.h"
 #include "top_bar.h"
 #include "logic_link.h"
@@ -147,7 +148,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false),
       rng_(1), decisions_(0), errors_(0) {}
 
 GameClient::~GameClient() {
@@ -213,6 +214,7 @@ void GameClient::update(const PadState& pad) {
 }
 
 void GameClient::show(const Json& d) {
+    potions_.detach();
     decision_ = d;
     choices_ = choices(d);
     focus_ = 0;
@@ -303,11 +305,13 @@ void GameClient::show(const Json& d) {
         Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map");
         if (bar) screen_->add_child(bar);
     }
+    potions_.attach(screen_, d["player"]);
     tree_->root()->add_child(screen_);
     refresh_plain_screen();
 }
 
 void GameClient::clear_screen() {
+    potions_.detach();
     if (screen_) {
         if (screen_->parent) screen_->parent->remove_child(screen_);
         delete screen_;
@@ -412,6 +416,13 @@ void GameClient::combat_input(const PadState& pad) {
 }
 
 void GameClient::handle_input(const PadState& pad) {
+    /* The potions (X) on any screen with the top bar. */
+    if (potions_.active()) {
+        std::string cmd = potions_.input(pad, combat_, decision_["enemies"]);
+        if (!cmd.empty()) send(cmd);
+        return;
+    }
+    if ((pad.pressed & PadState::X) && !(combat_ && combat_->playing()) && potions_.open()) return;
     if (combat_) {
         combat_input(pad);
         return;

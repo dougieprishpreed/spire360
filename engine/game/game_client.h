@@ -13,6 +13,7 @@
 #define SPIRE_GAME_CLIENT_H
 
 #include "../core/json.h"
+#include "potion_menu.h"
 #include "run_screen.h"
 
 namespace spire {
@@ -73,6 +74,7 @@ private:
     SceneLibrary* lib_;
     SceneTree* tree_;
     LogicLink* link_;
+    PotionMenu potions_; /* X: the top bar's potions */
     Node* screen_;
     CombatScreen* combat_; /* the combat screen's state while it is shown */
     RunScreen* ported_;    /* another ported screen while it is shown */

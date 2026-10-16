@@ -50,6 +50,10 @@ public:
     bool set_play_target(int enemy);
     void end_play();
     bool playing() const { return play_card_ >= 0; }
+    /* A potion aimed from `from` (screen point) at the same targets; ended
+     * by end_play. */
+    void begin_aim(const Vec2& from, const std::string& target_type, int target);
+    bool aiming() const { return aiming_; }
     /* Each frame (the screen's root calls it): the cards' moves, the
      * reticles' and nameplates' tweens, the arrow. */
     void process(double dt);
@@ -106,6 +110,8 @@ private:
     Creature player_;
     TweenSet tweens_;
     int play_card_;                   /* the card being played, -1: none */
+    bool aiming_;                     /* a potion aimed (begin_aim) */
+    Vec2 aim_from_;
     bool play_single_;                /* aiming at one enemy */
     int play_target_;
     /* NTargetingArrow: 19 segments and the head, drawn along a bezier from

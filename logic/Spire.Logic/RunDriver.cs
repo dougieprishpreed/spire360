@@ -122,6 +122,12 @@ public partial class RunDriver
             Sched.Run(() => RunManager.Instance.EnterAct(0, doTransition: false));
             Log("Entered Act 0");
 
+            // Rewards an event offers (Neow's Lost Coffer...): each taken in
+            // turn as the game's test path does, then what is left skipped as
+            // the rewards screen's Proceed does (a skipped card reward used to
+            // throw "The RewardsSet is not complete").
+            RewardsSet.testSelector = OfferRewardsHeadless;
+
             // Register card selector for cards that need player choice
             _selectorScope?.Dispose();
             _selectorScope = CardSelectCmd.UseSelector(_cardSelector);
@@ -134,6 +140,15 @@ public partial class RunDriver
         {
             return ErrorWithTrace("StartRun failed", ex);
         }
+    }
+
+    private static async Task OfferRewardsHeadless(RewardsSet set)
+    {
+        var sync = RunManager.Instance.RewardsSetSynchronizer;
+        foreach (var reward in set.Rewards.ToList())
+            await sync.SelectLocalReward(reward);
+        if (!sync.IsRewardsSetCompleted(set))
+            sync.SkipLocalRewardsSet();
     }
 
     /// <summary>
@@ -3098,6 +3113,30 @@ public partial class RunDriver
         }
     }
 
+    // NPotionPopup: whether Use and Discard are enabled, and Use's label
+    // (drink, or throw for potions aimed at a creature).
+    private static void AddPotionUse(Dictionary<string, object?> d, PotionModel p, Player player)
+    {
+        try
+        {
+            bool can = player.CanUseOrRemovePotions && !p.IsQueued && !player.Creature.IsDead;
+            bool usable = can && p.PassesCustomUsabilityCheck && p.Usage switch
+            {
+                MegaCrit.Sts2.Core.Entities.Potions.PotionUsage.AnyTime => true,
+                MegaCrit.Sts2.Core.Entities.Potions.PotionUsage.CombatOnly => CombatManager.Instance.IsInProgress
+                    && player.PlayerCombatState?.Phase == MegaCrit.Sts2.Core.Combat.PlayerTurnPhase.Play,
+                _ => false,
+            };
+            var t = p.TargetType;
+            bool aimed = t == TargetType.AnyEnemy || t == TargetType.AnyAlly || t == TargetType.TargetedNoCreature;
+            d["usage"] = p.Usage.ToString();
+            d["usable"] = usable;
+            d["discardable"] = can;
+            d["use_label"] = aimed || p.CanThrowAtAlly() ? "throw" : "drink";
+        }
+        catch (Exception ex) { Spire.Logic.Log.Warn($"potion use {p.Id}: {ex.Message}"); }
+    }
+
     private Dictionary<string, object?>? GetUpgradedInfo(CardModel card)
     {
         if (!card.IsUpgradable) return null;
@@ -3163,7 +3202,7 @@ public partial class RunDriver
                 if (p == null) return null;
                 var pvars = new Dictionary<string, object?>();
                 try { foreach (var dv in p.DynamicVars.Values) pvars[dv.Name] = (int)dv.BaseValue; } catch { }
-                return new Dictionary<string, object?>
+                var pd = new Dictionary<string, object?>
                 {
                     ["index"] = i,
                     ["id"] = p.Id.Entry,
@@ -3172,6 +3211,8 @@ public partial class RunDriver
                     ["vars"] = pvars.Count > 0 ? pvars : null,
                     ["target_type"] = p.TargetType.ToString(),
                 };
+                AddPotionUse(pd, p, player);
+                return pd;
             }).Where(x => x != null).ToList(),
             ["max_potions"] = player.MaxPotionCount,
             ["ascension"] = _runState?.AscensionLevel ?? 0,
