@@ -287,9 +287,21 @@ def cmd_texture(a):
 # ---- bundle ----
 
 DEFAULT_BUNDLE = [
+    # The screens ported so far and the next ones (rest site, shop, treasure,
+    # rewards, game over, character select), with the pictures the code
+    # loads by name (relic and potion icons, run history icons).
     "scenes/screens/main_menu.tscn", "scenes/rooms/combat_room.tscn", "scenes/cards/card.tscn",
     "scenes/combat/creature.tscn", "scenes/combat/player_hand.tscn", "scenes/ui/top_bar.tscn",
-    "scenes/screens/map/map_screen.tscn", "scenes/screens/rewards_screen.tscn",
+    "scenes/screens/map/map_screen.tscn", "scenes/screens/rewards_screen.tscn", "scenes/rewards/*.tscn",
+    "scenes/run.tscn", "scenes/rooms/event_room.tscn", "scenes/rooms/rest_site_room.tscn",
+    "scenes/rest_site/*.tscn", "scenes/rest_site/characters/*.tscn", "scenes/rooms/merchant_room.tscn",
+    "scenes/merchant/*.tscn", "scenes/merchant/characters/*.tscn", "scenes/rooms/treasure_room.tscn",
+    "scenes/screens/game_over_screen.tscn", "scenes/screens/character_select_screen.tscn",
+    "scenes/screens/char_select/*.tscn", "scenes/screens/card_selection/*.tscn", "scenes/events/*.tscn",
+    "scenes/ui/ancient_name_banner.tscn", "images/atlases/relic_atlas.sprites/*.tres",
+    "images/atlases/relic_outline_atlas.sprites/*.tres", "images/atlases/potion_atlas.sprites/*.tres",
+    "images/ui/run_history/*.png", "images/ui/rest_site/*.png", "images/ui/game_over_screen/*.png",
+    "images/events/neow.png", "images/events/this_or_that.png",
 ]
 
 

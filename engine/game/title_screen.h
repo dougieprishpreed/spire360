@@ -25,6 +25,9 @@ public:
     /* The chosen character's id for start_run ("Ironclad", ...). */
     const char* character() const;
     void set_character(const std::string& id);
+    /* While the run starts (the logic's first decision takes seconds):
+     * the menu stays, dimmed, without the carets, and takes no input. */
+    void set_starting();
     virtual void frame(double dt);
 
 private:

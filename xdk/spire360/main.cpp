@@ -163,6 +163,7 @@ void __cdecl main() {
     unsigned prev = 0;
     double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, wait_start = 0;
     int frames = 0, shown = 0;
+    bool starting = false; /* a run asked for, its first screen not here yet */
     for (;;) {
         XINPUT_STATE xs;
         ZeroMemory(&xs, sizeof(xs));
@@ -188,9 +189,9 @@ void __cdecl main() {
             TitleScreen::Action a = menu.input(pad);
             if (a == TitleScreen::QUIT) break;
             if (a == TitleScreen::START_RUN) {
-                tree->root()->remove_child(title);
-                delete title;
-                title = NULL;
+                /* The menu stays until the run's first screen. */
+                menu.set_starting();
+                starting = true;
                 if (!game) game = new GameClient(lib, tree, &link);
                 std::string seed = format("%08X", (unsigned)GetTickCount());
                 logf("run: %s, seed %s", menu.character(), seed.c_str());
@@ -221,11 +222,17 @@ void __cdecl main() {
             wait_start = now_ms();
             pad.pressed = 0;
         }
-        if (game && !title) {
+        if (game && (!title || starting)) {
             bool was_busy = game->busy();
             game->update(pad);
             if (game->decision_count() != shown) {
                 shown = game->decision_count();
+                if (starting && title) {
+                    tree->root()->remove_child(title);
+                    delete title;
+                    title = NULL;
+                }
+                starting = false;
                 logf("decision %d: %s (logic %.0f ms)", shown, game->decision()["decision"].str().c_str(),
                      now_ms() - wait_start);
                 tree->layout();

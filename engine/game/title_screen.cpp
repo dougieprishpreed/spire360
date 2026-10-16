@@ -112,7 +112,17 @@ void TitleScreen::focus(int i) {
     }
 }
 
+void TitleScreen::set_starting() {
+    for (size_t i = 0; i < labels_.size(); ++i)
+        if (labels_[i]) labels_[i]->modulate.a = 0.5f;
+    if (reticle_l_) reticle_l_->modulate.a = 0;
+    if (reticle_r_) reticle_r_->modulate.a = 0;
+    tweens_.clear();
+    focus_ = -2;
+}
+
 TitleScreen::Action TitleScreen::input(const PadState& pad) {
+    if (focus_ == -2) return NONE; /* starting */
     if (buttons_.empty()) return (pad.pressed & (PadState::A | PadState::START)) ? START_RUN : NONE;
     if (focus_ < 0) {
         focus(0);
