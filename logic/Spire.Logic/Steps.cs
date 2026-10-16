@@ -74,6 +74,10 @@ internal static class Steps
                 case Enum e: outArgs.Add(e.ToString()); break;
                 case MegaCrit.Sts2.Core.Models.AbstractModel m: outArgs.Add(m.Id.ToString()); break;
                 case Creature c: outArgs.Add(Who(c)); break;
+                case MegaCrit.Sts2.Core.Entities.Creatures.DamageResult dr:
+                    // NDamageNumVfx.Create(target, result): the number it shows.
+                    outArgs.Add(dr.UnblockedDamage + dr.OverkillDamage);
+                    break;
                 default:
                     var tn = a.GetType().Name;
                     if (tn.StartsWith("N", StringComparison.Ordinal)) continue; // UI node receivers
@@ -124,6 +128,12 @@ internal static class Steps
         catch { return; }
         if (now == null)
         {
+            // The fight just ended: the enemies alive at its last moment died
+            // with it (the snapshot that would show it is gone).
+            if (_last != null)
+                foreach (var c in _last.Creatures.Values)
+                    if (c.Alive && c.Who.StartsWith("e", StringComparison.Ordinal))
+                        _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "death", ["who"] = c.Who });
             // Outside combat the cues still matter (event sounds, map music).
             if (_pendingUi.Count > 0 && _steps.Count < MaxStepsPerResponse)
             {

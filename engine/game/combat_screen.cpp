@@ -41,6 +41,8 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     busy_until_ = 0;
     root_ = NULL;
     vfx_box_ = NULL;
+    places_ = NULL;
+    final_ = false;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -433,7 +435,7 @@ void CombatScreen::make_intents(Creature& c, const Json& intents, int creature_i
 }
 
 /* NCombatRoom.PositionEnemies. */
-void CombatScreen::position_enemies(std::vector<Creature>& cs, float scaling) {
+void CombatScreen::position_enemies(std::vector<Creature>& cs, float scaling, std::vector<Vec2>* out) {
     if (cs.empty()) return;
     float half = 960.0f / scaling, gap = 70.0f, sum = 0;
     for (size_t i = 0; i < cs.size(); ++i) sum += cs[i].width;
@@ -447,7 +449,9 @@ void CombatScreen::position_enemies(std::vector<Creature>& cs, float scaling) {
         if (gap < 30.0f) stagger = 60.0f + (40.0f - 60.0f) * ((gap - 5.0f) / 25.0f);
     }
     for (size_t i = 0; i < cs.size(); ++i) {
-        cs[i].node->set_position(Vec2(x + cs[i].width * 0.5f, 200.0f - ((i % 2) != 0 ? stagger : 0.0f)));
+        Vec2 at(x + cs[i].width * 0.5f, 200.0f - ((i % 2) != 0 ? stagger : 0.0f));
+        cs[i].node->set_position(at);
+        if (out) out->push_back(at);
         x += cs[i].width + gap;
     }
 }
@@ -1127,6 +1131,8 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     numbers_.clear();
     root_ = root;
     vfx_box_ = ctl(root, "CombatVfxContainer");
+    std::vector<int> enemy_node_ids;
+    ghosts_.clear();
     for (size_t i = 0; i < es.size(); ++i) {
         enemy_who_.push_back(format("e%d", es[i]["combat_id"].i(-1)));
         if (!make_creature(es[i]["id"].str(), false, c)) {
@@ -1141,9 +1147,29 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         make_intents(c, es[i]["intents"], (int)i);
         make_powers(c, es[i]["powers"]);
         enemy_nodes.push_back(c);
+        enemy_node_ids.push_back(es[i]["combat_id"].i(-1));
         enemies_.push_back(c);
     }
-    if (aftermath_) {
+    /* The enemies of the decision before that are gone now: they stay
+     * where they stood while their death plays (play_steps). */
+    const Json& before = previous_["enemies"];
+    for (size_t i = 0; !aftermath_ && places_ && i < before.size(); ++i) {
+        int id = before[i]["combat_id"].i(-1);
+        bool here = false;
+        for (size_t k = 0; k < es.size(); ++k)
+            if (es[k]["combat_id"].i(-2) == id) here = true;
+        if (here || places_->find(id) == places_->end()) continue;
+        Ghost g;
+        if (!make_creature(before[i]["id"].str(), false, g.c)) continue;
+        g.c.hp_bar_reduction = before[i]["hp_bar_reduction"].f();
+        enemies->add_child(g.c.node);
+        update_bounds(g.c);
+        refresh_health_bar(g.c, before[i], before[i]["powers"]);
+        g.c.node->set_position((*places_)[id]);
+        g.who = format("e%d", id);
+        ghosts_.push_back(g);
+    }
+    if (aftermath_ || final_) {
         Node* ui = find_named(root, "CombatUi");
         if (ui && ui->is_canvas_item()) ((CanvasItem*)ui)->visible = false;
     } else {
@@ -1151,7 +1177,19 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         build_hand(find_named(root, "CombatUi"), d);
     }
     position_players(ally_nodes, scaling, view["fully_center_players"].b());
-    position_enemies(enemy_nodes, scaling);
+    /* Where the enemies stand: as before in this fight; laid out again
+     * (all of them) when one has no place yet. */
+    bool known = places_ != NULL && !enemy_nodes.empty();
+    for (size_t i = 0; known && i < enemy_node_ids.size(); ++i)
+        if (places_->find(enemy_node_ids[i]) == places_->end()) known = false;
+    if (known) {
+        for (size_t i = 0; i < enemy_nodes.size(); ++i) enemy_nodes[i].node->set_position((*places_)[enemy_node_ids[i]]);
+    } else {
+        std::vector<Vec2> at;
+        position_enemies(enemy_nodes, scaling, &at);
+        for (size_t i = 0; places_ && i < at.size() && i < enemy_node_ids.size(); ++i)
+            (*places_)[enemy_node_ids[i]] = at[i];
+    }
     play_idle(root);
     arrow_ = make_arrow();
     root->add_child(arrow_);
@@ -1168,6 +1206,8 @@ CombatScreen::Creature* CombatScreen::creature_for(const std::string& who) {
     if (who == "player") return player_.node ? &player_ : NULL;
     for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i)
         if (enemy_who_[i] == who) return enemies_[i].node ? &enemies_[i] : NULL;
+    for (size_t i = 0; i < ghosts_.size(); ++i)
+        if (ghosts_[i].who == who) return &ghosts_[i].c;
     return NULL;
 }
 
@@ -1242,6 +1282,11 @@ void CombatScreen::fire(const Cue& c) {
         if (!s) return;
         const char* name = trigger_animation(c.name);
         std::string anim = name ? name : lower(c.name);
+        if (c.name == "Dead" && cr->node) {
+            /* NCreature's death: the creature fades once the animation has
+             * played (the game frees it). */
+            tweens_.tween(&cr->node->modulate.a, 0.0f, 0.6f, TRANS_LINEAR, EASE_IN_OUT, 0.9f);
+        }
         if (!s->set_animation(anim, false, 0)) return;
         SpSkeleton* sk = s->skeleton();
         const SpAnimation* idle = sk && anim != "die" ? sk->data()->find_animation("idle_loop") : NULL;
@@ -1443,11 +1488,13 @@ void CombatScreen::play_steps(const Json& steps) {
                 }
                 cues_.push_back(c);
                 any = true;
-            } else if (type == "hp" && ch["to"].i() < ch["from"].i()) {
+            } else if (type == "ui" && ch["call"].str() == "NDamageNumVfx.Create" && ch["args"].size() >= 2 &&
+                       ch["args"][1].is_number() && ch["args"][1].i() > 0) {
+                /* The number the game shows (unblocked damage + overkill). */
                 c.kind = CUE_DAMAGE;
-                c.who = ch["who"].str();
+                c.who = ch["args"][(size_t)0].str();
                 c.where = "center";
-                c.amount = ch["from"].i() - ch["to"].i();
+                c.amount = ch["args"][1].i();
                 if (!creature_for(c.who)) continue;
                 cues_.push_back(c);
                 t += 0.12;
@@ -1469,9 +1516,10 @@ void CombatScreen::play_steps(const Json& steps) {
     }
     /* The pad waits for the actions (not for the banners). */
     busy_until_ = 0;
-    for (size_t i = 0; i < cues_.size(); ++i)
-        if (cues_[i].kind != CUE_BANNER && cues_[i].at > busy_until_) busy_until_ = cues_[i].at;
-    if (busy_until_ > 0) busy_until_ += 0.3;
+    for (size_t i = 0; i < cues_.size(); ++i) {
+        double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.3);
+        if (cues_[i].kind != CUE_BANNER && end > busy_until_) busy_until_ = end;
+    }
 }
 
 } /* namespace spire */

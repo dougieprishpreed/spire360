@@ -178,6 +178,10 @@ int main(int argc, char** argv) {
             fprintf(stderr, "spire_play: the logic exited (see %s/logic.log)\n", out_dir.c_str());
             return 1;
         } else {
+            /* Time goes on while waiting (a fight's last blow plays before
+             * the screen after it). */
+            tree.process(1.0 / 60.0);
+            tree.layout(1);
             usleep(2000);
             if (++idle > 60000) { /* 2 minutes without an answer */
                 fprintf(stderr, "spire_play: no answer from the logic\n");

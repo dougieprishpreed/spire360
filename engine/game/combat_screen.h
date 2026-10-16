@@ -33,6 +33,13 @@ public:
         aftermath_ = true;
         aftermath_player_ = player;
     }
+    /* Before build: the fight's last decision (its enemies that are gone
+     * now stay while they die), where each enemy stands (by combat id:
+     * kept for the whole fight, NCombatRoom places them once), the room
+     * shown only for the killing blow (no hand or combat UI). */
+    void set_previous(const Json& decision) { previous_ = decision; }
+    void set_layout_memory(std::map<int, Vec2>* places) { places_ = places; }
+    void set_final() { final_ = true; }
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
     /* The controller's focused card in the hand (-1: the middle one); set
@@ -109,7 +116,7 @@ private:
     void make_intents(Creature& c, const Json& intents, int creature_index);
     void make_powers(Creature& c, const Json& powers);
     void make_orbs(Creature& c, const Json& orbs, int slots);
-    void position_enemies(std::vector<Creature>& c, float scaling);
+    void position_enemies(std::vector<Creature>& c, float scaling, std::vector<Vec2>* out = NULL);
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center);
     SceneLibrary* lib_;
     int hand_focus_;
@@ -153,6 +160,14 @@ private:
     double cue_t_, busy_until_;
     Node* root_;
     std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */
+    struct Ghost {
+        Creature c;
+        std::string who;
+    };
+    std::vector<Ghost> ghosts_;           /* enemies dead since the decision before */
+    Json previous_;
+    std::map<int, Vec2>* places_;
+    bool final_;
     Control* vfx_box_;                    /* %CombatVfxContainer (screen coordinates) */
     std::vector<FlyingNumber> numbers_;
     struct Banner {

@@ -12,9 +12,12 @@
 #ifndef SPIRE_GAME_CLIENT_H
 #define SPIRE_GAME_CLIENT_H
 
+#include "../core/base.h"
 #include "../core/json.h"
 #include "potion_menu.h"
 #include "run_screen.h"
+
+#include <map>
 
 namespace spire {
 
@@ -90,6 +93,8 @@ private:
     CombatScreen* room_;   /* the room behind an overlay (after a fight) */
     RunScreen* behind_;    /* another screen behind an overlay (an event's) */
     Json last_combat_;     /* the last combat_play decision (its room) */
+    std::map<int, Vec2> enemy_places_; /* where the fight's enemies stand */
+    Json finishing_;       /* a decision after the fight's killing blow, shown once it has played */
     Json last_event_;      /* the last event_choice decision (its room) */
     Json last_rest_;       /* the last rest_site decision (its room) */
     Json last_shop_;       /* the last shop decision (its room) */

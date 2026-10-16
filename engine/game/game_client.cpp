@@ -240,6 +240,15 @@ void GameClient::update(const PadState& pad) {
             waiting_ = false;
         }
     }
+    if (!finishing_.is_null()) {
+        /* The killing blow is playing: then the decision after it. */
+        if (room_ && room_->busy()) return;
+        Json d = finishing_;
+        decision_ = last_combat_;
+        show(d);
+        finishing_ = Json();
+        return;
+    }
     if (waiting_ || decision_.is_null()) return;
     if (auto_) choose_automatically();
     else handle_input(pad);
@@ -441,10 +450,34 @@ void GameClient::show(const Json& d) {
             ported_ = NULL;
         }
     }
+    if ((kind == "rewards" || kind == "game_over") && prev_kind == "combat_play" && d["steps"].size() > 0 &&
+        !last_combat_.is_null() && finishing_.is_null()) {
+        /* The fight's last command: its effects (the killing blow, the
+         * deaths) play on the room first, then this decision is shown. */
+        finishing_ = d;
+        room_ = new CombatScreen(lib_);
+        room_->set_final();
+        room_->set_layout_memory(&enemy_places_);
+        screen_ = room_->build(last_combat_, &err);
+        if (screen_) {
+            room_->play_steps(d["steps"]);
+            Node* bar = make_top_bar(lib_, last_combat_, false, prev_player);
+            if (bar) screen_->add_child(bar);
+            tree_->root()->add_child(screen_);
+            return;
+        }
+        delete room_;
+        room_ = NULL;
+        finishing_ = Json();
+    }
     if (kind == "combat_play") {
+        if (prev_kind != "combat_play") enemy_places_.clear(); /* a new fight */
+        Json before = prev_kind == "combat_play" ? last_combat_ : Json();
         last_combat_ = d;
         combat_ = new CombatScreen(lib_);
         combat_->set_hand_focus(hand_focus_);
+        combat_->set_layout_memory(&enemy_places_);
+        combat_->set_previous(before);
         screen_ = combat_->build(d, &err);
         if (!screen_) {
             log_warn("combat screen: %s", err.c_str());
@@ -491,6 +524,8 @@ void GameClient::clear_screen() {
     last_event_ = Json();
     last_rest_ = Json();
     last_shop_ = Json();
+    finishing_ = Json();
+    enemy_places_.clear();
 }
 
 void GameClient::pick(size_t i) {
