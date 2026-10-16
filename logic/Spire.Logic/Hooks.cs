@@ -75,6 +75,15 @@ internal static class Hooks
         // LocTable.GetLocStringsWithPrefix(string prefix): empty list.
         Bridge.Register("loc.get_loc_strings_with_prefix", _ => new List<LocString>());
 
+        // CardSelectCmd's entry points: which screen the pending card_select
+        // stands for, and its prompt.
+        foreach (var kind in new[] { "choose_a_card", "simple_grid", "combat_pile", "upgrade", "transform", "enchant",
+                                     "remove", "deck", "hand" })
+        {
+            var k = kind;
+            Spire.HookBridge.Hooks.RegisterAfter("cardselect.kind." + k, (a, r) => Driver?.AnnotateCardSelection(k, a, r));
+        }
+
         // CardSelectCmd.FromChooseABundleScreen(player, bundles): a bundle_select decision.
         Bridge.Register("cardselect.choose_bundle", a =>
         {

@@ -33,10 +33,13 @@ static CanvasItem* item(Node* scope, const char* unique) {
     return n && n->is_canvas_item() ? (CanvasItem*)n : NULL;
 }
 
+void warn_missing(const std::string& path); /* ui_util.h */
+
 static void set_texture(SceneLibrary* lib, CanvasItem* n, const std::string& path) {
     if (!n) return;
     Resource* r = lib->ext(path);
     Texture2DRes* t = r && r->is_texture() ? (Texture2DRes*)r : NULL;
+    if (!t && !path.empty()) warn_missing(path);
     if (n->type == "TextureRect") ((TextureRect*)n)->texture = t;
     else if (n->type == "NinePatchRect") ((NinePatchRect*)n)->texture = t;
 }

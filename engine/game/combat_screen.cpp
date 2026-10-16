@@ -316,8 +316,7 @@ void CombatScreen::make_powers(Creature& c, const Json& powers) {
             continue;
         }
         Node* icon = n->find_unique("Icon");
-        Resource* tex = lib_->ext("images/atlases/power_atlas.sprites/" + lower(pw["id"].str()) + ".tres");
-        if (icon && icon->type == "TextureRect") ((TextureRect*)icon)->texture = tex && tex->is_texture() ? (Texture2DRes*)tex : NULL;
+        set_texture(lib_, icon, "images/atlases/power_atlas.sprites/" + lower(pw["id"].str()) + ".tres");
         /* RefreshAmount */
         Node* label = n->find_unique("AmountLabel");
         if (label && label->is_control()) {

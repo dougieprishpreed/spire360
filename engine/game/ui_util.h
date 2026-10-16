@@ -24,6 +24,8 @@ void set_label(Node* n, const std::string& text);
 /* A TextureRect's or NinePatchRect's texture from a pack path ("" or a
  * missing one: none). */
 void set_texture(SceneLibrary* lib, Node* rect, const std::string& path);
+/* Logs a pack path the screens wanted but the pack lacks (once each). */
+void warn_missing(const std::string& path);
 /* A canvas item shown or hidden (NULL: nothing). */
 void set_visible(Node* n, bool visible);
 inline void hide(Node* n) { set_visible(n, false); }

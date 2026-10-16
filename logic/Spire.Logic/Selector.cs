@@ -46,6 +46,46 @@ public partial class RunDriver
 
         public bool HasPending => _pendingTcs != null && !_pendingTcs.Task.IsCompleted;
 
+        // The screen the game would open for the pending selection and its
+        // prompt (from the CardSelectCmd entry point, see Annotate).
+        public string? PendingKind { get; private set; }
+        public string? PendingPromptText { get; private set; }
+        public bool PendingCancelable { get; private set; }
+        public bool PendingManualConfirm { get; private set; }
+        private (string kind, string? prompt, bool cancelable, bool manual)? _next;
+
+        /// <summary>
+        /// After a CardSelectCmd entry point returns: label the selection it
+        /// opened. Most open it before returning (it is pending now); one
+        /// still running (an await before its selector call) labels the next.
+        /// </summary>
+        public void Annotate(string kind, object?[] args, object? result)
+        {
+            string? prompt = null;
+            bool cancelable = false, manual = false;
+            foreach (var a in args)
+            {
+                if (a is CardSelectorPrefs prefs)
+                {
+                    try { prompt = prefs.Prompt?.GetFormattedText(); } catch { }
+                    cancelable = prefs.Cancelable;
+                    manual = prefs.RequireManualConfirmation;
+                    break;
+                }
+            }
+            if (HasPending)
+            {
+                PendingKind = kind;
+                PendingPromptText = prompt;
+                PendingCancelable = cancelable;
+                PendingManualConfirm = manual;
+            }
+            else if (result is Task t && !t.IsCompleted)
+            {
+                _next = (kind, prompt, cancelable, manual);
+            }
+        }
+
         public Task<IEnumerable<CardModel>> GetSelectedCards(
             IEnumerable<CardModel> options, int minSelect, int maxSelect)
         {
@@ -60,6 +100,11 @@ public partial class RunDriver
             PendingOptions = optList;
             PendingMinSelect = minSelect;
             PendingMaxSelect = maxSelect;
+            PendingKind = _next?.kind;
+            PendingPromptText = _next?.prompt;
+            PendingCancelable = _next?.cancelable ?? false;
+            PendingManualConfirm = _next?.manual ?? false;
+            _next = null;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
             Spire.Logic.Log.Info($"Card selection pending: {optList.Count} options, select {minSelect}-{maxSelect}");
             return _pendingTcs.Task;

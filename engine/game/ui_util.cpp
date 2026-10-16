@@ -7,6 +7,7 @@
 #include "../scene/text_nodes.h"
 
 #include <ctype.h>
+#include <set>
 
 namespace spire {
 
@@ -42,10 +43,16 @@ void set_label(Node* n, const std::string& text) {
     else if (n && n->type == "RichTextLabel") ((RichTextLabel*)n)->text = text;
 }
 
+void warn_missing(const std::string& path) {
+    static std::set<std::string> told;
+    if (told.insert(path).second) log_warn("missing in the pack: %s", path.c_str());
+}
+
 void set_texture(SceneLibrary* lib, Node* rect, const std::string& path) {
     if (!rect) return;
     Resource* r = path.empty() ? NULL : lib->ext(path);
     Texture2DRes* t = r && r->is_texture() ? (Texture2DRes*)r : NULL;
+    if (!t && !path.empty()) warn_missing(path);
     if (rect->type == "TextureRect") ((TextureRect*)rect)->texture = t;
     else if (rect->type == "NinePatchRect") ((NinePatchRect*)rect)->texture = t;
 }

@@ -63,6 +63,9 @@ public partial class RunDriver
     private int _goldBeforeCombat;
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
+
+    internal void AnnotateCardSelection(string kind, object?[] args, object? result) =>
+        _cardSelector.Annotate(kind, args, result);
     // Pending bundle selection (Scroll Boxes: pick 1 of N packs)
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
@@ -1578,6 +1581,10 @@ public partial class RunDriver
                 ["cards"] = opts,
                 ["min_select"] = _cardSelector.PendingMinSelect,
                 ["max_select"] = _cardSelector.PendingMaxSelect,
+                ["kind"] = _cardSelector.PendingKind,
+                ["prompt"] = _cardSelector.PendingPromptText,
+                ["cancelable"] = _cardSelector.PendingCancelable,
+                ["manual_confirm"] = _cardSelector.PendingManualConfirm,
                 ["player"] = PlayerSummary(player),
             };
         }

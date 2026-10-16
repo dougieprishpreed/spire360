@@ -191,6 +191,96 @@
       "optional": true
     },
     {
+      "id": "cardselect.kind.choose_a_card",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromChooseACardScreen",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.simple_grid",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromSimpleGridForRewards",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.simple_grid",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromSimpleGrid",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.combat_pile",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromCombatPile",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.upgrade",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromDeckForUpgrade",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.transform",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromDeckForTransformation",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.enchant",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromDeckForEnchantment",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.remove",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromDeckForRemoval",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.deck",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromDeckGeneric",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
+      "id": "cardselect.kind.hand",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromHand",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Labels the pending card_select with the screen the game would open and its prompt."
+    },
+    {
       "id": "cardselect.choose_bundle",
       "action": "redirect",
       "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
