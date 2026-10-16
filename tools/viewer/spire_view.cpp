@@ -20,6 +20,7 @@
 #include "../../engine/game/rewards_screen.h"
 #include "../../engine/game/game_over_screen.h"
 #include "../../engine/game/character_select.h"
+#include "../../engine/game/bundle_select_screen.h"
 #include "../../engine/game/rest_site_screen.h"
 #include "../../engine/game/shop_screen.h"
 #include "../../engine/game/treasure_screen.h"
@@ -168,6 +169,10 @@ int main(int argc, char** argv) {
             ShopScreen* ss = new ShopScreen(&lib); /* lives as long as the scene */
             scene = ss->build(d, &err);
             ported = ss;
+        } else if (d["decision"].str() == "bundle_select") {
+            BundleSelectScreen* bs = new BundleSelectScreen(&lib); /* lives as long as the scene */
+            scene = bs->build(d, &err);
+            ported = bs;
         } else if (d["decision"].str() == "rest_site") {
             RestSiteScreen* rs = new RestSiteScreen(&lib); /* lives as long as the scene */
             scene = rs->build(d, &err);

@@ -6,6 +6,7 @@
 #include "../scene/text_nodes.h"
 #include "../scene/tree.h"
 #include "combat_screen.h"
+#include "bundle_select_screen.h"
 #include "card_select_screen.h"
 #include "event_screen.h"
 #include "game_over_screen.h"
@@ -373,6 +374,18 @@ void GameClient::show(const Json& d) {
         screen_ = s->build(d, &err);
         if (!screen_) {
             log_warn("card select screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "bundle_select") {
+        /* Over the event's room. */
+        BundleSelectScreen* s = new BundleSelectScreen(lib_);
+        s->set_background(overlay_background(d, false));
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("bundle select screen: %s", err.c_str());
             delete ported_;
             ported_ = NULL;
         }
