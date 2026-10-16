@@ -33,12 +33,17 @@ private:
 
 class SpineFollowNode;
 
+class MaterialRes;
+
 class SpineSprite : public Node2D {
 public:
     SpineSprite();
     virtual ~SpineSprite();
     SpineDataRes* data_res;
     float time_scale;
+    /* normal / additive / multiply / screen_material: what slots of each
+     * blend mode draw with (NULL: spine-godot's default for the mode). */
+    MaterialRes* slot_material[4];
 
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual void process(double dt);

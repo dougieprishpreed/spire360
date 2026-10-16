@@ -53,7 +53,9 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
     return data_;
 }
 
-SpineSprite::SpineSprite() : data_res(NULL), time_scale(1), lib_(NULL), skel_(NULL), failed_(false) {}
+SpineSprite::SpineSprite() : data_res(NULL), time_scale(1), lib_(NULL), skel_(NULL), failed_(false) {
+    for (int i = 0; i < 4; ++i) slot_material[i] = NULL;
+}
 
 SpineSprite::~SpineSprite() { delete skel_; }
 
@@ -68,6 +70,17 @@ bool SpineSprite::set(const std::string& key, const Json& v, const PropCtx& ctx)
         time_scale = (float)v.num(1);
         return true;
     }
+    static const char* const MATERIALS[4] = { "normal_material", "additive_material", "multiply_material",
+                                              "screen_material" };
+    for (int i = 0; i < 4; ++i)
+        if (key == MATERIALS[i]) {
+            Resource* r = ctx.resource(v);
+            slot_material[i] = r && (r->kind == Resource::RES_CANVAS_ITEM_MATERIAL ||
+                                     r->kind == Resource::RES_SHADER_MATERIAL)
+                                   ? (MaterialRes*)r
+                                   : NULL;
+            return true;
+        }
     /* Editor preview settings. */
     if (key == "preview_skin" || key == "preview_animation" || key == "preview_frame" || key == "preview_time")
         return true;
@@ -249,11 +262,21 @@ void SpineSprite::draw(Canvas& c) {
             v_[i] = Vec2((*pos)[i * 2], (*pos)[i * 2 + 1]);
             uv_[i] = Vec2((*uv)[i * 2], (*uv)[i * 2 + 1]);
         }
-        switch (slot.data->blend) {
-        case SP_BLEND_ADDITIVE: c.set_blend(BLEND_ADD); break;
-        case SP_BLEND_MULTIPLY: c.set_blend(BLEND_MUL); break;
-        case SP_BLEND_SCREEN: c.set_blend(BLEND_ADD); break; /* not exact (no screen blend yet) */
-        default: c.set_blend(item_blend); break;
+        /* SpineSprite.update_meshes: the sprite's material for the slot's
+         * blend mode when it has one (the scene's choice: Neow's room draws
+         * its multiply and screen slots as normal ones), else the mode's. */
+        int bm = slot.data->blend >= 0 && slot.data->blend < 4 ? slot.data->blend : 0;
+        const MaterialRes* m = slot_material[bm];
+        if (m && m->kind == Resource::RES_CANVAS_ITEM_MATERIAL) {
+            static const BlendMode modes[] = { BLEND_MIX, BLEND_ADD, BLEND_SUB, BLEND_MUL, BLEND_PREMULT_ALPHA };
+            c.set_blend(m->blend_mode >= 0 && m->blend_mode < 5 ? modes[m->blend_mode] : BLEND_MIX);
+        } else {
+            switch (slot.data->blend) {
+            case SP_BLEND_ADDITIVE: c.set_blend(BLEND_ADD); break;
+            case SP_BLEND_MULTIPLY: c.set_blend(BLEND_MUL); break;
+            case SP_BLEND_SCREEN: c.set_blend(BLEND_ADD); break; /* not exact (no screen blend yet) */
+            default: c.set_blend(item_blend); break;
+            }
         }
         if (!idx_.empty()) c.draw_triangles(img, v_, uv_, col_, idx_);
         clipper_.end_slot(si);

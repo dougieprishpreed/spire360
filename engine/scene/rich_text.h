@@ -47,6 +47,8 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Vec2 get_minimum_size();
     virtual void draw(Canvas& c);
+    /* NOTIFICATION_INTERNAL_PROCESS: the effects' clock. */
+    virtual void process(double dt) { elapsed_time += dt; }
 
     float content_height();
     float content_width();
