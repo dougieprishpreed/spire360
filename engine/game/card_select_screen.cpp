@@ -6,6 +6,7 @@
 #include "../scene/node.h"
 #include "../scene/scene.h"
 
+#include <algorithm>
 #include <math.h>
 
 namespace spire {
@@ -160,8 +161,8 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
         grid_h_ = 1080.0f - GRID_TOP;
         float lim_top = grid_h_ > scroll_h ? (grid_h_ - scroll_h) * 0.5f : 0.0f;
         float lim_bottom = grid_h_ > scroll_h ? (grid_h_ - scroll_h) * 0.5f : grid_h_ - scroll_h;
-        lim_lo_ = fminf(fminf(lim_top, lim_bottom), 0.0f);
-        lim_hi_ = fmaxf(fminf(lim_top, lim_bottom), 0.0f);
+        lim_lo_ = std::min(std::min(lim_top, lim_bottom), 0.0f);
+        lim_hi_ = std::max(std::min(lim_top, lim_bottom), 0.0f);
         if (lim_top > 0) lim_lo_ = lim_hi_ = lim_top;
         scroll_ = scroll_to_ = lim_top;
         (void)cols_used;

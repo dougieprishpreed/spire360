@@ -5,6 +5,12 @@
 set -e
 cd "$(dirname "$0")/../.."
 mkdir -p out/engine
+# C99 maths VS2010 does not have; g++ -std=c++98 still declares them.
+if grep -nE '\b(fminf?|fmaxf?|roundf?|truncf?|l?lroundf?|cbrtf?|log2f?|exp2f?|copysignf?|nearbyintf?|rintf?|remainderf?|fdimf?|expm1f?|log1pf?|isnan|isinf|isfinite|signbit|fpclassify|strtof|strtoll|strtoull)[[:space:]]*\(' \
+        engine/*/*.cpp engine/*/*.h xdk/spire360/*.cpp; then
+    echo "build.sh: C99 functions above are missing from VS2010" >&2
+    exit 1
+fi
 CXX=${CXX:-g++}
 FLAGS="-std=c++98 -pedantic -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"
 pids=""
