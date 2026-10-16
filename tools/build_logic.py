@@ -22,6 +22,7 @@ access to the dotnet-experimental NuGet feed (see docs/LOGIC_BUILD.md).
 Nothing produced here may be redistributed: it contains the player's game code.
 """
 import argparse
+import filecmp
 import hashlib
 import json
 import os
@@ -269,18 +270,34 @@ def build_w2c2():
 def stage_c(a):
     w2c2 = a.w2c2 or shutil.which("w2c2") or build_w2c2()
     cdir = os.path.join(OUT, "c")
-    shutil.rmtree(cdir, ignore_errors=True)
-    os.makedirs(cdir)
+    # Translated into a fresh folder, then only the files whose contents
+    # changed are copied over: the others keep their dates, so the XDK build
+    # (an hour for everything) compiles only what changed.
+    fresh = os.path.join(OUT, "c.new")
+    shutil.rmtree(fresh, ignore_errors=True)
+    os.makedirs(fresh)
     # Module name "logic" -> symbols m5_logic*; 2000 functions per file keeps
     # each translation unit small enough for the XDK compiler.
-    run([w2c2, "-f", str(a.funcs_per_file), os.path.join(OUT, "logic.wasm"), os.path.join(cdir, "logic.c")])
+    run([w2c2, "-f", str(a.funcs_per_file), os.path.join(OUT, "logic.wasm"), os.path.join(fresh, "logic.c")])
     # The table initialiser as data: one 100k-statement function is more than
     # the XDK compiler's heap can take.
-    run([sys.executable, os.path.join(ROOT, "tools", "w2c2_fix_tables.py"), os.path.join(cdir, "logic.c")])
-    run([sys.executable, os.path.join(ROOT, "tools", "w2c2_imports.py"), os.path.join(cdir, "logic.h"),
-         "--stubs", os.path.join(cdir, "logic_stubs.c")], check=False)
+    run([sys.executable, os.path.join(ROOT, "tools", "w2c2_fix_tables.py"), os.path.join(fresh, "logic.c")])
+    run([sys.executable, os.path.join(ROOT, "tools", "w2c2_imports.py"), os.path.join(fresh, "logic.h"),
+         "--stubs", os.path.join(fresh, "logic_stubs.c")], check=False)
+    os.makedirs(cdir, exist_ok=True)
+    changed = 0
+    for name in sorted(os.listdir(fresh)):
+        new, old = os.path.join(fresh, name), os.path.join(cdir, name)
+        if os.path.exists(old) and filecmp.cmp(new, old, shallow=False):
+            continue
+        shutil.copyfile(new, old)
+        changed += 1
+    for name in os.listdir(cdir):
+        if not os.path.exists(os.path.join(fresh, name)):
+            os.remove(os.path.join(cdir, name))
+    shutil.rmtree(fresh, ignore_errors=True)
     n = len([f for f in os.listdir(cdir) if f.endswith(".c")])
-    print(f"{n} C files in {cdir}")
+    print(f"{n} C files in {cdir} ({changed} files changed)")
 
 
 def stage_native(a):
