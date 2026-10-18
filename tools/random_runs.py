@@ -25,7 +25,7 @@ CHARACTERS = ["Ironclad", "Silent", "Defect", "Regent", "Necrobinder"]
 
 
 class Session:
-    def __init__(self, cmd, env, trace_path, verbose):
+    def __init__(self, cmd, env, trace_path, verbose, timing_path=None):
         # stderr goes to a file: an unread pipe fills up and blocks the logic.
         self.log_path = (trace_path[:-6] + ".log") if trace_path else os.devnull
         self.log = open(self.log_path, "w", encoding="utf-8")
@@ -34,6 +34,8 @@ class Session:
                                      errors="replace", bufsize=1, env=env)
         self.trace = open(trace_path, "w", encoding="utf-8", buffering=1) if trace_path else None
         self.verbose = verbose
+        self.timings = open(timing_path, "w", encoding="utf-8", buffering=1) if timing_path else None
+        self.last_decision = None
 
     def read(self):
         while True:
@@ -54,6 +56,7 @@ class Session:
                 return msg
 
     def send(self, cmd):
+        started = time.perf_counter()
         text = json.dumps(cmd, separators=(",", ":"))
         if self.trace:
             self.trace.write(">" + text + "\n")
@@ -62,6 +65,11 @@ class Session:
         self.proc.stdin.write(text + "\n")
         self.proc.stdin.flush()
         resp = self.read()
+        if self.timings:
+            self.timings.write(json.dumps({"cmd": cmd.get("cmd"), "action": cmd.get("action"),
+                                          "from": self.last_decision, "decision": resp.get("decision"),
+                                          "ms": (time.perf_counter() - started) * 1000}) + "\n")
+        self.last_decision = resp.get("decision")
         if self.verbose:
             print("  <", resp.get("type"), resp.get("decision", ""), (resp.get("message") or "")[:160])
         return resp
@@ -75,6 +83,8 @@ class Session:
             self.proc.kill()
         if self.trace:
             self.trace.close()
+        if self.timings:
+            self.timings.close()
         self.log.close()
 
 
@@ -158,9 +168,9 @@ def act(rng, state):
     return a("proceed")
 
 
-def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False):
+def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None):
     rng = random.Random(seed)
-    s = Session(cmd, env, trace_path, verbose)
+    s = Session(cmd, env, trace_path, verbose, timing_path)
     started = time.time()
     result = {"character": character, "seed": seed}
     try:
@@ -223,6 +233,7 @@ def main():
     ap.add_argument("--seed-prefix", default="spire360")
     ap.add_argument("--max-steps", type=int, default=6000)
     ap.add_argument("--trace-dir")
+    ap.add_argument("--timing-dir", help="per-command wall timings as JSONL (keep under work/ or traces/)")
     ap.add_argument("--data-dir", help="SPIRE_DATA for the logic process")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--tank", action="store_true", help="999 HP so random play reaches the later acts")
@@ -233,13 +244,16 @@ def main():
         env["SPIRE_DATA"] = a.data_dir
     if a.trace_dir:
         os.makedirs(a.trace_dir, exist_ok=True)
+    if a.timing_dir:
+        os.makedirs(a.timing_dir, exist_ok=True)
     cmd = shlex.split(a.cmd)
     results = []
     for character in a.characters.split(","):
         for i in range(a.runs):
             seed = f"{a.seed_prefix}-{character.lower()}-{i}"
             trace = os.path.join(a.trace_dir, seed + ".jsonl") if a.trace_dir else None
-            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank)
+            timing = os.path.join(a.timing_dir, seed + ".jsonl") if a.timing_dir else None
+            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing)
             results.append(r)
             print(json.dumps(r)[:600], flush=True)
     ok = [r for r in results if r["status"] in ("victory", "defeat")]

@@ -1,6 +1,7 @@
 /* Canvas: the draw commands of Godot's CanvasItem (draw_rect,
  * draw_texture_rect, nine patches, polygons) in an item's local coordinates,
- * turned into renderer triangles. One Canvas per frame; the scene tree sets
+ * turned into renderer triangles. A Canvas owns the renderer's texture cache;
+ * the scene tree sets
  * the item state (transform, modulate, blend) before each item draws. */
 #ifndef SPIRE_CANVAS_H
 #define SPIRE_CANVAS_H
@@ -17,6 +18,15 @@ enum NinePatchAxis { AXIS_STRETCH = 0, AXIS_TILE = 1, AXIS_TILE_FIT = 2 };
 class Canvas {
 public:
     Canvas(Renderer* r, const Pack* pack);
+    ~Canvas();
+    void begin_frame();
+    void end_frame();
+    void set_texture_budget(size_t bytes) { texture_budget_ = bytes; }
+    size_t texture_bytes() const { return texture_bytes_; }
+    size_t texture_count() const;
+    /* Generated sampler textures share the same ownership and budget. */
+    Texture* cached_texture(const std::string& key);
+    Texture* cache_texture(const std::string& key, const TextureData& data);
 
     /* Item state. xform maps local coordinates to screen pixels. */
     void set_item(const Xform2D& xform, const Color& modulate, BlendMode blend, int tex_flags);
@@ -54,6 +64,17 @@ public:
     void set_count_only(bool on) { count_only_ = on; }
 
 private:
+    Canvas(const Canvas&);
+    Canvas& operator=(const Canvas&);
+    struct CachedTexture {
+        Texture* texture;
+        size_t bytes;
+        u64 touched, frame;
+        CachedTexture() : texture(NULL), bytes(0), touched(0), frame(0) {}
+    };
+    std::map<std::string, CachedTexture> textures_;
+    size_t texture_bytes_, texture_budget_;
+    u64 texture_clock_, frame_;
     void image_quad(ImageTextureRes* img, Rect2 dst, Rect2 src, const Color& mod, int extra_flags);
     void emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2& uv0, const Vec2& uv1, const Color& c,
                    int flags);

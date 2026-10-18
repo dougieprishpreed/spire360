@@ -7,6 +7,8 @@
 #include "../../engine/game/logic_link.h"
 #include "../../engine/game/loc.h"
 #include "../../engine/game/ui_util.h"
+#include "../../engine/gfx/sw_renderer.h"
+#include "../../engine/scene/canvas.h"
 #include "../../engine/scene/node.h"
 #include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
@@ -50,7 +52,7 @@ static void advance(SceneTree& tree, GameClient& game) {
 static void selection_cases(SceneLibrary& lib, const Json& sample) {
     if (sample.size() < 2) return;
     static const char* kinds[] = { "simple_grid", "combat_pile", "deck", "upgrade" };
-    for (int kind = 0; kind < 4; ++kind) {
+    for (int kind = 0; kind < 8; ++kind) {
         Json d, cards = Json::make_array();
         for (int i = 0; i < 8; ++i) {
             Json card = sample[(size_t)i % sample.size()];
@@ -58,7 +60,8 @@ static void selection_cases(SceneLibrary& lib, const Json& sample) {
             cards.append(card);
         }
         d.set("cards", cards);
-        d.set("kind", Json::make_string(kinds[kind]));
+        d.set("kind", Json::make_string(kinds[kind % 4]));
+        d.set("manual_confirm", Json::make_number(kind >= 4 ? 1 : 0));
         d.set("min_select", Json::make_number(2));
         d.set("max_select", Json::make_number(2));
         CardSelectScreen screen(&lib);
@@ -76,11 +79,45 @@ static void selection_cases(SceneLibrary& lib, const Json& sample) {
         screen.input(pad);
         pad.pressed = PadState::A;
         std::string command = screen.input(pad);
+        if (kind >= 4) {
+            check(command.empty(), "manual selection submitted without confirmation");
+            pad.pressed = PadState::RIGHT; screen.input(pad);
+            pad.pressed = PadState::A;
+            check(screen.input(pad).empty(), "manual selection exceeded its maximum");
+            pad.pressed = PadState::Y;
+            command = screen.input(pad);
+        }
         if (command.empty()) command = screen.input(pad); /* deck preview confirm */
+        if (command.empty()) fprintf(stderr, "selection kind %s, manual %d: no confirmation command\n", kinds[kind % 4], kind >= 4 ? 1 : 0);
         check(!command.empty(), "two-card selection cannot be confirmed with the controller");
         Json result = Json::parse(command.c_str(), command.size(), &error);
         check(result["action"].str() == "select_cards" && result["args"]["indices"].str() == "0,1",
               "two-card selection did not submit both chosen indices");
+    }
+}
+
+static void actual_selection_case(SceneLibrary& lib, const Json& d, const std::string& line) {
+    if (d["min_select"].i() != 2 || d["max_select"].i() != 2 || d["cards"].size() < 2) return;
+    SceneTree tree;
+    ReplayLink link;
+    GameClient game(&lib, &tree, &link);
+    link.incoming.push_back("{\"type\":\"ready\"}"); game.update(PadState());
+    link.incoming.push_back(line); game.update(PadState());
+    advance(tree, game);
+    size_t before = link.sent.size();
+    PadState pad;
+    pad.pressed = PadState::A; game.update(pad);
+    check(link.sent.size() == before, "actual selection submitted after only one card");
+    pad.pressed = PadState::RIGHT; game.update(pad);
+    pad.pressed = PadState::A; game.update(pad);
+    if (link.sent.size() == before) { pad.pressed = PadState::Y; game.update(pad); }
+    if (link.sent.size() == before) { pad.pressed = PadState::A; game.update(pad); }
+    check(link.sent.size() == before + 1, "actual two-card decision did not send a controller command");
+    if (link.sent.size() > before) {
+        std::string error;
+        Json cmd = Json::parse(link.sent.back().c_str(), link.sent.back().size(), &error);
+        check(cmd["action"].str() == "select_cards" && cmd["args"]["indices"].str() == "0,1",
+              "actual selection sent the wrong cards");
     }
 }
 
@@ -134,6 +171,60 @@ static void lifecycle_cases(SceneLibrary& lib) {
     }
 }
 
+class CountRenderer : public SwRenderer {
+public:
+    CountRenderer() : created(0), destroyed(0) {}
+    virtual Texture* create_texture(const TextureData& data) { ++created; return SwRenderer::create_texture(data); }
+    virtual void destroy_texture(Texture* t) { ++destroyed; SwRenderer::destroy_texture(t); }
+    int created, destroyed;
+};
+
+static void texture_cache_cases(const Pack& pack) {
+    CountRenderer renderer;
+    {
+        Canvas canvas(&renderer, &pack);
+        TextureData td;
+        td.format = TEX_ARGB8; td.flags = 0;
+        td.width = td.height = td.orig_width = td.orig_height = 16;
+        td.levels.resize(1); td.levels[0].assign(16 * 16 * 4, 255);
+        canvas.set_texture_budget(2 * 16 * 16 * 4);
+        canvas.begin_frame();
+        Texture* a = canvas.cache_texture("test:a", td);
+        canvas.cache_texture("test:b", td);
+        check(canvas.cache_texture("test:a", td) == a && renderer.created == 2, "texture cache uploaded a duplicate");
+        canvas.end_frame();
+        canvas.begin_frame();
+        canvas.cache_texture("test:c", td);
+        check(renderer.destroyed == 0, "texture cache evicted a sampler before the frame finished");
+        canvas.end_frame();
+        check(canvas.cached_texture("test:a") == a && !canvas.cached_texture("test:b"), "texture cache did not evict the least recently used texture");
+        check(canvas.texture_bytes() <= 2 * 16 * 16 * 4 && canvas.texture_count() == 2, "texture budget was exceeded after the frame");
+        for (int i = 0; i < 122; ++i) { canvas.begin_frame(); canvas.end_frame(); }
+        check(canvas.texture_count() == 0, "unused screen textures were retained indefinitely");
+        canvas.cache_texture("test:final", td);
+    }
+    check(renderer.created == renderer.destroyed, "canvas destruction leaked textures");
+    /* Resource aliases and renderer lifetimes must not share raw GPU pointers. */
+    ImageTextureRes first, alias;
+    for (size_t i = 0; i < pack.count(); ++i) if (pack.entry(i).type == PACK_TEXTURE) {
+        first.path = alias.path = pack.name_of(&pack.entry(i)); break;
+    }
+    check(!first.path.empty(), "no pack texture available for alias check");
+    int before = renderer.created;
+    {
+        Canvas canvas(&renderer, &pack);
+        Texture* t = canvas.gpu_texture(&first);
+        check(t && canvas.gpu_texture(&alias) == t && renderer.created == before + 1,
+              "texture aliases uploaded separate GPU copies");
+    }
+    {
+        Canvas canvas(&renderer, &pack);
+        check(canvas.gpu_texture(&first) != NULL && renderer.created == before + 2,
+              "a new canvas reused a freed resource GPU pointer");
+    }
+    check(renderer.created == renderer.destroyed, "pack texture teardown leaked GPU copies");
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: spire_check <pack.s3p> <trace.jsonl> [more traces...]\n");
@@ -150,6 +241,7 @@ int main(int argc, char** argv) {
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     lifecycle_cases(lib);
+    texture_cache_cases(pack);
     int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0;
     bool selections_checked = false;
     for (int file = 2; file < argc; ++file) {
@@ -166,6 +258,7 @@ int main(int argc, char** argv) {
             if (line.empty() || line[0] != '{') continue;
             Json d = Json::parse(line.c_str(), line.size(), &error);
             if (d["type"].str() != "decision") continue;
+            if (d["decision"].str() == "card_select") actual_selection_case(lib, d, line);
             if (!selections_checked && d["hand"].size() >= 2) {
                 selection_cases(lib, d["hand"]);
                 selections_checked = true;

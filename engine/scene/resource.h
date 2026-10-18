@@ -61,13 +61,11 @@ public:
 
 class ImageTextureRes : public Texture2DRes {
 public:
-    ImageTextureRes() : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D"), gpu(NULL), loaded(false) {}
+    ImageTextureRes() : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D") {}
     virtual Vec2 size() const { return size_; }
     virtual bool get_rect_region(const Rect2& dst, const Rect2& src, Rect2& out_dst, Rect2& out_src,
                                  ImageTextureRes** image);
     Vec2 size_;     /* layout units (the game's size) */
-    Texture* gpu;   /* loaded by the canvas on first draw */
-    bool loaded;
 };
 
 class AtlasTextureRes : public Texture2DRes {

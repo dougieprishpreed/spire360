@@ -33,7 +33,12 @@ extern "C" int spire_logic_start(const char* root);
 
 using namespace spire;
 
-static std::string g_log;
+static FILE* g_log_file = NULL;
+static bool g_log_started = false;
+
+static void flush_log() {
+    if (g_log_file) fflush(g_log_file);
+}
 
 static void logf(const char* fmt, ...) {
     char buf[1024];
@@ -43,16 +48,16 @@ static void logf(const char* fmt, ...) {
     va_end(ap);
     buf[sizeof(buf) - 2] = 0;
     strcat(buf, "\n");
-    g_log += buf;
     OutputDebugStringA(buf);
-}
-
-static void flush_log() {
-    HANDLE h = CreateFileA("game:\\spire360.txt", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (h == INVALID_HANDLE_VALUE) return;
-    DWORD n = 0;
-    WriteFile(h, g_log.c_str(), (DWORD)g_log.size(), &n, NULL);
-    CloseHandle(h);
+    if (!g_log_file) {
+        g_log_file = fopen("game:\\spire360.txt", g_log_started ? "ab" : "wb");
+        if (g_log_file) g_log_started = true;
+    }
+    if (g_log_file) {
+        fputs(buf, g_log_file);
+        flush_log(); /* A hung frame must leave the last completed log line. */
+        if (ferror(g_log_file)) { fclose(g_log_file); g_log_file = NULL; }
+    }
 }
 
 static void engine_log(const char* line) { logf("%s", line); }
@@ -326,4 +331,5 @@ void __cdecl main() {
     delete lib;
     logf("spire360 done");
     flush_log();
+    if (g_log_file) { fclose(g_log_file); g_log_file = NULL; }
 }

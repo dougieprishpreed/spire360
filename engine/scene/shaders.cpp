@@ -63,11 +63,10 @@ Vec2 shader_param_vec2(const MaterialRes* m, const char* name, const Vec2& fallb
  * gradient map, made once per gradient (and renderer). Unset: white
  * (Godot's default for a sampler2D). */
 static Texture* gradient_lut(Canvas& c, Resource* gradient) {
-    typedef std::map<std::pair<Renderer*, Resource*>, Texture*> Cache;
-    static Cache cache;
-    std::pair<Renderer*, Resource*> key(c.renderer(), gradient);
-    Cache::iterator it = cache.find(key);
-    if (it != cache.end()) return it->second;
+    std::string key = "gradient:" + (gradient ? gradient->path : std::string("white"));
+    if (gradient && gradient->path.empty()) key += format("%p", (void*)gradient);
+    Texture* cached = c.cached_texture(key);
+    if (cached) return cached;
     GradientData g;
     bool ok = gradient && GradientData::from(gradient, g) && g.valid();
     TextureData td;
@@ -85,9 +84,7 @@ static Texture* gradient_lut(Canvas& c, Resource* gradient) {
         px[2] = (u8)(clampf(col.r, 0, 1) * 255 + 0.5f);
         px[3] = (u8)(clampf(col.a, 0, 1) * 255 + 0.5f);
     }
-    Texture* t = c.renderer()->create_texture(td);
-    cache[key] = t;
-    return t;
+    return c.cache_texture(key, td);
 }
 
 /* A sampler2D parameter as a renderer texture (NULL: unset, white). */

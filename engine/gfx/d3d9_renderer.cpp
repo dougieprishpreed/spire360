@@ -144,17 +144,17 @@ Texture* D3D9Renderer::create_texture(const TextureData& d) {
     t->height = d.height;
     t->orig_width = d.orig_width;
     t->orig_height = d.orig_height;
-    if (!dev_ || d.levels.empty()) return t;
+    if (!dev_ || d.levels.empty()) { delete t; return NULL; }
     D3DFORMAT fmt = d3d_format(d.format);
     bool block = d.format != TEX_ARGB8;
 #if defined(_XBOX)
     /* One level for now (no packed mip tail: D3D creates a one-level
      * texture unpacked, its base level at the base address). */
     UINT levels = 1;
-    if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, 0, &t->tex, NULL))) return t;
+    if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, 0, &t->tex, NULL))) { delete t; return NULL; }
 #else
     UINT levels = (UINT)d.levels.size();
-    if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, D3DPOOL_MANAGED, &t->tex, NULL))) return t;
+    if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, D3DPOOL_MANAGED, &t->tex, NULL))) { delete t; return NULL; }
 #endif
     for (UINT lv = 0; lv < levels; ++lv) {
         int w = d.width >> lv, h = d.height >> lv;
@@ -162,6 +162,17 @@ Texture* D3D9Renderer::create_texture(const TextureData& d) {
         if (h < 1) h = 1;
         int rows = block ? (h + 3) / 4 : h;
         int pitch = block ? ((w + 3) / 4) * (d.format == TEX_DXT1 ? 8 : 16) : w * 4;
+#if defined(_XBOX)
+        /* Xenos tiles in 32x32 blocks (texels for uncompressed data).
+         * Include the alignment in the cache budget. */
+        int blocks_x = block ? (w + 3) / 4 : w;
+        int blocks_y = rows;
+        size_t bytes = (size_t)((blocks_x + 31) & ~31) * (size_t)((blocks_y + 31) & ~31) *
+                       (size_t)(block ? (d.format == TEX_DXT1 ? 8 : 16) : 4);
+        t->memory_bytes += (bytes + 4095) & ~(size_t)4095;
+#else
+        t->memory_bytes += (size_t)rows * (size_t)pitch;
+#endif
         const std::vector<u8>& src = d.levels[lv];
         if ((int)src.size() < rows * pitch) break;
 #if defined(_XBOX)
@@ -206,6 +217,13 @@ void D3D9Renderer::destroy_texture(Texture* t) {
     if (!t) return;
     flush();
     D3D9Texture* d = (D3D9Texture*)t;
+    if (tex_ == d) tex_ = NULL;
+    if (gm_ == d) gm_ = NULL;
+    if (vfx_on_ && vfx_.lut == t) { vfx_.lut = NULL; vfx_on_ = false; }
+    if (fire_on_ && (fire_.noise1 == t || fire_.noise2 == t || fire_.noise_mask == t ||
+        fire_.dist1 == t || fire_.dist2 == t || fire_.dist_mask == t)) fire_on_ = false;
+    if (dev_) for (int stage = 0; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
+    dirty_ = true;
     RELEASE(d->tex);
     delete d;
 }

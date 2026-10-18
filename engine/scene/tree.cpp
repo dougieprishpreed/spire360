@@ -196,6 +196,7 @@ static Rect2 group_bounds(const SceneTree::DrawItem& d) {
 }
 
 void SceneTree::render(Canvas& canvas) {
+    canvas.begin_frame();
     skipped.clear();
     items_drawn = 0;
     std::vector<DrawItem> items;
@@ -255,6 +256,7 @@ void SceneTree::render(Canvas& canvas) {
     }
     if (group_mask) canvas.renderer()->end_group();
     canvas.set_clip(NULL);
+    canvas.end_frame();
 }
 
 } /* namespace spire */

@@ -19,7 +19,13 @@ decisions, HP changes wait for their impact cues, playback finishes, and
 two-card selections can be confirmed with a controller. It also checks
 one-shot particle completion/restart, VFX node cleanup and delayed tween
 timing. It reads the
-pack's sibling `data/` folder for localization. Keep traces out of git.
+pack's sibling `data/` folder for localization. Texture cache checks cover
+LRU order, frame boundaries, the memory budget, idle release, path aliases
+and renderer teardown. Keep traces out of git.
+
+`random_runs.py --timing-dir work/timings` records one JSONL timing file
+per run with the command/action, previous and resulting decision, and
+wall-clock milliseconds. These measurements include the protocol round trip.
 
     out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts] [--time T]
     out/engine/spire_view <pack.s3p> "Some text" out.png --text fonts/kreon_bold.ttf 24

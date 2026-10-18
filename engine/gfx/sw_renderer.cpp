@@ -22,6 +22,7 @@ Texture* SwRenderer::create_texture(const TextureData& d) {
         log_warn("texture decode failed (%dx%d fmt %d)", d.width, d.height, d.format);
         t->img.resize(1, 1);
     }
+    t->memory_bytes = (size_t)t->img.w * (size_t)t->img.h * 4;
     return t;
 }
 

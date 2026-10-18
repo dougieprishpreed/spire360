@@ -59,6 +59,7 @@ private:
     bool row_; /* choose a card: one row, no grid */
     int min_, max_;
     bool cancelable_;
+    bool manual_confirm_;
     std::vector<Control*> holders_;
     Node* root_;
     TipFollower tips_;

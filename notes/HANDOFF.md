@@ -166,7 +166,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
   with 0 failures, including new particle restart/expiry, Osty/slash node
   cleanup and delayed-tween timing checks. No logic or pack change in this
   batch. Other custom VFX scripts still need systematic coverage.
-- Orb playback: stable orb instance ids and explicit OrbModel passive /
+- Orb playback (`b62fc2e`): stable orb instance ids and explicit OrbModel passive /
   evoke cues; channel/capacity snapshots follow the action timeline.
   The engine preserves surviving orb sprites, moves slots over 0.45 s,
   fades removed orbs over 0.25 s, restarts activation particles and plays
@@ -180,6 +180,25 @@ a git clone, deleted files go away by themselves (keep the list as is).
   simple_grid, eight cards, exactly two required, no manual confirmation.
   Selecting indices 0,1 resumes the map and grows the deck from 10 to 12.
   Controller end-to-end coverage of this actual decision remains next.
+- Texture cache: Canvas owns uploads by pack path, including generated
+  gradient samplers. An 80 MiB LRU evicts after the frame, with backend
+  allocation estimates; textures unused for 120 rendered frames are also
+  released. D3D9 flushes batches and clears cached/bound sampler references
+  before destruction. Resource aliases share uploads and do not retain GPU
+  pointers after the renderer dies. PC builds reuse unchanged objects.
+- Card selection: manual confirmation works at a fixed count as well as
+  a range, selection cannot exceed the maximum, and upgrade templates get
+  a Confirm button when needed to open their preview. The real Gorge
+  decision now passes through GameClient controller input, sending both
+  indices. All eight automatic/manual grid cases pass.
+- Validation: strict C++03 PC build; 1,425 presentation responses, including
+  the actual event and texture cache lifecycle cases, **0 failures**.
+  Timed JIT runs: 15/15 completed, `differences: 0`. Timings are under
+  ignored `work/timings`; the repeated rewards delay is not reproduced on
+  JIT, so the Xenia performance item remains open.
+- Console log writes and flushes each line instead of retaining and
+  rewriting the whole history. This console-only change was reviewed;
+  no XDK compile or Xenia validation was run. Pack remains unchanged.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
@@ -309,10 +328,12 @@ here as they land, with the commit.
       protocol), the music logic of NRunMusicController, UI sounds.
 
 **Performance and robustness**
-- [ ] GPU texture budget + LRU; release a screen's textures when it goes.
+- [x] GPU texture budget + LRU; idle screen textures released (desktop cache
+      change, validated by PC cache tests; console verification pending).
 - [ ] Draw call batching.
 - [ ] The 2 s rewards decision.
-- [ ] Log appended per line.
+- [x] Log appended and flushed per line (desktop cache/log change; console
+      verification pending).
 - [ ] Soak: long spire_play `--auto` runs on every character with no
       plain-list screens, no missing-texture warnings, no hangs.
 

@@ -7,7 +7,67 @@
 namespace spire {
 
 Canvas::Canvas(Renderer* r, const Pack* pack)
-    : r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false) {}
+    : texture_bytes_(0), texture_budget_(80 * 1024 * 1024), texture_clock_(0), frame_(0),
+      r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false) {}
+
+Canvas::~Canvas() {
+    for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it)
+        if (it->second.texture) r_->destroy_texture(it->second.texture);
+}
+
+void Canvas::begin_frame() { ++frame_; }
+
+size_t Canvas::texture_count() const {
+    size_t count = 0;
+    for (std::map<std::string, CachedTexture>::const_iterator it = textures_.begin(); it != textures_.end(); ++it)
+        if (it->second.texture) ++count;
+    return count;
+}
+
+void Canvas::end_frame() {
+    /* Samplers and queued batches may hold textures until the last draw.
+     * Evict only here, after the complete scene has submitted its draws. */
+    r_->set_gradient_map(NULL, false);
+    r_->set_fire(NULL);
+    r_->set_vfx(NULL);
+    for (;;) {
+        std::map<std::string, CachedTexture>::iterator oldest = textures_.end();
+        for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it) {
+            if (!it->second.texture) continue;
+            bool expired = frame_ > it->second.frame && frame_ - it->second.frame > 120;
+            if (texture_bytes_ <= texture_budget_ && !expired) continue;
+            if (oldest == textures_.end() || it->second.touched < oldest->second.touched) oldest = it;
+        }
+        if (oldest == textures_.end()) break;
+        texture_bytes_ -= oldest->second.bytes;
+        r_->destroy_texture(oldest->second.texture);
+        textures_.erase(oldest);
+    }
+}
+
+Texture* Canvas::cached_texture(const std::string& key) {
+    std::map<std::string, CachedTexture>::iterator it = textures_.find(key);
+    if (it == textures_.end()) return NULL;
+    it->second.touched = ++texture_clock_;
+    it->second.frame = frame_;
+    return it->second.texture;
+}
+
+Texture* Canvas::cache_texture(const std::string& key, const TextureData& data) {
+    Texture* found = cached_texture(key);
+    if (found) return found;
+    CachedTexture entry;
+    entry.texture = r_->create_texture(data);
+    if (!entry.texture) return NULL;
+    /* Use the backend's allocation estimate, including tiled alignment and
+     * decoded software pixels, rather than compressed pack payload bytes. */
+    entry.bytes = entry.texture->memory_bytes;
+    entry.touched = ++texture_clock_;
+    entry.frame = frame_;
+    textures_[key] = entry;
+    texture_bytes_ += entry.bytes;
+    return entry.texture;
+}
 
 void Canvas::set_item(const Xform2D& xform, const Color& modulate, BlendMode blend, int tex_flags) {
     xform_ = xform;
@@ -20,17 +80,16 @@ void Canvas::set_clip(const Rect2* screen_rect) { r_->set_clip(screen_rect); }
 
 Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (!img) return NULL;
-    if (!img->loaded) {
-        img->loaded = true;
-        std::vector<u8> data;
-        TextureData td;
-        if (pack_ && pack_->read(img->path.c_str(), data) && Pack::parse_texture(data, td)) {
-            img->gpu = r_->create_texture(td);
-        } else {
-            log_warn("texture %s: not in the pack", img->path.c_str());
-        }
-    }
-    return img->gpu;
+    const std::string key = "pack:" + img->path;
+    std::map<std::string, CachedTexture>::iterator it = textures_.find(key);
+    if (it != textures_.end()) return cached_texture(key);
+    std::vector<u8> data;
+    TextureData td;
+    if (pack_ && pack_->read(img->path.c_str(), data) && Pack::parse_texture(data, td))
+        return cache_texture(key, td);
+    log_warn("texture %s: not in the pack", img->path.c_str());
+    textures_[key] = CachedTexture(); /* warn once for a missing resource */
+    return NULL;
 }
 
 void Canvas::emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2& uv0, const Vec2& uv1, const Color& c,

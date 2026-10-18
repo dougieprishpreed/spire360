@@ -85,6 +85,7 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
     min_ = d["min_select"].i(1);
     max_ = d["max_select"].i(1);
     cancelable_ = d["cancelable"].b();
+    manual_confirm_ = d["manual_confirm"].b();
     holders_.clear();
     cards_.clear();
     picked_.assign(d["cards"].size(), false);
@@ -186,9 +187,16 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
             cards_.push_back(card);
         }
         close_ = button(screen->find_unique("Close"), false);
-        confirm_ = button(screen->find_unique("Confirm"), true);
+        Node* confirm = screen->find_unique("Confirm");
+        /* Upgrade templates normally confirm through their preview. A
+         * manual/range selection also needs a way to open that preview. */
+        if (!confirm && (manual_confirm_ || min_ != max_ || max_ == 0)) {
+            confirm = instance(lib_, "scenes/ui/confirm_button.tscn");
+            if (confirm) screen->add_child(confirm);
+        }
+        confirm_ = button(confirm, true);
         show_button(close_, cancelable_, true);
-        show_button(confirm_, min_ != max_ && 0 >= min_, true);
+        show_button(confirm_, (min_ != max_ || manual_confirm_ || max_ == 0) && 0 >= min_, true);
         if (!holders_.empty()) focus(0);
     }
     root->add_child(screen);
@@ -266,6 +274,7 @@ void CardSelectScreen::focus(int i) {
 void CardSelectScreen::toggle(int i) {
     if (i < 0 || i >= (int)picked_.size()) return;
     if (!picked_[(size_t)i]) {
+        if ((int)order_.size() >= max_) return;
         picked_[(size_t)i] = true;
         order_.push_back(i);
         set_card_highlight(cards_[(size_t)i], true);
@@ -278,7 +287,7 @@ void CardSelectScreen::toggle(int i) {
             }
         set_card_highlight(cards_[(size_t)i], false);
     }
-    show_button(confirm_, min_ != max_ && (int)order_.size() >= min_);
+    show_button(confirm_, (min_ != max_ || manual_confirm_ || max_ == 0) && (int)order_.size() >= min_);
 }
 
 /* PreviewSelection: the picked cards over the dimmed grid, or (one card to
@@ -374,7 +383,7 @@ void CardSelectScreen::close_preview() {
     for (size_t k = 0; k < picked_.size(); ++k) picked_[k] = false;
     order_.clear();
     show_button(close_, cancelable_);
-    show_button(confirm_, min_ != max_ && 0 >= min_);
+    show_button(confirm_, (min_ != max_ || manual_confirm_ || max_ == 0) && 0 >= min_);
     int f = focus_;
     focus_ = -1;
     focus(f);
@@ -411,7 +420,7 @@ std::string CardSelectScreen::input(const PadState& pad) {
             focus(focus_ + columns_ < n ? focus_ + columns_ : n - 1);
         if ((pad.pressed & PadState::A) && focus_ >= 0) {
             toggle(focus_);
-            if (max_ > 0 && (int)order_.size() >= max_) {
+            if (!manual_confirm_ && max_ > 0 && (int)order_.size() >= max_) {
                 if (single_box_ || multi_box_) open_preview();
                 else return confirm();
             }
