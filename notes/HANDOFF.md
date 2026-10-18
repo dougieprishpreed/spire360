@@ -179,14 +179,14 @@ a git clone, deleted files go away by themselves (keep the list as is).
 - Reproduced Room Full of Cheese's Gorge selection with the real logic:
   simple_grid, eight cards, exactly two required, no manual confirmation.
   Selecting indices 0,1 resumes the map and grows the deck from 10 to 12.
-  Controller end-to-end coverage of this actual decision remains next.
-- Texture cache: Canvas owns uploads by pack path, including generated
+  Controller end-to-end coverage is recorded below.
+- Texture cache (`2adfce5`): Canvas owns uploads by pack path, including generated
   gradient samplers. An 80 MiB LRU evicts after the frame, with backend
   allocation estimates; textures unused for 120 rendered frames are also
   released. D3D9 flushes batches and clears cached/bound sampler references
   before destruction. Resource aliases share uploads and do not retain GPU
   pointers after the renderer dies. PC builds reuse unchanged objects.
-- Card selection: manual confirmation works at a fixed count as well as
+- Card selection (`2adfce5`): manual confirmation works at a fixed count as well as
   a range, selection cannot exceed the maximum, and upgrade templates get
   a Confirm button when needed to open their preview. The real Gorge
   decision now passes through GameClient controller input, sending both
@@ -196,9 +196,27 @@ a git clone, deleted files go away by themselves (keep the list as is).
   Timed JIT runs: 15/15 completed, `differences: 0`. Timings are under
   ignored `work/timings`; the repeated rewards delay is not reproduced on
   JIT, so the Xenia performance item remains open.
-- Console log writes and flushes each line instead of retaining and
+- Console log (`2adfce5`) writes and flushes each line instead of retaining and
   rewriting the whole history. This console-only change was reviewed;
   no XDK compile or Xenia validation was run. Pack remains unchanged.
+- Doom: the converter now bakes NoiseTexture2D resources with Godot 4.5.1
+  (including FastNoiseLite defaults and the resource's settings). Outputs
+  are cached under ignored `converter/.cache/procedural/`. Both renderers
+  implement the doom bar's screen-space noise and gradient fragment shader.
+  The PC render check verifies purple pixels and animation over time.
+- New full pack: `work/pack-next/pack.s3p`, 690.0 MB, 23 unique procedural
+  textures, **0 conversion errors**. Earlier packs remain in place.
+  Use `work/pack-next/data` with this pack. This converter change means
+  the console pack must be rebuilt for the next Xenia test.
+- AtlasResourceLoader's unpacked/beta fallbacks now resolve absent atlas
+  sprites (cards, relics, powers and potions). Sidestep resolves to its
+  actual beta portrait; its previous missing-texture warning is fixed.
+- Validation: 21 converter tests pass; strict C++03 PC build; full replay
+  of 1,425 responses with 0 failures for doom/procedural changes, followed
+  by targeted Silent/Necrobinder/event runs for atlas fallback and enemy
+  death cleanup, all 0 failures. Doom images checked in ignored
+  `work/doom-shots`. PC D3DCompiler compiles both shader-model-3 stages
+  (`python tools/check_canvas_shader.py`). No XDK build was run.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
@@ -328,11 +346,11 @@ here as they land, with the commit.
       protocol), the music logic of NRunMusicController, UI sounds.
 
 **Performance and robustness**
-- [x] GPU texture budget + LRU; idle screen textures released (desktop cache
-      change, validated by PC cache tests; console verification pending).
+- [x] GPU texture budget + LRU; idle screen textures released (`2adfce5`,
+      validated by PC cache tests; console verification pending).
 - [ ] Draw call batching.
 - [ ] The 2 s rewards decision.
-- [x] Log appended and flushed per line (desktop cache/log change; console
+- [x] Log appended and flushed per line (`2adfce5`; console
       verification pending).
 - [ ] Soak: long spire_play `--auto` runs on every character with no
       plain-list screens, no missing-texture warnings, no hangs.

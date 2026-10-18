@@ -8,6 +8,7 @@
 
 #include <math.h>
 #include <map>
+#include <string.h>
 
 namespace spire {
 
@@ -328,6 +329,18 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         f.outer[1] = out.g;
         f.outer[2] = out.b;
         f.outer[3] = out.a;
+        c.renderer()->set_fire(&f);
+        return true;
+    }
+    if (m->shader == "scenes/combat/doom_bar.gdshader") {
+        /* SCREEN_UV noise panning and the scene's purple gradient. Use the
+         * multi-sampler mode with selector 2 for this fragment shader. */
+        FireParams f;
+        memset(&f, 0, sizeof(f));
+        f.noise1 = param_texture(c, m, "noise_tex");
+        f.strength[3] = 2;
+        f.strength[0] = (float)g_shader_time;
+        c.renderer()->set_gradient_map(gradient_lut(c, shader_param_resource(m, "gradient_tex")), false);
         c.renderer()->set_fire(&f);
         return true;
     }

@@ -22,6 +22,13 @@ timing. It reads the
 pack's sibling `data/` folder for localization. Texture cache checks cover
 LRU order, frame boundaries, the memory budget, idle release, path aliases
 and renderer teardown. Keep traces out of git.
+The checker also renders the doom bar twice to verify its procedural noise
+and gradient, checks atlas fallback portraits and enemy death cleanup. Use
+a pack built with the current converter. `SPIRE_CHECK_SHOTS=<ignored dir>`
+saves the two doom renders for inspection.
+
+On Windows, `python tools/check_canvas_shader.py` compiles both PC D3D9
+shader stages with the system D3DCompiler; it does not invoke the XDK.
 
 `random_runs.py --timing-dir work/timings` records one JSONL timing file
 per run with the command/action, previous and resulting decision, and

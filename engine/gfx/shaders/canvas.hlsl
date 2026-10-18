@@ -71,6 +71,17 @@ float median3(float r, float g, float b) {
 
 float4 ps_main(VsOut i) : COLOR {
     [branch] if (g_fire.x > 0.5) {
+        [branch] if (g_fstr.w > 1.5) {
+            // Doom bar: the scene's noise texture, sampled in screen space.
+            float tm = g_fstr.x;
+            float scroll = tex2Dlod(g_fn1, float4(i.screen * 0.1 + tm * 0.0005 + 0.24, 0.0, 0.0)).r;
+            float n1 = tex2Dlod(g_fn1, float4(i.screen + tm * 0.0005 + scroll, 0.0, 0.0)).r;
+            float n2 = tex2Dlod(g_fn1, float4(i.screen - tm * 0.0007 + scroll, 0.0, 0.0)).r;
+            float value = smoothstep(0.4, 0.6, n1 * 0.75 + n2 * 0.35);
+            float3 rgb = tex2Dlod(g_lut, float4(value, 0.0, 0.0, 0.0)).rgb;
+            float alpha = tex2D(g_tex, i.uv).a * i.color.a;
+            return float4(rgb * alpha, alpha);
+        }
         // The game's stepped fire shaders (shaders/vfx/vfx_stepped_shader_fire_*).
         float2 uv = i.uv;
         float n2 = g_fstr.y * tex2Dlod(g_fn2, float4(uv * g_fn2p.xy + g_fn2p.zw, 0.0, 0.0)).b;

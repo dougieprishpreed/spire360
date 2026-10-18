@@ -282,7 +282,18 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 s[2] = rgb[2] * a;
                 s[3] = a;
             }
-            if (fire_on_) {
+            if (fire_on_ && fire_.strength[3] > 1.5f) {
+                float tm = fire_.strength[0], scroll[4], n1[4], n2[4], lut[4];
+                float u = ((float)x + 0.5f) / (float)fb_.w, v = ((float)y + 0.5f) / (float)fb_.h;
+                fire_texel(fire_.noise1, u * 0.1f + tm * 0.0005f + 0.24f,
+                               v * 0.1f + tm * 0.0005f + 0.24f, true, scroll);
+                fire_texel(fire_.noise1, u + tm * 0.0005f + scroll[0], v + tm * 0.0005f + scroll[0], true, n1);
+                fire_texel(fire_.noise1, u - tm * 0.0007f + scroll[0], v - tm * 0.0007f + scroll[0], true, n2);
+                float value = smoothstepf(0.4f, 0.6f, n1[0] * 0.75f + n2[0] * 0.35f);
+                fire_texel(gm_, value, 0, false, lut);
+                s[0] = lut[0] * s[3]; s[1] = lut[1] * s[3]; s[2] = lut[2] * s[3];
+                col[0] = col[1] = col[2] = 1;
+            } else if (fire_on_) {
                 /* The stepped fire: its colour (straight) and alpha, the
                  * vertex colour's alpha only. */
                 float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
@@ -296,7 +307,7 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 s[3] = fa;
                 col[0] = col[1] = col[2] = 1.0f;
             }
-            if (gm_ && tex) {
+            if (gm_ && tex && !(fire_on_ && fire_.strength[3] > 1.5f)) {
                 /* The gradient map: the texel's (straight) red through the
                  * lut; s is premultiplied again after. */
                 float r = s[3] > 0 ? s[0] / s[3] : 0.0f;

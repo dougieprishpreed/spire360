@@ -26,6 +26,9 @@
       Fonts need Godot 4.5.1 (it renders the glyphs, see
       spire_convert/fonts.py): --godot, $SPIRE_GODOT, or fetch-godot. Fonts
       keep only the characters of --languages (default eng).
+      Procedural noise textures also use Godot 4.5.1; their generated
+      images are cached in converter/.cache/procedural, then packed as data
+      textures. Keep that cache between pack builds.
 
   convert.py fetch-godot
       Downloads the official Godot 4.5.1 build (MIT, ~60 MB) into
@@ -44,6 +47,7 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spire_convert import atlas, ctex, fonts as fontconv, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
 from spire_convert import spine as spinefmt  # noqa: E402
+from spire_convert import procedural  # noqa: E402
 from spire_convert.pck import Pck  # noqa: E402
 
 # 1920x1080 design resolution -> 1280x720 on the console.
@@ -556,14 +560,18 @@ def cmd_build(a):
                 except Exception as e:  # noqa: BLE001
                     report["errors"][f] = f"{type(e).__name__}: {e}"
         text = [f for f in text if f not in sprite_text]
+        godot = fontconv.find_godot(a.godot)
+        procedural_baker = procedural.Baker(godot, res)
         for f in text + sorted(sprite_text):
             try:
                 body = sprite_text[f] if f in sprite_text else src.read(f).decode("utf-8")
                 tr = variant.parse_text(body)
-                add(f, s3p.TYPE_SCENE, json.dumps(scenes.to_json(tr, res), separators=(",", ":")).encode("utf-8"))
+                doc = scenes.to_json(tr, res)
+                procedural_baker.prepare(tr, doc)
+                add(f, s3p.TYPE_SCENE, json.dumps(doc, separators=(",", ":")).encode("utf-8"))
             except Exception as e:  # noqa: BLE001
                 report["errors"][f] = f"{type(e).__name__}: {e}"
-        godot = fontconv.find_godot(a.godot)
+        procedural_baker.write(add)
         if fonts and not godot:
             print("  fonts: no Godot 4.5.1 (--godot, $SPIRE_GODOT or `convert.py fetch-godot`); "
                   "storing the raw font files, the console will not draw their text", flush=True)

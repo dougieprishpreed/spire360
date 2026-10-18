@@ -9,9 +9,11 @@
 #include "../../engine/game/ui_util.h"
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
+#include "../../engine/scene/controls.h"
 #include "../../engine/scene/node.h"
 #include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
+#include "../../engine/scene/shaders.h"
 #include "../../engine/scene/text_nodes.h"
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
@@ -225,6 +227,63 @@ static void texture_cache_cases(const Pack& pack) {
     check(renderer.created == renderer.destroyed, "pack texture teardown leaked GPU copies");
 }
 
+static void doom_cases(SceneLibrary& lib, const Pack& pack) {
+    std::string error;
+    Node* bar = lib.instantiate("scenes/combat/health_bar.tscn", &error);
+    Node* node = bar ? bar->find_unique("DoomForeground") : NULL;
+    check(node && node->is_control(), "doom foreground did not load");
+    if (!node || !node->is_control()) { delete bar; return; }
+    node->parent->remove_child(node);
+    {
+        SceneTree tree;
+        tree.set_viewport(Vec2(320, 180), Xform2D());
+        Control* doom = (Control*)node;
+        for (int i = 0; i < 4; ++i) doom->anchor[i] = 0;
+        place(doom, 20, 80, 280, 28);
+        doom->visible = true;
+        tree.root()->add_child(doom);
+        tree.layout();
+        SwRenderer renderer;
+        Canvas canvas(&renderer, &pack);
+        double old_time = g_shader_time;
+        std::vector<u8> previous;
+        for (int frame = 0; frame < 2; ++frame) {
+            g_shader_time = frame * 100;
+            renderer.begin(320, 180, Color(0, 0, 0, 1));
+            tree.render(canvas); renderer.end();
+            check(tree.skipped.empty(), "doom bar shader was skipped");
+            const Image& image = renderer.framebuffer();
+            size_t purple = 0, different = 0;
+            for (size_t i = 0; i < image.px.size(); i += 4) {
+                if (image.px[i + 2] > image.px[i + 1] && image.px[i] > image.px[i + 1]) ++purple;
+                if (frame && image.px[i] != previous[i]) ++different;
+            }
+            check(purple > 5000, "doom bar did not draw its purple gradient");
+            if (frame) check(different > 100, "doom noise did not animate in screen space");
+            previous = image.px;
+            const char* shots = getenv("SPIRE_CHECK_SHOTS");
+            if (shots) write_png(format("%s/doom_%d.png", shots, frame).c_str(), image);
+        }
+        g_shader_time = old_time;
+    }
+    delete bar;
+}
+
+static void atlas_fallback_cases(SceneLibrary& lib) {
+    const char* path = "images/atlases/card_atlas.sprites/silent/sidestep.tres";
+    Resource* r = lib.ext(path);
+    check(r && r->is_texture(), "unpacked beta card portrait did not resolve through the atlas loader");
+    if (r && r->is_texture()) {
+        Texture2DRes* texture = (Texture2DRes*)r;
+        Rect2 dst, src;
+        ImageTextureRes* image = NULL;
+        texture->get_rect_region(Rect2(Vec2(), texture->size()), Rect2(Vec2(), texture->size()), dst, src, &image);
+        check(image && image->path == "images/packed/card_portraits/silent/beta/sidestep.png",
+              "card portrait fallback selected the wrong image");
+    }
+    check(lib.unsupported.find(std::string("missing ") + path) == lib.unsupported.end(), "valid beta portrait was reported missing");
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: spire_check <pack.s3p> <trace.jsonl> [more traces...]\n");
@@ -242,7 +301,9 @@ int main(int argc, char** argv) {
     FontLibrary::set_current(&fonts);
     lifecycle_cases(lib);
     texture_cache_cases(pack);
-    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0;
+    doom_cases(lib, pack);
+    atlas_fallback_cases(lib);
+    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0, death_checks = 0;
     bool selections_checked = false;
     for (int file = 2; file < argc; ++file) {
         std::ifstream input(argv[file]);
@@ -306,6 +367,24 @@ int main(int argc, char** argv) {
             for (size_t o = 0; same_fight && old_room && o < previous["orbs"].size(); ++o)
                 old_orbs.push_back(find_named(old_room, format("CombatOrb_%d", previous["orbs"][o]["instance_id"].i((int)o + 1)).c_str()));
             advance(tree, game);
+            if (same_fight && old_room) {
+                for (size_t s = 0; s < d["steps"].size(); ++s)
+                    for (size_t k = 0; k < d["steps"][s].size(); ++k) {
+                        const Json& ch = d["steps"][s][k];
+                        if (ch["t"].str() != "death" && ch["t"].str() != "despawn") continue;
+                        const std::string& who = ch["who"].str();
+                        if (who.size() < 2 || who[0] != 'e') continue;
+                        int id = atoi(who.c_str() + 1);
+                        bool present = false;
+                        for (size_t e = 0; e < d["enemies"].size(); ++e)
+                            if (d["enemies"][e]["combat_id"].i(-1) == id) present = true;
+                        if (present) continue; /* revived or still part of the encounter */
+                        Node* node = find_named(old_room, format("CombatEnemy_%d", id).c_str());
+                        check(!node || !node->is_control() || !((Control*)node)->visible || ((Control*)node)->modulate.a < 0.01f,
+                              "dead enemy remained visible after its response finished");
+                        ++death_checks;
+                    }
+            }
             if (d["decision"].str() == "combat_play" && !tree.root()->children.empty()) {
                 Node* room = tree.root()->children[0];
                 for (size_t o = 0; o < d["orbs"].size(); ++o) {
@@ -348,7 +427,7 @@ int main(int argc, char** argv) {
     check(persistent > 0, "no consecutive combat decisions were checked");
     check(hp_checks > 0, "no delayed health changes were checked");
     check(selections_checked, "no card data was available for controller selection checks");
-    printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d failures\n",
-           responses, persistent, hp_checks, orb_checks, failures);
+    printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d death checks, %d failures\n",
+           responses, persistent, hp_checks, orb_checks, death_checks, failures);
     return failures ? 1 : 0;
 }
