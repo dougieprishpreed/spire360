@@ -1,4 +1,5 @@
 #include "combat_screen.h"
+#include "game.h"
 #include "card_view.h"
 #include "loc.h"
 #include "ui_util.h"
@@ -13,6 +14,7 @@
 #include "../scene/script.h"
 #include "../scene/shaders.h"
 #include "../scene/text_nodes.h"
+#include "../scene/value.h"
 #include "../spine/spine.h"
 
 #include <ctype.h>
@@ -1258,7 +1260,8 @@ void CombatScreen::sync_orbs(const Json& models, int slots, bool animate) {
         set_label(o.node->find_unique("EvokeAmount"), format("%d", model["evoke"].i()));
         set_visible(o.node->find_unique("PassiveAmount"), !model.is_null() && kind != "plasma_orb");
         set_visible(o.node->find_unique("EvokeAmount"), kind == "dark_orb");
-        bool focus = find_power(player_.powers, "FOCUS_POWER") != NULL;
+        const Json* focus_power = find_power(player_.powers, "FOCUS_POWER");
+        bool focus = focus_power && (*focus_power)["amount"].i() > 0;
         orb_particles(orb_export(o.sprite, "_focusedParticles"), false, focus && (kind != "glass_orb" || model["passive"].i() > 0));
         orb_particles(orb_export(o.sprite, "_superchargedParticles"), false, model["evoke"].i() >= 24);
         next.push_back(o);
@@ -1294,8 +1297,13 @@ void CombatScreen::activate_orb(const Json& cue) {
                 orb_effect("vfx/orbs/" + scene->str(), ((CanvasItem*)o.sprite)->global_transform().origin);
         } else if (kind != "glass_orb" || cue["passive"].i() > 0) {
             orb_particles(orb_export(o.sprite, "_passiveActivatedParticles"), true);
-            if (find_power(player_.powers, "FOCUS_POWER"))
+            const Json* focus = find_power(player_.powers, "FOCUS_POWER");
+            if (focus && (*focus)["amount"].i() > 0)
                 orb_particles(orb_export(o.sprite, "_passiveActivatedFocusedParticles"), true);
+            float strength = kind == "glass_orb" ? (float)cue["passive"].num() / 4 : 1;
+            double duration = kind == "lightning_orb" ? 0.4 : kind == "dark_orb" ? 0.55 : 0.5;
+            if (kind == "dark_orb" && !(focus && (*focus)["amount"].i() > 0)) strength = 0.65f;
+            shake_vfx(orb_export(o.sprite, "_spineShaker"), strength, duration);
         }
         if (kind == "frost_orb" && player_.center)
             orb_effect(evoke ? "vfx/orbs/frost/vfx_frost_orb_evoke_shield" : "vfx/orbs/frost/vfx_frost_orb_passive_shield",
@@ -1306,6 +1314,30 @@ void CombatScreen::activate_orb(const Json& cue) {
                 if (target && target->center)
                     orb_effect("vfx/orbs/glass/vfx_glass_orb_evoke_impact", ((CanvasItem*)target->center)->global_transform().origin);
             }
+        if (evoke && kind == "dark_orb" && o.sprite && o.sprite->is_canvas_item())
+            for (size_t j = 0; j < cue["targets"].size(); ++j) {
+                Creature* target = creature_for(cue["targets"][j].str());
+                if (!target || !target->center) continue;
+                Node* projectile = make_vfx_projectile(lib_, "vfx/orbs/dark/vfx_dark_orb_evoke_projectile_handler",
+                    "vfx/orbs/dark/vfx_dark_orb_evoke_projectile", ((CanvasItem*)o.sprite)->global_transform().origin,
+                    ((CanvasItem*)target->center)->global_transform().origin);
+                if (projectile && vfx_box_) vfx_box_->add_child(projectile); else delete projectile;
+            }
+        if (kind == "plasma_orb" && o.sprite && o.sprite->is_canvas_item() && player_.center) {
+            Vec2 range;
+            const Json* offsets = o.sprite->get_extra("_projectileOffsetRange");
+            if (offsets) jv_vec2(*offsets, range);
+            const Json* interval = o.sprite->get_extra("_projectileSpawnInterval");
+            for (int j = 0; j < (evoke ? 2 : 1); ++j) {
+                float angle = (float)(chaotic_rand() % 100000) / 100000 * 2 * PI_F;
+                float radius = range.x + (range.y - range.x) * ((float)(chaotic_rand() % 100000) / 100000);
+                Vec2 source = ((CanvasItem*)o.sprite)->global_transform().origin + Vec2(cosf(angle), sinf(angle)) * radius;
+                Node* projectile = make_vfx_projectile(lib_, "vfx/orbs/plasma/vfx_plasma_orb_projectile_handler",
+                    "vfx/orbs/plasma/vfx_plasma_orb_projectile", source, ((CanvasItem*)player_.center)->global_transform().origin,
+                    j * (interval ? interval->num(0.05) : 0.05));
+                if (projectile && vfx_box_) vfx_box_->add_child(projectile); else delete projectile;
+            }
+        }
         break;
     }
 }

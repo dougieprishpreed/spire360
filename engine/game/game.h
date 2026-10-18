@@ -4,7 +4,15 @@
 #ifndef SPIRE_GAME_H
 #define SPIRE_GAME_H
 
+#include "../core/base.h"
+
 namespace spire {
+
+class Node;
+class SceneLibrary;
+bool shake_vfx(Node* shaker, float strength, double duration);
+Node* make_vfx_projectile(SceneLibrary* lib, const std::string& handler, const std::string& projectile,
+                          const Vec2& from, const Vec2& to, double delay = 0);
 
 void install_text_scripts();
 void install_anim_scripts();

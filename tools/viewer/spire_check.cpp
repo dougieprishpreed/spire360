@@ -20,6 +20,7 @@
 
 #include <deque>
 #include <fstream>
+#include <math.h>
 #include <stdio.h>
 
 using namespace spire;
@@ -131,6 +132,15 @@ static size_t particles_alive(Node* n) {
 }
 
 static void lifecycle_cases(SceneLibrary& lib) {
+    std::string gradient_error;
+    const std::string gradient_json = "{\"colors\":{\"t\":\"PackedColorArray\",\"v\":[1,1,1,0,1,1,1,1]},\"interpolation_mode\":2}";
+    Json gradient_props = Json::parse(gradient_json.c_str(), gradient_json.size(), &gradient_error);
+    Resource gradient_resource(Resource::RES_GENERIC, "Gradient");
+    gradient_resource.props = &gradient_props;
+    GradientData gradient;
+    check(GradientData::from(&gradient_resource, gradient) && gradient.at(0).a == 0 && gradient.at(1).a == 1,
+          "gradient lost explicit colors when offsets used their defaults");
+    check(fabsf(gradient.at(0.25f).a - 0.203125f) < 0.00001f, "gradient cubic interpolation did not match Godot");
     Particles2D p(false);
     p.amount = 4;
     p.lifetime = 0.1;
@@ -170,6 +180,59 @@ static void lifecycle_cases(SceneLibrary& lib) {
         check(!tree.root()->children.empty(), "slash effect ended before its four frames played");
         for (int i = 0; i < 8; ++i) tree.process(1.0 / 60.0);
         check(tree.root()->children.empty(), "finished slash effect was retained in the room");
+    }
+}
+
+static void orb_effect_cases(SceneLibrary& lib) {
+    SceneTree tree;
+    std::string error;
+    Node* orb = lib.instantiate("scenes/orbs/orb_visuals/lightning_orb.tscn", &error);
+    check(orb != NULL, "lightning orb did not load for shaker check");
+    if (orb) {
+        tree.root()->add_child(orb);
+        Node* shaker = orb->get_node("spine_shaker");
+        Node* target = orb->get_node("SpineSkeleton");
+        check(shake_vfx(shaker, 1, 0.4), "orb shaker script was unavailable");
+        bool moved = false;
+        for (int i = 0; i < 15; ++i) {
+            tree.process(1.0 / 60.0);
+            if (target && target->is_node2d()) {
+                Vec2 p = ((Node2D*)target)->position;
+                if (p.x != 0 || p.y != 0) moved = true;
+            }
+        }
+        check(moved, "orb passive shaker did not move its Spine target");
+        for (int i = 0; i < 30; ++i) tree.process(1.0 / 60.0);
+        check(target && target->is_node2d() && ((Node2D*)target)->position.x == 0 && ((Node2D*)target)->position.y == 0,
+              "orb shaker did not return to rest");
+        tree.root()->remove_child(orb); delete orb;
+    }
+    static const char* kinds[] = { "dark", "plasma" };
+    for (int kind = 0; kind < 2; ++kind) {
+        Control* box = full_rect_control("VfxBox");
+        tree.root()->add_child(box);
+        std::string path = std::string("vfx/orbs/") + kinds[kind] + "/vfx_" + kinds[kind] + "_orb_";
+        if (kind == 0) path += "evoke_";
+        Node* handler = make_vfx_projectile(&lib, path + "projectile_handler", path + "projectile", Vec2(100, 200), Vec2(500, 300));
+        check(handler != NULL, "orb projectile handler did not load");
+        if (handler) {
+            box->add_child(handler);
+            std::string name = handler->name;
+            tree.process(1.0 / 60.0);
+            check(!handler->children.empty(), "projectile handler did not instantiate its projectile");
+            const Json* travel = handler->get_extra("_travelTimeRange");
+            double maximum = travel ? (*travel)["v"][1].num(1) : 1;
+            int frames = (int)ceil(maximum * 60) + 2;
+            for (int i = 0; i < frames; ++i) tree.process(1.0 / 60.0);
+            if (!handler->children.empty() && handler->children[0]->is_node2d()) {
+                Vec2 at = ((Node2D*)handler->children[0])->global_transform().origin;
+                check(fabsf(at.x - 500) < 0.01f && fabsf(at.y - 300) < 0.01f,
+                      "orb projectile did not reach its target on time");
+            }
+            for (int i = 0; i < 180; ++i) tree.process(1.0 / 60.0);
+            check(find_named(box, name.c_str()) == NULL, "projectile handler outlived its trail delay");
+        }
+        tree.root()->remove_child(box); delete box;
     }
 }
 
@@ -339,6 +402,7 @@ int main(int argc, char** argv) {
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     lifecycle_cases(lib);
+    orb_effect_cases(lib);
     texture_cache_cases(pack);
     doom_cases(lib, pack);
     atlas_fallback_cases(lib);

@@ -29,6 +29,8 @@ saves the two doom renders for inspection.
 The map transition case drives controller selection with both fast and
 delayed logic replies, checking that travel completes before the room swap
 and the overlay clears. With `SPIRE_CHECK_SHOTS` it also saves map travel.
+Orb helper cases exercise passive shaker motion/reset and Dark/Plasma
+projectile arrival and cleanup using the actual scenes and curves.
 
 On Windows, `python tools/check_canvas_shader.py` compiles both PC D3D9
 shader stages with the system D3DCompiler; it does not invoke the XDK.

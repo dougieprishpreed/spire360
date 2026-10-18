@@ -171,8 +171,8 @@ a git clone, deleted files go away by themselves (keep the list as is).
   The engine preserves surviving orb sprites, moves slots over 0.45 s,
   fades removed orbs over 0.25 s, restarts activation particles and plays
   the scene's evoke effect, frost shields and glass evoke impacts.
-  Dark projectiles, orb shaking and remaining specialized effects are
-  still open; do not tick the full orb checklist item yet.
+  Follow-up projectile/shaker progress is below. Remaining specialized
+  effects and trail rendering keep the full orb checklist item open.
 - Orb validation: 15/15 seeded JIT runs, `differences: 0`; strict C++03
   PC build; 1,421 presentation responses with 181 orb persistence/removal
   checks and **0 failures**. No converter change.
@@ -217,7 +217,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
   death cleanup, all 0 failures. Doom images checked in ignored
   `work/doom-shots`. PC D3DCompiler compiles both shader-model-3 stages
   (`python tools/check_canvas_shader.py`). No XDK build was run.
-- Map/run flow: map opening fades and the legend slides in; selected path
+- Map/run flow (`4add1c6`): map opening fades and the legend slides in; selected path
   ticks change sequentially over 0.8 s and grow from 1.7 to 1.2 over 0.4 s.
   The marker hides, changes point, and bounces into place. Room travel
   retains the old scene while the logic resolves, sweeps the game's black
@@ -235,6 +235,20 @@ a git clone, deleted files go away by themselves (keep the list as is).
   ignored `traces/doom.jsonl`. Doom-specific dissolve/overlay VFX, map
   start-of-act animation and map close/view controls remain open.
   No logic or converter change in this flow batch.
+- Orb VFX: NShaker now interpolates chaotic offsets and returns the target
+  to rest with NOrbVfx's sine OutIn strength decay. Passive activations use
+  each orb's duration and strength. NVfxProjectileHandler follows the
+  scene's movement/height curves, stops emission at impact, spawns impact
+  VFX and frees its trailing particles after 2 s. Dark evokes and Plasma
+  passive/evoke projectiles use it; Plasma's second projectile is delayed
+  by the scene's interval. Focus particles require a positive Focus amount.
+- Validation: strict C++03 build; shaker motion/reset, gradient defaults/
+  cubic interpolation, Dark/Plasma arrival timing and cleanup checks pass.
+  Real logic test decks recorded passive and evoke cues for all five orb
+  types (`traces/orb-cases`, ignored). Replay: 133 responses, 98 persistent
+  rooms, 42 HP impacts, 129 orb checks, **0 failures**. No logic or pack
+  changes. Line2D/Bezier trail drawing and specialized shader coverage
+  remain before the orb presentation is complete.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
