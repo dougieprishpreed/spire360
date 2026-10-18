@@ -138,7 +138,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
 ### Desktop implementation progress
 
 - Setup/tooling published in `0c3486a`.
-- First combat continuity change: the room, creature Spine tracks and
+- Combat continuity (`b98df1f`): the room, creature Spine tracks and
   surviving hand holders stay alive across decisions and behind combat
   selections/rewards. Stable card instance ids connect hand holders to
   steps. HP, block, powers, energy and pile counts update at their impact
@@ -156,6 +156,16 @@ a git clone, deleted files go away by themselves (keep the list as is).
   in a trace; investigate before the no-missing-texture soak gate.
 - Logic presentation exports changed: the eventual console build needs
   wasm/C + logic_lib rebuilt. The converter/pack is unchanged so far.
+- VFX cleanup: one-shot particles keep simulating after emission stops;
+  this fixes frozen Osty heal particles. Effects now leave the scene tree
+  through deferred deletion. Slash sprites, generic particle/Spine VFX,
+  damage numbers and turn banners release their nodes. Big slash and hit
+  spark scripts follow their particle restart and lifetime sequences.
+  Delayed tweens retain the remainder of a late frame.
+- Validation: strict C++03 build and all 1,421 presentation responses pass
+  with 0 failures, including new particle restart/expiry, Osty/slash node
+  cleanup and delayed-tween timing checks. No logic or pack change in this
+  batch. Other custom VFX scripts still need systematic coverage.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 

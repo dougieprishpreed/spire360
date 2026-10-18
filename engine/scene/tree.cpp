@@ -73,15 +73,29 @@ void SceneTree::layout(int passes) {
 }
 
 void SceneTree::process_node(Node* n, double dt) {
+    if (n->queued_for_deletion()) return;
     if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
     if (n->behavior) n->behavior->process(n, dt);
     n->process(dt);
     for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
 }
 
+static void flush_deleted(Node* n) {
+    for (size_t i = n->children.size(); i-- > 0;) {
+        Node* child = n->children[i];
+        if (child->queued_for_deletion()) {
+            n->remove_child(child);
+            delete child;
+        } else {
+            flush_deleted(child);
+        }
+    }
+}
+
 void SceneTree::process(double dt) {
     g_shader_time += dt;
     process_node(&root_, dt);
+    flush_deleted(&root_);
 }
 
 static Rect2 xform_rect(const Xform2D& xf, const Rect2& r) {

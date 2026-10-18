@@ -230,7 +230,8 @@ void TweenSet::update(double dt) {
                 ++j;
             }
             if (items_[i].from_current) items_[i].from = *items_[i].p;
-            items_[i].t = 0;
+            /* Keep the part of this frame after the delay. Dropping it
+             * stretches short VFX sequences whenever a frame is late. */
         }
         Item& it = items_[i];
         if (it.t >= it.seconds) {

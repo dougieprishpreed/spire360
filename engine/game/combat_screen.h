@@ -169,6 +169,7 @@ private:
     struct FlyingNumber {
         Node2D* node;
         Vec2 velocity;
+        double until;
     };
     Creature* creature_for(const std::string& who);
     bool vfx_position(const Cue& c, Vec2* out);
@@ -178,6 +179,7 @@ private:
     std::vector<Cue> cues_;
     size_t next_cue_;
     double cue_t_, busy_until_;
+    double life_t_; /* keeps running when a new response resets the playhead */
     Node* root_;
     std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */
     struct Ghost {

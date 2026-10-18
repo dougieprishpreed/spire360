@@ -52,6 +52,9 @@ public:
 
     void add_child(Node* child);
     void remove_child(Node* child); /* does not delete */
+    /* Godot's QueueFree: removed after this frame's process traversal. */
+    void queue_free() { queued_free_ = true; }
+    bool queued_for_deletion() const { return queued_free_; }
     int index() const;
     /* "a/b", "..", "%Unique", "%Unique/child" */
     Node* get_node(const std::string& path);
@@ -66,6 +69,7 @@ public:
     virtual void process(double dt) { (void)dt; }
 
 private:
+    bool queued_free_;
     Node(const Node&);
     Node& operator=(const Node&);
 };

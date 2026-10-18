@@ -59,6 +59,9 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual void process(double dt);
     virtual void draw(Canvas& c);
+    void restart();
+    size_t active_count() const;
+    bool finished() const { return !emitting && active_count() == 0; }
 
 private:
     struct Particle {

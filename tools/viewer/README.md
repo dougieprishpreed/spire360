@@ -16,7 +16,9 @@ that MSYS2 otherwise hides with `-std=c++98`.
 `out/engine/spire_check <pack.s3p> <trace.jsonl> [more traces...]` replays
 local `random_runs.py` traces and checks that combat rooms survive across
 decisions, HP changes wait for their impact cues, playback finishes, and
-two-card selections can be confirmed with a controller. It reads the
+two-card selections can be confirmed with a controller. It also checks
+one-shot particle completion/restart, VFX node cleanup and delayed tween
+timing. It reads the
 pack's sibling `data/` folder for localization. Keep traces out of git.
 
     out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts] [--time T]

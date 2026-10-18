@@ -8,6 +8,7 @@
 #include "../../engine/game/loc.h"
 #include "../../engine/game/ui_util.h"
 #include "../../engine/scene/node.h"
+#include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
 #include "../../engine/scene/text_nodes.h"
 #include "../../engine/scene/tree.h"
@@ -83,6 +84,56 @@ static void selection_cases(SceneLibrary& lib, const Json& sample) {
     }
 }
 
+static size_t particles_alive(Node* n) {
+    size_t count = 0;
+    if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") count += ((Particles2D*)n)->active_count();
+    for (size_t i = 0; i < n->children.size(); ++i) count += particles_alive(n->children[i]);
+    return count;
+}
+
+static void lifecycle_cases(SceneLibrary& lib) {
+    Particles2D p(false);
+    p.amount = 4;
+    p.lifetime = 0.1;
+    p.fixed_fps = 0;
+    p.one_shot = true;
+    p.explosiveness = 1;
+    p.process(0.05);
+    check(p.active_count() > 0, "one-shot particles did not start");
+    for (int i = 0; i < 30; ++i) p.process(1.0 / 60.0);
+    check(p.finished(), "one-shot particles froze after emission stopped");
+    p.restart();
+    p.process(0.05);
+    check(p.active_count() > 0, "restarted particle system did not emit again");
+
+    float value = 0;
+    TweenSet tweens;
+    tweens.tween(&value, 1, 1, TRANS_LINEAR, EASE_IN_OUT, 1);
+    tweens.update(1.5);
+    check(value > 0.49f && value < 0.51f, "delayed tween lost the remainder of a late frame");
+
+    std::string error;
+    SceneTree tree;
+    Node* fx = lib.instantiate("scenes/vfx/vfx_heal_osty.tscn", &error);
+    check(fx != NULL, "Osty heal effect did not load");
+    if (fx) {
+        tree.root()->add_child(fx);
+        for (int i = 0; i < 90; ++i) tree.process(1.0 / 60.0);
+        check(particles_alive(fx) == 0, "Osty heal particles remained visible past their lifetimes");
+        for (int i = 0; i < 155; ++i) tree.process(1.0 / 60.0);
+        check(tree.root()->children.empty(), "expired Osty effect was retained in the room");
+    }
+    Node* slash = lib.instantiate("scenes/vfx/vfx_attack_slash.tscn", &error);
+    check(slash != NULL, "slash effect did not load");
+    if (slash) {
+        tree.root()->add_child(slash);
+        for (int i = 0; i < 12; ++i) tree.process(1.0 / 60.0);
+        check(!tree.root()->children.empty(), "slash effect ended before its four frames played");
+        for (int i = 0; i < 8; ++i) tree.process(1.0 / 60.0);
+        check(tree.root()->children.empty(), "finished slash effect was retained in the room");
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: spire_check <pack.s3p> <trace.jsonl> [more traces...]\n");
@@ -98,6 +149,7 @@ int main(int argc, char** argv) {
     SceneLibrary lib(&pack);
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
+    lifecycle_cases(lib);
     int responses = 0, persistent = 0, hp_checks = 0;
     bool selections_checked = false;
     for (int file = 2; file < argc; ++file) {

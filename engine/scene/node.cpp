@@ -137,7 +137,7 @@ bool godot_is_a(const std::string& cls, const char* base) {
 
 /* ---- Node ---- */
 
-Node::Node() : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), flags(0) {}
+Node::Node() : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), flags(0), queued_free_(false) {}
 
 Node::~Node() {
     delete behavior;

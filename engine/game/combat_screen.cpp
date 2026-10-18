@@ -39,6 +39,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     osty_.node = NULL;
     next_cue_ = 0;
     cue_t_ = 0;
+    life_t_ = 0;
     busy_until_ = 0;
     root_ = NULL;
     vfx_box_ = NULL;
@@ -1114,11 +1115,20 @@ void CombatScreen::process(double dt) {
     /* The steps' cues as their time comes; the damage numbers fly
      * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
     cue_t_ += dt;
+    life_t_ += dt;
     while (next_cue_ < cues_.size() && cues_[next_cue_].at <= cue_t_) fire(cues_[next_cue_++]);
-    for (size_t i = 0; i < banners_.size(); ++i)
-        if (banners_[i].node->visible && cue_t_ >= banners_[i].until) banners_[i].node->visible = false;
-    for (size_t i = 0; i < numbers_.size(); ++i) {
+    for (size_t i = banners_.size(); i-- > 0;)
+        if (life_t_ >= banners_[i].until) {
+            banners_[i].node->queue_free();
+            banners_.erase(banners_.begin() + (long)i);
+        }
+    for (size_t i = numbers_.size(); i-- > 0;) {
         FlyingNumber& n = numbers_[i];
+        if (life_t_ >= n.until) {
+            n.node->queue_free();
+            numbers_.erase(numbers_.begin() + (long)i);
+            continue;
+        }
         n.node->position = n.node->position + n.velocity * t;
         n.velocity = n.velocity + Vec2(0, 2000) * t;
     }
@@ -1801,7 +1811,7 @@ void CombatScreen::fire(const Cue& c) {
     tweens_.tween(&n->modulate.a, 0.0f, 2.0f, TRANS_QUAD, EASE_IN);
     tweens_.tween_from(&n->scale, Vec2(2.5f, 2.5f), Vec2(1, 1), 1.2f, TRANS_QUAD, EASE_OUT);
     vfx_box_->add_child(num);
-    FlyingNumber f = { n, Vec2(rx * 100.0f, -700.0f - (float)(chaotic_rand() % 101)) };
+    FlyingNumber f = { n, Vec2(rx * 100.0f, -700.0f - (float)(chaotic_rand() % 101)), life_t_ + 2.05 };
     numbers_.push_back(f);
 }
 
@@ -1883,11 +1893,12 @@ void CombatScreen::show_banner(const std::string& kind, int round) {
         life = 5.1;
     }
     root_->add_child(n);
-    Banner bn = { b, cue_t_ + life };
+    Banner bn = { b, life_t_ + life + 0.05 };
     banners_.push_back(bn);
 }
 
 void CombatScreen::show_start_banner() {
+    busy_until_ = 2.6; /* NCombatStartBanner: player turn starts here. */
     Cue c;
     c.kind = CUE_BANNER;
     c.amount = 1;

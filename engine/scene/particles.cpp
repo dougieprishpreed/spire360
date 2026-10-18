@@ -271,12 +271,28 @@ void Particles2D::apply_process_material(Resource* m) {
 
 /* ---- simulation (_update_internal / _particles_process) ---- */
 
+void Particles2D::restart() {
+    time_ = frame_remainder_ = 0;
+    cycle_ = 0;
+    started_ = false;
+    emitting = true;
+    for (size_t i = 0; i < particles_.size(); ++i) particles_[i].active = false;
+}
+
+size_t Particles2D::active_count() const {
+    size_t count = 0;
+    for (size_t i = 0; i < particles_.size(); ++i) if (particles_[i].active) ++count;
+    return count;
+}
+
 void Particles2D::process(double dt) {
     if ((int)particles_.size() != amount) {
         particles_.assign(amount > 0 ? amount : 0, Particle());
         for (size_t i = 0; i < particles_.size(); ++i) particles_[i].active = false;
     }
-    if (particles_.empty() || !emitting) return;
+    /* Stopping emission does not stop the particles already alive. In a
+     * one-shot system those particles must keep aging until they finish. */
+    if (particles_.empty() || (!emitting && active_count() == 0)) return;
     double frame_time = fixed_fps > 0 ? 1.0 / fixed_fps : 1.0 / 30.0;
     if (!started_) {
         started_ = true;
