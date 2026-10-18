@@ -26,6 +26,7 @@ class LogicLink;
 class Node;
 class SceneLibrary;
 class SceneTree;
+class RoomTransition;
 
 /* Something the player can do now: a label for the plain screen and the
  * protocol command. */
@@ -82,6 +83,7 @@ private:
     void combat_input(const PadState& pad);
     Node* plain_screen(const Json& d);
     void refresh_plain_screen();
+    void start_room_transition();
 
     SceneLibrary* lib_;
     SceneTree* tree_;
@@ -115,6 +117,8 @@ private:
     bool want_characters_;
     Json characters_;
     int characters_version_;
+    RoomTransition* transition_;
+    Json transition_pending_;
 };
 
 } /* namespace spire */

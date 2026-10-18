@@ -284,6 +284,45 @@ static void atlas_fallback_cases(SceneLibrary& lib) {
     check(lib.unsupported.find(std::string("missing ") + path) == lib.unsupported.end(), "valid beta portrait was reported missing");
 }
 
+static void transition_case(SceneLibrary& lib, const Pack& pack, const std::string& map_line, const std::string& room_line) {
+    for (int slow = 0; slow < 2; ++slow) {
+        SceneTree tree;
+        ReplayLink link;
+        GameClient game(&lib, &tree, &link);
+        link.incoming.push_back("{\"type\":\"ready\"}"); game.update(PadState());
+        link.incoming.push_back(map_line); game.update(PadState());
+        check(game.busy(), "map opening had no animation");
+        advance(tree, game);
+        Node* map = tree.root()->children[0];
+        int count = game.decision_count();
+        PadState pad; pad.pressed = PadState::A; game.update(pad);
+        check(game.busy() && !link.sent.empty(), "map selection did not start travel and send the command");
+        int wait_frames = slow ? 90 : 12;
+        for (int i = 0; i < wait_frames; ++i) { tree.process(1.0 / 60.0); tree.layout(1); game.update(PadState()); }
+        check(tree.root()->children[0] == map && game.decision_count() == count,
+              "map disappeared before the destination response arrived");
+        link.incoming.push_back(room_line); game.update(PadState());
+        if (!slow) {
+            check(tree.root()->children[0] == map && game.decision_count() == count,
+                  "fast logic response cut off the map travel animation");
+            for (int i = 0; i < 30; ++i) { tree.process(1.0 / 60.0); tree.layout(1); game.update(PadState()); }
+            check(game.decision_count() == count, "room swapped before the fade reached black");
+            const char* shots = getenv("SPIRE_CHECK_SHOTS");
+            if (shots) {
+                tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(1.0f / 3, 1.0f / 3)); tree.layout();
+                SwRenderer renderer; Canvas canvas(&renderer, &pack);
+                renderer.begin(640, 360, Color(0, 0, 0, 1)); tree.render(canvas); renderer.end();
+                write_png(format("%s/map_travel.png", shots).c_str(), renderer.framebuffer());
+            }
+        }
+        advance(tree, game);
+        check(game.decision_count() == count + 1 && game.decision()["decision"].str() == "combat_play",
+              "room transition did not finish at the destination decision");
+        Node* overlay = find_named(tree.root(), "RoomTransition");
+        check(overlay && !((Control*)overlay)->visible, "transition overlay remained after room fade-in");
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: spire_check <pack.s3p> <trace.jsonl> [more traces...]\n");
@@ -305,6 +344,7 @@ int main(int argc, char** argv) {
     atlas_fallback_cases(lib);
     int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0, death_checks = 0;
     bool selections_checked = false;
+    bool transition_checked = false;
     for (int file = 2; file < argc; ++file) {
         std::ifstream input(argv[file]);
         if (!input) { check(false, "cannot open trace"); continue; }
@@ -314,11 +354,15 @@ int main(int argc, char** argv) {
         link.incoming.push_back("{\"type\":\"ready\"}");
         game.update(PadState());
         Json previous;
-        std::string line;
+        std::string line, previous_line;
         while (std::getline(input, line)) {
             if (line.empty() || line[0] != '{') continue;
             Json d = Json::parse(line.c_str(), line.size(), &error);
             if (d["type"].str() != "decision") continue;
+            if (!transition_checked && previous["decision"].str() == "map_select" && d["decision"].str() == "combat_play") {
+                transition_case(lib, pack, previous_line, line);
+                transition_checked = true;
+            }
             if (d["decision"].str() == "card_select") actual_selection_case(lib, d, line);
             if (!selections_checked && d["hand"].size() >= 2) {
                 selection_cases(lib, d["hand"]);
@@ -421,6 +465,7 @@ int main(int argc, char** argv) {
                 check(matched || !present, "health bar did not settle to the decision's HP");
             }
             previous = d;
+            previous_line = line;
             ++responses;
         }
     }

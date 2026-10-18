@@ -120,6 +120,11 @@ bool GradientData::from(Resource* r, GradientData& out) {
         out.offsets.push_back(1);
         out.colors.push_back(Color(0, 0, 0, 1));
         out.colors.push_back(Color(1, 1, 1, 1));
+        const Json& cv = c["v"];
+        for (size_t i = 0; i < out.colors.size() && i * 4 + 3 < cv.size(); ++i) {
+            size_t k = i * 4;
+            out.colors[i] = Color(jv_float(cv[k]), jv_float(cv[k + 1]), jv_float(cv[k + 2]), jv_float(cv[k + 3]));
+        }
     } else {
         const Json& ov = o["v"];
         const Json& cv = c["v"];
@@ -147,6 +152,21 @@ Color GradientData::at(float t) const {
     float f = d > 0 ? (t - offsets[i]) / d : 0;
     const Color& a = colors[i];
     const Color& b = colors[i + 1];
+    if (interpolation == 2) {
+        /* Godot Gradient's cubic interpolation, using the adjacent stops;
+         * endpoints duplicate the nearest colour. */
+        const Color& before = colors[i > 0 ? i - 1 : 0];
+        const Color& after = colors[i + 2 < colors.size() ? i + 2 : colors.size() - 1];
+        Color result;
+        float* dest[] = { &result.r, &result.g, &result.b, &result.a };
+        float av[] = { a.r, a.g, a.b, a.a }, bv[] = { b.r, b.g, b.b, b.a };
+        float pv[] = { before.r, before.g, before.b, before.a }, nv[] = { after.r, after.g, after.b, after.a };
+        for (int k = 0; k < 4; ++k)
+            *dest[k] = 0.5f * (2 * av[k] + (-pv[k] + bv[k]) * f +
+                (2 * pv[k] - 5 * av[k] + 4 * bv[k] - nv[k]) * f * f +
+                (-pv[k] + 3 * av[k] - 3 * bv[k] + nv[k]) * f * f * f);
+        return result;
+    }
     return Color(lerpf(a.r, b.r, f), lerpf(a.g, b.g, f), lerpf(a.b, b.b, f), lerpf(a.a, b.a, f));
 }
 

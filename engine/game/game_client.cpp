@@ -5,6 +5,9 @@
 #include "../scene/scene.h"
 #include "../scene/text_nodes.h"
 #include "../scene/tree.h"
+#include "../scene/canvas.h"
+#include "../scene/particles.h"
+#include "../scene/value.h"
 #include "combat_screen.h"
 #include "bundle_select_screen.h"
 #include "card_select_screen.h"
@@ -21,6 +24,73 @@
 #include "logic_link.h"
 
 namespace spire {
+
+/* NTransition.RoomFadeOut/RoomFadeIn, normal speed. The scene's gradient
+ * sweeps down after 0.5 s while the backdrop reaches black over 0.6 s.
+ * The next room then fades in over 0.8 s. */
+class RoomTransition : public Control {
+public:
+    explicit RoomTransition(SceneLibrary* lib) : phase(0), elapsed(0), initial_y(-2564), gradient_height(2280) {
+        name = "RoomTransition";
+        z_index = 4096;
+        visible = false;
+        const SceneFile* scene = lib->file("scenes/game.tscn");
+        if (!scene) return;
+        const Json& nodes = scene->doc["nodes"];
+        for (size_t i = 0; i < nodes.size(); ++i) if (nodes[i]["name"].str() == "GradientTransition") {
+            const Json& props = nodes[i]["props"];
+            initial_y = props["offset_top"].f(-2564);
+            gradient_height = 1080 + props["offset_bottom"].f(-1364) - initial_y;
+            Resource* texture = lib->resolve(props["texture"], scene);
+            GradientData::from(texture, gradient);
+            if (texture && texture->props) {
+                jv_vec2((*texture->props)["fill_from"], fill_from);
+                jv_vec2((*texture->props)["fill_to"], fill_to);
+            }
+        }
+    }
+    int phase; /* 0 idle, 1 waiting to exchange rooms, 2 revealing the new room */
+    double elapsed;
+    float initial_y, gradient_height;
+    Vec2 fill_from, fill_to;
+    GradientData gradient;
+    void start_out() { phase = 1; elapsed = 0; visible = true; }
+    void start_in() { phase = 2; elapsed = 0; visible = true; }
+    bool ready() const { return phase == 1 && elapsed >= 1.1; }
+    virtual void process(double dt) {
+        if (phase == 0) return;
+        elapsed += dt;
+        if (phase == 2 && elapsed >= 0.8) { phase = 0; visible = false; }
+    }
+    virtual void draw(Canvas& canvas) {
+        if (!phase) return;
+        float progress = clampf((float)((elapsed - 0.5) / 0.6), 0, 1);
+        if (phase == 1 && gradient.valid()) {
+            float y = initial_y * (1 - progress);
+            std::vector<Vec2> vertices;
+            std::vector<Color> colors;
+            std::vector<int> indices;
+            Vec2 direction = fill_to - fill_from;
+            float length_sq = direction.x * direction.x + direction.y * direction.y;
+            for (int i = 0; i <= 128; ++i) {
+                float v = (float)i / 128;
+                float t = length_sq > 0 ? ((0 - fill_from.x) * direction.x + (v - fill_from.y) * direction.y) / length_sq : 0;
+                float alpha = gradient.at(clampf(t, 0, 1)).a;
+                vertices.push_back(Vec2(0, y + v * gradient_height));
+                vertices.push_back(Vec2(1920, y + v * gradient_height));
+                colors.push_back(Color(0, 0, 0, alpha)); colors.push_back(Color(0, 0, 0, alpha));
+                if (i) {
+                    int k = (i - 1) * 2;
+                    indices.push_back(k); indices.push_back(k + 1); indices.push_back(k + 3);
+                    indices.push_back(k); indices.push_back(k + 3); indices.push_back(k + 2);
+                }
+            }
+            canvas.draw_colored_triangles(vertices, indices, colors);
+        }
+        float alpha = phase == 1 ? progress : clampf(1 - (float)(elapsed / 0.8), 0, 1);
+        canvas.draw_rect(Rect2(0, 0, 1920, 1080), Color(0, 0, 0, alpha));
+    }
+};
 
 static std::string quoted(const std::string& s) {
     std::string out = "\"";
@@ -168,9 +238,13 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0) {}
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL) {}
 
 GameClient::~GameClient() {
+    if (transition_) {
+        if (transition_->parent) transition_->parent->remove_child(transition_);
+        delete transition_;
+    }
     if (screen_) {
         screen_->parent->remove_child(screen_);
         delete screen_;
@@ -193,6 +267,14 @@ void GameClient::request_characters() {
 }
 
 void GameClient::send(const std::string& command) {
+    if (ported_ && decision_["decision"].str() == "map_select") {
+        std::string error;
+        Json cmd = Json::parse(command.c_str(), command.size(), &error);
+        if (cmd["action"].str() == "select_map_node") {
+            ((MapScreen*)ported_)->begin_travel(cmd["args"]["col"].i(), cmd["args"]["row"].i());
+            start_room_transition();
+        }
+    }
     waiting_ = true;
     if (!link_->send(command)) error_ = "the logic is not running";
 }
@@ -203,7 +285,14 @@ unsigned GameClient::next_rand() {
 }
 
 bool GameClient::busy() const {
-    return waiting_ || !finishing_.is_null() || (combat_ && combat_->busy()) || (room_ && room_->busy());
+    return waiting_ || !finishing_.is_null() || (combat_ && combat_->busy()) || (room_ && room_->busy()) ||
+           (ported_ && ported_->busy()) || (transition_ && transition_->phase != 0);
+}
+
+void GameClient::start_room_transition() {
+    if (!transition_) transition_ = new RoomTransition(lib_);
+    if (!transition_->parent) tree_->root()->add_child(transition_);
+    transition_->start_out();
 }
 
 void GameClient::update(const PadState& pad) {
@@ -234,7 +323,11 @@ void GameClient::update(const PadState& pad) {
             ++characters_version_;
         } else if (type == "decision") {
             waiting_ = false;
-            show(msg);
+            bool changed_room = !decision_.is_null() && msg["decision"].str() != "map_select" &&
+                msg["context"]["total_floor"].i() != decision_["context"]["total_floor"].i();
+            if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
+            if (transition_ && transition_->phase == 1) transition_pending_ = msg;
+            else show(msg);
         } else if (type == "error") {
             error_ = msg["message"].str();
             log_warn("logic: %s", error_.c_str());
@@ -245,6 +338,15 @@ void GameClient::update(const PadState& pad) {
             waiting_ = false;
         }
     }
+    if (transition_ && transition_->phase == 1 && !transition_pending_.is_null() && transition_->ready()) {
+        Json next = transition_pending_;
+        transition_pending_ = Json();
+        show(next);
+        transition_->start_in();
+        tree_->root()->remove_child(transition_); tree_->root()->add_child(transition_);
+        return;
+    }
+    if (transition_ && transition_->phase != 0) return;
     if (!finishing_.is_null()) {
         /* The killing blow is playing: then the decision after it. */
         if ((room_ && room_->busy()) || (combat_ && combat_->busy())) return;
@@ -257,6 +359,7 @@ void GameClient::update(const PadState& pad) {
     if (waiting_ || decision_.is_null()) return;
     if (combat_ && combat_->busy()) return;
     if (room_ && room_->busy()) return;
+    if (ported_ && ported_->busy()) return;
     if (auto_) choose_automatically();
     else handle_input(pad);
 }
@@ -556,10 +659,15 @@ void GameClient::show(const Json& d) {
     }
     potions_.attach(screen_, d["player"]);
     tree_->root()->add_child(screen_);
+    if (transition_ && transition_->parent) {
+        tree_->root()->remove_child(transition_); tree_->root()->add_child(transition_);
+    }
     refresh_plain_screen();
 }
 
 void GameClient::clear_screen() {
+    if (transition_) { transition_->phase = 0; transition_->visible = false; }
+    transition_pending_ = Json();
     potions_.detach();
     if (screen_) {
         if (screen_->parent) screen_->parent->remove_child(screen_);

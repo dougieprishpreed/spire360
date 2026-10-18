@@ -102,11 +102,15 @@ static std::string outline_name(const std::string& type, const std::string& room
     return icon_name(type, room);
 }
 
-MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1) {}
+MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1), next_tick_(0), current_col_(-1), current_row_(-1),
+    opening_(0), travel_t_(-1), marker_(NULL) {}
 
 Node* MapScreen::build(const Json& d, std::string* error) {
     points_.clear();
     choices_.clear();
+    paths_.clear();
+    travel_ticks_.clear();
+    travel_t_ = -1;
     const Json& m = d["map"];
     if (!m.is_object()) {
         if (error) *error = "map_select without a map";
@@ -185,6 +189,8 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     /* The scroll: the current row's distance up from -600. */
     const Json& cur = m["current"];
     int cur_row = cur.size() == 2 ? cur[1].i() : 0;
+    current_col_ = cur.size() == 2 ? cur[(size_t)0].i() : -1;
+    current_row_ = cur_row;
     Control* map_ctl = (Control*)the_map;
     map_ctl->offset[SIDE_TOP] = map_ctl->offset[SIDE_BOTTOM] = -600.0f + (float)cur_row * dist_y;
 
@@ -326,6 +332,8 @@ Node* MapScreen::build(const Json& d, std::string* error) {
             dir = dir * (1.0f / len);
             float angle = atan2f(dir.y, dir.x) + PI_F / 2;
             int n = (int)(len / TICK_DIST) + 1;
+            Path path;
+            path.from_col = pc; path.from_row = pr; path.to_col = cc; path.to_row = cr;
             for (int t = 1; t < n; ++t) {
                 Node* dot = instance(lib_, "scenes/ui/map_dot.tscn");
                 if (!dot || dot->type != "TextureRect") {
@@ -344,13 +352,16 @@ Node* MapScreen::build(const Json& d, std::string* error) {
                 r->modulate = walked ? traveled : untraveled;
                 if (walked) r->scale = Vec2(1.2f, 1.2f);
                 paths_box->add_child(dot);
+                path.ticks.push_back(r);
             }
+            paths_.push_back(path);
         }
     }
 
     /* NMapMarker on the last room visited (not on the start or boss rows):
      * the character's marker over the point's top centre. */
     Node* marker = root->get_node("TheMap/MapMarker");
+    marker_ = marker && marker->is_control() ? (Control*)marker : NULL;
     if (!visited.empty() && marker && marker->type == "TextureRect") {
         int vc = visited.back().first, vr = visited.back().second;
         for (size_t i = 0; i < placed.size(); ++i) {
@@ -377,6 +388,26 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     focus_ = -1;
     if (!choices_.empty()) focus(0);
     tweens_.update(1.0); /* at rest */
+    /* NMapScreen.Open: map/backstop in 0.25 s, points and legend delayed
+     * 0.1 s; legend slides in from 120 px to the right. */
+    opening_ = 0;
+    map_ctl->modulate.a = 0;
+    tweens_.tween(&map_ctl->modulate.a, 1, 0.25f);
+    if (backstop && backstop->is_canvas_item()) {
+        CanvasItem* b = (CanvasItem*)backstop;
+        b->modulate.a = 0; tweens_.tween(&b->modulate.a, 0.85f, 0.25f);
+    }
+    if (points_box->is_canvas_item()) {
+        CanvasItem* p = (CanvasItem*)points_box;
+        p->modulate.a = 0; tweens_.tween(&p->modulate.a, 1, 0.25f, TRANS_LINEAR, EASE_IN_OUT, 0.1f);
+    }
+    if (legend && legend->is_control()) {
+        Control* l = (Control*)legend;
+        l->modulate.a = 0;
+        tweens_.tween(&l->modulate.a, 1, 0.25f, TRANS_LINEAR, EASE_IN_OUT, 0.1f);
+        tweens_.tween_from(&l->offset[SIDE_LEFT], l->offset[SIDE_LEFT] + 120, l->offset[SIDE_LEFT], 0.25f, TRANS_BACK, EASE_OUT, 0.1f);
+        tweens_.tween_from(&l->offset[SIDE_RIGHT], l->offset[SIDE_RIGHT] + 120, l->offset[SIDE_RIGHT], 0.25f, TRANS_BACK, EASE_OUT, 0.1f);
+    }
     return root;
 }
 
@@ -406,6 +437,7 @@ void MapScreen::focus(int i) {
 }
 
 std::string MapScreen::input(const PadState& pad) {
+    if (busy()) return std::string();
     int n = (int)choices_.size();
     if (n == 0) return std::string();
     if ((pad.pressed & PadState::LEFT) && focus_ > 0) focus(focus_ - 1);
@@ -417,10 +449,48 @@ std::string MapScreen::input(const PadState& pad) {
     return std::string();
 }
 
+void MapScreen::begin_travel(int col, int row) {
+    if (travel_t_ >= 0) return;
+    travel_t_ = 0;
+    next_tick_ = 0;
+    travel_ticks_.clear();
+    for (size_t i = 0; i < paths_.size(); ++i)
+        if (paths_[i].from_col == current_col_ && paths_[i].from_row == current_row_ &&
+            paths_[i].to_col == col && paths_[i].to_row == row) travel_ticks_ = paths_[i].ticks;
+    if (marker_) tweens_.tween(&marker_->scale, Vec2(0, 0), 0.2f);
+    for (size_t i = 0; i < points_.size(); ++i) if (points_[i].col == col && points_[i].row == row) {
+        Point& p = points_[i];
+        marker_to_ = offset_pos(p.node) + Vec2(offset_size(p.node).x * 0.5f - 20, -35);
+        if (p.icon) {
+            p.icon->self_modulate = Color();
+            tweens_.tween(&p.icon->scale, Vec2(1.5f, 1.5f), 0.2f, TRANS_EXPO, EASE_OUT);
+        }
+    }
+}
+
 /* NNormalMapPoint._Process: a travelable point's icon pulses
  * (sin(t) * 0.25 + 1.2, t += 4 dt) unless it has the focus. */
 void MapScreen::frame(double dt) {
     tweens_.update(dt);
+    opening_ += dt;
+    if (travel_t_ >= 0) {
+        double before = travel_t_;
+        travel_t_ += dt;
+        while (next_tick_ < travel_ticks_.size() && travel_t_ >= 0.8 * (double)(next_tick_ + 1) / (double)travel_ticks_.size()) {
+            Control* tick = travel_ticks_[next_tick_++];
+            tick->modulate = hex(0x241F1A); /* StsColors.pathDotTraveled */
+            tweens_.tween_from(&tick->scale, Vec2(1.7f, 1.7f), Vec2(1.2f, 1.2f), 0.4f, TRANS_CUBIC, EASE_OUT);
+        }
+        if (marker_ && before < 0.8 && travel_t_ >= 0.8) {
+            marker_->visible = true;
+            place_from_centre(marker_, marker_to_, Vec2(40, 40));
+            tweens_.tween_from(&marker_->scale, Vec2(0, 1), Vec2(1, 1), 0.2f);
+            tweens_.tween(&marker_->offset[SIDE_TOP], marker_to_.y - 25, 0.2f, TRANS_SINE, EASE_IN);
+            tweens_.tween(&marker_->offset[SIDE_BOTTOM], marker_to_.y + 15, 0.2f, TRANS_SINE, EASE_IN);
+            tweens_.tween(&marker_->offset[SIDE_TOP], marker_to_.y, 0.75f, TRANS_ELASTIC, EASE_OUT, 0.2f);
+            tweens_.tween(&marker_->offset[SIDE_BOTTOM], marker_to_.y + 40, 0.75f, TRANS_ELASTIC, EASE_OUT, 0.2f);
+        }
+    }
     for (size_t k = 0; k < choices_.size(); ++k) {
         Point& p = points_[(size_t)choices_[k]];
         Control* target = p.icon_container ? p.icon_container : p.node;

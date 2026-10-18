@@ -199,7 +199,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
 - Console log (`2adfce5`) writes and flushes each line instead of retaining and
   rewriting the whole history. This console-only change was reviewed;
   no XDK compile or Xenia validation was run. Pack remains unchanged.
-- Doom: the converter now bakes NoiseTexture2D resources with Godot 4.5.1
+- Doom (`85e4ffe`): the converter now bakes NoiseTexture2D resources with Godot 4.5.1
   (including FastNoiseLite defaults and the resource's settings). Outputs
   are cached under ignored `converter/.cache/procedural/`. Both renderers
   implement the doom bar's screen-space noise and gradient fragment shader.
@@ -208,7 +208,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
   textures, **0 conversion errors**. Earlier packs remain in place.
   Use `work/pack-next/data` with this pack. This converter change means
   the console pack must be rebuilt for the next Xenia test.
-- AtlasResourceLoader's unpacked/beta fallbacks now resolve absent atlas
+- AtlasResourceLoader's unpacked/beta fallbacks (`85e4ffe`) resolve absent atlas
   sprites (cards, relics, powers and potions). Sidestep resolves to its
   actual beta portrait; its previous missing-texture warning is fixed.
 - Validation: 21 converter tests pass; strict C++03 PC build; full replay
@@ -217,6 +217,24 @@ a git clone, deleted files go away by themselves (keep the list as is).
   death cleanup, all 0 failures. Doom images checked in ignored
   `work/doom-shots`. PC D3DCompiler compiles both shader-model-3 stages
   (`python tools/check_canvas_shader.py`). No XDK build was run.
+- Map/run flow: map opening fades and the legend slides in; selected path
+  ticks change sequentially over 0.8 s and grow from 1.7 to 1.2 over 0.4 s.
+  The marker hides, changes point, and bounces into place. Room travel
+  retains the old scene while the logic resolves, sweeps the game's black
+  gradient after 0.5 s, swaps only once black (1.1 s), then fades in over
+  0.8 s. Fast responses cannot cut playback short; delayed responses leave
+  the old room behind the black overlay. Input and auto-play wait.
+  The gradient loader now honors colors with omitted/default offsets and
+  supports cubic interpolation as Godot does.
+- Validation: strict C++03 build; full 1,425-response replay with 995
+  persistent-room checks, 366 HP impacts, 181 orb checks and 26 death
+  checks, **0 failures**; controller map travel tested with fast and slow
+  replies. Map travel render inspected under `work/transition-shots`.
+  A real Doom-only fight (Scourge test deck) reached rewards in five
+  combat responses with a death cue; replay passes. Its trace stays in
+  ignored `traces/doom.jsonl`. Doom-specific dissolve/overlay VFX, map
+  start-of-act animation and map close/view controls remain open.
+  No logic or converter change in this flow batch.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 

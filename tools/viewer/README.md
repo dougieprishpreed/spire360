@@ -26,6 +26,9 @@ The checker also renders the doom bar twice to verify its procedural noise
 and gradient, checks atlas fallback portraits and enemy death cleanup. Use
 a pack built with the current converter. `SPIRE_CHECK_SHOTS=<ignored dir>`
 saves the two doom renders for inspection.
+The map transition case drives controller selection with both fast and
+delayed logic replies, checking that travel completes before the room swap
+and the overlay clears. With `SPIRE_CHECK_SHOTS` it also saves map travel.
 
 On Windows, `python tools/check_canvas_shader.py` compiles both PC D3D9
 shader stages with the system D3DCompiler; it does not invoke the XDK.

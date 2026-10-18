@@ -29,7 +29,7 @@ struct CurveData {
 struct GradientData {
     std::vector<float> offsets;
     std::vector<Color> colors;
-    int interpolation; /* 0 linear, 1 constant, 2 cubic (as linear) */
+    int interpolation; /* 0 linear, 1 constant, 2 cubic */
     GradientData() : interpolation(0) {}
     bool valid() const { return !offsets.empty(); }
     Color at(float t) const;

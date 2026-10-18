@@ -32,6 +32,7 @@ public:
     virtual Node* build(const Json& decision, std::string* error) = 0;
     /* One frame of pad input: a command for the logic, or "" for none. */
     virtual std::string input(const PadState& pad) = 0;
+    virtual bool busy() const { return false; }
 };
 
 } /* namespace spire */
