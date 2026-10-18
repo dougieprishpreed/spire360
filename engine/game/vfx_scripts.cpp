@@ -3,6 +3,7 @@
  * an effect when it is over; deferred deletion follows the frame traversal. */
 #include "../scene/controls.h"
 #include "../scene/node.h"
+#include "../scene/line_2d.h"
 #include "../scene/particles.h"
 #include "../scene/resource.h"
 #include "../scene/scene.h"
@@ -335,6 +336,68 @@ private:
     CurveData movement_, height_curve_;
 };
 
+/* NBezierTrail keeps world-space points for _pointDuration, interpolating
+ * large steps. NBasicTrail and NTrail2D keep a fixed number of segments. */
+class Trail : public ScriptBehavior {
+public:
+    Trail(Node* n, int kind) : kind_(kind), target_(NULL), duration_(exported_number(n, "_pointDuration", 0.5f)),
+        maximum_((int)exported_number(n, "_maxSegments", kind == 1 ? 10 : 20)), has_last_(false) {}
+    virtual void ready(Node* n) {
+        if (n->parent && n->parent->is_node2d()) target_ = (Node2D*)n->parent;
+    }
+    virtual void process(Node* n, double dt) {
+        if (!target_ || n->type != "Line2D") return;
+        Line2D* line = (Line2D*)n;
+        Vec2 point = target_->global_transform().origin;
+        if (kind_ != 2) {
+            line->top_level = true;
+            line->position = Vec2(); line->rotation = 0;
+        }
+        if (kind_ == 0) {
+            float distance = has_last_ ? sqrtf((point.x - last_.x) * (point.x - last_.x) + (point.y - last_.y) * (point.y - last_.y)) : 0;
+            if (!has_last_ || distance >= 12) {
+                size_t count = line->points.size();
+                if (count > 2 && distance > 48) {
+                    Vec2 a = line->points[count - 2], b = line->points[count - 1];
+                    for (float span = 48; span < distance - 12; span += 48) {
+                        float t = 0.5f + span / distance * 0.5f;
+                        Vec2 ab = a + (b - a) * t, bp = b + (point - b) * t;
+                        line->points.push_back(ab + (bp - ab) * t);
+                        ages_.push_back((float)dt * t);
+                    }
+                }
+                line->points.push_back(point); ages_.push_back(0);
+                last_ = point; has_last_ = true;
+            }
+            for (size_t i = 0; i < ages_.size();) {
+                ages_[i] += (float)dt;
+                if (ages_[i] > duration_) {
+                    line->points.erase(line->points.begin() + (long)i);
+                    ages_.erase(ages_.begin() + (long)i);
+                } else ++i;
+            }
+        } else {
+            if (kind_ == 1) line->points.push_back(point);
+            else {
+                global_.insert(global_.begin(), point);
+                if ((int)global_.size() >= maximum_) global_.pop_back();
+                line->points.clear();
+                for (size_t i = 0; i < global_.size(); ++i) line->points.push_back(local_point(target_, global_[i]));
+            }
+            if (kind_ == 1 && (int)line->points.size() > maximum_) line->points.erase(line->points.begin());
+        }
+    }
+private:
+    int kind_;
+    Node2D* target_;
+    float duration_;
+    int maximum_;
+    bool has_last_;
+    Vec2 last_;
+    std::vector<float> ages_;
+    std::vector<Vec2> global_;
+};
+
 ScriptBehavior* make_sprite_animator(Node* n) { return new SpriteAnimator(n); }
 ScriptBehavior* make_particle_system(Node* n) { return new VfxParticleSystem(n); }
 ScriptBehavior* make_vfx_spine(Node* n) { return new VfxSpine(n); }
@@ -343,6 +406,9 @@ ScriptBehavior* make_big_slash_impact(Node*) { return new BigSlash(true); }
 ScriptBehavior* make_hit_spark(Node*) { return new HitSpark(); }
 ScriptBehavior* make_shaker(Node* n) { return new Shaker(n); }
 ScriptBehavior* make_projectile_handler(Node* n) { return new ProjectileHandler(n); }
+ScriptBehavior* make_bezier_trail(Node* n) { return new Trail(n, 0); }
+ScriptBehavior* make_basic_trail(Node* n) { return new Trail(n, 1); }
+ScriptBehavior* make_node_trail(Node* n) { return new Trail(n, 2); }
 
 } /* namespace */
 
@@ -371,6 +437,9 @@ void install_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/NHitSparkVfx.cs", make_hit_spark);
     register_script("res://src/Core/Nodes/Vfx/Utilities/NShaker.cs", make_shaker);
     register_script("res://src/Core/Nodes/Vfx/Utilities/NVfxProjectileHandler.cs", make_projectile_handler);
+    register_script("res://src/Core/Nodes/Vfx/NBezierTrail.cs", make_bezier_trail);
+    register_script("res://src/Core/Nodes/Vfx/NBasicTrail.cs", make_basic_trail);
+    register_script("res://src/Core/Nodes/Vfx/Utilities/NTrail2D.cs", make_node_trail);
 }
 
 } /* namespace spire */

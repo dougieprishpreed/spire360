@@ -235,7 +235,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
   ignored `traces/doom.jsonl`. Doom-specific dissolve/overlay VFX, map
   start-of-act animation and map close/view controls remain open.
   No logic or converter change in this flow batch.
-- Orb VFX: NShaker now interpolates chaotic offsets and returns the target
+- Orb VFX (`3097f9f`): NShaker interpolates chaotic offsets and returns the target
   to rest with NOrbVfx's sine OutIn strength decay. Passive activations use
   each orb's duration and strength. NVfxProjectileHandler follows the
   scene's movement/height curves, stops emission at impact, spawns impact
@@ -249,6 +249,23 @@ a git clone, deleted files go away by themselves (keep the list as is).
   rooms, 42 HP impacts, 129 orb checks, **0 failures**. No logic or pack
   changes. Line2D/Bezier trail drawing and specialized shader coverage
   remain before the orb presentation is complete.
+- Trail geometry: Line2D uses Godot 4.5.1's MIT-licensed line builder,
+  adapted to C++03 (sharp/bevel/round joins, caps, closed paths, width
+  curves, gradients and texture modes). NBezierTrail, NBasicTrail and
+  NTrail2D now generate their movement points; the projectile flipbook
+  shader's frame UVs and gradient map are rendered. Inventory: 19 scene
+  files contain native Line2D nodes (some multiplayer/debug only).
+  Edge antialiasing and visibility-reset details remain open.
+- Validation: strict C++03 build; line width/gradient, all join modes,
+  round caps and closing segment checks pass; 133 orb replay responses,
+  **0 failures**. Dark/Plasma renders inspected in `work/trail-shots`.
+  PC builds now use GCC dependency files to reuse unaffected objects;
+  included-header invalidation and escaped paths verified.
+- Console timing now logs `logic response` as soon as a complete protocol
+  line arrives. The existing decision timer is labeled `response +
+  presentation` because it includes scene building/playback. This will
+  distinguish the reported rewards delay in the next Xenia report. Console
+  code reviewed; no XDK build was run. No logic or pack change in this batch.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 

@@ -294,7 +294,7 @@ void Canvas::draw_colored_triangles(const std::vector<Vec2>& v, const std::vecto
 }
 
 void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, const std::vector<Vec2>& uv,
-                            const std::vector<Color>& colors, const std::vector<int>& idx) {
+                            const std::vector<Color>& colors, const std::vector<int>& idx, int flags) {
     Texture* tex = img ? gpu_texture(img) : NULL;
     if (img && !tex) return;
     if (idx.empty()) return;
@@ -303,7 +303,7 @@ void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, co
         int k = idx[i];
         verts_[i] = Vertex(xform_.xform(v[k]), uv[k], modulate_ * (colors.empty() ? Color() : colors[k]));
     }
-    if (!count_only_) r_->draw_triangles(tex, &verts_[0], (int)verts_.size(), blend_, tex_flags_);
+    if (!count_only_) r_->draw_triangles(tex, &verts_[0], (int)verts_.size(), blend_, tex_flags_ | flags);
     ++calls_;
 }
 

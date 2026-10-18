@@ -279,7 +279,8 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         return true;
     }
     if (m->shader == "shaders/vfx/common/vfx_flipbook_shader.gdshader" ||
-        m->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader") {
+        m->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader" ||
+        m->shader == "shaders/vfx/common/vfx_projectile_flipbook_shader.gdshader") {
         /* The colour as above, the texel's alpha; the frame of the flipbook
          * is the particles' (Particles2D::draw). Erosion and hue shift are
          * not ported. */

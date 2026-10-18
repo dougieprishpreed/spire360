@@ -69,6 +69,29 @@ static double now_ms() {
     return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
 }
 
+/* Keep protocol latency separate from scene building and effect playback.
+ * A rewards screen may be held until the killing blow has finished. */
+class TimedLogicLink : public SrtLink {
+public:
+    TimedLogicLink() : sent_at_(0), pending_(false) {}
+    virtual bool send(const std::string& line) {
+        sent_at_ = now_ms();
+        pending_ = SrtLink::send(line);
+        return pending_;
+    }
+    virtual bool poll(std::string& line) {
+        if (!SrtLink::poll(line)) return false;
+        if (pending_ && !line.empty() && line[0] == '{') {
+            logf("logic response: %.0f ms, %u bytes", now_ms() - sent_at_, (unsigned)line.size());
+            pending_ = false;
+        }
+        return true;
+    }
+private:
+    double sent_at_;
+    bool pending_;
+};
+
 /* XInput -> the engine's pad bits. Triggers count as pressed past half. */
 static unsigned pad_bits(const XINPUT_GAMEPAD& g) {
     static const struct {
@@ -166,7 +189,7 @@ void __cdecl main() {
     if (title) tree->root()->add_child(title);
     else logf("main menu: %s", err.c_str());
     tree->layout();
-    SrtLink link;
+    TimedLogicLink link;
     GameClient* game = new GameClient(lib, tree, &link);
     game->request_characters();
     CharacterSelectScreen chars(lib);
@@ -288,7 +311,7 @@ void __cdecl main() {
                     starting = false;
                     in_run = true;
                 }
-                logf("decision %d: %s (logic %.0f ms)", shown, game->decision()["decision"].str().c_str(),
+                logf("decision %d: %s (response + presentation %.0f ms)", shown, game->decision()["decision"].str().c_str(),
                      now_ms() - wait_start);
                 tree->layout();
             }

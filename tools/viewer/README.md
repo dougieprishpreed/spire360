@@ -12,6 +12,8 @@ On Windows, use MSYS2's **MSYS** environment and its `gcc` package
 Keep Windows Python and .NET on PATH (`MSYS2_PATH_TYPE=inherit`). The
 build runs one compiler at a time and enables the POSIX declarations
 that MSYS2 otherwise hides with `-std=c++98`.
+GCC dependency files keep unchanged objects cached. Python is used to check
+their timestamps; `CXX`, `PYTHON` and `EXTRA_FLAGS` can override the tools.
 
 `out/engine/spire_check <pack.s3p> <trace.jsonl> [more traces...]` replays
 local `random_runs.py` traces and checks that combat rooms survive across
@@ -31,6 +33,8 @@ delayed logic replies, checking that travel completes before the room swap
 and the overlay clears. With `SPIRE_CHECK_SHOTS` it also saves map travel.
 Orb helper cases exercise passive shaker motion/reset and Dark/Plasma
 projectile arrival and cleanup using the actual scenes and curves.
+Line geometry checks cover gradients, width, all join modes, round caps
+and closed paths; projectile captures also show their trails.
 
 On Windows, `python tools/check_canvas_shader.py` compiles both PC D3D9
 shader stages with the system D3DCompiler; it does not invoke the XDK.

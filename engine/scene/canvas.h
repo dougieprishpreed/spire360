@@ -55,7 +55,7 @@ public:
                                 const std::vector<Color>& colors);
     /* Textured, indexed, per-vertex colours; uvs in 0..1 of the image. */
     void draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, const std::vector<Vec2>& uv,
-                        const std::vector<Color>& colors, const std::vector<int>& idx);
+                        const std::vector<Color>& colors, const std::vector<int>& idx, int flags = 0);
 
     Texture* gpu_texture(ImageTextureRes* img);
     Renderer* renderer() const { return r_; }

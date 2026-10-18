@@ -12,6 +12,9 @@ if grep -nE '\b(fminf?|fmaxf?|roundf?|truncf?|l?lroundf?|cbrtf?|log2f?|exp2f?|co
     exit 1
 fi
 CXX=${CXX:-g++}
+if [ -z "${PYTHON:-}" ]; then
+    if command -v python >/dev/null 2>&1; then PYTHON=python; else PYTHON=python3; fi
+fi
 # The POSIX host uses fseeko/usleep; MSYS2 hides them in strict ANSI mode.
 FLAGS="-std=c++98 -pedantic -D_DEFAULT_SOURCE -D_LARGEFILE_SOURCE -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"
 stamp=out/engine/compiler-flags
@@ -24,9 +27,8 @@ for f in engine/*/*.cpp tools/viewer/spire_view.cpp tools/viewer/spire_play.cpp 
     o=out/engine/$(basename "$f" .cpp).o
     objs="$objs $o"
     # Keep the verifier to one compiler process at a time.
-    if [ ! -f "$o" ] || [ "$f" -nt "$o" ] || [ "$stamp" -nt "$o" ] ||
-       [ -n "$(find engine -name '*.h' -newer "$o" -print -quit)" ]; then
-        $CXX $FLAGS -c "$f" -o "$o"
+    if $PYTHON tools/viewer/needs_rebuild.py "$o" "$f" "$stamp" "$o.d"; then
+        $CXX $FLAGS -MMD -MP -MF "$o.d" -c "$f" -o "$o"
     fi
 done
 engine_objs=$(echo $objs | tr ' ' '\n' | grep -v -e spire_view.o -e spire_play.o -e spire_check.o | tr '\n' ' ')

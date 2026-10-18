@@ -10,6 +10,7 @@
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
 #include "../../engine/scene/controls.h"
+#include "../../engine/scene/line_2d.h"
 #include "../../engine/scene/node.h"
 #include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
@@ -220,6 +221,19 @@ static void orb_effect_cases(SceneLibrary& lib) {
             std::string name = handler->name;
             tree.process(1.0 / 60.0);
             check(!handler->children.empty(), "projectile handler did not instantiate its projectile");
+            tree.process(1.0 / 60.0); tree.process(1.0 / 60.0);
+            Node* trail_node = find_named(handler, "trail");
+            check(trail_node && trail_node->type == "Line2D" && ((Line2D*)trail_node)->points.size() >= 2,
+                  "projectile trail did not retain its movement points");
+            const char* shots = getenv("SPIRE_CHECK_SHOTS");
+            if (shots) {
+                for (int frame = 0; frame < 3; ++frame) tree.process(1.0 / 60.0);
+                tree.layout();
+                SwRenderer renderer; Canvas canvas(&renderer, lib.pack());
+                renderer.begin(640, 360, Color(0, 0, 0, 1)); tree.render(canvas); renderer.end();
+                write_png(format("%s/%s_projectile.png", shots, kinds[kind]).c_str(), renderer.framebuffer());
+                check(tree.skipped.empty(), "orb projectile render used an unsupported shader");
+            }
             const Json* travel = handler->get_extra("_travelTimeRange");
             double maximum = travel ? (*travel)["v"][1].num(1) : 1;
             int frames = (int)ceil(maximum * 60) + 2;
@@ -234,6 +248,41 @@ static void orb_effect_cases(SceneLibrary& lib) {
         }
         tree.root()->remove_child(box); delete box;
     }
+}
+
+static void line_cases(const Pack& pack) {
+    SceneTree tree;
+    tree.set_viewport(Vec2(240, 64), Xform2D());
+    Line2D* line = (Line2D*)SceneLibrary::create_node("Line2D");
+    line->width = 20;
+    line->points.push_back(Vec2(20, 32)); line->points.push_back(Vec2(220, 32));
+    line->gradient.offsets.push_back(0); line->gradient.offsets.push_back(1);
+    line->gradient.colors.push_back(Color(1, 0, 0, 1)); line->gradient.colors.push_back(Color(0, 0, 1, 1));
+    tree.root()->add_child(line);
+    SwRenderer renderer; Canvas canvas(&renderer, &pack);
+    renderer.begin(240, 64, Color(0, 0, 0, 1)); tree.render(canvas); renderer.end();
+    const Image& image = renderer.framebuffer();
+    check(image.at(40, 32)[0] > image.at(40, 32)[2] && image.at(200, 32)[2] > image.at(200, 32)[0],
+          "Line2D did not draw its lengthwise gradient");
+    check(image.at(40, 10)[0] == 0 && image.at(40, 24)[0] > 0, "Line2D did not respect its width");
+    line->begin_cap = line->end_cap = Line2D::LINE_CAP_ROUND;
+    for (int joint = 0; joint < 3; ++joint) {
+        line->joint_mode = joint;
+        renderer.begin(240, 64, Color(0, 0, 0, 1)); tree.render(canvas); renderer.end();
+        check(renderer.framebuffer().at(12, 32)[0] > 0 && renderer.framebuffer().at(228, 32)[2] > 0,
+              "Line2D round caps did not extend past the endpoints");
+        line->points.insert(line->points.begin() + 1, Vec2(120, 12));
+        renderer.begin(240, 64, Color(0, 0, 0, 1)); tree.render(canvas); renderer.end();
+        check(renderer.triangles_drawn() > 4, "Line2D did not build its corner/cap geometry");
+        line->points.erase(line->points.begin() + 1);
+    }
+    line->closed = true;
+    line->points.clear();
+    line->points.push_back(Vec2(40, 20)); line->points.push_back(Vec2(200, 20));
+    line->points.push_back(Vec2(200, 50)); line->points.push_back(Vec2(40, 50));
+    renderer.begin(240, 64, Color(0, 0, 0, 1)); tree.render(canvas); renderer.end();
+    const u8* closure = renderer.framebuffer().at(40, 35);
+    check(closure[0] > 0 || closure[2] > 0, "closed Line2D omitted its final segment");
 }
 
 class CountRenderer : public SwRenderer {
@@ -403,6 +452,7 @@ int main(int argc, char** argv) {
     FontLibrary::set_current(&fonts);
     lifecycle_cases(lib);
     orb_effect_cases(lib);
+    line_cases(pack);
     texture_cache_cases(pack);
     doom_cases(lib, pack);
     atlas_fallback_cases(lib);
