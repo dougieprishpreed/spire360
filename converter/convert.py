@@ -29,6 +29,14 @@
       Procedural noise textures also use Godot 4.5.1; their generated
       images are cached in converter/.cache/procedural, then packed as data
       textures. Keep that cache between pack builds.
+      FMOD banks need .NET 10 (the offline metadata/FSB helper); original
+      Vorbis packets are rebuilt as Ogg, with no re-encoding. The ignored
+      converter/.cache/audio folder keeps converted samples. --vgmstream
+      optionally validates every rebuilt sample with an independent decoder.
+
+  convert.py audio <pck | dir> <out_dir> [--vgmstream PATH]
+      Builds an audio-only test pack, including the Studio event graph,
+      parameters, playlists, buses, trigger conditions and sample mappings.
 
   convert.py fetch-godot
       Downloads the official Godot 4.5.1 build (MIT, ~60 MB) into
@@ -47,7 +55,7 @@ import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spire_convert import atlas, ctex, fonts as fontconv, godot_binary, resources, s3p, scenes, texture, variant  # noqa: E402
 from spire_convert import spine as spinefmt  # noqa: E402
-from spire_convert import procedural  # noqa: E402
+from spire_convert import procedural, audio as bank_audio  # noqa: E402
 from spire_convert.pck import Pck  # noqa: E402
 
 # 1920x1080 design resolution -> 1280x720 on the console.
@@ -644,6 +652,10 @@ def cmd_build(a):
             except Exception as e:  # noqa: BLE001
                 report["errors"][p] = f"{type(e).__name__}: {e}"
 
+        banks = [f for f in files if f.startswith('banks/desktop/') and f.endswith('.bank')]
+        if banks and not a.skip_bank_audio and (not a.only or any(wanted(f) for f in banks)):
+            bank_audio.Baker(src, banks, a.vgmstream).write(add)
+
     # Folder listings the logic's game code reads (the combat background
     # picker lists scenes/backgrounds/<name>/layers), in .pck order.
     res_dirs = res_dir_listing(src)
@@ -669,6 +681,15 @@ def cmd_build(a):
     for k, v in list(report["errors"].items())[:10]:
         print(f"  {k}: {v}")
     print(f"build took {time.time() - t0:.0f} s")
+
+
+def cmd_audio(a):
+    """An audio-only pack for decoder/mixer validation, from the local PCK."""
+    src = open_source(a.pack)
+    banks = [f for f in src.list() if f.startswith('banks/desktop/') and f.endswith('.bank')]
+    os.makedirs(a.out, exist_ok=True)
+    with s3p.Writer(os.path.join(a.out, 'pack.s3p')) as writer:
+        bank_audio.Baker(src, banks, a.vgmstream).write(lambda name, type_, payload, info: writer.add(name, type_, payload))
 
 
 def main():
@@ -699,10 +720,16 @@ def main():
                    help="comma-separated localization folders whose characters the fonts keep "
                         "(default eng; 'all' keeps every glyph: gigabytes for the CJK fonts)")
     b.add_argument("--godot", help="Godot 4.5.1 binary for the font step")
+    b.add_argument("--vgmstream", help="optional vgmstream-cli binary to validate rebuilt FMOD samples")
+    b.add_argument("--skip-bank-audio", action="store_true", help="omit bank audio for a visual-only test pack")
+    audio_parser = sub.add_parser('audio', help='build an audio-only test pack from the installed PCK')
+    audio_parser.add_argument('pack')
+    audio_parser.add_argument('out')
+    audio_parser.add_argument('--vgmstream')
     sub.add_parser("fetch-godot")
     a = ap.parse_args()
     try:
-        {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build,
+        {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build, "audio": cmd_audio,
          "fetch-godot": lambda _a: print(f"godot: {fontconv.fetch_godot()}")}[a.cmd](a)
     except KeyboardInterrupt:
         sys.exit(1)

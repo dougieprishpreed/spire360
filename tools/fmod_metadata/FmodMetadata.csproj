@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FModBankParser" Version="1.2.0" />
+    <!-- The parser's published package lists the obsolete 1.2 dependency. -->
+    <PackageReference Include="Fmod5Sharp" Version="3.0.1" />
+  </ItemGroup>
+</Project>

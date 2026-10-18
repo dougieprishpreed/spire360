@@ -267,6 +267,41 @@ a git clone, deleted files go away by themselves (keep the list as is).
   distinguish the reported rewards delay in the next Xenia report. Console
   code reviewed; no XDK build was run. No logic or pack change in this batch.
 
+- Later-act coverage: `traces/soak` has one high-HP test run per character;
+  all five completed and Silent reached victory. `spire_check` replayed
+  **5,130 responses, 3,786 persistent rooms, 1,416 HP impacts, 575 orb checks
+  and 134 death checks, 0 failures**. Two remaining warnings: Aeonglass's
+  `RaySlot` refers to `blast_placeholder` (investigate Spine slot setup),
+  and The Lantern Key incorrectly requests a portrait: its actual layout
+  is Combat, which must embed the encounter rather than a default portrait.
+- Offline bank converter (this batch): `tools/fmod_metadata` uses
+  pinned NuGet FModBankParser 1.2.0 + Fmod5Sharp 3.0.1; the parser's own
+  audio path expects an unpublished stream overload, so its in-memory
+  metadata input masks SND chunks. The separate FSB path calls the public
+  byte-array API to rebuild Ogg without re-encoding. No game DLLs load.
+- **Do not load the installed fmod.dll in helper processes.** ctypes probes
+  stalled in LoadLibrary and coincided with the user's "Self-protection
+  failed. Error code 4" popups. Those helpers were terminated. Use the
+  offline parser/decoder; don't repeat the DLL probes.
+- `converter/spire_convert/audio.py` preserves the complete Studio graph
+  and per-bank waveform mapping (waveform GUIDs may occur in multiple
+  banks with different sample indices). FSB loop ends are exclusive;
+  final Ogg granules are corrected to FSB's frame count with a new CRC,
+  retaining the original audio packets. Original PCM would be 4.493 GiB;
+  the rebuilt audio-only pack is **258,547,949 bytes**, 2,313 unique samples.
+  The installed v0.111.0 has **591 named events** (the old 336 count was
+  stale), 650 event GUIDs including nested events, and 32 parameter names.
+- Audio check: all 2,509 source samples' rebuilt rate/channel/frame counts
+  pass independent vgmstream r2117 checks. One source/rebuilt decode was
+  compared sample-by-sample, **identical PCM**. Full converter tests: 25
+  pass; strict C++03 PC build passes. No logic changes in this batch.
+  `work/audio-pack/pack.s3p` is audio-only; the current visual pack remains
+  `work/pack-next/pack.s3p`. Full builds now include bank audio; optional
+  `--vgmstream work/toolchain/vgmstream/vgmstream-cli.exe` checks it;
+  `--skip-bank-audio` is only for visual test packs. Keep the ignored
+  `converter/.cache/audio` cache. Engine decoder/mixer/XAudio2, adaptive
+  music and temporary mp3 playback are still open; do not tick Sound yet.
+
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
 **Logic**: the game's own sts2.dll, IL-patched (`logic/patches.json`),
@@ -385,7 +420,7 @@ here as they land, with the commit.
       history, statistics, timeline) as far as they are single-player.
 
 **Sound**
-- [ ] Converter: the 12 FMOD Studio banks (301 MB, 336 events) and the
+- [ ] Converter: the 12 FMOD Studio banks (301 MB, 591 named events) and the
       mp3 temp sfx: extract the samples at conversion time (FSB5 inside
       the banks), plus the event -> sample(s) mapping and the parameters
       the game sets.
