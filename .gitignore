@@ -42,3 +42,8 @@ ipch/
 *.log
 *.zip
 *.zip.[0-9][0-9][0-9]
+# local work folders: decompiled game code, run traces, packs, screenshots
+# (all made from the player's game files: never commit)
+decomp/
+traces/
+work/

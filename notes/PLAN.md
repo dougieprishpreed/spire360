@@ -8,7 +8,7 @@ player's machine, and the resulting XEX is for personal use only.
 
 This replaces the first plan's clean-room re-implementation of ~1,600 models.
 Why: [DECISIONS.md](DECISIONS.md) D1-D3. What exists today and what to run
-next: [../HANDOFF.md](../HANDOFF.md).
+next: [HANDOFF.md](HANDOFF.md).
 
 Pinned build: **v0.111.0** (commit 41cef1ea, 2026-08-13). Moving to a newer
 build is an explicit task: `tools/build_logic.py --stage copy,stubs,patch,jit`

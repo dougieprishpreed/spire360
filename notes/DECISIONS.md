@@ -67,11 +67,13 @@ death VFX, event portrait VFX) into presentation cues.
 
 Inherited from sts2-cli; each is UI-driven flow the adapter replicates:
 
-1. Post-combat rewards: gold, potions and relics are auto-collected; only the
-   card reward is a choice. Real game: the player picks each reward.
-2. Treasure rooms auto-pick the first relic.
+1. ~~Post-combat rewards auto-collected~~: now a `rewards` decision, the
+   player takes each reward.
+2. ~~Treasure rooms auto-pick the first relic~~: now a `treasure` decision
+   (`open_chest`, `pick_relic`, `proceed`), as NTreasureRoom.
 3. Between-act healing is re-implemented (`HealBetweenActs`).
-4. Rest site and some events are forced back to the map after an option.
+4. Rest site: now stays (a `done` rest_site decision, then proceed); check
+   the events that still go straight back to the map.
 5. Card-reward alternatives (e.g. Singing Bowl-style options) are not exposed.
 6. ~~Crystal Sphere minigame~~: now a `crystal_sphere` decision (tool + cell clicks on the game's own minigame model).
 7. Neutralize: sts2-cli's replacement is disabled; verify the original works.

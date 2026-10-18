@@ -1,228 +1,255 @@
 # Handoff
 
-Rewritten each session; kept short. Plan: [PLAN.md](PLAN.md); decisions: [DECISIONS.md](DECISIONS.md).
-Why things are the way they are: [DECISIONS.md](DECISIONS.md).
+Rewritten at each change of session; read it first. Plan: [PLAN.md](PLAN.md).
+Why things are the way they are: [DECISIONS.md](DECISIONS.md). Dialect rules:
+[../docs/CODING_RULES.md](../docs/CODING_RULES.md).
 
-## State (pinned game build v0.111.0)
+Last rewrite: 2026-10-18, when the work moved from a cloud session (game
+data reached it as zip "bundles") to a local desktop session on the user's
+PC, with the game installed.
 
-**Logic, on PC: working.** The player's sts2.dll runs headless through
-`logic/Spire.Logic` on one thread:
+## Goal: the alpha release candidate
 
-- `tools/random_runs.py`: 25/25 random runs complete (all five characters);
-  with `--tank` the agent reaches Act 3 and wins full runs.
-- NativeAOT x64 build of adapter + game runs (all 1,660 models register
-  through reflection without JIT): strong evidence for NativeAOT-LLVM.
-- `selfplay` command (agent inside the logic): PC JIT baseline: start_run
-  2.1 s, action avg 1.8 ms / p95 6 ms / max 119 ms, GC heap 15 MB.
-- Responses carry `steps`: state diffs (hp, block, powers, card moves,
-  intents, orbs) and UI cues (sounds, VFX, speech, music, `wait` pacing) in
-  game order.
+Port **everything in the game except multiplayer**, systematically, and keep
+going until the build is an alpha release candidate: every screen,
+effect, animation, transition and sound of a single-player run, as the game
+shows them. The content is finite: work through the checklist below rather
+than stopping after each feature for feedback. The user builds and tests
+in Xenia only when the agent says the alpha RC is ready (or when the user
+asks). **Never start an XDK build yourself unless the user asks for one.**
+Use the PC tools (spire_view, spire_play, the JIT logic) to check the work.
 
-**Runtime: verified.** `runtime/tests/run_tests.py`: x86-64, big-endian
-PowerPC (qemu), Win32 backend (wine).
+## Rules (keep)
 
-- Runs on the player's real localization tables (from their pck): 25/25 and
-  10/10 `--tank`; UTF-8 protocol verified with Japanese tables.
+- **No game data in git, ever.** That covers the game's files and anything
+  made from them: decompiled source, packs, extracted images, bundles, run
+  traces (they hold game text), screenshots of the game. Local copies go in
+  ignored folders (`work/`, `decomp/`, `traces/`, `out/`, `data/`,
+  `logic/lib/`). Before every commit, `git status` and check that only
+  source, tools and docs are staged.
+- Engine and console code: **C++03 for Visual Studio 2010** (the XDK's
+  compiler). `tools/viewer/build.sh` builds with `g++ -std=c++98
+  -pedantic` and greps for C99 maths VS2010 lacks (`round`, `fminf`, ...;
+  it also catches them in comments). Translated logic: C89.
+- Logic changes must not change the game: run the seeded trace check below
+  (0 differences) after every change under `logic/`.
+- At most **one background job** at a time (usage quota).
+- No model names or ids in commits, PRs, code or docs.
+- Branch: `claude/peaceful-ritchie-zgh7h5`. No pull requests unless the
+  user asks.
+- Comments say what the game does and where (the C# class or scene being
+  ported, its numbers), in the style of the surrounding code.
 
-**XDK spike (M0): done (user's XDK, run in Xenia).**
-- hello: all checks pass (big-endian, `_MSC_VER` 1600, `lwbrx` incl.
-  unaligned, 64 MB reserve+commit, D3D device).
-- bigcode: 64 MB of code (37,400 functions) links and runs: PASS. The build
-  took 2.5 h on one core; `/MP` is now on.
-- probe: VS2010 PPC compiler, strict C89 (docs/CODING_RULES.md).
-- selftest: PASS (after the stat-by-handle fix).
-- bench: all checks identical to PC; 2.40 s vs 0.63 s on the PC (3.8x), in
-  Xenia (not hardware).
+## The user's machine
 
-**Logic as wasm (M1): done and verified.** The whole pipeline runs in
-this environment now (network open; wasi-sdk 29 in the scratchpad, set
-WASI_SDK_PATH): `build_logic.py --stage patch,wasm,c,native`.
-- 25 seeded runs on x86-64 native and 25 on big-endian PowerPC (qemu-ppc,
-  `--native-cc powerpc-linux-gnu-gcc --native-tag ppc`) give traces
-  byte-identical to the .NET JIT build. The user's PC: native build plays a
-  full run too.
-- Code size: 33.5 -> 27.8 MB (wasm code), logic.wasm 46.8 MB, C 279 MB,
-  x86 binary 75 MB; PPC text was 119 MB before the cut (64 MB proven to
-  link on the 360). Cuts: `ui.strip` (Godot UI bodies -> throw) and
-  `mods.no_harmony.*`. Slimmer build re-verified: 20/20 native traces
-  identical when paused (PPC rebuild of it was in progress).
-- Next size ideas: `IlcOptimizationPreference=Size` (measure speed too);
-  shared throw helper for stripped bodies.
+| What | Where |
+|---|---|
+| Repository | `F:\downloads\temp\python\hermes\spire360` (was a zip extract; becomes a git clone at the start of the desktop session) |
+| Game (v0.111.0) | `F:\Program Files (x86)\Slay the Spire 2` (`SlayTheSpire2.pck`, sts2.dll in its data folder) |
+| wasi-sdk 29 | `C:\wasi-sdk-29.0-x86_64-windows` |
+| XDK | Visual Studio 2010 + Xbox 360 XDK; "Xbox 360 Command Prompt"; `xdk\build.cmd` |
+| Emulator | Xenia Canary; the XEX's log is `game:\spire360.txt`, Xenia's own log `xenia.log` |
+| Also | Python, .NET 10 SDK, 7-Zip |
 
-**M2 (console logic run): done in Xenia, 2026-10-15.** logic_runner plays
-a seeded Ironclad self-play (seed x360) to the same result as the PC build:
-63 steps, defeat on act 1 floor 5, identical action counts, 0 errors.
-Xenia timings (not hardware): start of run 8.9 s, action avg 28.6 ms, p95
-159 ms, max 338 ms (PC native: 1.1 s and 2.3 ms); GC heap 13 MB. Build:
-48 min compile, 6 s link once /DEBUG and /OPT:ICF are off (with them the
-32-bit linker died, LNK1000); logic.c needs tools/w2c2_fix_tables.py
-(C1002 otherwise; the c stage runs it). Next: hardware timings.
+Build caches to keep (gitignored, slow to remake): `out\logic` (the
+translated logic; `out\logic\w2c2_base.h.stamp`), `logic\lib`, `data`,
+`xdk\logic_lib\Release` (the 47 min logic library), the converted pack.
 
-**Converter (M3): reads everything, builds the pack; needs the user's pack
-to run at full scale.** `converter/convert.py survey|texture|build`
-(requirements.txt). Decoders tested against Godot 4.5.1 output (12 tests).
-Spine skeletons and atlases go into the pack as JSON (`spire_convert/spine.py`,
-our own 4.2 reader; `survey` lists the Spine features the game uses).
-Not yet: FMOD banks.
+## Local workflow
 
-**Converter (older notes):** `converter/pck_tool.py` reads Godot 4 packs; works on
-the player's SlayTheSpire2.pck (v3, Godot 4.5.1, 15,890 files). What the pack
-holds, for the converter:
-- textures: 3,555 `.ctex` under `.godot/imported`: 2,311 plain (PNG/WebP
-  inside, 294 MB), 540 S3TC (207 MB, usable as DXT after a byte swap), 704
-  BPTC/BC7 (671 MB: the 360 has no BC7, decode and re-encode to DXT).
-- scenes are text `.tscn` (1,037) and `.tres` (2,296), not binary RSRC.
-- localization: `localization/<lang>/*.json`, 3-letter folders (eng, deu,
-  jpn, ...): the layout the logic reads.
-- Spine (164 `.spskel` / 170 `.spatlas`), 12 FMOD banks (301 MB), 20
-  `.fontdata` (371 MB, mostly CJK), 100 shaders.
+The PC tools need a POSIX shell and g++ for `tools/viewer/build.sh`: use
+WSL (Ubuntu: `sudo apt install g++ python3 python3-pip`, .NET 10 SDK for
+Linux, the repo at `/mnt/f/downloads/temp/python/hermes/spire360`) or
+MSYS2. Pick one environment and run the logic, the converter and the tools
+from it. Paths below are relative to the repository.
 
-**Engine (`engine/`, C++03 for VS2010, checked with `g++ -std=c++98 -pedantic`):**
-- `core/`: pack.s3p reader, JSON DOM. `gfx/`: renderer interface, software
-  renderer (bilinear, premultiplied, repeat/nearest), DXT decode, PNG out.
-- `scene/`: Godot's node tree ported from 4.5.1 (MIT): scene instancing
-  (instances, inherited scenes, overrides), resources (AtlasTexture,
-  StyleBoxFlat/Texture/Empty, Theme, FontVariation, materials), Control layout
-  (anchors, offsets, grow, min sizes), Box/Margin/Panel/Center/Grid/Flow
-  containers, TextureRect, NinePatchRect, ColorRect, Panel, Sprite2D, theme
-  lookup with Godot's default theme (`default_theme.inc`, generated by
-  `tools/gen_default_theme.py` from the 4.5.1 binary), canvas draw order
-  (show_behind_parent, z_index, clip_contents, modulate).
-- `text/`: fonts exported by Godot itself (converter `--godot` /
-  `fetch-godot`: every glyph as MSDF pages, HarfBuzz advances, kerning and
-  ligatures), shaper and line breaking ported from TextServer; `scene/`
-  Label and RichTextLabel (BBCode, inline images, effects) ported.
-- `game/`: ports of the game's C# presentation scripts, attached by script
-  path (`scene/script.h`): MegaLabel / MegaRichTextLabel auto-size and the
-  game's RichTextEffects ([gold], [blue], [sine], ...).
-- `scene/particles`: CPUParticles2D simulation ported; GPUParticles2D mapped
-  onto it. `scene/shaders`: hsv and button_pulse ported (others are skipped
-  and reported).
-- `gfx/d3d9_renderer`: PC D3D9 and Xbox 360 D3D, one shader
-  (`gfx/shaders/canvas.hlsl`); compile-checked with MinGW only.
-- `tools/viewer/spire_view`: scene -> PNG (`tools/viewer/build.sh`);
-  `tools/viewer/refdiff.py`: diffs against Godot's renders (see
-  `tools/viewer/README.md`). Bundle status: 7 of 8 root scenes within 0.11%
-  of pixels off by >16/255; the main menu waits on the Spine page images
-  and dark_blur (screen-texture blur).
-- `spine/`: our own Spine 4.2 runtime (DECISIONS D12): bones (all inherit
-  modes), region and mesh attachments (weighted, deform), skins, curve
-  timelines, draw order, tracks with crossfades, IK (1 and 2 bones),
-  transform (local/world, absolute/relative), path and physics constraints
-  with Spine's update order, clipping, sequences. The pack holds skeletons
-  in our binary form ("SPB1", spine.py engine_binary; no JSON parse on the
-  console). `scene/spine_sprite` is the SpineSprite node;
-  `game/anim_scripts` ports NSpineAutoPlayer. Not yet: dark-colour tint,
-  screen blend. Matches the game on the main menu; the constraints still
-  need checking against creatures (a creature bundle).
-- `xdk/spire_view`: the engine on the console (D3D9, 1280x720).
+1. **Decompiled game source** (the reference for every port; never
+   committed): `dotnet tool install -g ilspycmd`, then
+   `ilspycmd -p -o decomp "<game>/<data folder>/sts2.dll"` (the folder that
+   holds sts2.dll; `tools/build_logic.py` finds it the same way). Godot's
+   own C++ (4.5.1, MIT) is the reference for engine behaviour.
+2. **Game files**: read them straight from the .pck.
+   `python converter/pck_tool.py extract <pck> work/res "<glob>"` pulls out
+   scenes, scripts, shaders, images to read. No more bundles.
+3. **Pack for the PC tools**: `python converter/convert.py build <pck>
+   work/pack` (the full pack, ~700 MB, at the console's 2/3 scale; `--only
+   'glob'` for a quick partial one, `--godot` / `fetch-godot` for fonts).
+   It also writes `work/pack/data` (localization, `res_dirs.json`).
+4. **Logic (JIT)**: `python tools/build_logic.py --game-dir <game> --stage
+   copy,patch,jit` (after a change to `logic/patches.json`, `patch` must
+   run before `jit`). Run: `dotnet out/logic/jit/Spire.Logic.dll` with
+   `SPIRE_DATA=work/pack/data` (or `data`).
+5. **Engine tools**: `sh tools/viewer/build.sh` gives
+   `out/engine/spire_view` (a scene or a decision JSON to PNG; plays
+   combat steps; viewer-only keys `previous_stage`, `previous_player`)
+   and `out/engine/spire_play` (the whole game headless with the real
+   logic: `spire_play work/pack/pack.s3p work/shots --logic "dotnet
+   out/logic/jit/Spire.Logic.dll" --character Ironclad --seed S --steps N
+   [--auto SEED]`, a PNG per screen). Compare the PNGs with the real game
+   (run it, screenshot the same screen) and with the decompiled code.
+6. **Logic regression check** (after every logic change):
 
-## How the user updates
+   ```
+   python tools/random_runs.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" --runs 3 --trace-dir traces/base --data-dir work/pack/data   # once, before the change
+   python tools/random_runs.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" --runs 3 --trace-dir traces/new  --data-dir work/pack/data
+   python tools/trace_compare.py traces/base traces/new        # must print "differences: 0"
+   ```
 
-The user downloads the branch as a zip from GitHub and extracts it over
-the folder (no git). Deleted or renamed source files therefore stay on
-their disk: whenever one is removed, add it to the stale-file list at the
-top of xdk/build.cmd (the projects compile every .cpp in engine\*).
-Every extract also re-dates every file: build.cmd keeps w2c2_base.h's date
-while its contents are unchanged (out\logic\w2c2_base.h.stamp), or the
-whole translated logic would recompile (over an hour) after each update.
-Any other header the translated C includes needs the same treatment.
+   `trace_compare.py` ignores presentation-only keys (`steps`, `tips`, ...)
+   and the decisions the self-play agent answers its own way; add a key to
+   its DROP set only when it is presentation data.
+7. **Console build** (only when the user asks): the user runs, in the Xbox
+   360 Command Prompt, `python tools\build_logic.py --game-dir <game>`
+   (when logic changed; stage `c` needed), `python converter\convert.py
+   build <pck> out` (when the converter changed), `xdk\build.cmd spire360`,
+   and copies `out\pack.s3p` and `out\data` to `<xex folder>\spire\`.
+   See `xdk/README.md`. Tell the user exactly which of these steps a build
+   needs (logic_lib recompiles for ~47 min when the logic changed).
 
-## Waiting on the user
+The stale-file list at the top of `xdk/build.cmd` was for zip updates; with
+a git clone, deleted files go away by themselves (keep the list as is).
 
-1. (2026-10-16) The build of 01abc27 ran in Xenia: health bars, intents,
-   powers, top bar, card reward, card play all good. Not seen: the relic row
-   (no warning then; set_texture now logs every missing pack path once),
-   the game version (the pack predates the release_info fix: rebuild it).
-   logic_lib took 47 min (full compile, logic changed). Per frame: ~3.7 ms
-   process, ~12.7 ms draw (~450 calls), first decision ~10 s.
-   Next build (the user waits for "a first preview release candidate"):
-   build_logic + full logic_lib (logic changed again), rebuild the pack,
-   spire360. New since: main menu with character choice and back to it
-   after a run (StartRun cleans up the previous run), the menu kept while
-   the run starts, map screen, event screens (default + Neow), card
-   selection screens (grid / upgrade preview / choose a card), potions
-   (X), the event reward skip fix, card_select kind/prompt, potion usage.
-   Ask for: spire360.txt, screenshots of menu / Neow / map / a card select
-   / the potion popup, and a bundle5 (convert.py bundle's new default
-   roots: rest site, shop, treasure, rewards, game over, character select;
-   --max-mb 90 if it leaves the backgrounds out).
-2. Usage: the user's quota drained when five spec agents and a native
-   build ran at once. One background job at a time, only when it saves
-   real work. Specs written so far: scratchpad spec_top_bar.md,
-   spec_rewards.md (the map / events / card-select specs were cut off).
+## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
-## Next (agent)
+**Logic**: the game's own sts2.dll, IL-patched (`logic/patches.json`),
+driven by `logic/Spire.Logic` (JSON lines: decisions, commands, `steps`).
+Runs as .NET JIT (the oracle), NativeAOT-LLVM wasm -> w2c2 C (PC native
+and the console; seeded traces byte-identical, x86-64 and big-endian PPC).
+Decisions with screens: main menu, character select, Neow and events,
+map, combat, card rewards and rewards, card selections (grid, upgrade,
+choose a card, bundles), rest site, shop, treasure (player picks the
+relic: `open_chest`, `pick_relic`, `proceed`), game over. `steps` carry
+state diffs and UI cues: `vfx` (on a creature, its side, the screen),
+`anim` (creature animation triggers), damage numbers, `death` (also for
+enemies alive when the combat ends), `wait`. Cards, powers and relics
+export their hover `tips`.
 
-- Spine: check the menu against the game's screenshot; constraints (IK,
-  transform, physics) and clipping as the survey shows the creatures need
-  them; the game's creature scripts (NCreatureVisuals) on top.
-- dark_blur and other screen-texture shaders.
-- Font pages: glyphs are now limited to the chosen languages' characters
-  (`build --languages`, default eng: ~110 characters, ~5 MB of MSDF pages
-  per font). Still to do: repack Godot's 512x512 pages tightly.
-- Presentation of real screens: ports of the game's node scripts
-  (NMainMenu, NCombatRoom, NCard, ...) driven by the logic protocol.
-- M2 runner: `xdk/logic_runner` from `out/logic/c`.
-- Fidelity gaps in DECISIONS D6 (rewards screen choice first).
+**Engine** (`engine/`): Godot 4.5.1's scene tree, Control layout,
+containers, themes, text (MSDF fonts exported by Godot, TextServer
+shaping, RichTextLabel with the game's effects), CPU particles (flipbooks,
+per-particle erosion), our Spine 4.2 runtime, tweens, a software renderer
+and a D3D9 renderer (PC + 360, one `canvas.hlsl`; regenerate
+`canvas_hlsl.inc` with `python tools/gen_shader_inc.py
+engine/gfx/shaders/canvas.hlsl`). Shader ports in `engine/scene/shaders.cpp`
+(hsv, button pulse, card glow, colour matrix, ripple, gradient map,
+grayscale, flipbook, stepped fire, the erosion particle family: ring polar,
+poof, common particle). Game screens in `engine/game/` (one file per
+screen; `game_client.cpp` turns decisions into screens and choices into
+commands; `combat_screen.cpp` plays `steps`).
 
-## Known issues
+**Console** (`xdk/spire360`): the engine + the translated logic in one
+XEX, logic on its own thread. A whole run plays in Xenia.
 
-- Fidelity gaps D6 (auto-collected rewards, treasure auto-pick, healing
-  between acts re-implemented, rest site forced to map).
-- `InitProgressData` warns once on a fresh profile (harmless; reloaded after
-  ModelDb).
+## The user's last Xenia test (2026-10-18) and the log
 
-## Since 2026-10-15
+Works: attack effects show; rest site fire, treasure room, Osty fine.
 
-- Docs: README is for players; planning notes live in notes/ (removed when
-  the port is finished).
-- Spine: binary skeletons (SPB1), constraints, clipping, sequences,
-  SpineBoneNode/SpineSlotNode. All 44 creature scenes a-f render coherently
-  (`spire_view ... --spine-anim idle_loop --origin 960 900`).
-- Ironclad + slimes match the user's combat screenshots (pose, art, scale).
-- Protocol for the presentation (JIT-checked, seeded runs unchanged): ids
-  (monster/combat/power/relic/potion/orb/character), map_select.map (whole
-  act map), combat_play.view (encounter, camera, the game's background pick
-  via DirAccess over data/res_dirs.json). The console logic needs a rebuild
-  (build_logic.py stages up to c) before the combined XEX.
-- Combat screen (engine/game/combat_screen): room, background, creatures,
-  hitboxes, health bars (block, poison, lethal colours) match the game's
-  screenshot. Canvas groups (clip_children) in both renderers; verified
-  against Godot renders. Doom's bar needs FastNoiseLite + doom_bar.gdshader
-  (not drawn yet).
-- Protocol (JIT-checked, 15 seeded runs unchanged): intents (animation,
-  sprite, label), powers (visible, counter, display_amount, amount_color),
-  creatures (hp_display, poison_next_turn, hp_bar_reduction,
-  health_bar_visible). The stand-in Color(string) parses hex now.
-- Game loop: engine/game/logic_link (SrtLink in-process, PipeLink child
-  process), game_client (decisions -> screens, choices -> commands,
-  auto-play), tools/viewer/spire_play (headless PC game with the real
-  logic, PNG per screen), xdk/spire360 (the console program) and
-  xdk/logic_lib (the logic compiled once).
-- Protocol: combat UI fields (exhaust_pile_count, stars, turn_number),
-  card view fields (title, description_bbcode, portrait, pools, cost
-  display/colours, glow). Specs from the game's scripts are summarised in
-  the scratchpad (spec_combat_ui.md, spec_hand.md); key numbers belong in
-  the code comments when ported.
-- Combat UI at rest, hand of cards (card_view), the card glow shader and
-  pad play in combat (focus, targeting, end turn) match the game's
-  screenshot. Converter: atlas sprites come from the .tpsheet files (the
-  game's AtlasResourceLoader), not the .tres in the .pck.
-- Pad card play as NControllerCardPlay: A centres the card (3/4 size),
-  single-enemy cards aim NTargetingArrow (19 bezier segments + head, lerp
-  14/s) at the target's CenterPos with its reticle and nameplate (last
-  target remembered as LastTargetedCreature); other cards mark all
-  enemies or the player; A plays, B returns. Hand holders lerp like
-  NHandCardHolder (7/10/8 per second). engine/scene/tween: Godot's
-  easing (sine, expo, elastic). Card descriptions do not yet follow the
-  target (SetPreviewTarget: needs a per-target description from the
-  logic).
-- Next: intents and power icons (NIntent, NPower), top bar, the map and
-  reward screens; then the rest of the plain-list screens. The pack
-  header's game version reads empty on the console (check).
-- Older next list: combat UI overlay (energy, piles, end turn, controller glyphs),
-  hand and cards, intents and power icons (need a bundle with
-  scenes/combat/*.tscn, scenes/cards/*.tscn, scenes/ui/*.tscn and the
-  intent/power/card atlases), top bar. Then LogicLink + GameClient and the
-  combined XEX (the console logic needs a rebuild first).
+Reported, in the user's order of importance:
+
+1. **No continuous flow (primary).** Combat, map travel and room changes
+   feel like a slideshow of static scenes; the game flows continuously.
+   Cause: each decision rebuilds its screen. Needed: a persistent combat
+   scene animating state changes (HP bar tweens, block, cards flying to
+   the piles and from the draw pile, intents changing, powers appearing),
+   the game's room transitions (fades, NMapScreen open/close, the map's
+   travel animation along the path, act changes), the hand drawn and
+   discarded as in NPlayerHand. Sound will help, but this is not only
+   sound.
+2. **Effect timing.** Effects start late and play too slowly (the "slash"
+   text inside the Strike slash effect is visible: the effect's timeline
+   or its texture/region is wrong); effects linger until the next turn
+   (Osty's rebirth): VFX nodes need the game's lifetimes (QueueFree after
+   their particles/animations end); animations play at the wrong moment
+   (cue order vs `wait` pacing in `play_steps`).
+3. **Defect orbs**: evoke damage shows on the next turn and without its
+   effects; channel/evoke animations missing.
+4. **Doom**: not drawn on the health bars (needs FastNoiseLite + the
+   doom_bar shader); an enemy killed by doom plays no death animation and
+   stays until the next turn.
+5. **Freeze** on a card select screen, probably the event that adds two
+   common cards. Xenia log: last line "decision 295: card_select (logic
+   138 ms)" after a combat_play, nothing after: the screen built (or hung
+   building) and input never produced a command. Reproduce with
+   spire_play on that event's decision (find the event in the decompiled
+   source; drive it with a seed or a scripted decision in spire_view).
+6. **Slowdowns**: Xenia's log has ~187k "Loaded tiled" texture uploads in
+   ~45k frames: `Canvas::gpu_texture` (D3D9 renderer) never frees GPU
+   textures, memory grows, Xenia re-uploads. Needs a texture budget with
+   LRU eviction (and freeing textures of screens that are gone). Frame
+   cost: ~4 ms process + layout, ~12.5 ms draw, 300-700 draw calls
+   (batch by texture/state).
+7. **Slow logic**: the second `rewards` decision of every fight takes
+   ~2 s in Xenia: profile it on PC (likely card reward generation or a
+   save/serialisation path; time per command in random_runs).
+8. **Log**: `spire360.txt` stopped at decision 221 while Xenia's log went
+   to 295: `flush_log` (xdk/spire360/main.cpp) rewrites the file only now
+   and then. Append each line (or flush after each decision) so a freeze
+   leaves the full log.
+9. Tips (cards, powers, relics) not tested yet.
+
+## Port checklist (everything except multiplayer)
+
+Order: the flow and the bugs above first, then the rest. Tick items off
+here as they land, with the commit.
+
+**Flow and combat**
+- [ ] Persistent combat scene; state changes animated from `steps` (HP and
+      block bars, powers, intents, energy, piles, card moves: draw,
+      discard, exhaust, shuffle, generated cards), the game's timings.
+- [ ] NPlayerHand behaviour: draw/discard animations, card play flying to
+      its target, retained cards, hand selection mode (choose cards from
+      the hand: now a grid).
+- [ ] VFX lifetimes and cleanup; effect timing and speed; damage blocked
+      effects; hit flashes and shakes (NCreature, ScreenShake).
+- [ ] Orb channel / evoke / passive effects and their timing.
+- [ ] Doom bar; death by doom (and every non-attack death) animated.
+- [ ] Creature focus tips (powers, intents) in combat.
+- [ ] Remaining combat VFX shaders (~60 effect shaders in the pack: the
+      erosion family is done; screen distortion, heavy_blunt_erosion,
+      water reflection, dark_blur and the screen-texture blurs, the rest
+      as `survey` lists them).
+- [ ] Turn banners, combat start/end, victory and boss transitions.
+
+**Run flow and screens**
+- [ ] Room transitions (fade, the room's own enter animations) and map
+      travel (the path drawn, the marker moving, the map opening/closing).
+- [ ] Act transitions, the act start banners, the final victory and the
+      ending screens.
+- [ ] Crystal Sphere minigame screen (a plain list now).
+- [ ] Pause / settings menu (Start), deck viewer, draw/discard/exhaust
+      pile viewers, inspect card (zoomed card with upgrade preview).
+- [ ] Any decision type still shown as the plain list: find them with
+      spire_play runs on every character and the AutoSlay screen list
+      (DECISIONS D7).
+- [ ] Saving and continue (the game's save files; on the console under
+      the XEX's folder or a save container), Continue on the main menu.
+- [ ] Main menu extras that work in single-player (compendium, run
+      history, statistics, timeline) as far as they are single-player.
+
+**Sound**
+- [ ] Converter: the 12 FMOD Studio banks (301 MB, 336 events) and the
+      mp3 temp sfx: extract the samples at conversion time (FSB5 inside
+      the banks), plus the event -> sample(s) mapping and the parameters
+      the game sets.
+- [ ] Engine: XAudio2 playback on the console (a PC backend for the
+      tools), streaming music.
+- [ ] The game's sound cues from `steps` (`sfx` / `music` cues are in the
+      protocol), the music logic of NRunMusicController, UI sounds.
+
+**Performance and robustness**
+- [ ] GPU texture budget + LRU; release a screen's textures when it goes.
+- [ ] Draw call batching.
+- [ ] The 2 s rewards decision.
+- [ ] Log appended per line.
+- [ ] Soak: long spire_play `--auto` runs on every character with no
+      plain-list screens, no missing-texture warnings, no hangs.
+
+**Not ported (by decision)**: multiplayer and everything that only exists
+for it (votes, other players' hands and holders).
+
+## Known gaps in the logic adapter
+
+DECISIONS D6: healing between acts re-implemented in the adapter;
+`random_runs.py`'s agent answers rewards/treasure differently from the
+oldest traces (hence the normalisation in `trace_compare.py`).
+`InitProgressData` warns once on a fresh profile (harmless).
