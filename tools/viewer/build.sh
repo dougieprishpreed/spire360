@@ -12,17 +12,16 @@ if grep -nE '\b(fminf?|fmaxf?|roundf?|truncf?|l?lroundf?|cbrtf?|log2f?|exp2f?|co
     exit 1
 fi
 CXX=${CXX:-g++}
-FLAGS="-std=c++98 -pedantic -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"
-pids=""
+# The POSIX host uses fseeko/usleep; MSYS2 hides them in strict ANSI mode.
+FLAGS="-std=c++98 -pedantic -D_DEFAULT_SOURCE -D_LARGEFILE_SOURCE -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"
 objs=""
 for f in engine/*/*.cpp tools/viewer/spire_view.cpp tools/viewer/spire_play.cpp; do
     case "$f" in *d3d9_renderer.cpp) continue ;; esac  # Windows / XDK only
     o=out/engine/$(basename "$f" .cpp).o
     objs="$objs $o"
-    $CXX $FLAGS -c "$f" -o "$o" &
-    pids="$pids $!"
+    # Keep the verifier to one compiler process at a time.
+    $CXX $FLAGS -c "$f" -o "$o"
 done
-for p in $pids; do wait $p; done
 engine_objs=$(echo $objs | tr ' ' '\n' | grep -v -e spire_view.o -e spire_play.o | tr '\n' ' ')
 $CXX -o out/engine/spire_view $engine_objs out/engine/spire_view.o
 $CXX -o out/engine/spire_play $engine_objs out/engine/spire_play.o

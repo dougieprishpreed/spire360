@@ -109,6 +109,32 @@ from it. Paths below are relative to the repository.
 The stale-file list at the top of `xdk/build.cmd` was for zip updates; with
 a git clone, deleted files go away by themselves (keep the list as is).
 
+### Desktop setup (2026-10-18)
+
+- Local Git now tracks the exact signed branch head `bf024082` as a
+  shallow checkout. The GitHub integration supplied its commit and tree;
+  all 451 local source files, the tree and the signed commit were verified
+  against GitHub's object hashes. Use the integration for remote reads and
+  commits; Windows command-line Git has no saved GitHub credentials.
+- Deleted remote `bundle6` and the six root `bundle*.zip*` archives.
+  Removed superseded root `HANDOFF.md` and `docs/PLAN.md` /
+  `docs/DECISIONS.md`. Other old reports, the screenshot and `pck_sample/`
+  were moved to ignored `work/legacy/`. Build caches stayed in place.
+- MSYS2 + its MSYS `gcc` package live in ignored
+  `work/toolchain/msys64/`; set `MSYS2_PATH_TYPE=inherit` before launching
+  `usr/bin/bash.exe -lc` so Windows Python/.NET remain on PATH. Use that
+  shell for the converter, JIT driver and PC tools. The PC build compiles
+  serially and enables MSYS2's POSIX declarations.
+- ILSpy is local at `out/tools/ilspycmd.exe`; the complete installed
+  v0.111.0 DLL is decompiled into `decomp/`.
+- Full pack: `work/pack/pack.s3p`, 687.8 MB, 0 conversion errors; its
+  data lives at `work/pack/data`. Existing console pack/caches preserved.
+- JIT `copy,patch,jit` passes. Strict C++03 PC build passes. Baseline:
+  `traces/base`, three seeds per character, **15/15 completed**, no logic
+  errors. The baseline comparator check prints `differences: 0`.
+- Do not tick alpha checklist items for this setup. Gameplay fixes and
+  their validation are still required; no XDK build has been run.
+
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
 **Logic**: the game's own sts2.dll, IL-patched (`logic/patches.json`),

@@ -7,6 +7,12 @@ Build (PC, strict C++03 like the XDK compiler): `tools/viewer/build.sh`
 -> `out/engine/spire_view`. `--time T` runs T seconds of frames (60 fps)
 before the shot (default 5 frames, as `shot.gd`), to see animations move.
 
+On Windows, use MSYS2's **MSYS** environment and its `gcc` package
+(`pacman -S gcc`), which supplies the POSIX pipes used by `spire_play`.
+Keep Windows Python and .NET on PATH (`MSYS2_PATH_TYPE=inherit`). The
+build runs one compiler at a time and enables the POSIX declarations
+that MSYS2 otherwise hides with `-std=c++98`.
+
     out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts] [--time T]
     out/engine/spire_view <pack.s3p> "Some text" out.png --text fonts/kreon_bold.ttf 24
 
