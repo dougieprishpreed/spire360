@@ -1,4 +1,5 @@
 #include "game_client.h"
+#include "../audio/game_audio.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -271,6 +272,7 @@ void GameClient::send(const std::string& command) {
         std::string error;
         Json cmd = Json::parse(command.c_str(), command.size(), &error);
         if (cmd["action"].str() == "select_map_node") {
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_select");
             ((MapScreen*)ported_)->begin_travel(cmd["args"]["col"].i(), cmd["args"]["row"].i());
             start_room_transition();
         }
@@ -422,6 +424,7 @@ void GameClient::show(const Json& d) {
     Json prev_player = decision_["player"];
     const std::string& kind = d["decision"].str();
     if (combat_ && prev_kind == "combat_play" && kind == "combat_play") {
+        if (lib_->audio()) lib_->audio()->decision(d);
         potions_.detach();
         decision_ = d;
         choices_ = choices(d);
@@ -449,6 +452,11 @@ void GameClient::show(const Json& d) {
         combat_->play_steps(d["steps"]);
         finishing_ = d;
         return;
+    }
+    if (lib_->audio()) {
+        lib_->audio()->decision(d);
+        if (kind != "combat_play") lib_->audio()->steps(d["steps"]);
+        if (kind == "map_select" && prev_kind != "map_select") lib_->audio()->ui("event:/sfx/ui/map/map_open");
     }
     potions_.detach();
     /* NOverlayStack keeps the current combat room behind rewards and
@@ -666,6 +674,7 @@ void GameClient::show(const Json& d) {
 }
 
 void GameClient::clear_screen() {
+    if (lib_->audio()) lib_->audio()->menu();
     if (transition_) { transition_->phase = 0; transition_->visible = false; }
     transition_pending_ = Json();
     potions_.detach();
@@ -802,6 +811,12 @@ void GameClient::handle_input(const PadState& pad) {
     /* The last command's effects play out first (the game takes no input
      * while its actions run). */
     if (combat_ && combat_->busy()) return;
+    /* NButton's default click/hover sounds; hand cards have their own cues. */
+    if (!combat_ && lib_->audio()) {
+        if (pad.pressed & (PadState::UP | PadState::DOWN | PadState::LEFT | PadState::RIGHT)) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
+        if (pad.pressed & PadState::A) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        if (pad.pressed & PadState::B) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+    }
     /* The potions (X) on any screen with the top bar. */
     if (potions_.active()) {
         std::string cmd = potions_.input(pad, combat_, decision_["enemies"]);

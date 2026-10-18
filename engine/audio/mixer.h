@@ -21,6 +21,8 @@ public:
     void pause(bool paused) { paused_ = paused; }
     void render(float* stereo, int frames);
     size_t active_voices() const { return voices_.size(); }
+    bool playing(u32 voice) const;
+    double remaining(u32 voice) const;
     u32 rate() const { return rate_; }
     size_t buffer_bytes() const;
 private:

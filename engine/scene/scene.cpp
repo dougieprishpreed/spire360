@@ -37,7 +37,7 @@ static SceneLibrary* g_library = NULL;
 
 SceneLibrary* SceneLibrary::current() { return g_library; }
 
-SceneLibrary::SceneLibrary(const Pack* pack) : pack_(pack), default_theme_(NULL), default_font_(NULL) {
+SceneLibrary::SceneLibrary(const Pack* pack) : pack_(pack), audio_(NULL), default_theme_(NULL), default_font_(NULL) {
     g_library = this;
     default_font_ = new FontRes("FontFile");
     default_font_->file = DEFAULT_FONT_NAME;

@@ -8,61 +8,88 @@ Last rewrite: 2026-10-18, when the work moved from a cloud session (game
 data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed.
 
-## Paused session checkpoint (2026-10-18)
+## Resumed Sound checkpoint (2026-10-18)
 
-Paused at the user's request, after finishing and publishing the current
-checks. Resume implementation from this checkpoint; repository setup,
-bundle cleanup, decompilation and baselines are already done. Do not reset
-the checkout or recreate any caches. Use the GitHub integration for remote
-operations: Windows Git has no saved GitHub login.
+Repository setup, decompilation and baselines remain intact. No caches were
+reset or removed. Use the GitHub integration for remote operations; the
+Windows Git CLI has no saved login. No XDK build has been run.
 
-The active work is **Sound**. Bank conversion is published in `eec6c86`;
-the following batch adds a portable streaming decoder, mixer, Windows /
-Xbox XAudio2 output and logic sound exports. Those components pass their
-individual checks, but are **not yet connected to game playback**. There
-is no audio event runtime yet. `CombatScreen::play_steps` deliberately skips
-new `sfx` cues so they cannot add combat input delays before that hookup.
-The normal game still has no sound. Do not call this an alpha candidate.
+Sound is now connected in source. `AudioEvents` executes compact, lazy-loaded
+per-bank programs compiled from `audio/events.json`: nested events, layers,
+weighted/sequential playlists, random modulation, bus gains/automation,
+parameter conditions, timed/trimmed instruments, loop regions and quantized
+transitions. Transition segments retain their own instruments and delay the
+destination timeline; inactive act banks are released. The raw Studio graph
+is retained in the pack for offline inspection.
 
-Next: implement an event runtime over `audio/events.json` (per-bank graphs,
-including nested events, weighted playlists, layers, bus gain, random
-modulation, parameter conditions, timing and loop/stop semantics); connect
-it to the mixer/output and the combat cue timeline, room/UI sounds and
-NRunMusicController's adaptive music. Temporary imported mp3 playback also
-remains. Then repair the two later-act warnings below and continue the
-alpha checklist. Saving/continue, Crystal Sphere, pause/deck/piles,
-act/victory transitions and remaining shaders are still open.
+`GameAudio` connects the combat cue timeline, non-combat steps, room/UI
+sounds, creature-owned loops and NRunMusicController selection/parameters.
+The console main loop now pumps the existing XAudio2 backend (source only;
+no XDK compile). `spire_play` mixes headlessly by default; `--audio` enables
+the PC device and `--audio-wav work/<name>.wav` records its actual mix.
 
-Current local packs: `work/pack-next/pack.s3p` (visuals + procedural noise)
-and `work/audio-pack/pack.s3p` (audio-only, for the audio verifier). A normal
-full converter build now includes both visual assets and bank audio, but
-has not yet been rebuilt since the audio work. Keep both existing packs
-and `converter/.cache/audio`. No XDK build has been run or authorized.
+The offline converter normalizes all 52 imported MP3 streams to PCM16 WAV
+using the local ffmpeg on PATH; bank music stays compressed and streaming.
+Godot's temporary stream randomizers are resolved by the presentation code.
+Do not load the installed fmod.dll in a helper process.
 
-Latest logic regression: `traces/audio`, 15/15 seeded runs, **differences: 0**
-against `traces/base`. Use `--data-dir work/pack/data` for that baseline:
-its ready header includes this exact directory string. Using pack-next's
-data produces a header-only difference even though localization is equal.
-The new traces contain 1,889 play, 17 parameter, 5 loop and 1 stop sound
-cues. Sound hooks retain SfxCmd's ending-combat guards, volume, parameters
-and creature loop ownership. `Steps.Ui` now preserves float dictionaries.
-The eventual console rebuild therefore still needs wasm/C + logic_lib.
+The UI bridge previously returned null for audio singletons, so ?. calls
+never reached sound/music exports. Audio receivers now retain harmless
+constructor-only placeholders. ResolveMusic and its MusicSelection value
+type are preserved as pure helpers. The context exports the game's seeded
+music/bank selection, encounter ambience/custom music and room progress.
 
-Validation commands (PowerShell, repo root; use the ignored MSYS2 toolchain
-with `MSYS2_PATH_TYPE=inherit` for the PC executables):
+Validation so far: strict C++03 PC build; 27 converter tests; synthetic
+sample-level scheduling/layer/playlist/nesting/condition/loop/stream checks;
+591 named events (588 start samples within 2 s), 52 imported streams, zero
+decoder failures. JIT seeded regression: 15/15 runs, **differences: 0**
+(`traces/audio-runtime`, compared with `traces/base`). The new traces include
+1,742 temporary-audio and 448 music-controller calls as well as SfxCmd cues.
+The focused audio-enabled replay passes 99 responses / 74 persistent rooms /
+33 impacts / 57 orb checks / 2 deaths, zero presentation and decoder failures,
+640 voices started. Two absent-event calls are the Vine Shambler mismatch
+below. A 14-screen Defect PC render records a non-silent 20.95 s stereo mix
+(`work/audio-play.wav`), 110 voices, zero missing/decoder failures. All 19
+music events pass Progress 0..9 and boss-parameter checks; transition-bridge
+fixtures and elite-phase persistence checks pass. The full 15-trace audio
+replay was stopped to rebuild after refinements; do not count it as passed.
+
+The game's Vine Shambler code requests `vine_shambler_cast`, which is absent
+from the installed bank's string table (the bank has `grasping_vines`). Keep
+this content mismatch visible; do not silently invent a replacement cue.
+
+Packs preserved: `work/pack/pack.s3p`, `work/pack-next/pack.s3p`,
+`work/audio-pack/pack.s3p`. New audio test pack: `work/audio-runtime/pack.s3p`.
+`work/pack-audio/pack.s3p` combines pack-next visuals and the new audio for PC
+checks; regenerate it after runtime-program changes. It was assembled from
+the existing packs; a complete converter build remains a separate check.
+Keep `converter/.cache/audio` and every existing ignored build cache.
+
+Next: finish the audio fidelity audit (authored DSP, exact transition fade
+curves, seek speeds and scatterer behavior still need coverage), then repair
+the two later-act warnings and continue
+the alpha checklist. Saving/continue, Crystal Sphere, pause/deck/piles,
+act/victory transitions and remaining shaders are still open. This is **not
+an alpha candidate**. Event playback is connected, but Sound is not ticked
+complete while its remaining fidelity gaps are unverified.
+
+After logic changes use the same baseline data directory (its exact string
+is in the ready header), and require `differences: 0`:
 
 ```
 python tools/build_logic.py --game-dir "F:\Program Files (x86)\Slay the Spire 2" --stage patch,jit
-python tools/random_runs.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" --runs 3 --trace-dir traces/audio --data-dir work/pack/data
-python tools/trace_compare.py traces/base traces/audio
+python tools/random_runs.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" --runs 3 --trace-dir traces/audio-runtime --data-dir work/pack/data
+python tools/trace_compare.py traces/base traces/audio-runtime
 ```
 
-`tools/viewer/build.sh` now also builds `spire_audio_check`: a pack path
-fully decodes/seeks every sample; append `--mix-only` for quick mixer checks;
-`--device-check` exercises the Windows XAudio2 queue with muted silence.
-Local evidence: `work/audio-check.log`, `work/audio-pause-check.log`,
-`work/audio-trace-compare.log`, `work/soak-check.log`. There should be no
-background jobs left at this pause. Keep the one-background-job limit.
+The muted Windows XAudio2 check submits/recycles 16 buffers and confirms
+positive frame consumption. No background job should remain after validation/publishing.
+
+PC tools use the preserved MSYS2 toolchain with `MSYS2_PATH_TYPE=inherit`;
+explicitly cd to the repo inside bash -lc. Checks/outputs remain under
+ignored `work/audio-runtime-*`. Keep the one-background-job limit. The next
+user-requested console build needs a new pack and wasm/C + logic_lib because
+logic presentation exports changed; never run an XDK build without a request.
 
 ## Goal: the alpha release candidate
 

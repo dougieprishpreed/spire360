@@ -3,9 +3,10 @@ from pathlib import Path
 import struct
 import sys
 import unittest
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from spire_convert import audio
+from spire_convert import audio, audio_events
 
 
 def fsb():
@@ -25,6 +26,22 @@ def page(granule, final=False):
 
 
 class Audio(unittest.TestCase):
+    def test_controller_context_survives_flat_transition_chunks(self):
+        timeline, controller = uuid.UUID(int=1), uuid.UUID(int=2)
+        def chunk(tag, data):
+            return tag + struct.pack('<I', len(data)) + data + (b'\0' if len(data) & 1 else b'')
+        body = chunk(b'TLNB', timeline.bytes_le) + chunk(b'TRNB', uuid.UUID(int=3).bytes_le)
+        body += chunk(b'CTRO', struct.pack('<HH', 3, 16) + controller.bytes_le)
+        raw = b'RIFF' + struct.pack('<I', len(body) + 4) + b'FEV ' + body
+        self.assertEqual(audio_events.controller_sources(raw, audio.chunks), {str(controller): str(timeline)})
+
+    def test_imported_pcm_stream_has_wave_header(self):
+        raw = audio.stream_payload(dict(type='AudioStreamWAV', props=dict(data=b'\x00\x7f\x80\xff', format=0,
+                                                                          mix_rate=22050, stereo=False)))
+        self.assertEqual(raw[:4], b'RIFF')
+        self.assertEqual(struct.unpack_from('<4h', raw, 44), (0, 32512, -32768, -256))
+        self.assertEqual(struct.unpack_from('<I', raw, 24)[0], 22050)
+
     def test_variable_sample_headers_and_loop_end(self):
         sample, = audio.fsb_samples(fsb())
         self.assertEqual((sample['rate'], sample['channels'], sample['frames']), (44100, 2, 10))

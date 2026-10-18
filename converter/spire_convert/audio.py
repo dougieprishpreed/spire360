@@ -14,6 +14,7 @@ import struct
 import subprocess
 
 from . import s3p
+from . import audio_events
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / 'converter/.cache/audio'
@@ -267,3 +268,41 @@ class Baker:
         add('audio/events.json', s3p.TYPE_BLOB,
             json.dumps(metadata, separators=(',', ':')).encode('utf-8'),
             {'events': sum(p.startswith('event:') for p in metadata['paths'].values()), 'samples': len(written)})
+        audio_events.write_programs(metadata, raw_banks, add, chunks, s3p.TYPE_BLOB)
+
+
+def stream_payload(resource):
+    """Bake Godot's temporary MP3 streams to PCM16 with an offline decoder.
+
+    Bank music keeps its original compressed packets. These short imported
+    streams are small; normalized WAV also avoids an MP3 runtime on Xenon.
+    """
+    props = resource['props']
+    raw = props.get('data') or b''
+    if resource['type'] == 'AudioStreamMP3':
+        decoder = shutil.which('ffmpeg')
+        if not decoder:
+            raise RuntimeError('ffmpeg is required to convert temporary MP3 sounds')
+        folder = CACHE / 'streams' / hashlib.sha256(raw + b'PCM16 WAV 1').hexdigest()
+        folder.mkdir(parents=True, exist_ok=True)
+        wav = folder / 'audio.wav'
+        if not wav.exists():
+            source = folder / 'source.mp3'
+            source.write_bytes(raw)
+            temp = folder / 'audio.tmp.wav'
+            subprocess.run([decoder, '-v', 'error', '-nostdin', '-y', '-i', str(source),
+                            '-map', '0:a:0', '-acodec', 'pcm_s16le', str(temp)], check=True)
+            temp.replace(wav)
+        return wav.read_bytes()
+    if resource['type'] == 'AudioStreamWAV':
+        channels, rate = (2 if props.get('stereo') else 1), props.get('mix_rate', 44100)
+        fmt = props.get('format', 0)
+        if fmt == 0:  # Godot's signed eight-bit PCM -> signed PCM16
+            raw = b''.join(struct.pack('<h', (v if v < 128 else v - 256) * 256) for v in raw)
+        elif fmt != 1:
+            raise ValueError('unsupported imported WAV compression ' + str(fmt))
+        return (struct.pack('<4sI4s4sIHHIIHH4sI', b'RIFF', len(raw) + 36, b'WAVE', b'fmt ',
+                            16, 1, channels, rate, rate * channels * 2, channels * 2, 16, b'data', len(raw)) + raw)
+    if raw.startswith(b'OggS'):
+        return raw
+    raise ValueError('unsupported imported audio stream ' + resource['type'])

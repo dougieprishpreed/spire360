@@ -17,6 +17,7 @@
 #include <stdio.h>
 
 #include "../../engine/core/pack.h"
+#include "../../engine/audio/game_audio.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/character_select.h"
 #include "../../engine/game/title_screen.h"
@@ -175,6 +176,10 @@ void __cdecl main() {
     Loc::init("game:\\spire\\data");
     install_game_scripts();
     SceneLibrary* lib = new SceneLibrary(&pack);
+    GameAudio audio(&pack);
+    lib->set_audio(&audio);
+    if (!audio.open_output()) logf("audio: XAudio2 output unavailable");
+    audio.menu();
     FontLibrary* fonts = new FontLibrary(&pack);
     FontLibrary::set_current(fonts);
     Canvas canvas(&renderer, &pack);
@@ -330,6 +335,7 @@ void __cdecl main() {
          * calls, and Present (which waits for vsync and the GPU). */
         double f0 = now_ms();
         tree->process(dt > 0.1 ? 0.1 : dt);
+        audio.update(dt > 0.1 ? 0.1 : dt);
         tree->layout(1);
         double f1 = now_ms();
         renderer.begin(1280, 720, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));

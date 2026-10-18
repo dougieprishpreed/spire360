@@ -14,6 +14,7 @@
  * line) per screen, and logic.log (the logic's stderr). The logic's working
  * directory is ours: give it SPIRE_DATA in the environment for localization. */
 #include "../../engine/core/pack.h"
+#include "../../engine/audio/game_audio.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
 #include "../../engine/game/game_client.h"
@@ -64,13 +65,16 @@ int main(int argc, char** argv) {
                         "[--scale S] [--auto SEED]\n");
         return 2;
     }
-    std::string logic_cmd, character = "Ironclad", seed = "spire360";
+    std::string logic_cmd, character = "Ironclad", seed = "spire360", audio_wav;
+    bool audio_device = false;
     int steps = 40;
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
     std::vector<unsigned> pad_script;
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
+        else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
+        else if (strcmp(argv[i], "--audio-wav") == 0 && i + 1 < argc) audio_wav = argv[++i];
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
@@ -114,6 +118,10 @@ int main(int argc, char** argv) {
     size_t slash = pack_dir.find_last_of('/');
     Loc::init(slash == std::string::npos ? std::string("data") : pack_dir.substr(0, slash) + "/data");
     SceneLibrary lib(&pack);
+    GameAudio audio(&pack);
+    if (audio.events().available()) lib.set_audio(&audio);
+    if (audio_device && !audio.open_output()) fprintf(stderr, "spire_play: audio output unavailable\n");
+    if (!audio_wav.empty() && !audio.record(audio_wav.c_str())) { fprintf(stderr, "spire_play: cannot record audio\n"); return 1; }
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     PipeLink pipe;
@@ -147,6 +155,7 @@ int main(int argc, char** argv) {
             tree.layout();
             for (int f = 0; f < 30; ++f) {
                 tree.process(1.0 / 60.0);
+                audio.update(1.0 / 60.0);
                 tree.layout(1);
             }
             sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -160,6 +169,7 @@ int main(int argc, char** argv) {
             tree.layout();
             for (int f = 0; f < 60; ++f) {
                 tree.process(1.0 / 60.0);
+                audio.update(1.0 / 60.0);
                 tree.layout(1);
             }
             sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -181,6 +191,7 @@ int main(int argc, char** argv) {
             /* Time goes on while waiting (a fight's last blow plays before
              * the screen after it). */
             tree.process(1.0 / 60.0);
+            audio.update(1.0 / 60.0);
             tree.layout(1);
             usleep(2000);
             if (++idle > 60000) { /* 2 minutes without an answer */
@@ -190,5 +201,7 @@ int main(int argc, char** argv) {
         }
     }
     printf("%d screens\n", shown);
+    if (audio.events().available()) printf("audio: %.0f voices started, %u absent event calls, %u decoder failures\n",
+        (double)audio.events().started_voices(), audio.events().missing_events(), audio.events().failures());
     return 0;
 }

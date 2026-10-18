@@ -10,6 +10,7 @@
 namespace spire {
 
 class Pack;
+class GameAudio;
 
 struct SceneFile {
     std::string name; /* pack name */
@@ -25,6 +26,8 @@ public:
     static SceneLibrary* current();
 
     const Pack* pack() const { return pack_; }
+    GameAudio* audio() const { return audio_; }
+    void set_audio(GameAudio* audio) { audio_ = audio; }
 
     /* Loads (and caches) a scene/resource file. NULL if missing. */
     const SceneFile* file(const std::string& name);
@@ -58,6 +61,7 @@ private:
     void init_default_theme();
 
     const Pack* pack_;
+    GameAudio* audio_; /* service owned by the application */
     std::map<std::string, SceneFile*> files_;
     std::map<std::string, Resource*> ext_;
     std::vector<Resource*> owned_; /* subs and inline objects */

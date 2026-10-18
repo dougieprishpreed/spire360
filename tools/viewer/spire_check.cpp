@@ -1,7 +1,9 @@
 /* PC presentation regressions against local protocol traces. Fixtures and
  * packs stay outside git: this executable reads the player's own traces. */
 #include "../../engine/core/pack.h"
+#include "../../engine/audio/game_audio.h"
 #include "../../engine/game/card_select_screen.h"
+#include "../../engine/game/combat_screen.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/logic_link.h"
@@ -23,6 +25,7 @@
 #include <fstream>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 using namespace spire;
 
@@ -47,10 +50,28 @@ static void advance(SceneTree& tree, GameClient& game) {
     int frames = 0;
     do {
         tree.process(1.0 / 60.0);
+        if (SceneLibrary::current() && SceneLibrary::current()->audio()) SceneLibrary::current()->audio()->update(1.0 / 60.0);
         tree.layout(1);
         game.update(PadState());
     } while (game.busy() && ++frames < 3600);
     check(!game.busy(), "presentation did not finish within 60 simulated seconds");
+}
+
+static void audio_timing_case(SceneLibrary& lib, const Json& sample) {
+    Json d = sample; d.set("steps", Json());
+    CombatScreen screen(&lib);
+    SceneTree tree;
+    std::string error;
+    Node* root = screen.build(d, &error);
+    check(root != NULL, "audio timing combat fixture did not build");
+    if (!root) return;
+    tree.root()->add_child(root);
+    const char* text = "[[{\"t\":\"sfx\",\"op\":\"play\",\"path\":\"event:/sfx/block_gain\"}]]";
+    Json steps = Json::parse(text, strlen(text), &error);
+    screen.play_steps(steps);
+    check(!screen.busy(), "sound-only steps added a combat input delay");
+    tree.process(1.0 / 60.0);
+    if (lib.audio()) lib.audio()->update(1.0 / 60.0);
 }
 
 static void selection_cases(SceneLibrary& lib, const Json& sample) {
@@ -448,6 +469,8 @@ int main(int argc, char** argv) {
     size_t slash = pack_path.find_last_of("/\\");
     Loc::init(slash == std::string::npos ? "data" : pack_path.substr(0, slash) + "/data");
     SceneLibrary lib(&pack);
+    GameAudio audio(&pack);
+    if (audio.events().available()) lib.set_audio(&audio);
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     lifecycle_cases(lib);
@@ -464,6 +487,7 @@ int main(int argc, char** argv) {
         if (!input) { check(false, "cannot open trace"); continue; }
         SceneTree tree;
         ReplayLink link;
+        audio.events().stop_all();
         GameClient game(&lib, &tree, &link);
         link.incoming.push_back("{\"type\":\"ready\"}");
         game.update(PadState());
@@ -479,6 +503,7 @@ int main(int argc, char** argv) {
             }
             if (d["decision"].str() == "card_select") actual_selection_case(lib, d, line);
             if (!selections_checked && d["hand"].size() >= 2) {
+                audio_timing_case(lib, d);
                 selection_cases(lib, d["hand"]);
                 selections_checked = true;
             }
@@ -581,6 +606,7 @@ int main(int argc, char** argv) {
             previous = d;
             previous_line = line;
             ++responses;
+            if (responses % 100 == 0) { printf("presentation: %d responses checked\n", responses); fflush(stdout); }
         }
     }
     check(persistent > 0, "no consecutive combat decisions were checked");
@@ -588,5 +614,10 @@ int main(int argc, char** argv) {
     check(selections_checked, "no card data was available for controller selection checks");
     printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d death checks, %d failures\n",
            responses, persistent, hp_checks, orb_checks, death_checks, failures);
+    if (audio.events().available()) {
+        check(audio.events().failures() == 0, "audio replay had decoder failures");
+        printf("audio replay: %.0f voices started, %u absent event calls, %u decoder failures\n",
+            (double)audio.events().started_voices(), audio.events().missing_events(), audio.events().failures());
+    }
     return failures ? 1 : 0;
 }

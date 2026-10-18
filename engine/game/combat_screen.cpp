@@ -2,6 +2,7 @@
 #include "game.h"
 #include "card_view.h"
 #include "loc.h"
+#include "../audio/game_audio.h"
 #include "ui_util.h"
 
 #include "../scene/controls.h"
@@ -1877,6 +1878,7 @@ static const char* trigger_animation(const std::string& trigger) {
 }
 
 void CombatScreen::fire(const Cue& c) {
+    if (c.kind == CUE_AUDIO) { if (lib_->audio()) lib_->audio()->cue(c.data); return; }
     if (c.kind == CUE_STATE) { apply_state(c.data); return; }
     if (c.kind == CUE_SYNC) { finish_state(); return; }
     if (c.kind == CUE_BANNER) {
@@ -1884,6 +1886,7 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_ANIM) {
+        if (c.name == "Dead" && lib_->audio()) lib_->audio()->stop_room_loops(c.who);
         Creature* cr = creature_for(c.who);
         SpineSprite* s = cr ? first_spine(cr->visuals) : NULL;
         const char* name = trigger_animation(c.name);
@@ -1952,6 +1955,7 @@ void CombatScreen::add_cue(const Cue& c) {
 /* NPlayerTurnBanner / NEnemyTurnBanner / NCombatStartBanner (the scenes in
  * scenes/combat), over everything. */
 void CombatScreen::show_banner(const std::string& kind, int round) {
+    if (lib_->audio()) lib_->audio()->ui(kind == "start" ? "battle_start_1.mp3" : kind == "enemy" ? "enemy_turn.mp3" : "player_turn.mp3");
     if (!root_) return;
     std::string path = "scenes/combat/" + kind + "_banner.tscn";
     if (kind == "start") path = "scenes/combat/combat_start_banner.tscn";
@@ -2075,13 +2079,13 @@ void CombatScreen::play_steps(const Json& steps) {
         for (size_t k = 0; k < step.size(); ++k) {
             const Json& ch = step[k];
             const std::string& type = ch["t"].str();
-            /* Sound commands must not add input delays while the separate
-             * audio event runtime is being connected. */
-            if (type == "sfx") continue;
             Cue c;
             c.at = t;
             c.amount = 0;
-            if (type == "anim") {
+            if (type == "sfx" || (type == "ui" && (ch["call"].str().find("Audio") != std::string::npos ||
+                                                    ch["call"].str().find("Music") != std::string::npos))) {
+                c.kind = CUE_AUDIO; c.data = ch; cues_.push_back(c);
+            } else if (type == "anim") {
                 c.kind = CUE_ANIM;
                 c.who = ch["who"].str();
                 c.name = ch["name"].str();
@@ -2140,7 +2144,7 @@ void CombatScreen::play_steps(const Json& steps) {
     busy_until_ = 0;
     for (size_t i = 0; i < cues_.size(); ++i) {
         double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.4);
-        if (cues_[i].kind != CUE_BANNER && end > busy_until_) busy_until_ = end;
+        if (cues_[i].kind != CUE_BANNER && cues_[i].kind != CUE_AUDIO && end > busy_until_) busy_until_ = end;
     }
 }
 

@@ -705,6 +705,7 @@ internal sealed class Patcher
         foreach (var type in _module.GetTypes())
         {
             if (!InNamespaces(type, prefixes)) continue;
+            if (type.FullName == "MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController/MusicSelection") continue;
             // Only Godot objects (nodes, resources) and what is nested in them:
             // plain helpers in these namespaces (EpochComparer, sorting saved
             // epochs) are used by the logic.
@@ -712,6 +713,9 @@ internal sealed class Patcher
             foreach (var m in type.Methods)
             {
                 if (!m.HasBody || m.IsConstructor) continue;
+                // A pure seeded selection helper, also used by the adapter's
+                // presentation export; it never touches a Godot node.
+                if (type.FullName == "MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController" && m.Name == "ResolveMusic") continue;
                 var body = m.Body;
                 body.Instructions.Clear();
                 body.ExceptionHandlers.Clear();
@@ -899,6 +903,17 @@ internal sealed class Patcher
         var seq = new List<Instruction>();
         if (ret.MetadataType == MetadataType.Void) return seq;
         var elementName = ret.GetElementType().FullName;
+        // Audio singleton receivers must survive ?. guards so the following
+        // call reaches the UI bridge. Their constructors only initialize
+        // local fields; the redirected calls never execute a UI body.
+        if (elementName is "MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController" or
+            "MegaCrit.Sts2.Core.Nodes.Audio.NAudioManager" or
+            "MegaCrit.Sts2.Core.Audio.Debug.NDebugAudioManager")
+        {
+            var ctor = ret.Resolve().Methods.Single(m => m.IsConstructor && !m.IsStatic && m.Parameters.Count == 0);
+            seq.Add(il.Create(OpCodes.Newobj, _module.ImportReference(ctor)));
+            return seq;
+        }
         var taskDef = _module.ImportReference(typeof(Task)).Resolve();
         if (ret.FullName == "System.Threading.Tasks.Task")
         {

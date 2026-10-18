@@ -1,4 +1,5 @@
 #include "title_screen.h"
+#include "../audio/game_audio.h"
 #include "loc.h"
 
 #include "../scene/controls.h"
@@ -61,6 +62,7 @@ Node* TitleScreen::build(const std::string& version, std::string* error) {
 /* NMainMenuTextButton.OnFocus (gold, 1.05) and NMainMenu's carets. */
 void TitleScreen::focus(int i) {
     if (i < 0 || i >= (int)buttons_.size() || i == focus_) return;
+    if (lib_->audio() && focus_ >= 0) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if (focus_ >= 0 && labels_[(size_t)focus_]) {
         Control* old = labels_[(size_t)focus_];
         old->self_modulate = hex(CREAM);
@@ -110,7 +112,10 @@ TitleScreen::Action TitleScreen::input(const PadState& pad) {
     int n = (int)buttons_.size();
     if (pad.pressed & PadState::UP) focus((focus_ + n - 1) % n);
     if (pad.pressed & PadState::DOWN) focus((focus_ + 1) % n);
-    if (pad.pressed & (PadState::A | PadState::START)) return focus_ == 0 ? SINGLEPLAYER : QUIT;
+    if (pad.pressed & (PadState::A | PadState::START)) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        return focus_ == 0 ? SINGLEPLAYER : QUIT;
+    }
     return NONE;
 }
 

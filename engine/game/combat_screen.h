@@ -173,7 +173,7 @@ private:
     Node2D* arrow_head_;
     Vec2 arrow_pos_, arrow_to_;
     /* Step playback. */
-    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER, CUE_STATE, CUE_SYNC };
+    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER, CUE_STATE, CUE_SYNC, CUE_AUDIO };
     struct Cue {
         double at;
         int kind;

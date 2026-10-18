@@ -3262,6 +3262,31 @@ public partial class RunDriver
         }
         catch { }
 
+        // NRunMusicController: ResolveMusic uses a separate seeded bg_music
+        // stream, so presentation selection cannot consume the run's RNG.
+        if (_runState.Act is { } musicAct)
+        {
+            var selection = MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController.ResolveMusic(
+                null, musicAct.BgMusicOptions, musicAct.MusicBankPaths, _runState.Rng.Seed);
+            var encounter = (_runState.CurrentRoom as CombatRoom)?.Encounter;
+            var roomType = _runState.CurrentRoom?.RoomType;
+            bool combat = roomType is RoomType.Monster or RoomType.Elite or RoomType.Boss;
+            int progress = combat && !CombatManager.Instance.IsInProgress ? 7 : roomType switch
+            {
+                RoomType.Shop => 2, RoomType.RestSite => 3, RoomType.Treasure => 5,
+                RoomType.Monster => 1, RoomType.Elite or RoomType.Boss => 6,
+                RoomType.Event when (_runState.CurrentRoom as EventRoom)?.CanonicalEvent is AncientEventModel => 0,
+                RoomType.Event => 4, _ => 0,
+            };
+            ctx["audio"] = new Dictionary<string, object?>
+            {
+                ["track"] = selection?.Track, ["bank"] = selection?.BankPath,
+                ["ambience"] = encounter?.HasAmbientSfx == true ? encounter.AmbientSfx : musicAct.AmbientSfx,
+                ["custom"] = CombatManager.Instance.IsInProgress && encounter?.HasBgm == true ? encounter.CustomBgm : null,
+                ["progress"] = progress,
+            };
+        }
+
         return ctx;
     }
 

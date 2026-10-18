@@ -67,6 +67,20 @@ AudioMixer::Voice* AudioMixer::find(u32 id) {
     for (size_t i = 0; i < voices_.size(); ++i) if (voices_[i]->id == id) return voices_[i];
     return NULL;
 }
+bool AudioMixer::playing(u32 id) const {
+    for (size_t i = 0; i < voices_.size(); ++i) if (voices_[i]->id == id) return true;
+    return false;
+}
+double AudioMixer::remaining(u32 id) const {
+    for (size_t i = 0; i < voices_.size(); ++i) if (voices_[i]->id == id) {
+        const Voice& v = *voices_[i];
+        if (v.loops < 0) return -1;
+        double frames = (double)v.decoder.frames() - v.cursor + (v.next_valid ? 2 : 1) - v.fraction;
+        frames += (double)v.loops * (v.loop_end - v.loop_start);
+        return frames / (v.decoder.rate() * v.pitch);
+    }
+    return 0;
+}
 void AudioMixer::volume(u32 id, float gain, double seconds) {
     Voice* v = find(id);
     if (!v) return;

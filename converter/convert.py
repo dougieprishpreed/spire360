@@ -33,6 +33,9 @@
       Vorbis packets are rebuilt as Ogg, with no re-encoding. The ignored
       converter/.cache/audio folder keeps converted samples. --vgmstream
       optionally validates every rebuilt sample with an independent decoder.
+      Temporary imported MP3 sounds require ffmpeg on PATH; they are baked
+      to PCM16 WAV and cached without changing the original installation.
+      Compact audio/runtime bank programs accompany the complete raw graph.
 
   convert.py audio <pck | dir> <out_dir> [--vgmstream PATH]
       Builds an audio-only test pack, including the Studio event graph,
@@ -646,7 +649,7 @@ def cmd_build(a):
                 raw = src.read(res.resolve(p))
                 r = godot_binary.parse_rsrc(raw)
                 main = r["resources"][-1]
-                add(p, s3p.TYPE_AUDIO, main["props"].get("data") or b"",
+                add(p, s3p.TYPE_AUDIO, bank_audio.stream_payload(main),
                     {"stream": main["type"], **{k: v for k, v in main["props"].items()
                                                 if k in ("format", "mix_rate", "stereo", "loop", "bpm")}})
             except Exception as e:  # noqa: BLE001
@@ -690,6 +693,15 @@ def cmd_audio(a):
     os.makedirs(a.out, exist_ok=True)
     with s3p.Writer(os.path.join(a.out, 'pack.s3p')) as writer:
         bank_audio.Baker(src, banks, a.vgmstream).write(lambda name, type_, payload, info: writer.add(name, type_, payload))
+        res = resources.Resources(src)
+        for f in src.list():
+            if not f.endswith('.import'):
+                continue
+            p = f[:-7]
+            imp = res.importer(p)
+            if imp and imp[1] and imp[1].startswith('AudioStream') and res.resolve(p):
+                main = godot_binary.parse_rsrc(src.read(res.resolve(p)))['resources'][-1]
+                writer.add(p, s3p.TYPE_AUDIO, bank_audio.stream_payload(main))
 
 
 def main():
