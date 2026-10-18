@@ -6,6 +6,7 @@
 #include "../scene/controls.h"
 #include "../scene/tree.h"
 #include "../scene/node.h"
+#include "../scene/particles.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
 #include "../scene/rich_text.h"
@@ -49,6 +50,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     tips_for_ = -2;
     pending_finish_ = false;
     played_instance_ = -1;
+    orb_box_ = NULL;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -1116,6 +1118,19 @@ void CombatScreen::process(double dt) {
      * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
     cue_t_ += dt;
     life_t_ += dt;
+    for (size_t i = 0; i < orbs_.size(); ++i) {
+        OrbSlot& o = orbs_[i];
+        o.t += dt;
+        float k = tween_interpolate(TRANS_SINE, EASE_IN_OUT, (float)(o.t < 0.45 ? o.t : 0.45), 0, 1, 0.45f);
+        o.node->set_position(o.from + (o.to - o.from) * k);
+    }
+    for (size_t i = fading_orbs_.size(); i-- > 0;) {
+        FadingOrb& o = fading_orbs_[i];
+        if (life_t_ >= o.until) {
+            o.node->queue_free();
+            fading_orbs_.erase(fading_orbs_.begin() + (long)i);
+        } else o.node->modulate.a = (float)(o.until - life_t_) / 0.25f;
+    }
     while (next_cue_ < cues_.size() && cues_[next_cue_].at <= cue_t_) fire(cues_[next_cue_++]);
     for (size_t i = banners_.size(); i-- > 0;)
         if (life_t_ >= banners_[i].until) {
@@ -1168,59 +1183,130 @@ void CombatScreen::make_orbs(Creature& c, const Json& orbs, int slots) {
     c.node->add_child(m);
     Node* box = m->find_unique("Orbs");
     if (!box) box = m;
-    /* TweenLayout: an arc of 125 degrees from -150 to -25, radius 225 at 3
-     * slots up to 300 at 10. */
-    float radius = 225.0f + (300.0f - 225.0f) * ((float)slots - 3.0f) / 7.0f;
-    float span = 125.0f, step = slots > 1 ? span / (float)(slots - 1) : 0.0f;
+    orb_box_ = box;
+    sync_orbs(orbs, slots, false);
+}
+
+static Node* orb_export(Node* n, const char* key) {
+    const Json* p = n ? n->get_extra(key) : NULL;
+    return p ? n->get_node((*p)["np"].str()) : NULL;
+}
+
+/* NParticlesContainer.Restart / SetEmitting use the exported particle list. */
+static void orb_particles(Node* n, bool restart, bool emitting = true) {
+    if (!n) return;
+    if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") {
+        Particles2D* p = (Particles2D*)n;
+        if (restart) p->restart();
+        else p->emitting = emitting;
+        return;
+    }
+    const Json* paths = n->get_extra("_particles");
+    for (size_t i = 0; paths && i < paths->size(); ++i)
+        orb_particles(n->get_node((*paths)[i]["np"].str()), restart, emitting);
+}
+
+void CombatScreen::sync_orbs(const Json& models, int slots, bool animate) {
+    if (!orb_box_) {
+        if (slots > 0) make_orbs(player_, models, slots);
+        return;
+    }
+    if (slots < 0) slots = 0;
+    if (slots > 10) slots = 10; /* OrbQueue.maxCapacity */
+    std::vector<OrbSlot> next;
+    std::vector<bool> kept(orbs_.size(), false);
+    float radius = 225.0f + 75.0f * ((float)slots - 3.0f) / 7.0f;
+    float step = slots > 1 ? 125.0f / (float)(slots - 1) : 0.0f;
     for (int i = 0; i < slots; ++i) {
-        Node* o = instance(lib_, "scenes/orbs/orb.tscn");
-        if (!o || !o->is_control()) {
-            delete o;
-            break;
-        }
-        Control* oc = (Control*)o;
-        const Json* model = i < (int)orbs.size() ? &orbs[(size_t)i] : NULL;
-        /* NOrb._Ready: the local player's are at 0.85. The anchors (0.5 in
-         * a parent of no size) as 0: placed before it has its parent. */
-        oc->scale = oc->scale * 0.85f;
-        for (int s = 0; s < 4; ++s) oc->anchor[s] = 0;
-        float a = (-25.0f - span) * 3.14159265f / 180.0f;
-        oc->set_position(Vec2(-cosf(a), sinf(a)) * radius);
-        span -= step;
-        Node* outline = o->find_unique("Outline");
-        Node* passive = o->find_unique("PassiveAmount");
-        Node* evoke = o->find_unique("EvokeAmount");
-        hide(o->find_unique("SelectionReticle"));
-        if (!model) {
-            /* An empty slot: its outline only. */
-            set_visible(passive, false);
-            set_visible(evoke, false);
-            set_visible(outline, true);
-        } else {
-            /* UpdateVisuals: the orb's sprite (OrbModel.CreateSprite,
-             * scenes/orbs/orb_visuals/<id>.tscn) idling, its numbers. */
-            set_visible(outline, false);
-            set_visible(o->find_unique("LabelContainer"), true);
-            std::string id = lower((*model)["id"].str());
-            Node* sprite = instance(lib_, "scenes/orbs/orb_visuals/" + id + ".tscn");
-            Node* vc = o->find_unique("VisualContainer");
-            if (sprite && vc) vc->add_child(sprite);
-            else delete sprite;
-            int pv = (*model)["passive"].i(), ev = (*model)["evoke"].i();
-            set_label(passive, format("%d", pv));
-            set_label(evoke, format("%d", ev));
-            if (id == "plasma_orb") {
-                set_visible(passive, false);
-                set_visible(evoke, false);
-            } else if (id == "dark_orb") {
-                set_visible(passive, true);
-                set_visible(evoke, true);
-            } else {
-                set_visible(passive, true);
-                set_visible(evoke, false);
+        Json model = i < (int)models.size() ? models[(size_t)i] : Json();
+        int id = model.is_null() ? -1 - i : model["instance_id"].i(i + 1);
+        OrbSlot o;
+        o.node = NULL;
+        o.sprite = NULL;
+        for (size_t j = 0; j < orbs_.size(); ++j)
+            if (!kept[j] && orbs_[j].id == id && orbs_[j].data["id"] == model["id"]) {
+                o = orbs_[j]; kept[j] = true; break;
             }
+        if (!o.node) {
+            Node* n = instance(lib_, "scenes/orbs/orb.tscn");
+            if (!n || !n->is_control()) { delete n; continue; }
+            o.node = (Control*)n;
+            o.node->scale = o.node->scale * 0.85f;
+            for (int s = 0; s < 4; ++s) o.node->anchor[s] = 0;
+            o.node->set_position(Vec2(0, 0));
+            if (!model.is_null()) {
+                o.sprite = instance(lib_, "scenes/orbs/orb_visuals/" + lower(model["id"].str()) + ".tscn");
+                Node* vc = n->find_unique("VisualContainer");
+                if (o.sprite && vc) { vc->add_child(o.sprite); play_idle(o.sprite); }
+                else { delete o.sprite; o.sprite = NULL; }
+            }
+            orb_box_->add_child(n);
         }
-        box->add_child(o);
+        o.id = id;
+        o.node->name = format("CombatOrb_%d", id);
+        o.data = model;
+        o.from = Vec2(o.node->offset[SIDE_LEFT], o.node->offset[SIDE_TOP]);
+        float a = (-150.0f + (float)i * step) * PI_F / 180.0f;
+        o.to = Vec2(-cosf(a), sinf(a)) * radius;
+        o.t = animate ? 0 : 0.45;
+        if (!animate) o.node->set_position(o.to);
+        set_visible(o.node->find_unique("SelectionReticle"), false);
+        set_visible(o.node->find_unique("Outline"), model.is_null());
+        set_visible(o.node->find_unique("LabelContainer"), !model.is_null());
+        std::string kind = lower(model["id"].str());
+        set_label(o.node->find_unique("PassiveAmount"), format("%d", model["passive"].i()));
+        set_label(o.node->find_unique("EvokeAmount"), format("%d", model["evoke"].i()));
+        set_visible(o.node->find_unique("PassiveAmount"), !model.is_null() && kind != "plasma_orb");
+        set_visible(o.node->find_unique("EvokeAmount"), kind == "dark_orb");
+        bool focus = find_power(player_.powers, "FOCUS_POWER") != NULL;
+        orb_particles(orb_export(o.sprite, "_focusedParticles"), false, focus && (kind != "glass_orb" || model["passive"].i() > 0));
+        orb_particles(orb_export(o.sprite, "_superchargedParticles"), false, model["evoke"].i() >= 24);
+        next.push_back(o);
+    }
+    for (size_t i = 0; i < orbs_.size(); ++i) if (!kept[i]) {
+        FadingOrb f = { orbs_[i].node, life_t_ + 0.25 };
+        fading_orbs_.push_back(f);
+    }
+    orbs_ = next;
+}
+
+void CombatScreen::orb_effect(const std::string& path, const Vec2& at) {
+    if (!vfx_box_ || path.empty()) return;
+    Node* fx = instance(lib_, "scenes/" + path + ".tscn");
+    if (!fx) return;
+    Vec2 local = inverse(vfx_box_->global_transform()).xform(at);
+    if (fx->is_node2d()) ((Node2D*)fx)->position = local;
+    else if (fx->is_control()) ((Control*)fx)->set_position(local);
+    vfx_box_->add_child(fx);
+}
+
+/* NOrbVfx receives the activation before damage or block is applied.
+ * The sprite stays alive during NOrbManager's 0.25 s evoke fade. */
+void CombatScreen::activate_orb(const Json& cue) {
+    for (size_t i = 0; i < orbs_.size(); ++i) {
+        OrbSlot& o = orbs_[i];
+        if (o.id != cue["instance_id"].i(-100)) continue;
+        bool evoke = cue["evoking"].b();
+        std::string kind = lower(cue["id"].str());
+        if (evoke) {
+            const Json* scene = o.sprite ? o.sprite->get_extra("_evokeVfxSceneName") : NULL;
+            if (scene && o.sprite->is_canvas_item())
+                orb_effect("vfx/orbs/" + scene->str(), ((CanvasItem*)o.sprite)->global_transform().origin);
+        } else if (kind != "glass_orb" || cue["passive"].i() > 0) {
+            orb_particles(orb_export(o.sprite, "_passiveActivatedParticles"), true);
+            if (find_power(player_.powers, "FOCUS_POWER"))
+                orb_particles(orb_export(o.sprite, "_passiveActivatedFocusedParticles"), true);
+        }
+        if (kind == "frost_orb" && player_.center)
+            orb_effect(evoke ? "vfx/orbs/frost/vfx_frost_orb_evoke_shield" : "vfx/orbs/frost/vfx_frost_orb_passive_shield",
+                       ((CanvasItem*)player_.center)->global_transform().origin);
+        if (evoke && kind == "glass_orb")
+            for (size_t j = 0; j < cue["targets"].size(); ++j) {
+                Creature* target = creature_for(cue["targets"][j].str());
+                if (target && target->center)
+                    orb_effect("vfx/orbs/glass/vfx_glass_orb_evoke_impact", ((CanvasItem*)target->center)->global_transform().origin);
+            }
+        break;
     }
 }
 
@@ -1587,6 +1673,13 @@ void CombatScreen::apply_state(const Json& ch) {
     const std::string& type = ch["t"].str();
     Creature* c = creature_for(ch["who"].str());
     if (type == "card") { move_card(ch); return; }
+    if (type == "orb_activate") { activate_orb(ch); return; }
+    if (type == "orbs" && ch["orbs"].is_array()) {
+        sync_orbs(ch["orbs"], ch["slots"].i(), true);
+        state_.set("orbs", ch["orbs"]);
+        state_.set("orb_slots", ch["slots"]);
+        return;
+    }
     if (type == "energy" || type == "max_energy" || type == "stars" || type == "round") {
         state_.set(type, ch["to"]);
         if (type == "round") state_.set("turn_number", ch["to"]);
@@ -1667,6 +1760,8 @@ void CombatScreen::finish_state() {
             refresh_state(osty_, true);
         }
         sync_hand(pending_["hand"], true);
+        if (state_["orbs"] != pending_["orbs"] || state_["orb_slots"] != pending_["orb_slots"])
+            sync_orbs(pending_["orbs"], pending_["orb_slots"].i(), true);
         state_ = pending_;
     } else {
         sync_hand(Json(), true);

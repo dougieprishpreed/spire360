@@ -111,6 +111,25 @@ internal static class Steps
         if (_pendingUi.Count < 500) _pendingUi.Add(cue);
     }
 
+    public static Dictionary<string, object?> OrbInfo(OrbModel orb) => new()
+    {
+        ["id"] = orb.Id.Entry, ["instance_id"] = IdOf(orb),
+        ["passive"] = (int)orb.PassiveVal, ["evoke"] = (int)orb.EvokeVal,
+    };
+
+    // The UI subscribes to OrbModel's activation events. Record the same
+    // moment even when no Godot orb node exists in the headless logic.
+    public static void OrbCue(OrbModel orb, bool evoke, Creature[]? targets)
+    {
+        if (!Enabled || !RecordUi) return;
+        Capture(); // channel/capacity changes precede the activation
+        var cue = OrbInfo(orb);
+        cue["t"] = "orb_activate";
+        cue["evoking"] = evoke;
+        cue["targets"] = targets?.Select(Who).ToArray();
+        Cue(cue);
+    }
+
     /// <summary>A pacing delay the game asked for (Cmd.Wait / Task.Delay).</summary>
     public static void Wait(int ms, string source)
     {
@@ -185,6 +204,8 @@ internal static class Steps
         public readonly Dictionary<int, (string Pile, int Index, string CardId)> Cards = new();
         public readonly List<int> Hand = new();
         public string Orbs = "";
+        public int OrbSlots;
+        public List<Dictionary<string, object?>> OrbState = new();
     }
 
     private static Snapshot? Take(Player? player)
@@ -220,8 +241,12 @@ internal static class Steps
             try
             {
                 var orbs = pcs.OrbQueue?.Orbs;
+                s.OrbSlots = pcs.OrbQueue?.Capacity ?? 0;
                 if (orbs != null)
-                    s.Orbs = string.Join(",", orbs.Select(o => $"{o.Id.Entry}:{(int)o.PassiveVal}:{(int)o.EvokeVal}"));
+                {
+                    s.Orbs = string.Join(",", orbs.Select(o => $"{IdOf(o)}:{o.Id.Entry}:{(int)o.PassiveVal}:{(int)o.EvokeVal}"));
+                    s.OrbState = orbs.Select(OrbInfo).ToList();
+                }
             }
             catch { }
         }
@@ -356,8 +381,8 @@ internal static class Steps
 
         if (!a.Hand.SequenceEqual(b.Hand))
             d.Add(new Dictionary<string, object?> { ["t"] = "hand", ["cards"] = b.Hand.ToList() });
-        if (a.Orbs != b.Orbs)
-            d.Add(new Dictionary<string, object?> { ["t"] = "orbs", ["orbs"] = b.Orbs });
+        if (a.Orbs != b.Orbs || a.OrbSlots != b.OrbSlots)
+            d.Add(new Dictionary<string, object?> { ["t"] = "orbs", ["orbs"] = b.OrbState, ["slots"] = b.OrbSlots });
         return d;
     }
 }

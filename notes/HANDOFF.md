@@ -156,7 +156,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
   in a trace; investigate before the no-missing-texture soak gate.
 - Logic presentation exports changed: the eventual console build needs
   wasm/C + logic_lib rebuilt. The converter/pack is unchanged so far.
-- VFX cleanup: one-shot particles keep simulating after emission stops;
+- VFX cleanup (`cdc59ff`): one-shot particles keep simulating after emission stops;
   this fixes frozen Osty heal particles. Effects now leave the scene tree
   through deferred deletion. Slash sprites, generic particle/Spine VFX,
   damage numbers and turn banners release their nodes. Big slash and hit
@@ -166,6 +166,20 @@ a git clone, deleted files go away by themselves (keep the list as is).
   with 0 failures, including new particle restart/expiry, Osty/slash node
   cleanup and delayed-tween timing checks. No logic or pack change in this
   batch. Other custom VFX scripts still need systematic coverage.
+- Orb playback: stable orb instance ids and explicit OrbModel passive /
+  evoke cues; channel/capacity snapshots follow the action timeline.
+  The engine preserves surviving orb sprites, moves slots over 0.45 s,
+  fades removed orbs over 0.25 s, restarts activation particles and plays
+  the scene's evoke effect, frost shields and glass evoke impacts.
+  Dark projectiles, orb shaking and remaining specialized effects are
+  still open; do not tick the full orb checklist item yet.
+- Orb validation: 15/15 seeded JIT runs, `differences: 0`; strict C++03
+  PC build; 1,421 presentation responses with 181 orb persistence/removal
+  checks and **0 failures**. No converter change.
+- Reproduced Room Full of Cheese's Gorge selection with the real logic:
+  simple_grid, eight cards, exactly two required, no manual confirmation.
+  Selecting indices 0,1 resumes the map and grows the deck from 10 to 12.
+  Controller end-to-end coverage of this actual decision remains next.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 

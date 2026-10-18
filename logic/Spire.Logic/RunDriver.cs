@@ -2429,6 +2429,7 @@ public partial class RunDriver
                 {
                     ["index"] = i,
                     ["id"] = orb.Id.Entry,
+                    ["instance_id"] = Steps.IdOf(orb),
                     ["name"] = _loc.Bilingual("orbs", orb.Id.Entry + ".title"),
                     ["type"] = orb.GetType().Name.Replace("Orb", ""),
                     ["passive"] = (int)orb.PassiveVal,

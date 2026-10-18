@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     lifecycle_cases(lib);
-    int responses = 0, persistent = 0, hp_checks = 0;
+    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0;
     bool selections_checked = false;
     for (int file = 2; file < argc; ++file) {
         std::ifstream input(argv[file]);
@@ -209,7 +209,31 @@ int main(int argc, char** argv) {
                     ++hp_checks;
                 }
             }
+            std::vector<Node*> old_orbs;
+            for (size_t o = 0; same_fight && old_room && o < previous["orbs"].size(); ++o)
+                old_orbs.push_back(find_named(old_room, format("CombatOrb_%d", previous["orbs"][o]["instance_id"].i((int)o + 1)).c_str()));
             advance(tree, game);
+            if (d["decision"].str() == "combat_play" && !tree.root()->children.empty()) {
+                Node* room = tree.root()->children[0];
+                for (size_t o = 0; o < d["orbs"].size(); ++o) {
+                    const Json& orb = d["orbs"][o];
+                    int id = orb["instance_id"].i((int)o + 1);
+                    Node* node = find_named(room, format("CombatOrb_%d", id).c_str());
+                    check(node != NULL, "channelled orb was absent after its response played");
+                    ++orb_checks;
+                    for (size_t p = 0; p < old_orbs.size(); ++p)
+                        if (previous["orbs"][p]["instance_id"].i((int)p + 1) == id)
+                            check(node == old_orbs[p], "surviving orb sprite was rebuilt between responses");
+                }
+                for (size_t p = 0; p < old_orbs.size(); ++p) {
+                    int id = previous["orbs"][p]["instance_id"].i((int)p + 1);
+                    bool present = false;
+                    for (size_t o = 0; o < d["orbs"].size(); ++o)
+                        if (d["orbs"][o]["instance_id"].i((int)o + 1) == id) present = true;
+                    if (!present) check(find_named(room, format("CombatOrb_%d", id).c_str()) == NULL,
+                                        "evoked orb stayed in the room after its fade");
+                }
+            }
             if (hp_label && expected > 0) {
                 /* More than one hit may occur in the response: compare the
                  * final decision rather than the first damage step. */
@@ -231,7 +255,7 @@ int main(int argc, char** argv) {
     check(persistent > 0, "no consecutive combat decisions were checked");
     check(hp_checks > 0, "no delayed health changes were checked");
     check(selections_checked, "no card data was available for controller selection checks");
-    printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d failures\n",
-           responses, persistent, hp_checks, failures);
+    printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d failures\n",
+           responses, persistent, hp_checks, orb_checks, failures);
     return failures ? 1 : 0;
 }

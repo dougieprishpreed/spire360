@@ -133,6 +133,21 @@ private:
     void make_intents(Creature& c, const Json& intents, int creature_index);
     void make_powers(Creature& c, const Json& powers);
     void make_orbs(Creature& c, const Json& orbs, int slots);
+    void sync_orbs(const Json& orbs, int slots, bool animate);
+    void activate_orb(const Json& cue);
+    void orb_effect(const std::string& path, const Vec2& at);
+    struct OrbSlot {
+        Control* node;
+        Node* sprite;
+        Json data;
+        int id;
+        Vec2 from, to;
+        double t;
+    };
+    struct FadingOrb { Control* node; double until; };
+    Node* orb_box_;
+    std::vector<OrbSlot> orbs_;
+    std::vector<FadingOrb> fading_orbs_;
     void position_enemies(std::vector<Creature>& c, float scaling, std::vector<Vec2>* out = NULL);
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center, Creature* osty = NULL,
                           float osty_max_hp = 0);

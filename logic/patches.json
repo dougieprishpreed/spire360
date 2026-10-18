@@ -231,6 +231,18 @@
       "note": "Records a creature's animation trigger (Attack, Cast, Hit, ...)."
     },
     {
+      "id": "orb.passive",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.OrbModel",
+      "method": "ActivatePassive"
+    },
+    {
+      "id": "orb.evoke",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.OrbModel",
+      "method": "ActivateEvoke"
+    },
+    {
       "id": "cardselect.kind.choose_a_card",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",

@@ -86,6 +86,15 @@ internal static class Hooks
 
         // VfxCmd: the effects the game would spawn (it returns at once in
         // test mode); CreatureCmd.TriggerAnim: the creatures' animations.
+        Spire.HookBridge.Hooks.RegisterAfter("orb.passive", (a, r) =>
+        {
+            if (a.Length > 0 && a[0] is OrbModel orb) Steps.OrbCue(orb, false, null);
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("orb.evoke", (a, r) =>
+        {
+            if (a.Length > 1 && a[0] is OrbModel orb && a[1] is Creature[] targets)
+                Steps.OrbCue(orb, true, targets);
+        });
         Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature", (a, r) => VfxCue(a, "feet"));
         Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature_center", (a, r) => VfxCue(a, "center"));
         Spire.HookBridge.Hooks.RegisterAfter("vfx.on_side", (a, r) =>
