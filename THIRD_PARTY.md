@@ -10,6 +10,7 @@
 | Mono.Cecil | NuGet, PC tools only | MIT | Patcher and API dump; never on the console. |
 | FModBankParser 1.2.0 | NuGet, `tools/fmod_metadata/` | Apache-2.0 | Offline Studio bank metadata; no FMOD runtime DLLs. Never on the console. |
 | Fmod5Sharp 3.0.1 | NuGet, `tools/fmod_metadata/` | MIT | Rebuilds FSB5 Vorbis packets as Ogg at conversion time, without re-encoding. Never on the console. |
+| stb_vorbis 1.22 | `third_party/stb/stb_vorbis.c` | MIT or public domain | Streaming Vorbis decoder; pinned revision in `UPSTREAM_COMMIT`. Upstream license is retained in the source. |
 | vgmstream | Optional external PC tool | ISC (its optional codec dependencies have their own licenses) | Independent audio conversion checks via `--vgmstream`; never on the console. |
 | NativeAOT-LLVM, .NET runtime | NuGet, linked into logic.wasm | MIT | Built on the player's PC. |
 | wasi-sdk / wasi-libc | linked into logic.wasm | Apache-2.0 WITH LLVM-exception, MIT, BSD | Built on the player's PC. |

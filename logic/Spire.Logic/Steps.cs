@@ -71,6 +71,9 @@ internal static class Steps
                 case null: continue;
                 case string str: outArgs.Add(str); break;
                 case bool or int or long or float or double or decimal: outArgs.Add(a); break;
+                case IReadOnlyDictionary<string, float> parameters:
+                    outArgs.Add(parameters.ToDictionary(p => p.Key, p => (object?)p.Value));
+                    break;
                 case Enum e: outArgs.Add(e.ToString()); break;
                 case MegaCrit.Sts2.Core.Models.AbstractModel m: outArgs.Add(m.Id.ToString()); break;
                 case Creature c: outArgs.Add(Who(c)); break;

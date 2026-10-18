@@ -231,6 +231,47 @@
       "note": "Records a creature's animation trigger (Attack, Cast, Hit, ...)."
     },
     {
+      "id": "sfx.play",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.SfxCmd",
+      "method": "Play",
+      "all_overloads": true,
+      "note": "Record sound commands skipped by NonInteractiveMode; preserve the ending-combat guard, volume and parameters."
+    },
+    {
+      "id": "sfx.loop",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.SfxCmd",
+      "method": "PlayLoop",
+      "all_overloads": true
+    },
+    {
+      "id": "sfx.stop",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.SfxCmd",
+      "method": "StopLoop",
+      "all_overloads": true
+    },
+    {
+      "id": "sfx.param",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.SfxCmd",
+      "method": "SetParam"
+    },
+    {
+      "id": "sfx.damage",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.SfxCmd",
+      "method": "PlayDamage"
+    },
+    {
+      "id": "sfx.death",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.SfxCmd",
+      "method": "PlayDeath",
+      "all_overloads": true
+    },
+    {
       "id": "orb.passive",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Models.OrbModel",

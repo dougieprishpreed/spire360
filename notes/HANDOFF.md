@@ -8,6 +8,62 @@ Last rewrite: 2026-10-18, when the work moved from a cloud session (game
 data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed.
 
+## Paused session checkpoint (2026-10-18)
+
+Paused at the user's request, after finishing and publishing the current
+checks. Resume implementation from this checkpoint; repository setup,
+bundle cleanup, decompilation and baselines are already done. Do not reset
+the checkout or recreate any caches. Use the GitHub integration for remote
+operations: Windows Git has no saved GitHub login.
+
+The active work is **Sound**. Bank conversion is published in `eec6c86`;
+the following batch adds a portable streaming decoder, mixer, Windows /
+Xbox XAudio2 output and logic sound exports. Those components pass their
+individual checks, but are **not yet connected to game playback**. There
+is no audio event runtime yet. `CombatScreen::play_steps` deliberately skips
+new `sfx` cues so they cannot add combat input delays before that hookup.
+The normal game still has no sound. Do not call this an alpha candidate.
+
+Next: implement an event runtime over `audio/events.json` (per-bank graphs,
+including nested events, weighted playlists, layers, bus gain, random
+modulation, parameter conditions, timing and loop/stop semantics); connect
+it to the mixer/output and the combat cue timeline, room/UI sounds and
+NRunMusicController's adaptive music. Temporary imported mp3 playback also
+remains. Then repair the two later-act warnings below and continue the
+alpha checklist. Saving/continue, Crystal Sphere, pause/deck/piles,
+act/victory transitions and remaining shaders are still open.
+
+Current local packs: `work/pack-next/pack.s3p` (visuals + procedural noise)
+and `work/audio-pack/pack.s3p` (audio-only, for the audio verifier). A normal
+full converter build now includes both visual assets and bank audio, but
+has not yet been rebuilt since the audio work. Keep both existing packs
+and `converter/.cache/audio`. No XDK build has been run or authorized.
+
+Latest logic regression: `traces/audio`, 15/15 seeded runs, **differences: 0**
+against `traces/base`. Use `--data-dir work/pack/data` for that baseline:
+its ready header includes this exact directory string. Using pack-next's
+data produces a header-only difference even though localization is equal.
+The new traces contain 1,889 play, 17 parameter, 5 loop and 1 stop sound
+cues. Sound hooks retain SfxCmd's ending-combat guards, volume, parameters
+and creature loop ownership. `Steps.Ui` now preserves float dictionaries.
+The eventual console rebuild therefore still needs wasm/C + logic_lib.
+
+Validation commands (PowerShell, repo root; use the ignored MSYS2 toolchain
+with `MSYS2_PATH_TYPE=inherit` for the PC executables):
+
+```
+python tools/build_logic.py --game-dir "F:\Program Files (x86)\Slay the Spire 2" --stage patch,jit
+python tools/random_runs.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" --runs 3 --trace-dir traces/audio --data-dir work/pack/data
+python tools/trace_compare.py traces/base traces/audio
+```
+
+`tools/viewer/build.sh` now also builds `spire_audio_check`: a pack path
+fully decodes/seeks every sample; append `--mix-only` for quick mixer checks;
+`--device-check` exercises the Windows XAudio2 queue with muted silence.
+Local evidence: `work/audio-check.log`, `work/audio-pause-check.log`,
+`work/audio-trace-compare.log`, `work/soak-check.log`. There should be no
+background jobs left at this pause. Keep the one-background-job limit.
+
 ## Goal: the alpha release candidate
 
 Port **everything in the game except multiplayer**, systematically, and keep
@@ -274,7 +330,7 @@ a git clone, deleted files go away by themselves (keep the list as is).
   `RaySlot` refers to `blast_placeholder` (investigate Spine slot setup),
   and The Lantern Key incorrectly requests a portrait: its actual layout
   is Combat, which must embed the encounter rather than a default portrait.
-- Offline bank converter (this batch): `tools/fmod_metadata` uses
+- Offline bank converter (`eec6c86`): `tools/fmod_metadata` uses
   pinned NuGet FModBankParser 1.2.0 + Fmod5Sharp 3.0.1; the parser's own
   audio path expects an unpublished stream overload, so its in-memory
   metadata input masks SND chunks. The separate FSB path calls the public
@@ -300,7 +356,23 @@ a git clone, deleted files go away by themselves (keep the list as is).
   `--vgmstream work/toolchain/vgmstream/vgmstream-cli.exe` checks it;
   `--skip-bank-audio` is only for visual test packs. Keep the ignored
   `converter/.cache/audio` cache. Engine decoder/mixer/XAudio2, adaptive
-  music and temporary mp3 playback are still open; do not tick Sound yet.
+  music and temporary mp3 playback were still open at that commit; do not
+  tick Sound yet. See the current decoder/mixer work below.
+- Portable streaming decode (current batch): `engine/audio/decoder.*` uses
+  stb_vorbis 1.22 (MIT/public domain, pinned under `third_party/stb`) and a
+  PCM16 WAV reader. Pack audio uses independent file handles and bounded
+  decoder buffers, so music need not be loaded as whole PCM tracks.
+  `spire_audio_check work/audio-pack/pack.s3p` fully decoded **2,313
+  samples / 918,182,894 frames**, checking EOF and sample-accurate seeking
+  against the first decode, **0 failures**. Strict C++03 build passes.
+  The mixer now passes source comparisons for layering, finite loops and
+  their tails, resampling, pause and volume fades (including sub-sample
+  fades). The Windows XAudio2 backend submitted/recycled 16 buffers and
+  consumed 4,096 frames with its master muted. Xbox output uses the same
+  mixer; its API was checked against the installed SDK headers, with no
+  XDK build. A fresh sound-hook presentation replay passes 99 responses /
+  74 persistent rooms / 33 impacts / 57 orb checks / 2 deaths, 0 failures.
+  Event interpretation and game playback integration remain open.
 
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 

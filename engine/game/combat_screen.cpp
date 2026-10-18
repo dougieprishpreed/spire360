@@ -2075,6 +2075,9 @@ void CombatScreen::play_steps(const Json& steps) {
         for (size_t k = 0; k < step.size(); ++k) {
             const Json& ch = step[k];
             const std::string& type = ch["t"].str();
+            /* Sound commands must not add input delays while the separate
+             * audio event runtime is being connected. */
+            if (type == "sfx") continue;
             Cue c;
             c.at = t;
             c.amount = 0;

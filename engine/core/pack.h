@@ -45,6 +45,9 @@ public:
     bool read(const char* name, std::vector<u8>& out) const;
     /* The first bytes of an entry (headers). */
     bool read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const;
+    /* An independent file handle positioned at this entry, for streaming
+     * audio without moving the renderer's shared pack cursor. Caller closes. */
+    FILE* open_stream(const PackEntry* e) const;
     const char* name_of(const PackEntry* e) const;
     size_t count() const { return entries_.size(); }
     const PackEntry& entry(size_t i) const { return entries_[i]; }
@@ -57,6 +60,7 @@ public:
 
 private:
     FILE* f_;
+    std::string path_;
     u32 flags_;
     std::string game_version_;
     std::vector<PackEntry> entries_; /* sorted by hash */

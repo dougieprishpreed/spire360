@@ -23,6 +23,7 @@ Pack::~Pack() { close(); }
 void Pack::close() {
     if (f_) fclose(f_);
     f_ = NULL;
+    path_.clear();
     entries_.clear();
     names_.clear();
 }
@@ -42,6 +43,7 @@ bool Pack::open(const char* path, std::string* error) {
         if (error) *error = format("cannot open %s", path);
         return false;
     }
+    path_ = path;
     u8 h[64];
     if (fread(h, 1, 64, f_) != 64 || memcmp(h, "S3P1", 4) != 0 || be32(h + 4) != 1) {
         if (error) *error = "not a Spire360 pack (S3P1 v1)";
@@ -109,6 +111,13 @@ bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
     out.resize(len);
     if (!seek64(f_, e->offset)) return false;
     return len == 0 || fread(&out[0], 1, len, f_) == len;
+}
+
+FILE* Pack::open_stream(const PackEntry* e) const {
+    if (!f_ || !e) return NULL;
+    FILE* stream = fopen(path_.c_str(), "rb");
+    if (stream && !seek64(stream, e->offset)) { fclose(stream); stream = NULL; }
+    return stream;
 }
 
 bool Pack::parse_texture_size(const std::vector<u8>& d, int* w, int* h, int* ow, int* oh) {

@@ -38,7 +38,7 @@ using MegaCrit.Sts2.Core.Unlocks;
 
 namespace Spire.Logic;
 
-internal static class Hooks
+internal static partial class Hooks
 {
     /// <summary>The active driver, for hooks that open decision points.</summary>
     internal static RunDriver? Driver;
@@ -57,6 +57,7 @@ internal static class Hooks
     /// <summary>Registers every handler. Call before any game code runs.</summary>
     public static void Install()
     {
+        InstallSound();
         // LocTable.GetRawText(string key): the table's text, or the key when missing
         // (the original throws for missing keys).
         Bridge.Register("loc.get_raw_text", a =>
