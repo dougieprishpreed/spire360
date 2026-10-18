@@ -2281,6 +2281,8 @@ public partial class RunDriver
             var cardInfo = new Dictionary<string, object?>
             {
                 ["index"] = i,
+                // NPlayerHand retains holders by card instance across decisions.
+                ["instance_id"] = Steps.IdOf(c),
                 ["id"] = c.Id.ToString(),
                 ["name"] = _loc.Card(c.Id.Entry),
                 ["cost"] = c.EnergyCost?.GetResolved() ?? 0,

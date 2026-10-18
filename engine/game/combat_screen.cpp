@@ -46,6 +46,8 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     final_ = false;
     tips_ = NULL;
     tips_for_ = -2;
+    pending_finish_ = false;
+    played_instance_ = -1;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -87,6 +89,7 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.reticle = NULL;
     out.nameplate = NULL;
     out.center = NULL;
+    out.shown_hp = out.shown_max_hp = -1;
     Node* n = instance(lib_, "scenes/combat/creature.tscn");
     if (!n || !n->is_control()) {
         delete n;
@@ -317,11 +320,15 @@ void CombatScreen::make_powers(Creature& c, const Json& powers) {
     Control* sd = ctl(c.node, "HealthBar");
     Control* box = ctl(sd, "PowerContainer");
     if (!box) return;
+    for (size_t i = 0; i < box->children.size(); ++i) set_visible(box->children[i], false);
     std::vector<Control*> nodes;
     for (size_t i = 0; i < powers.size(); ++i) {
         const Json& pw = powers[i];
         if (!pw["visible"].b(true)) continue;
-        Node* n = instance(lib_, "scenes/combat/power.tscn");
+        std::string name = "Power_" + pw["id"].str();
+        Node* n = box->get_node(name);
+        bool fresh = n == NULL;
+        if (!n) n = instance(lib_, "scenes/combat/power.tscn");
         if (!n || !n->is_control()) {
             delete n;
             continue;
@@ -334,7 +341,13 @@ void CombatScreen::make_powers(Creature& c, const Json& powers) {
             ((Control*)label)->add_theme_color_override("font_color", json_color(pw["amount_color"], Color(1, 1, 1)));
             set_label(label, pw["counter"].b() ? format("%d", pw["display_amount"].i(pw["amount"].i())) : std::string());
         }
-        box->add_child(n);
+        n->name = name;
+        set_visible(n, true);
+        if (fresh) {
+            box->add_child(n);
+            ((Control*)n)->modulate.a = 0;
+            tweens_.tween(&((Control*)n)->modulate.a, 1, 0.25f, TRANS_SINE, EASE_OUT);
+        }
         nodes.push_back((Control*)n);
     }
     /* SetCreatureBounds: x at the bounds' left, width bounds + 25. */
@@ -412,6 +425,11 @@ private:
 void CombatScreen::make_intents(Creature& c, const Json& intents, int creature_index) {
     Node* row = c.node ? c.node->find_unique("Intents") : NULL;
     if (!row || !row->is_control()) return;
+    while (!row->children.empty()) {
+        Node* child = row->children.back();
+        row->remove_child(child);
+        delete child;
+    }
     ((Control*)row)->modulate.a = 1;
     for (size_t i = 0; i < intents.size(); ++i) {
         const Json& in = intents[i];
@@ -687,39 +705,99 @@ static const float HAND_ANGLE[10][10] = {
 /* NPlayerHand.RefreshLayout with a controller: the focused card upright,
  * full size and raised to its hitbox's half height; the others pushed
  * aside (75, 50, 25 px for distances 1..3). */
+CombatScreen::Holder CombatScreen::make_holder(const Json& card) {
+    Holder h;
+    h.node = NULL;
+    h.card_node = NULL;
+    h.id = card["instance_id"].i(-card["index"].i() - 1);
+    h.data = card;
+    h.angle = h.to_angle = 0;
+    h.scale = h.to_scale = 1;
+    h.text = card["description_bbcode"].str();
+    h.text_multi = card["description_multi"].is_string() ? card["description_multi"].str() : h.text;
+    const Json& by = card["description_by_target"];
+    for (size_t i = 0; i < by.size(); ++i) h.text_by_target.push_back(by[i].str());
+    Node* node = instance(lib_, "scenes/cards/holders/hand_card_holder.tscn");
+    if (!node || !node->is_control()) { delete node; return h; }
+    h.node = (Control*)node;
+    h.card_node = make_card(lib_, card);
+    if (h.card_node) node->add_child(h.card_node);
+    Node* flash = node->get_node("Flash");
+    if (flash && flash->is_canvas_item()) ((CanvasItem*)flash)->modulate.a = 0;
+    hide(node->find_unique("HandIndex"));
+    return h;
+}
+
 void CombatScreen::build_hand(Node* ui, const Json& d) {
     holders_.clear();
     Node* hand = ui ? find_named(ui, "Hand") : NULL;
     Node* box = hand ? hand->find_unique("CardHolderContainer") : NULL;
     hand_box_ = box && box->is_control() ? (Control*)box : NULL;
-    if (!box) return;
-    const Json& cards = d["hand"];
+    sync_hand(d["hand"], false);
+}
+
+/* NPlayerHand keeps each NHandCardHolder while that card stays in hand.
+ * New holders start at the draw pile; the existing ones keep their pose. */
+void CombatScreen::sync_hand(const Json& cards, bool animate) {
+    if (!hand_box_) return;
+    std::vector<Holder> next;
+    std::vector<bool> kept(holders_.size(), false);
     for (size_t i = 0; i < cards.size() && i < 10; ++i) {
-        Node* holder = instance(lib_, "scenes/cards/holders/hand_card_holder.tscn");
-        if (!holder || !holder->is_control()) {
-            delete holder;
-            continue;
+        int id = cards[i]["instance_id"].i(-cards[i]["index"].i() - 1);
+        Holder h;
+        bool found = false;
+        for (size_t j = 0; j < holders_.size(); ++j) {
+            if (kept[j] || holders_[j].id != id) continue;
+            h = holders_[j];
+            kept[j] = true;
+            found = true;
+            if (h.data != cards[i]) {
+                if (h.card_node) { h.node->remove_child(h.card_node); delete h.card_node; }
+                h.card_node = make_card(lib_, cards[i]);
+                if (h.card_node) h.node->add_child(h.card_node);
+                h.data = cards[i];
+                h.text = cards[i]["description_bbcode"].str();
+                h.text_multi = cards[i]["description_multi"].is_string() ? cards[i]["description_multi"].str() : h.text;
+                h.text_by_target.clear();
+                const Json& by = cards[i]["description_by_target"];
+                for (size_t k = 0; k < by.size(); ++k) h.text_by_target.push_back(by[k].str());
+            }
+            break;
         }
-        Control* h = (Control*)holder;
-        Node* card = make_card(lib_, cards[i]);
-        if (card) h->add_child(card);
-        /* Flash (upgrade / cost change pulse) and the index label are off at rest. */
-        Node* flash = h->get_node("Flash");
-        if (flash && flash->is_canvas_item()) ((CanvasItem*)flash)->modulate.a = 0;
-        Node* index = h->find_unique("HandIndex");
-        if (index && index->is_canvas_item()) ((CanvasItem*)index)->visible = false;
-        box->add_child(h);
-        Holder hd;
-        hd.node = h;
-        hd.angle = hd.to_angle = 0;
-        hd.scale = hd.to_scale = 1;
-        hd.text = cards[i]["description_bbcode"].str();
-        const Json& by = cards[i]["description_by_target"];
-        for (size_t t = 0; t < by.size(); ++t) hd.text_by_target.push_back(by[t].str());
-        hd.text_multi = cards[i]["description_multi"].is_string() ? cards[i]["description_multi"].str() : hd.text;
-        holders_.push_back(hd);
+        if (!found) {
+            h = make_holder(cards[i]);
+            if (!h.node) continue;
+            hand_box_->add_child(h.node);
+            if (animate) {
+                h.pos = Vec2(-850, -70);
+                h.scale = 0.15f;
+                h.angle = -25;
+            }
+        }
+        next.push_back(h);
     }
-    layout_hand(true);
+    for (size_t j = 0; j < holders_.size(); ++j) {
+        if (kept[j]) continue;
+        if (!animate) {
+            hand_box_->remove_child(holders_[j].node);
+            delete holders_[j].node;
+        } else {
+            MovingCard m;
+            m.holder = holders_[j];
+            m.from = m.holder.pos;
+            m.to = Vec2(850, -70);
+            m.from_scale = m.holder.scale;
+            m.to_scale = 0.15f;
+            m.t = 0;
+            m.duration = 0.4;
+            moving_cards_.push_back(m);
+        }
+    }
+    holders_ = next;
+    hand_ = cards;
+    tips_for_ = -2;
+    layout_hand(!animate);
+    refresh_tips();
 }
 
 void CombatScreen::set_hand_focus(int index) {
@@ -987,6 +1065,22 @@ void CombatScreen::update_arrow(const Vec2& target) {
 void CombatScreen::process(double dt) {
     float t = (float)dt;
     tweens_.update(dt);
+    for (size_t i = moving_cards_.size(); i-- > 0;) {
+        MovingCard& m = moving_cards_[i];
+        m.t += dt;
+        float u = clampf((float)(m.t / m.duration), 0, 1);
+        float k = tween_interpolate(TRANS_CUBIC, EASE_OUT, u, 0, 1, 1);
+        Vec2 at = m.from + (m.to - m.from) * k;
+        place(m.holder.node, at.x, at.y, 0, 0);
+        float sc = m.from_scale + (m.to_scale - m.from_scale) * k;
+        m.holder.node->scale = Vec2(sc, sc);
+        m.holder.node->modulate.a = 1 - u;
+        if (u >= 1) {
+            if (m.holder.node->parent) m.holder.node->parent->remove_child(m.holder.node);
+            delete m.holder.node;
+            moving_cards_.erase(moving_cards_.begin() + (long)i);
+        }
+    }
     for (size_t i = 0; i < holders_.size(); ++i) {
         Holder& h = holders_[i];
         h.pos = h.pos + (h.to_pos - h.pos) * minf(1.0f, t * 7.0f);
@@ -1169,7 +1263,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     if (make_creature(player["character"].is_string() ? player["character"].str() : std::string("ironclad"), true, c)) {
         allies->add_child(c.node);
         update_bounds(c);
-        refresh_health_bar(c, player, player_powers);
+        c.data = player;
+        c.powers = player_powers;
+        refresh_state(c, false);
         set_nameplate_text(c.nameplate, player["name"].str());
         make_powers(c, player_powers);
         if (!aftermath_) make_orbs(c, d["orbs"], d["orb_slots"].i(0));
@@ -1188,7 +1284,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         }
         allies->add_child(c.node);
         update_bounds(c);
-        refresh_health_bar(c, osty, no_powers);
+        c.data = osty;
+        c.powers = no_powers;
+        refresh_state(c, false);
         set_nameplate_text(c.nameplate, osty["name"].str());
         osty_ = c;
     }
@@ -1201,6 +1299,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     busy_until_ = 0;
     numbers_.clear();
     root_ = root;
+    state_ = d;
     vfx_box_ = ctl(root, "CombatVfxContainer");
     hand_ = d["hand"];
     tips_ = NULL;
@@ -1214,9 +1313,12 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
             continue;
         }
         c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
+        c.node->name = format("CombatEnemy_%d", es[i]["combat_id"].i(-1));
         enemies->add_child(c.node);
         update_bounds(c);
-        refresh_health_bar(c, es[i], es[i]["powers"]);
+        c.data = es[i];
+        c.powers = es[i]["powers"];
+        refresh_state(c, false);
         set_nameplate_text(c.nameplate, es[i]["name"].str());
         make_intents(c, es[i]["intents"], (int)i);
         make_powers(c, es[i]["powers"]);
@@ -1238,7 +1340,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         g.c.hp_bar_reduction = before[i]["hp_bar_reduction"].f();
         enemies->add_child(g.c.node);
         update_bounds(g.c);
-        refresh_health_bar(g.c, before[i], before[i]["powers"]);
+        g.c.data = before[i];
+        g.c.powers = before[i]["powers"];
+        refresh_state(g.c, false);
         g.c.node->set_position((*places_)[id]);
         g.who = format("e%d", id);
         ghosts_.push_back(g);
@@ -1273,6 +1377,294 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     root->add_child(driver);
     if (!aftermath_ && !final_) refresh_tips();
     return root;
+}
+
+/* NHealthBar delays the orange middleground for one second after damage,
+ * then eases it to the new foreground over one second. */
+void CombatScreen::refresh_state(Creature& c, bool animate) {
+    if (!c.node) return;
+    Control* hb = ctl(ctl(c.node, "HealthBar"), "HealthBar");
+    Control* mid = ctl(hb, "HpMiddleground");
+    float old = mid ? mid->offset[SIDE_RIGHT] : 0;
+    bool changed = c.shown_hp != c.data["hp"].i() || c.shown_max_hp != c.data["max_hp"].i();
+    refresh_health_bar(c, c.data, c.powers);
+    if (animate && mid && c.shown_hp >= 0 && c.data["hp"].i() > 0) {
+        float target = mid->offset[SIDE_RIGHT];
+        mid->offset[SIDE_RIGHT] = old;
+        if (changed) tweens_.tween(&mid->offset[SIDE_RIGHT], target, 1, TRANS_EXPO, EASE_OUT, target < old ? 1.0f : 0.0f);
+    }
+    c.shown_hp = c.data["hp"].i();
+    c.shown_max_hp = c.data["max_hp"].i();
+}
+
+void CombatScreen::refresh_counters() {
+    Node* ui = find_named(root_, "CombatUi");
+    Node* box = ui ? ui->get_node("EnergyCounterContainer") : NULL;
+    if (box && !box->children.empty())
+        set_label(box->children[0]->get_node("Label"), format("%d/%d", state_["energy"].i(), state_["max_energy"].i()));
+    Node* star = ui ? ui->get_node("StarCounter") : NULL;
+    if (star) {
+        set_visible(star, state_["always_show_stars"].b() || state_["stars"].i() > 0);
+        set_label(star->find_unique("CountLabel"), format("[center]%d[/center]", state_["stars"].i()));
+    }
+    Node* piles = find_named(ui, "CombatPileContainer");
+    static const char* names[] = { "DrawPile", "DiscardPile", "ExhaustPile" };
+    static const char* fields[] = { "draw_pile_count", "discard_pile_count", "exhaust_pile_count" };
+    for (int i = 0; piles && i < 3; ++i) {
+        Node* pile = piles->get_node(names[i]);
+        if (!pile) continue;
+        set_counter_label(pile->get_node("CountContainer/Count"), state_[fields[i]].i());
+        if (i == 2) set_visible(pile, state_[fields[i]].i() > 0);
+    }
+    Node* end = ui ? ui->get_node("EndTurnButton") : NULL;
+    if (end) set_label(end->get_node("Visuals/Label"), Loc::format("gameplay_ui", "END_TURN_BUTTON", "turnNumber",
+                        format("%d", state_["turn_number"].i(state_["round"].i(1)))));
+    Node* top = root_ ? root_->get_node("TopBarLayer") : NULL;
+    if (top) {
+        set_label(find_named(top, "HpLabel"), format("%d/%d", player_.data["hp"].i(), player_.data["max_hp"].i()));
+        set_label(find_named(top, "GoldLabel"), format("%d", state_["player"]["gold"].i()));
+    }
+}
+
+/* Keep the background, Spine tracks, particles and surviving holders alive.
+ * Only new combatants are instanced; absent enemies remain through death. */
+void CombatScreen::update_decision(const Json& d, bool finishing) {
+    if (!finishing) {
+        aftermath_ = final_ = false;
+        set_visible(find_named(root_, "CombatUi"), true);
+    }
+    pending_ = d;
+    pending_finish_ = finishing;
+    previous_ = state_;
+    played_instance_ = play_card_ >= 0 && play_card_ < (int)holders_.size() ? holders_[(size_t)play_card_].id : -1;
+    played_destination_ = Vec2(0, -500);
+    if (play_target_ >= 0 && play_target_ < (int)enemies_.size() && enemies_[(size_t)play_target_].node && hand_box_)
+        played_destination_ = inverse(hand_box_->global_transform()).xform(enemies_[(size_t)play_target_].node->global_transform().xform(enemies_[(size_t)play_target_].hitbox.pos + enemies_[(size_t)play_target_].hitbox.size * 0.5f));
+    end_play();
+    if (tips_) { root_->remove_child(tips_); delete tips_; tips_ = NULL; }
+    tips_for_ = -2;
+    if (!finishing) {
+        std::vector<Creature> next;
+        std::vector<std::string> who;
+        std::vector<bool> kept(enemies_.size(), false);
+        const Json& es = d["enemies"];
+        Node* container = root_->find_unique("EnemyContainer");
+        for (size_t i = 0; i < es.size(); ++i) {
+            std::string id = format("e%d", es[i]["combat_id"].i(-1));
+            Creature c;
+            c.node = NULL;
+            bool found = false;
+            for (size_t j = 0; j < enemy_who_.size(); ++j) {
+                if (enemy_who_[j] == id) { c = enemies_[j]; kept[j] = true; found = true; break; }
+            }
+            for (size_t j = 0; !found && j < ghosts_.size(); ++j) {
+                if (ghosts_[j].who != id) continue;
+                c = ghosts_[j].c;
+                ghosts_.erase(ghosts_.begin() + (long)j);
+                found = true;
+                break;
+            }
+            if (!found && container && make_creature(es[i]["id"].str(), false, c)) {
+                c.node->name = format("CombatEnemy_%d", es[i]["combat_id"].i(-1));
+                container->add_child(c.node);
+                c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
+                c.data = es[i];
+                c.powers = es[i]["powers"];
+                update_bounds(c);
+                refresh_state(c, false);
+                set_nameplate_text(c.nameplate, es[i]["name"].str());
+                if (places_ && places_->find(es[i]["combat_id"].i()) != places_->end()) c.node->set_position((*places_)[es[i]["combat_id"].i()]);
+                else c.node->set_position(Vec2(250.0f + (float)i * 220.0f, 200));
+                play_idle(c.node);
+                c.node->visible = false; /* revealed by spawn or the final sync */
+            }
+            next.push_back(c);
+            who.push_back(id);
+        }
+        for (size_t j = 0; j < enemies_.size(); ++j) {
+            if (kept[j] || !enemies_[j].node) continue;
+            Ghost g;
+            g.c = enemies_[j];
+            g.who = enemy_who_[j];
+            ghosts_.push_back(g);
+        }
+        enemies_ = next;
+        enemy_who_ = who;
+        if (!osty_.node && d["osty"]["alive"].b()) {
+            Node* allies = root_->find_unique("AllyContainer");
+            if (allies && make_creature("osty", false, osty_)) {
+                allies->add_child(osty_.node);
+                osty_.data = d["osty"];
+                update_bounds(osty_);
+                refresh_state(osty_, false);
+                play_idle(osty_.node);
+                osty_.node->visible = false;
+            }
+        }
+    }
+    play_steps(d["steps"]);
+}
+
+void CombatScreen::show_aftermath(const Json& player) {
+    aftermath_ = true;
+    hide(find_named(root_, "CombatUi"));
+    if (player.is_object()) {
+        player_.data = player;
+        player_.powers = Json();
+        refresh_state(player_, true);
+        make_powers(player_, Json());
+    }
+    for (size_t i = 0; i < enemies_.size(); ++i) hide(enemies_[i].node);
+    for (size_t i = 0; i < ghosts_.size(); ++i) hide(ghosts_[i].c.node);
+}
+
+void CombatScreen::move_card(const Json& change) {
+    const std::string& from = change["from"].str();
+    const std::string& to = change["to"].str();
+    static const char* piles[] = { "draw", "discard", "exhaust" };
+    static const char* fields[] = { "draw_pile_count", "discard_pile_count", "exhaust_pile_count" };
+    for (int p = 0; p < 3; ++p) {
+        int n = state_[fields[p]].i();
+        if (from == piles[p]) --n;
+        if (to == piles[p]) ++n;
+        state_.set(fields[p], Json::make_number(n < 0 ? 0 : n));
+    }
+    int id = change["card"].i(-1);
+    if (from == "hand" && to != "hand") {
+        for (size_t i = 0; i < holders_.size(); ++i) {
+            if (holders_[i].id != id) continue;
+            MovingCard m;
+            m.holder = holders_[i];
+            m.from = m.holder.pos;
+            m.to = id == played_instance_ ? played_destination_ : Vec2(850, to == "exhaust" ? -250.0f : -70.0f);
+            m.from_scale = m.holder.scale;
+            m.to_scale = id == played_instance_ ? 0.5f : 0.15f;
+            m.t = 0;
+            m.duration = 0.4;
+            moving_cards_.push_back(m);
+            holders_.erase(holders_.begin() + (long)i);
+            break;
+        }
+        Json hand = Json::make_array();
+        for (size_t i = 0; i < hand_.size(); ++i)
+            if (hand_[i]["instance_id"].i(-1) != id) hand.append(hand_[i]);
+        hand_ = hand;
+        layout_hand();
+    }
+    if (to == "hand" && from != "hand") {
+        const Json& cards = pending_["hand"];
+        for (size_t i = 0; hand_box_ && i < cards.size(); ++i) {
+            if (cards[i]["instance_id"].i(-2) != id) continue;
+            bool exists = false;
+            for (size_t j = 0; j < holders_.size(); ++j) if (holders_[j].id == id) exists = true;
+            if (exists) break;
+            Holder h = make_holder(cards[i]);
+            if (!h.node) break;
+            h.pos = Vec2(from == "draw" ? -850.0f : 0.0f, from == "draw" ? -70.0f : -500.0f);
+            h.scale = 0.15f;
+            h.angle = -25;
+            hand_box_->add_child(h.node);
+            holders_.push_back(h);
+            hand_.append(cards[i]);
+            layout_hand();
+            break;
+        }
+    }
+    refresh_counters();
+}
+
+void CombatScreen::apply_state(const Json& ch) {
+    const std::string& type = ch["t"].str();
+    Creature* c = creature_for(ch["who"].str());
+    if (type == "card") { move_card(ch); return; }
+    if (type == "energy" || type == "max_energy" || type == "stars" || type == "round") {
+        state_.set(type, ch["to"]);
+        if (type == "round") state_.set("turn_number", ch["to"]);
+        refresh_counters();
+        return;
+    }
+    if (!c) return;
+    if (type == "hp" || type == "max_hp" || type == "block") {
+        c->data.set(type, ch["to"]);
+        refresh_state(*c, true);
+        refresh_counters();
+    } else if (type == "power") {
+        Json next = Json::make_array();
+        bool exists = false;
+        for (size_t i = 0; i < c->powers.size(); ++i) {
+            Json p = c->powers[i];
+            if (p["id"].str() == ch["power"].str()) {
+                exists = true;
+                if (ch["removed"].b()) continue;
+                p.set("amount", ch["to"]);
+                p.set("display_amount", ch["to"]);
+            }
+            next.append(p);
+        }
+        if (!exists && !ch["removed"].b()) {
+            const Json* metadata = NULL;
+            const Json& es = pending_["enemies"];
+            const Json& powers = ch["who"].str() == "player" ? pending_["player_powers"] : c->powers;
+            metadata = find_power(powers, ch["power"].str().c_str());
+            for (size_t i = 0; !metadata && i < es.size(); ++i)
+                if (format("e%d", es[i]["combat_id"].i()) == ch["who"].str()) metadata = find_power(es[i]["powers"], ch["power"].str().c_str());
+            Json p = metadata ? *metadata : Json();
+            p.set("id", ch["power"]);
+            p.set("amount", ch["to"]);
+            p.set("display_amount", ch["to"]);
+            p.set("counter", Json::make_number(1));
+            next.append(p);
+        }
+        c->powers = next;
+        make_powers(*c, next);
+        refresh_state(*c, true);
+    } else if (type == "spawn" || type == "revive") {
+        c->node->visible = true;
+        tweens_.kill(&c->node->modulate.a);
+        c->node->modulate.a = 1;
+        play_idle(c->node);
+    }
+}
+
+void CombatScreen::finish_state() {
+    if (pending_.is_null()) return;
+    if (pending_["player"].is_object()) {
+        player_.data = pending_["player"];
+        player_.powers = pending_finish_ ? Json() : pending_["player_powers"];
+        refresh_state(player_, true);
+        make_powers(player_, player_.powers);
+    }
+    if (!pending_finish_) {
+        const Json& es = pending_["enemies"];
+        for (size_t i = 0; i < enemies_.size() && i < es.size(); ++i) {
+            Creature& c = enemies_[i];
+            if (!c.node) continue;
+            if (c.data["intents"] != es[i]["intents"]) {
+                make_intents(c, es[i]["intents"], (int)i);
+                Control* row = ctl(c.node, "Intents");
+                if (row) { row->modulate.a = 0; tweens_.tween(&row->modulate.a, 1, 0.25f); }
+            }
+            c.data = es[i];
+            c.powers = es[i]["powers"];
+            c.node->visible = true;
+            tweens_.kill(&c.node->modulate.a);
+            c.node->modulate.a = 1;
+            refresh_state(c, true);
+            make_powers(c, c.powers);
+        }
+        if (osty_.node && pending_["osty"].is_object()) {
+            osty_.data = pending_["osty"];
+            refresh_state(osty_, true);
+        }
+        sync_hand(pending_["hand"], true);
+        state_ = pending_;
+    } else {
+        sync_hand(Json(), true);
+        hide(find_named(root_, "CombatUi"));
+        state_.set("player", pending_["player"]);
+    }
+    refresh_counters();
+    pending_ = Json();
 }
 
 /* ---- step playback ---- */
@@ -1348,6 +1740,8 @@ static const char* trigger_animation(const std::string& trigger) {
 }
 
 void CombatScreen::fire(const Cue& c) {
+    if (c.kind == CUE_STATE) { apply_state(c.data); return; }
+    if (c.kind == CUE_SYNC) { finish_state(); return; }
     if (c.kind == CUE_BANNER) {
         show_banner(c.name, c.amount);
         return;
@@ -1355,14 +1749,17 @@ void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_ANIM) {
         Creature* cr = creature_for(c.who);
         SpineSprite* s = cr ? first_spine(cr->visuals) : NULL;
-        if (!s) return;
         const char* name = trigger_animation(c.name);
         std::string anim = name ? name : lower(c.name);
-        if (c.name == "Dead" && cr->node) {
+        if (c.name == "Dead" && cr && cr->node) {
+            cr->data.set("hp", Json::make_number(0));
+            refresh_state(*cr, true);
+            hide(cr->node->find_unique("Intents"));
             /* NCreature's death: the creature fades once the animation has
              * played (the game frees it). */
             tweens_.tween(&cr->node->modulate.a, 0.0f, 0.6f, TRANS_LINEAR, EASE_IN_OUT, 0.9f);
         }
+        if (!s) return;
         if (!s->set_animation(anim, false, 0)) return;
         SpSkeleton* sk = s->skeleton();
         const SpAnimation* idle = sk && anim != "die" ? sk->data()->find_animation("idle_loop") : NULL;
@@ -1502,13 +1899,14 @@ void CombatScreen::show_start_banner() {
     add_cue(c);
 }
 
-/* The steps as a timeline. The game's own pacing (the animation triggers'
- * waits, Cmd.Wait) sets the times, shortened so a turn stays brisk. */
+/* The steps as a timeline. CreatureCmd.TriggerAnim's pause precedes its
+ * impact; VFX, damage numbers and state changes at that impact are parallel.
+ * Cmd.Wait supplies the remaining pacing without an extra per-step delay. */
 void CombatScreen::play_steps(const Json& steps) {
     cues_.clear();
     next_cue_ = 0;
     cue_t_ = 0;
-    double t = 0.05;
+    double t = 0;
     /* A new round in the steps: the enemies' turn came first (its banner,
      * then their actions), the player's turn banner at the new round. */
     bool new_round = false;
@@ -1526,7 +1924,6 @@ void CombatScreen::play_steps(const Json& steps) {
     }
     for (size_t i = 0; i < steps.size(); ++i) {
         const Json& step = steps[i];
-        bool any = false;
         for (size_t k = 0; k < step.size(); ++k)
             if (step[k]["t"].str() == "round") {
                 Cue b;
@@ -1550,8 +1947,7 @@ void CombatScreen::play_steps(const Json& steps) {
                 if (!creature_for(c.who)) continue;
                 cues_.push_back(c);
                 double w = ch["wait"].num(0);
-                t += w > 0.5 ? 0.5 : w;
-                any = true;
+                if (w > 0) t += w;
             } else if (type == "vfx") {
                 c.kind = CUE_VFX;
                 c.path = ch["path"].str();
@@ -1563,7 +1959,6 @@ void CombatScreen::play_steps(const Json& steps) {
                     c.where = ch["at"].str();
                 }
                 cues_.push_back(c);
-                any = true;
             } else if (type == "ui" && ch["call"].str() == "NDamageNumVfx.Create" && ch["args"].size() >= 2 &&
                        ch["args"][1].is_number() && ch["args"][1].i() > 0) {
                 /* The number the game shows (unblocked damage + overkill). */
@@ -1573,27 +1968,37 @@ void CombatScreen::play_steps(const Json& steps) {
                 c.amount = ch["args"][1].i();
                 if (!creature_for(c.who)) continue;
                 cues_.push_back(c);
-                t += 0.12;
-                any = true;
-            } else if (type == "death") {
+            } else if (type == "death" || type == "despawn") {
                 c.kind = CUE_ANIM;
                 c.who = ch["who"].str();
                 c.name = "Dead";
                 if (!creature_for(c.who)) continue;
+                bool already = false;
+                for (size_t q = 0; q < cues_.size(); ++q)
+                    if (cues_[q].kind == CUE_ANIM && cues_[q].who == c.who && cues_[q].name == "Dead") already = true;
+                if (already) continue;
                 cues_.push_back(c);
-                t += 0.3;
-                any = true;
             } else if (type == "wait") {
                 double w = ch["ms"].num(0) / 1000.0;
-                t += w > 0.5 ? 0.5 : w;
+                if (w > 0) t += w;
+            } else {
+                c.kind = CUE_STATE;
+                c.data = ch;
+                cues_.push_back(c);
             }
         }
-        if (any) t += 0.05;
+    }
+    if (!pending_.is_null()) {
+        Cue sync;
+        sync.kind = CUE_SYNC;
+        sync.at = t;
+        sync.amount = 0;
+        cues_.push_back(sync);
     }
     /* The pad waits for the actions (not for the banners). */
     busy_until_ = 0;
     for (size_t i = 0; i < cues_.size(); ++i) {
-        double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.3);
+        double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.4);
         if (cues_[i].kind != CUE_BANNER && end > busy_until_) busy_until_ = end;
     }
 }

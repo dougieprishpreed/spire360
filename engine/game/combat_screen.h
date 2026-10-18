@@ -42,6 +42,11 @@ public:
     void set_final() { final_ = true; }
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
+    /* NCombatRoom lives for the fight. Apply a response to that room;
+     * state changes are presented when their steps reach the playhead. */
+    void update_decision(const Json& decision, bool finishing = false);
+    void show_aftermath(const Json& player);
+    Node* root_node() const { return root_; }
     /* The controller's focused card in the hand (-1: the middle one); set
      * before build, or after it to move the focus (relays the hand). */
     void set_hand_focus(int index);
@@ -87,6 +92,8 @@ private:
         Control* reticle;        /* %SelectionReticle */
         Control* nameplate;      /* the state display's %NameplateContainer */
         Node* center;            /* the visuals' %CenterPos (VfxSpawnPosition) */
+        Json data, powers;       /* state currently shown, before the next cue */
+        int shown_hp, shown_max_hp;
     };
     /* A hand card's holder and where NHandCardHolder is taking it
      * (SetTargetPosition / Angle / Scale: lerps, not tweens). */
@@ -100,6 +107,9 @@ private:
         std::string text;
         std::vector<std::string> text_by_target;
         std::string text_multi;
+        int id;                  /* Steps.IdOf(card), stable across responses */
+        Json data;
+        Node* card_node;
     };
     void show_card_text(Holder& h, const std::string& text);
     Node* make_background(const Json& bg);
@@ -107,6 +117,13 @@ private:
     void update_bounds(Creature& c);
     void setup_combat_ui(Node* root, const Json& d);
     void build_hand(Node* ui, const Json& d);
+    Holder make_holder(const Json& card);
+    void sync_hand(const Json& cards, bool animate);
+    void move_card(const Json& change);
+    void refresh_state(Creature& c, bool animate);
+    void apply_state(const Json& change);
+    void finish_state();
+    void refresh_counters();
     void layout_hand(bool snap = false);
     void select_reticle(Creature& c, bool on);
     void show_nameplate(Creature& c, bool on);
@@ -141,12 +158,13 @@ private:
     Node2D* arrow_head_;
     Vec2 arrow_pos_, arrow_to_;
     /* Step playback. */
-    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER };
+    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER, CUE_STATE, CUE_SYNC };
     struct Cue {
         double at;
         int kind;
         std::string who, path, name, where; /* where: center, feet, side, screen */
         int amount;
+        Json data;
     };
     struct FlyingNumber {
         Node2D* node;
@@ -183,6 +201,17 @@ private:
     Json hand_;
     Control* tips_;
     int tips_for_;
+    Json state_, pending_;
+    bool pending_finish_;
+    int played_instance_;
+    Vec2 played_destination_;
+    struct MovingCard {
+        Holder holder;
+        Vec2 from, to;
+        float from_scale, to_scale;
+        double t, duration;
+    };
+    std::vector<MovingCard> moving_cards_;
 };
 
 } /* namespace spire */

@@ -13,6 +13,12 @@ Keep Windows Python and .NET on PATH (`MSYS2_PATH_TYPE=inherit`). The
 build runs one compiler at a time and enables the POSIX declarations
 that MSYS2 otherwise hides with `-std=c++98`.
 
+`out/engine/spire_check <pack.s3p> <trace.jsonl> [more traces...]` replays
+local `random_runs.py` traces and checks that combat rooms survive across
+decisions, HP changes wait for their impact cues, playback finishes, and
+two-card selections can be confirmed with a controller. It reads the
+pack's sibling `data/` folder for localization. Keep traces out of git.
+
     out/engine/spire_view <pack.s3p> scenes/screens/main_menu.tscn out.png [--scale 0.6667] [--no-scripts] [--time T]
     out/engine/spire_view <pack.s3p> "Some text" out.png --text fonts/kreon_bold.ttf 24
 

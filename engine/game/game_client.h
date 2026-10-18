@@ -62,7 +62,7 @@ public:
     /* Increments with each new decision shown. */
     int decision_count() const { return decisions_; }
     /* Waiting for the logic's answer. */
-    bool busy() const { return waiting_; }
+    bool busy() const;
     bool game_over() const { return decision_["decision"].str() == "game_over"; }
     /* The game over screen's Main Menu was pressed (A on the plain one). */
     bool menu_requested() const { return menu_requested_; }

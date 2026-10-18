@@ -135,6 +135,28 @@ a git clone, deleted files go away by themselves (keep the list as is).
 - Do not tick alpha checklist items for this setup. Gameplay fixes and
   their validation are still required; no XDK build has been run.
 
+### Desktop implementation progress
+
+- Setup/tooling published in `0c3486a`.
+- First combat continuity change: the room, creature Spine tracks and
+  surviving hand holders stay alive across decisions and behind combat
+  selections/rewards. Stable card instance ids connect hand holders to
+  steps. HP, block, powers, energy and pile counts update at their impact
+  cues; the orange health bar follows NHealthBar's delayed tween. Cards
+  move into/out of the hand; disappeared enemies play their deaths.
+  Auto-play waits for playback and submits complete multi-card choices.
+- Validation: strict C++03 build; 15/15 seeded JIT runs with
+  `differences: 0`; `spire_check` replays 1,421 decisions, checking 995
+  persistent rooms and 366 delayed HP impacts, with **0 failures**.
+  It also checks controller selection of two cards in simple/combat/deck/
+  upgrade grids. An 80-decision PC render run completed.
+- This is partial checklist progress: map/room transitions, all intermediate
+  card animations, orb cues, VFX cleanup and other alpha items remain.
+  The local full pack also exposes a missing Silent `sidestep` atlas path
+  in a trace; investigate before the no-missing-texture soak gate.
+- Logic presentation exports changed: the eventual console build needs
+  wasm/C + logic_lib rebuilt. The converter/pack is unchanged so far.
+
 ## State (v0.111.0, 2026-10-18, commit 5fb9bdf and later)
 
 **Logic**: the game's own sts2.dll, IL-patched (`logic/patches.json`),

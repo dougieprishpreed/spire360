@@ -202,6 +202,10 @@ unsigned GameClient::next_rand() {
     return (rng_ >> 8) & 0xFFFFFF;
 }
 
+bool GameClient::busy() const {
+    return waiting_ || !finishing_.is_null() || (combat_ && combat_->busy()) || (room_ && room_->busy());
+}
+
 void GameClient::update(const PadState& pad) {
     std::string line;
     while (link_->poll(line)) {
@@ -243,14 +247,16 @@ void GameClient::update(const PadState& pad) {
     }
     if (!finishing_.is_null()) {
         /* The killing blow is playing: then the decision after it. */
-        if (room_ && room_->busy()) return;
+        if ((room_ && room_->busy()) || (combat_ && combat_->busy())) return;
         Json d = finishing_;
-        decision_ = last_combat_;
-        show(d);
         finishing_ = Json();
+        d.set("steps", Json()); /* already played on the persistent room */
+        show(d);
         return;
     }
     if (waiting_ || decision_.is_null()) return;
+    if (combat_ && combat_->busy()) return;
+    if (room_ && room_->busy()) return;
     if (auto_) choose_automatically();
     else handle_input(pad);
 }
@@ -262,6 +268,10 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     std::string err;
     const std::string& rt = d["context"]["room_type"].str();
     bool in_fight = rt == "Monster" || rt == "Elite" || rt == "Boss";
+    if (room_ && room_->root_node() && !room_->root_node()->parent) {
+        if (aftermath) room_->show_aftermath(d["player"]);
+        return room_->root_node();
+    }
     if (in_fight && !last_combat_.is_null()) {
         room_ = new CombatScreen(lib_);
         if (aftermath) room_->set_aftermath(d["player"]);
@@ -304,10 +314,57 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
 }
 
 void GameClient::show(const Json& d) {
-    potions_.detach();
     std::string prev_kind = decision_["decision"].str();
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];
+    const std::string& kind = d["decision"].str();
+    if (combat_ && prev_kind == "combat_play" && kind == "combat_play") {
+        potions_.detach();
+        decision_ = d;
+        choices_ = choices(d);
+        ++decisions_;
+        last_combat_ = d;
+        target_ = -1;
+        combat_->update_decision(d);
+        Node* old_bar = screen_->get_node("TopBarLayer");
+        if (old_bar) { screen_->remove_child(old_bar); delete old_bar; }
+        Json bar_state = d;
+        bar_state.set("player", prev_player);
+        Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
+        if (bar) screen_->add_child(bar);
+        potions_.attach(screen_, d["player"]);
+        return;
+    }
+    if (combat_ && prev_kind == "combat_play" && (kind == "rewards" || kind == "game_over") && d["steps"].size() > 0) {
+        /* Keep the actual room through its killing blow, including deaths
+         * caused by powers and orbs. Open the overlay after playback. */
+        combat_->update_decision(d, true);
+        finishing_ = d;
+        return;
+    }
+    if (combat_ && prev_kind == "combat_play" && kind == "card_select" && d["steps"].size() > 0) {
+        combat_->play_steps(d["steps"]);
+        finishing_ = d;
+        return;
+    }
+    potions_.detach();
+    /* NOverlayStack keeps the current combat room behind rewards and
+     * selections. Detach it before deleting the old overlay, then reparent
+     * that same room into the next screen. */
+    CombatScreen* kept_room = NULL;
+    const std::string& room_type = d["context"]["room_type"].str();
+    bool in_fight = room_type == "Monster" || room_type == "Elite" || room_type == "Boss";
+    bool combat_screen = kind == "combat_play" || kind == "card_select" || kind == "rewards" || kind == "card_reward";
+    if (((in_fight && combat_screen) || kind == "game_over") && (combat_ || room_)) {
+        kept_room = combat_ ? combat_ : room_;
+        Node* room_node = kept_room->root_node();
+        if (room_node && room_node->parent) room_node->parent->remove_child(room_node);
+        if (screen_ == room_node) screen_ = NULL;
+        if (kept_room == combat_) combat_ = NULL;
+        if (kept_room == room_) room_ = NULL;
+        Node* bar = room_node ? room_node->get_node("TopBarLayer") : NULL;
+        if (bar) { room_node->remove_child(bar); delete bar; }
+    }
     if (prev_kind == "rewards" && ported_) reward_focus_ = ((RewardsScreen*)ported_)->focused();
     if (prev_kind == "shop" && ported_) {
         ShopScreen* shop = (ShopScreen*)ported_;
@@ -329,12 +386,11 @@ void GameClient::show(const Json& d) {
     delete ported_;
     ported_ = NULL;
     delete room_;
-    room_ = NULL;
+    room_ = kept_room;
     delete behind_;
     behind_ = NULL;
     target_ = -1;
     std::string err;
-    const std::string& kind = d["decision"].str();
     if (kind == "rewards") {
         /* Over the room; a new rewards screen continues the last one (a
          * reward taken) without its slide-in; back from the card reward
@@ -463,44 +519,32 @@ void GameClient::show(const Json& d) {
             ported_ = NULL;
         }
     }
-    if ((kind == "rewards" || kind == "game_over") && prev_kind == "combat_play" && d["steps"].size() > 0 &&
-        !last_combat_.is_null() && finishing_.is_null()) {
-        /* The fight's last command: its effects (the killing blow, the
-         * deaths) play on the room first, then this decision is shown. */
-        finishing_ = d;
-        room_ = new CombatScreen(lib_);
-        room_->set_final();
-        room_->set_layout_memory(&enemy_places_);
-        screen_ = room_->build(last_combat_, &err);
-        if (screen_) {
-            room_->play_steps(d["steps"]);
-            Node* bar = make_top_bar(lib_, last_combat_, false, prev_player);
-            if (bar) screen_->add_child(bar);
-            tree_->root()->add_child(screen_);
-            return;
-        }
-        delete room_;
-        room_ = NULL;
-        finishing_ = Json();
-    }
     if (kind == "combat_play") {
-        if (prev_kind != "combat_play") enemy_places_.clear(); /* a new fight */
+        bool continuing = room_ != NULL;
+        if (prev_kind != "combat_play" && !continuing) enemy_places_.clear(); /* a new fight */
         Json before = prev_kind == "combat_play" ? last_combat_ : Json();
         last_combat_ = d;
-        combat_ = new CombatScreen(lib_);
-        combat_->set_hand_focus(hand_focus_);
-        combat_->set_layout_memory(&enemy_places_);
-        combat_->set_previous(before);
-        screen_ = combat_->build(d, &err);
+        if (continuing) {
+            combat_ = room_;
+            room_ = NULL;
+            screen_ = combat_->root_node();
+            combat_->update_decision(d);
+        } else {
+            combat_ = new CombatScreen(lib_);
+            combat_->set_hand_focus(hand_focus_);
+            combat_->set_layout_memory(&enemy_places_);
+            combat_->set_previous(before);
+            screen_ = combat_->build(d, &err);
+        }
         if (!screen_) {
             log_warn("combat screen: %s", err.c_str());
             delete combat_;
             combat_ = NULL;
-        } else if (prev_kind == "combat_play") {
+        } else if (!continuing && prev_kind == "combat_play") {
             /* What the last command did: the cards' effects, the enemies'
              * turn. */
             combat_->play_steps(d["steps"]);
-        } else {
+        } else if (!continuing) {
             combat_->show_start_banner();
         }
     }
@@ -548,6 +592,24 @@ void GameClient::pick(size_t i) {
 
 /* Like tools/random_runs.py: mostly play cards, then end the turn. */
 void GameClient::choose_automatically() {
+    if (decision_["decision"].str() == "card_select") {
+        int available = (int)decision_["cards"].size();
+        int count = decision_["min_select"].i(1);
+        if (count < 0) count = 0;
+        if (count > available) count = available;
+        if (count == 0) { send(action("skip_select")); return; }
+        std::vector<int> indices;
+        for (int i = 0; i < available; ++i) indices.push_back(i);
+        std::string selected;
+        for (int i = 0; i < count; ++i) {
+            size_t pick = next_rand() % indices.size();
+            int index = indices[pick];
+            selected += format(i ? ",%d" : "%d", decision_["cards"][(size_t)index]["index"].i(index));
+            indices.erase(indices.begin() + (long)pick);
+        }
+        send(action("select_cards", "\"indices\":" + quoted(selected)));
+        return;
+    }
     if (choices_.empty()) return;
     size_t n = choices_.size();
     if (decision_["decision"].str() == "combat_play" && n > 1 && next_rand() % 10 != 0) n -= 1; /* not "End turn" */

@@ -32,6 +32,29 @@ bool Json::has(const char* key) const {
     return type_ == OBJECT && obj_.find(key) != obj_.end();
 }
 
+void Json::set(const std::string& key, const Json& value) {
+    if (type_ != OBJECT) { *this = Json(); type_ = OBJECT; }
+    if (obj_.find(key) == obj_.end()) keys_.push_back(key);
+    obj_[key] = value;
+}
+
+void Json::append(const Json& value) {
+    if (type_ != ARRAY) { *this = Json(); type_ = ARRAY; }
+    arr_.push_back(value);
+}
+
+bool Json::operator==(const Json& other) const {
+    if (type_ != other.type_) return false;
+    switch (type_) {
+    case BOOL: return bool_ == other.bool_;
+    case NUMBER: return num_ == other.num_;
+    case STRING: return str_ == other.str_;
+    case ARRAY: return arr_ == other.arr_;
+    case OBJECT: return obj_ == other.obj_;
+    default: return true;
+    }
+}
+
 class JsonParser {
 public:
     JsonParser(const char* s, size_t n) : s_(s), end_(s + n), p_(s), err_() {}
