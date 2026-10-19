@@ -82,6 +82,11 @@ def compile_bank(bank, sources):
                 result['mods'].append({'kind': m['type'], 'property': m['propertyIndex'], **m['subnode']})
         return {k: v for k, v in result.items() if v}
 
+    def fades(entries):
+        return {f['busGuid']: [[struct.unpack('<I', struct.pack('<f', p['x']))[0] / 48000,
+                              p['y'], p['shape'], p['type']]
+                             for p in curves[f['curveGuid']]['curvePoints']] for f in entries}
+
     for key, wrapper in g['instrumentNodes'].items():
         n, kind = wrapper['data'], wrapper['type'].replace('InstrumentNode', '').lower()
         b = n['instrumentBody']
@@ -99,7 +104,7 @@ def compile_bank(bank, sources):
             node.update(mode=p['playMode'].split('_')[-1], entries=p['entries'])
             if kind == 'scatterer':
                 node.update(spawn=[n['spawnTime']['minimum'], n['spawnTime']['maximum']],
-                            polyphony=n['maximumSpawnPolyphony'], count=n['spawnCount'])
+                            polyphony=n['maximumSpawnPolyphony'], count=-1 if n['spawnCount'] == 33 else n['spawnCount'])
         elif kind == 'event':
             node['event'] = n['eventGuid']
             node['params'] = {names[p['parameterGuid']]: p['initialValue'] for p in n['eventParameterStubs']
@@ -135,6 +140,8 @@ def compile_bank(bank, sources):
                           'fade': max(body.get('leadInLength', 0), body.get('leadOutLength', 0)) / 48000,
                           'lead_in': body.get('leadInLength', 0) / 48000,
                           'lead_out': body.get('leadOutLength', 0) / 48000,
+                          'source_fades': fades(body.get('leadInCurves', [])),
+                          'destination_fades': fades(body.get('leadOutCurves', [])),
                           'length': body.get('length', 0) / 48000,
                           'boxes': [{'id': b['guid'], 'at': b['startTime'] / 48000,
                                      'length': b['length'] / 48000, 'locked': True}

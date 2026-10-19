@@ -59,18 +59,24 @@ struct AudioEvents::Impl {
         float volume, pitch, gain_db, pitch_st;
         double bridge_start, fade_in;
         const Json* bridge;
+        const Json* fade_curves;
+        Player* fade_owner;
+        double fade_start, source_timeline;
         bool destination_started;
+        bool transition_release;
         int repeats, selected, spawn_count;
         std::string key, category;
         std::vector<Child> children;
         std::map<std::string, float> values;
+        std::map<std::string, float> targets;
         std::map<std::string, bool> enabled;
         std::map<std::string, float> random_volume, random_pitch;
         std::map<std::string, bool> transitions;
         Player(Impl* s, Bank* b, const Json* d, bool e, Player* ctx, const std::string& k)
             : system(s), bank(b), def(d), context(ctx), event(e), started(false), done(false), first(true), releasing(false),
               voice(0), age(0), pos(0), delay(0), cutoff(-1), release_at(0), release_time(0), next_spawn(0), volume(1), pitch(1),
-              gain_db(0), pitch_st(0), bridge_start(0), fade_in(0), bridge(NULL), destination_started(false),
+              gain_db(0), pitch_st(0), bridge_start(0), fade_in(0), bridge(NULL), fade_curves(NULL), fade_owner(NULL),
+              fade_start(0), source_timeline(-1), destination_started(false), transition_release(false),
               repeats(0), selected(-1), spawn_count(0), key(k) {
             ++bank->references;
             if (event) {
@@ -78,6 +84,7 @@ struct AudioEvents::Impl {
                 for (size_t i = 0; i < params.size(); ++i) {
                     const std::string& n = params[i].str();
                     values[n] = ctx ? ctx->parameter(n) : b->doc["parameters"].get(n)["defaultValue"].f();
+                    if (ctx) targets[n] = ctx->desired_parameter(n);
                 }
             } else {
                 repeats = (*def)["loops"].i();
@@ -103,10 +110,18 @@ struct AudioEvents::Impl {
             if (v != values.end()) return v->second;
             return context ? context->parameter(name) : 0;
         }
+        float desired_parameter(const std::string& name) const {
+            std::map<std::string, float>::const_iterator target = targets.find(name);
+            if (target != targets.end()) return target->second;
+            return context ? context->desired_parameter(name) : parameter(name);
+        }
         void set_parameter(const std::string& name, float value) {
             const Json& p = bank->doc["parameters"].get(name);
             if (!p.is_null()) value = clampf(value, p["minimum"].f(), p["maximum"].f());
-            values[name] = value;
+            if (event && values.count(name)) {
+                if (p["seekSpeed"].f() > 0) targets[name] = value;
+                else values[name] = value;
+            }
             for (size_t i = 0; i < children.size(); ++i) children[i].player->set_parameter(name, value);
         }
         bool matches(const Json& conditions) const {
@@ -123,7 +138,10 @@ struct AudioEvents::Impl {
                 if (!i->second) return false;
             return true;
         }
-        double timeline_position() const { return event ? pos : context ? context->timeline_position() : age; }
+        double timeline_position() const {
+            if (source_timeline >= 0 && fade_owner) return source_timeline + fade_owner->age - fade_start;
+            return event ? pos : context ? context->timeline_position() : age;
+        }
         void properties(const Json& d, const std::string& owner, float& db, float& st) {
             float db_mod = 0, st_mod = 0;
             const Json& mods = d["mods"];
@@ -171,6 +189,15 @@ struct AudioEvents::Impl {
             float bus_db = (*b)["volume"].f(), bus_pitch = (*b)["pitch"].f();
             properties(*b, bus, bus_db, bus_pitch);
             db += bus_db; st += bus_pitch;
+            const Player* fade = this;
+            while (fade && !fade->fade_curves) fade = fade->context;
+            if (fade && fade->fade_owner) {
+                const Json& points = fade->fade_curves->get(bus);
+                if (points.size()) {
+                    float gain = curve_value(points, fade->fade_owner->age - fade->fade_start, 1);
+                    db += gain > 0 ? (float)(20 * log10(gain)) : -80;
+                }
+            }
             buses((*b)["parent"].str(), db, st, depth + 1);
         }
         void levels(float& gain, float& ratio) {
@@ -181,7 +208,7 @@ struct AudioEvents::Impl {
             } else buses((*def)["bus"].str(), db, st);
             gain *= volume * db_gain(db); ratio *= pitch * pitch_ratio(st);
             if (fade_in > 0) gain *= clampf((float)((age - delay) / fade_in), 0, 1);
-            if (releasing && release_time > 0) gain *= clampf(1 - (float)((age - release_at) / release_time), 0, 1);
+            if (releasing && release_time > 0 && !transition_release) gain *= clampf(1 - (float)((age - release_at) / release_time), 0, 1);
             if (context) context->levels(gain, ratio);
             else gain *= system->category_gain(category);
         }
@@ -275,7 +302,14 @@ struct AudioEvents::Impl {
                 for (size_t k = 0; k < children.size();) {
                     if (children[k].box >= 0) {
                         if (t["length"].num() > EPS) {
-                            children[k].box = -3; children[k].player->release(t["lead_in"].num()); ++k;
+                            Player* source = children[k].player;
+                            children[k].box = -3;
+                            if (t["source_fades"].size()) {
+                                source->fade_curves = &t["source_fades"]; source->fade_owner = this;
+                                source->fade_start = age; source->source_timeline = pos;
+                                source->transition_release = true;
+                            }
+                            source->release(t["lead_in"].num()); ++k;
                         } else {
                             children[k].player->detach(0);
                             delete children[k].player; children.erase(children.begin() + k);
@@ -309,7 +343,13 @@ struct AudioEvents::Impl {
                 if (inside && !enabled[id]) {
                     size_t before = children.size();
                     add_instrument(box["id"].str(), (int)i, box["locked"].b() ? pos - box["at"].num() : 0);
-                    if (bridge && children.size() > before) children.back().player->fade_in = (*bridge)["lead_out"].num();
+                    if (bridge && children.size() > before) {
+                        Player* destination = children.back().player;
+                        if ((*bridge)["destination_fades"].size()) {
+                            destination->fade_curves = &(*bridge)["destination_fades"];
+                            destination->fade_owner = this; destination->fade_start = bridge_start;
+                        } else destination->fade_in = (*bridge)["lead_out"].num();
+                    }
                 }
                 enabled[id] = inside;
             }
@@ -370,7 +410,8 @@ struct AudioEvents::Impl {
                 }
             }
             if (!event && (*def)["kind"].str() == "scatterer" && age + EPS >= next_spawn + delay) {
-                if (children.size() < (size_t)(*def)["polyphony"].i(1)) { select(); ++spawn_count; }
+                int limit = (*def)["count"].i(-1);
+                if ((limit < 0 || spawn_count < limit) && children.size() < (size_t)(*def)["polyphony"].i(1)) { select(); ++spawn_count; }
                 next_spawn = age - delay + system->range((*def)["spawn"][(size_t)0].f(), (*def)["spawn"][1].f());
             }
             for (size_t i = 0; i < children.size();) {
@@ -403,14 +444,32 @@ struct AudioEvents::Impl {
         }
         void advance(double seconds) {
             age += seconds;
+            for (std::map<std::string, float>::iterator i = targets.begin(); i != targets.end(); ++i) {
+                const Json& parameter = bank->doc["parameters"].get(i->first);
+                float& value = values[i->first];
+                float speed = parameter["seekSpeed"].f();
+                if (i->second < value && parameter["seekSpeedDown"].f() > 0) speed = parameter["seekSpeedDown"].f();
+                float step = (float)seconds * speed;
+                value = speed <= 0 ? i->second : value < i->second ? minf(value + step, i->second) : maxf(value - step, i->second);
+            }
             if (event && !releasing && (!bridge || destination_started)) pos += seconds;
             for (size_t i = 0; i < children.size(); ++i) children[i].player->advance(seconds);
+        }
+        void ramp_levels(double seconds) {
+            if (voice) {
+                float gain = 1, ratio = 1; levels(gain, ratio);
+                system->mixer.volume(voice, gain, seconds);
+                system->mixer.pitch(voice, ratio);
+            }
+            for (size_t i = 0; i < children.size(); ++i) children[i].player->ramp_levels(seconds);
         }
         double boundary() const {
             double next = 64.0 / system->mixer.rate();
             if (delay > age + EPS) next = mind(next, delay - age);
             if (releasing && release_at + release_time > age + EPS) next = mind(next, release_at + release_time - age);
             if (cutoff > age + EPS) next = mind(next, cutoff - age);
+            if (!event && (*def)["kind"].str() == "scatterer" && next_spawn + delay > age + EPS)
+                next = mind(next, next_spawn + delay - age);
             if (voice) {
                 double remaining = system->mixer.remaining(voice);
                 if (remaining > EPS) next = mind(next, remaining);
@@ -567,9 +626,11 @@ void AudioEvents::render(float* out, int frames) {
             if (p->done) { delete p; impl_->roots.erase(i++); }
             else { int boundary = (int)ceil(p->boundary() * impl_->mixer.rate() - 0.0001); if (boundary > 0 && boundary < count) count = boundary; ++i; }
         }
-        impl_->mixer.render(out + cursor * 2, count);
         double dt = (double)count / impl_->mixer.rate();
-        for (std::map<u32, Impl::Player*>::iterator i = impl_->roots.begin(); i != impl_->roots.end(); ++i) i->second->advance(dt);
+        for (std::map<u32, Impl::Player*>::iterator i = impl_->roots.begin(); i != impl_->roots.end(); ++i) {
+            i->second->advance(dt); i->second->ramp_levels(dt);
+        }
+        impl_->mixer.render(out + cursor * 2, count);
         cursor += count;
     }
     impl_->collect_banks();

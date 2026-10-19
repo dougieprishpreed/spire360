@@ -18,9 +18,9 @@ static int fixture_cases(const Pack& pack) {
     AudioEvents audio(&pack);
     if (!audio.available()) return 1;
     std::vector<float> data(2000);
-    const char* names[] = { "layer", "nested", "choice", "delay", "timeline", "repeat", "condition", "bank", "bridge" };
+    const char* names[] = { "layer", "nested", "choice", "delay", "timeline", "repeat", "condition", "bank", "bridge", "fade" };
     int failures = 0;
-    for (int i = 0; i < 9; ++i) {
+    for (int i = 0; i < 10; ++i) {
         audio.stop_all();
         Json params; params.set("intensity", Json::make_number(2));
         audio.play(std::string("event:/test/") + names[i], 1, params);
@@ -32,6 +32,7 @@ static int fixture_cases(const Pack& pack) {
             if (i == 4) want = f >= 48 && f < 96 ? 0.25f : 0;
             if (i == 5) want = f < 480 ? 0.25f : f < 960 ? -0.25f : 0;
             if (i == 8) want = f < 240 ? 0.25f : f < 336 ? 0.125f : f < 816 ? -0.25f : 0;
+            if (i == 9) want = f < 240 ? 0.25f : f < 336 ? 0.25f - (f - 240) * 0.5f / 96 : f < 720 ? -0.25f : 0;
             if (fabsf(data[(size_t)f * 2] - want) > 0.00001f || fabsf(data[(size_t)f * 2 + 1] - want) > 0.00001f) {
                 fprintf(stderr, "FAIL event %s frame %d: %.6f expected %.6f\n", names[i], f, data[(size_t)f * 2], want); ++failures; break;
             }
@@ -59,6 +60,18 @@ static int fixture_cases(const Pack& pack) {
     Json cue = Json::parse(cue_text, strlen(cue_text), &error);
     game.decision(decision); game.cue(cue); game.decision(decision);
     if (game.events().parameter_value(1, "Progress") != 8) { fprintf(stderr, "FAIL elite phase was reset by another decision\n"); ++failures; }
+    audio.stop_all(); audio.global_parameter("Progress", 0);
+    u32 ramp = audio.play("event:/test/music"); audio.parameter(ramp, "ramp", 1);
+    for (int i = 0; i < 5; ++i) audio.render(&data[0], 960);
+    if (fabsf(audio.parameter_value(ramp, "ramp") - 0.2f) > 0.00001f) { fprintf(stderr, "FAIL parameter seek up\n"); ++failures; }
+    audio.parameter(ramp, "ramp", 0);
+    for (int i = 0; i < 5; ++i) audio.render(&data[0], 960);
+    if (fabsf(audio.parameter_value(ramp, "ramp") - 0.1f) > 0.00001f) { fprintf(stderr, "FAIL parameter seek down\n"); ++failures; }
+    audio.stop_all();
+    u64 scattered = audio.started_voices(); audio.play("event:/test/scatter"); audio.render(&data[0], 1000);
+    if (audio.started_voices() - scattered != 42 || data[1968] != 0.25f) {
+        fprintf(stderr, "FAIL infinite scatterer scheduling: %.0f spawns, sample %.6f\n", (double)(audio.started_voices() - scattered), data[1968]); ++failures;
+    }
     printf("audio: synthetic event timing, layers, playlists, nested events, conditions, bank selection, loops and streams: %d failures\n", failures);
     return failures;
 }

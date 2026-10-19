@@ -54,6 +54,13 @@ music events pass Progress 0..9 and boss-parameter checks; transition-bridge
 fixtures and elite-phase persistence checks pass. The full 15-trace audio
 replay was stopped to rebuild after refinements; do not count it as passed.
 
+Follow-up fidelity checks now cover asymmetric parameter seek speeds,
+authored per-bus transition fades and scatterer spawn deadlines. A scatterer
+count of 33 in the current bank format means unlimited spawning; the fixture
+checks 42 exactly timed spawns. Linear transition fades are checked against
+individual output samples. Nonlinear curve shapes and authored DSP still
+need verification.
+
 The game's Vine Shambler code requests `vine_shambler_cast`, which is absent
 from the installed bank's string table (the bank has `grasping_vines`). Keep
 this content mismatch visible; do not silently invent a replacement cue.
@@ -61,12 +68,15 @@ this content mismatch visible; do not silently invent a replacement cue.
 Packs preserved: `work/pack/pack.s3p`, `work/pack-next/pack.s3p`,
 `work/audio-pack/pack.s3p`. New audio test pack: `work/audio-runtime/pack.s3p`.
 `work/pack-audio/pack.s3p` combines pack-next visuals and the new audio for PC
-checks; regenerate it after runtime-program changes. It was assembled from
-the existing packs; a complete converter build remains a separate check.
+checks. The current complete converter build is `work/pack-sound/pack.s3p`:
+954.6 MB, 737 localization files, zero conversion errors. Use this pack for
+new checks. Full decode passes 2,365 samples / 922,744,173 frames, with zero
+failures; named-event, imported-stream, all-music and focused 99-response
+presentation checks pass against it. Older intermediate packs are preserved.
 Keep `converter/.cache/audio` and every existing ignored build cache.
 
-Next: finish the audio fidelity audit (authored DSP, exact transition fade
-curves, seek speeds and scatterer behavior still need coverage), then repair
+Next: finish the audio fidelity audit (authored DSP and nonlinear transition
+curve shapes still need coverage), then repair
 the two later-act warnings and continue
 the alpha checklist. Saving/continue, Crystal Sphere, pause/deck/piles,
 act/victory transitions and remaining shaders are still open. This is **not
