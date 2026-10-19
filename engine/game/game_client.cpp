@@ -463,6 +463,10 @@ void GameClient::show(const Json& d) {
      * selections. Detach it before deleting the old overlay, then reparent
      * that same room into the next screen. */
     CombatScreen* kept_room = NULL;
+    bool event_room = prev_kind == "event_choice" && decision_["layout"].str() == "Combat" && ported_ &&
+        ((kind == "event_choice" && d["event_id"].str() == decision_["event_id"].str()) ||
+         (kind == "combat_play" && d["view"]["encounter"] == decision_["combat_visuals"]["view"]["encounter"]));
+    if (event_room) kept_room = ((EventScreen*)ported_)->take_combat();
     const std::string& room_type = d["context"]["room_type"].str();
     bool in_fight = room_type == "Monster" || room_type == "Elite" || room_type == "Boss";
     bool combat_screen = kind == "combat_play" || kind == "card_select" || kind == "rewards" || kind == "card_reward";
@@ -559,7 +563,9 @@ void GameClient::show(const Json& d) {
     }
     if (kind == "event_choice") {
         last_event_ = d;
-        ported_ = new EventScreen(lib_);
+        EventScreen* event = new EventScreen(lib_);
+        if (event_room) { event->set_combat(room_); room_ = NULL; }
+        ported_ = event;
         screen_ = ported_->build(d, &err);
         if (!screen_) {
             log_warn("event screen: %s", err.c_str());
@@ -640,6 +646,7 @@ void GameClient::show(const Json& d) {
             room_ = NULL;
             screen_ = combat_->root_node();
             combat_->update_decision(d);
+            if (event_room) combat_->show_start_banner();
         } else {
             combat_ = new CombatScreen(lib_);
             combat_->set_hand_focus(hand_focus_);

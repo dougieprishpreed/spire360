@@ -49,6 +49,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     vfx_box_ = NULL;
     places_ = NULL;
     final_ = false;
+    visual_only_ = false;
     tips_ = NULL;
     tips_for_ = -2;
     pending_finish_ = false;
@@ -1498,6 +1499,16 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
             (*places_)[enemy_node_ids[i]] = at[i];
     }
     play_idle(root);
+    if (visual_only_) {
+        /* NCreature.ToggleIsInteractable(false) hides the state display. */
+        hide(player_.node ? player_.node->find_unique("HealthBar") : NULL);
+        hide(osty_.node ? osty_.node->find_unique("HealthBar") : NULL);
+        for (size_t i = 0; i < enemies_.size(); ++i) {
+            Node* n = enemies_[i].node;
+            hide(n ? n->find_unique("HealthBar") : NULL);
+            hide(n ? n->find_unique("Intents") : NULL);
+        }
+    }
     arrow_ = make_arrow();
     root->add_child(arrow_);
     Node* driver = SceneLibrary::create_node("Node");
@@ -1558,6 +1569,18 @@ void CombatScreen::refresh_counters() {
 /* Keep the background, Spine tracks, particles and surviving holders alive.
  * Only new combatants are instanced; absent enemies remain through death. */
 void CombatScreen::update_decision(const Json& d, bool finishing) {
+    if (visual_only_ && !finishing) {
+        /* NCombatRoom.TransitionToActiveCombat keeps all creature nodes. */
+        visual_only_ = false;
+        setup_combat_ui(root_, d);
+        build_hand(find_named(root_, "CombatUi"), d);
+        set_visible(player_.node ? player_.node->find_unique("HealthBar") : NULL, true);
+        for (size_t i = 0; i < enemies_.size(); ++i) {
+            Node* n = enemies_[i].node;
+            set_visible(n ? n->find_unique("HealthBar") : NULL, d["enemies"][i]["health_bar_visible"].b(true));
+            set_visible(n ? n->find_unique("Intents") : NULL, true);
+        }
+    }
     if (!finishing) {
         aftermath_ = final_ = false;
         set_visible(find_named(root_, "CombatUi"), true);

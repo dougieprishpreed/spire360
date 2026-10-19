@@ -4,6 +4,7 @@
 #include "../../engine/audio/game_audio.h"
 #include "../../engine/game/card_select_screen.h"
 #include "../../engine/game/combat_screen.h"
+#include "../../engine/game/event_screen.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/logic_link.h"
@@ -44,6 +45,32 @@ public:
 static int failures = 0;
 static void check(bool ok, const char* message) {
     if (!ok) { fprintf(stderr, "FAIL: %s\n", message); ++failures; }
+}
+
+static void combat_event_case(SceneLibrary& lib, const Json& decision) {
+    EventScreen screen(&lib);
+    SceneTree tree;
+    std::string error;
+    Node* root = screen.build(decision, &error);
+    check(root != NULL, "combat event did not build its layout");
+    if (!root) return;
+    tree.root()->add_child(root);
+    tree.set_viewport(Vec2(1920, 1080), Xform2D());
+    for (int i = 0; i < 60; ++i) tree.process(0.05);
+    Node* room = find_named(root, "CombatRoomContainer");
+    Node* enemies = find_named(room, "EnemyContainer");
+    const Json& es = decision["combat_visuals"]["enemies"];
+    check(es.size() > 0 && enemies && !enemies->children.empty(), "combat event lost the encounter's enemies");
+    Node* ui = find_named(room, "CombatUi");
+    check(ui && ui->is_canvas_item() && !((CanvasItem*)ui)->visible, "combat event enabled the combat hand/UI");
+    Node* enemy = enemies && !enemies->children.empty() ? enemies->children[0] : NULL;
+    Node* health = enemy ? enemy->find_unique("HealthBar") : NULL;
+    check(health && health->is_canvas_item() && !((CanvasItem*)health)->visible, "visual-only enemy health display is visible");
+    check(find_named(root, "Portrait") == NULL, "combat event used the portrait layout");
+    PadState pad; pad.pressed = PadState::A;
+    std::string command = screen.input(pad);
+    Json response = Json::parse(command.c_str(), command.size(), &error);
+    check(response["action"].str() == "choose_option", "combat event options did not accept controller input");
 }
 
 static void advance(SceneTree& tree, GameClient& game) {
@@ -508,6 +535,10 @@ int main(int argc, char** argv) {
                 selections_checked = true;
             }
             Node* old_room = tree.root()->children.empty() ? NULL : tree.root()->children[0];
+            Node* old_event_allies = previous["layout"].str() == "Combat" ? find_named(old_room, "AllyContainer") : NULL;
+            bool continuing_event = old_event_allies &&
+                ((d["layout"].str() == "Combat" && d["event_id"] == previous["event_id"]) ||
+                 (d["decision"].str() == "combat_play" && d["view"]["encounter"] == previous["combat_visuals"]["view"]["encounter"]));
             bool same_fight = previous["decision"].str() == "combat_play" && d["decision"].str() == "combat_play";
             Node* hp_label = NULL;
             std::string old_hp;
@@ -550,6 +581,17 @@ int main(int argc, char** argv) {
             for (size_t o = 0; same_fight && old_room && o < previous["orbs"].size(); ++o)
                 old_orbs.push_back(find_named(old_room, format("CombatOrb_%d", previous["orbs"][o]["instance_id"].i((int)o + 1)).c_str()));
             advance(tree, game);
+            if (d["layout"].str() == "Combat") combat_event_case(lib, d);
+            if (continuing_event) {
+                check(find_named(tree.root(), "AllyContainer") == old_event_allies, "combat event rebuilt its embedded encounter between pages/fight");
+                if (d["decision"].str() == "combat_play") {
+                    Node* ui = find_named(tree.root(), "CombatUi");
+                    check(ui && ui->is_canvas_item() && ((CanvasItem*)ui)->visible, "combat event did not activate the combat UI");
+                    Node* es = find_named(tree.root(), "EnemyContainer");
+                    Node* health = es && !es->children.empty() ? es->children[0]->find_unique("HealthBar") : NULL;
+                    check(health && health->is_canvas_item() && ((CanvasItem*)health)->visible, "combat event did not restore enemy interaction/state display");
+                }
+            }
             if (same_fight && old_room) {
                 for (size_t s = 0; s < d["steps"].size(); ++s)
                     for (size_t k = 0; k < d["steps"][s].size(); ++k) {

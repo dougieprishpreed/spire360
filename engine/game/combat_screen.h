@@ -40,6 +40,8 @@ public:
     void set_previous(const Json& decision) { previous_ = decision; }
     void set_layout_memory(std::map<int, Vec2>* places) { places_ = places; }
     void set_final() { final_ = true; }
+    /* NCombatRoom VisualOnly: event scenery, with inactive creature UI. */
+    void set_visual_only() { visual_only_ = final_ = true; }
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
     /* NCombatRoom lives for the fight. Apply a response to that room;
@@ -205,6 +207,7 @@ private:
     Json previous_;
     std::map<int, Vec2>* places_;
     bool final_;
+    bool visual_only_;
     Control* vfx_box_;                    /* %CombatVfxContainer (screen coordinates) */
     std::vector<FlyingNumber> numbers_;
     struct Banner {

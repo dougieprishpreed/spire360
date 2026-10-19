@@ -1,4 +1,5 @@
 #include "event_screen.h"
+#include "combat_screen.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -44,9 +45,19 @@ static std::string option_text(const Json& o) {
 }
 
 EventScreen::EventScreen(SceneLibrary* lib)
-    : lib_(lib), focus_(-1), enabled_(false), enable_at_(0), time_(0), ancient_(false), line_(0), laid_out_(false),
+    : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), ancient_(false), line_(0), laid_out_(false),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
+
+EventScreen::~EventScreen() { delete combat_; }
+
+CombatScreen* EventScreen::take_combat() {
+    CombatScreen* result = combat_;
+    combat_ = NULL;
+    Node* room = result ? result->root_node() : NULL;
+    if (room && room->parent) room->parent->remove_child(room);
+    return result;
+}
 
 Node* EventScreen::build(const Json& d, std::string* error) {
     decision_ = d;
@@ -69,15 +80,49 @@ Node* EventScreen::build(const Json& d, std::string* error) {
     back->color = Color(0, 0, 0, 1);
     root->add_child(back);
 
-    Node* layout = ancient_ ? build_ancient(d) : build_default(d);
+    bool combat = d["layout"].str() == "Combat";
+    Node* layout = ancient_ ? build_ancient(d) : combat ? build_combat(d) : build_default(d);
     if (!layout) {
-        if (error) *error = ancient_ ? "no ancient_event_layout.tscn" : "no default_event_layout.tscn";
+        if (error) *error = ancient_ ? "no ancient_event_layout.tscn" : combat ? "no combat event visuals/layout" : "no default_event_layout.tscn";
         delete root;
         return NULL;
     }
     root->add_child(layout);
     root->add_child(frame_driver(this));
     return root;
+}
+
+/* NCombatEventLayout.SetEvent: the encounter behind the description and
+ * event options, with the combat hand and creature interaction disabled. */
+Node* EventScreen::build_combat(const Json& d) {
+    if (!d["combat_visuals"].is_object()) return NULL;
+    Node* lay = instance(lib_, "scenes/events/combat_event_layout.tscn");
+    Node* box = lay ? lay->find_unique("CombatRoomContainer") : NULL;
+    if (!box) { delete lay; return NULL; }
+    Node* room = combat_ ? combat_->root_node() : NULL;
+    if (!combat_) {
+        combat_ = new CombatScreen(lib_);
+        combat_->set_visual_only();
+        std::string error;
+        room = combat_->build(d["combat_visuals"], &error);
+    }
+    if (!room) { delete combat_; combat_ = NULL; delete lay; return NULL; }
+    box->add_child(room);
+    Node* desc = lay->find_unique("EventDescription");
+    set_label(desc, d["description_bbcode"].is_string() ? d["description_bbcode"].str() : d["description"].str());
+    if (desc && desc->type == "RichTextLabel") {
+        RichTextLabel* r = (RichTextLabel*)desc;
+        tweens_.tween_from(&r->modulate.a, 0, 1, 1.0f, TRANS_LINEAR, EASE_IN_OUT, SETUP_WAIT + 0.75f);
+        tweens_.tween_from(&r->visible_ratio, 0, 1, 1.0f, TRANS_SINE, EASE_OUT, SETUP_WAIT + 0.75f);
+    }
+    hide(lay->find_unique("SharedEventLabel"));
+    Node* options = lay->find_unique("OptionsContainer");
+    const Json& os = d["options"];
+    options_.reserve(os.size());
+    for (size_t i = 0; i < os.size(); ++i) add_option(options, os[i], (int)i, false);
+    if (!options_.empty()) focus(0);
+    enabled_ = true; enable_at_ = SETUP_WAIT;
+    return lay;
 }
 
 /* NEventLayout: portrait, title, description, options. */

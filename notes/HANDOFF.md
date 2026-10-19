@@ -52,7 +52,7 @@ below. A 14-screen Defect PC render records a non-silent 20.95 s stereo mix
 (`work/audio-play.wav`), 110 voices, zero missing/decoder failures. All 19
 music events pass Progress 0..9 and boss-parameter checks; transition-bridge
 fixtures and elite-phase persistence checks pass. The full 15-trace audio
-replay was stopped to rebuild after refinements; do not count it as passed.
+replay now passes against the latest normal converter pack, as recorded below.
 
 Follow-up fidelity checks now cover asymmetric parameter seek speeds,
 authored per-bus transition fades and scatterer spawn deadlines. A scatterer
@@ -71,26 +71,55 @@ distortion and 1 fader. Earlier labels for loudness meters, delay and
 convolution reverb were parser enum mismatches. Integer parameter union bits
 are recovered before writing programs. These effects are **not executed by
 the runtime yet**. Converter tests: 29 pass; all installed bus effect
-references resolve. A new complete pack/check run is in progress under
-`work/pack-sound-effects`, with logs `work/audio-effects-*`.
+references resolve. The complete `work/pack-sound-effects/pack.s3p` build
+passes: 954.8 MB, 737 localization files, zero conversion errors. Named-event,
+all 52 temporary-stream and all 19 music checks pass against it. The full
+15-trace audio presentation replay plus the Lantern Key branches passes:
+1,428 responses / 995 persistent rooms / 366 impacts / 181 orb checks /
+26 deaths, zero failures; 8,097 voices, four absent-event calls and zero
+decoder failures. Logs: `work/audio-effects-*`.
 
 The game's Vine Shambler code requests `vine_shambler_cast`, which is absent
-from the installed bank's string table (the bank has `grasping_vines`). Keep
-this content mismatch visible; do not silently invent a replacement cue.
+from the installed bank's string table (the bank has `grasping_vines`).
+Slithering Strangler similarly requests `slithering_strangler_tail`, absent
+from the bank (which has headbutt, cast and die). Both were verified against
+the installed code and offline string table. The full replay's four absent
+calls use these two paths. Keep these content mismatches visible; do not
+silently invent replacement cues.
 
 Packs preserved: `work/pack/pack.s3p`, `work/pack-next/pack.s3p`,
 `work/audio-pack/pack.s3p`. New audio test pack: `work/audio-runtime/pack.s3p`.
 `work/pack-audio/pack.s3p` combines pack-next visuals and the new audio for PC
-checks. The current complete converter build is `work/pack-sound/pack.s3p`:
-954.6 MB, 737 localization files, zero conversion errors. Use this pack for
-new checks. Full decode passes 2,365 samples / 922,744,173 frames, with zero
+checks. The earlier complete converter build is `work/pack-sound/pack.s3p`:
+954.6 MB, 737 localization files, zero conversion errors. Full decode passes
+2,365 samples / 922,744,173 frames, with zero
 failures; named-event, imported-stream, all-music and focused 99-response
 presentation checks pass against it. Older intermediate packs are preserved.
 Keep `converter/.cache/audio` and every existing ignored build cache.
 
+Combat events now use `combat_event_layout.tscn` and the synchronizer's
+existing encounter in VisualOnly mode. The room, Spine tracks and creatures
+persist across event pages and into combat, when health displays and combat
+UI activate. The Lantern Key's gold and fight branches pass with the real
+logic; the rendered layout and controller options are checked. Focused
+replay: 106 responses / 74 persistent rooms / 33 impacts / 57 orb checks /
+2 deaths, zero failures, 667 voices and zero decoder failures. Seeded logic:
+15/15 runs in `traces/combat-event`, **differences: 0**. No gameplay RNG is
+consumed by the visual export. Punch-Off and The Architect also pass real
+logic export, controller/layout and render checks; Punch-Off's transition
+into combat preserves its room. Their focused replay passes 105 responses,
+zero failures. Punch-Off's ambient sparring loop and The Architect's speech
+bubbles/head animation are still open. Renders: ignored `work/lantern-gold.png`
+and `work/event-{punch_off,the_architect}.png`. The current complete pack is
+`work/pack-sound-effects/pack.s3p`; every earlier pack/cache is preserved.
+
+Aeonglass's RaySlot warning is a stale unused anchor in the installed scene:
+`slot_name=blast_placeholder` is absent from the original skeleton; RaySlot
+has no children and NAeonGlassVfx does not use it. Do not invent a substitute
+slot or hide other missing anchors. It is not a converter bone omission.
+
 Next: finish the audio fidelity audit (authored DSP and nonlinear transition
-curve shapes still need coverage), then repair
-the two later-act warnings and continue
+curve shapes still need coverage), cover the other combat events and continue
 the alpha checklist. Saving/continue, Crystal Sphere, pause/deck/piles,
 act/victory transitions and remaining shaders are still open. This is **not
 an alpha candidate**. Event playback is connected, but Sound is not ticked
@@ -542,10 +571,11 @@ here as they land, with the commit.
       history, statistics, timeline) as far as they are single-player.
 
 **Sound**
-- [ ] Converter: the 12 FMOD Studio banks (301 MB, 591 named events) and the
+- [x] Converter: the 12 FMOD Studio banks (301 MB, 591 named events) and the
       mp3 temp sfx: extract the samples at conversion time (FSB5 inside
       the banks), plus the event -> sample(s) mapping and the parameters
-      the game sets.
+      the game sets (`eec6c86`, `7877c59`, `5bb51a6`; complete local pack and
+      all sample/event/stream checks pass).
 - [ ] Engine: XAudio2 playback on the console (a PC backend for the
       tools), streaming music.
 - [ ] The game's sound cues from `steps` (`sfx` / `music` cues are in the

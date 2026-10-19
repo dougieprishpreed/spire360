@@ -25,6 +25,7 @@ from collections import Counter
 DROP = {
     "instance_id",
     "audio",  # NRunMusicController's presentation selection and parameters
+    "combat_visuals",  # visual-only encounter behind a combat event's options
     "steps", "tips", "background", "colorless", "card_removal_used", "orb_slots", "orbs", "score_lines", "score",
     "death_quote", "victory_text", "jitter", "room", "look", "max_potions", "ascension", "at_second_boss",
     "ancient", "point_type", "at_boss", "total_floor", "second_boss", "description_by_target",

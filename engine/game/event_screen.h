@@ -8,8 +8,8 @@
  * ancient's background scene, its name banner, the dialogue lines one at a
  * time (A: the next line), then the options under them.
  *
- * Combat and custom layouts (events with their own scenes) show the default
- * layout for now. */
+ * Combat layouts embed an encounter in VisualOnly mode. Custom layouts
+ * (events with their own scenes) show the default layout for now. */
 #ifndef SPIRE_EVENT_SCREEN_H
 #define SPIRE_EVENT_SCREEN_H
 
@@ -22,13 +22,18 @@ namespace spire {
 class CanvasItem;
 class Control;
 class SceneLibrary;
+class CombatScreen;
 
 class EventScreen : public RunScreen, public FrameListener {
 public:
     explicit EventScreen(SceneLibrary* lib);
+    virtual ~EventScreen();
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
     virtual void frame(double dt);
+    void set_combat(CombatScreen* combat) { combat_ = combat; }
+    /* Transfer the visual-only room across event pages or into the fight. */
+    CombatScreen* take_combat();
 
 private:
     struct Option {
@@ -43,12 +48,14 @@ private:
     };
     Node* build_default(const Json& d);
     Node* build_ancient(const Json& d);
+    Node* build_combat(const Json& d);
     void add_option(Node* box, const Json& o, int i, bool ancient);
     void focus(int i);
     void show_line(int i);
     void place_content(float h);
 
     SceneLibrary* lib_;
+    CombatScreen* combat_;
     Json decision_;
     std::vector<Option> options_;
     int focus_;

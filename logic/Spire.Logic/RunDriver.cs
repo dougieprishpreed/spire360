@@ -2129,11 +2129,11 @@ public partial class RunDriver
     private EncounterModel? _combatViewFor;
 
     [System.Diagnostics.CodeAnalysis.DynamicDependency("GetBackgroundAssets", typeof(EncounterModel))]
-    private Dictionary<string, object?>? CombatView()
+    private Dictionary<string, object?>? CombatView(EncounterModel? encounter = null)
     {
         try
         {
-            var enc = (_runState?.CurrentRoom as CombatRoom)?.Encounter;
+            var enc = encounter ?? (_runState?.CurrentRoom as CombatRoom)?.Encounter;
             var act = _runState?.Act;
             if (enc == null || act == null) return null;
             if (ReferenceEquals(enc, _combatViewFor)) return _combatView;
@@ -2828,6 +2828,33 @@ public partial class RunDriver
             catch (Exception ex) { Log($"ancient: {ex.Message}"); }
         }
 
+        Dictionary<string, object?>? combatVisuals = null;
+        if (localEvent.LayoutType == MegaCrit.Sts2.Core.Events.EventLayoutType.Combat)
+        {
+            try
+            {
+                // NCombatEventLayout.SetEvent uses the synchronizer's existing
+                // encounter; generating another would consume gameplay RNG.
+                var visuals = localEvent.CreateCombatRoomVisuals(_runState!.Players, _runState.Act);
+                combatVisuals = new Dictionary<string, object?>
+                {
+                    ["view"] = CombatView(visuals.Encounter),
+                    ["player"] = PlayerSummary(_runState.Players[0]),
+                    ["enemies"] = visuals.Enemies.Select((c, i) => new Dictionary<string, object?>
+                    {
+                        ["index"] = i,
+                        ["id"] = c.Monster?.Id.Entry,
+                        ["combat_id"] = c.CombatId,
+                        ["slot"] = string.IsNullOrEmpty(c.SlotName) ? null : c.SlotName,
+                        ["name"] = _loc.Monster(c.Monster?.Id.Entry ?? "UNKNOWN"),
+                        ["hp"] = c.CurrentHp,
+                        ["max_hp"] = c.MaxHp,
+                    }.WithCreatureView(c)).ToList(),
+                };
+            }
+            catch (Exception ex) { Log($"combat event visuals: {ex.Message}"); }
+        }
+
         return new Dictionary<string, object?>
         {
             ["type"] = "decision",
@@ -2843,6 +2870,7 @@ public partial class RunDriver
             ["title_text"] = titleText,
             ["description_bbcode"] = descBbcode,
             ["ancient"] = ancient,
+            ["combat_visuals"] = combatVisuals,
         };
     }
 
