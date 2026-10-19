@@ -10,6 +10,37 @@ import uuid
 
 ZERO = '00000000-0000-0000-0000-000000000000'
 
+# FModBankParser 1.2.0 names these with the newer enum, which removed three
+# plugin slots and ENVELOPEFOLLOWER. v142 banks store the earlier numeric IDs.
+PARSER_DSP_NAMES = ('UNKNOWN MIXER OSCILLATOR LOWPASS ITLOWPASS HIGHPASS ECHO '
+    'FADER FLANGE DISTORTION NORMALIZE LIMITER PARAMEQ PITCHSHIFT CHORUS '
+    'ITECHO COMPRESSOR SFXREVERB LOWPASS_SIMPLE DELAY TREMOLO SEND RETURN '
+    'HIGHPASS_SIMPLE PAN THREE_EQ FFT LOUDNESS_METER CONVOLUTIONREVERB '
+    'CHANNELMIX TRANSCEIVER OBJECTPAN MULTIBAND_EQ MULTIBAND_DYNAMICS').split()
+BANK_DSP_NAMES = PARSER_DSP_NAMES[:15] + ['VSTPLUGIN', 'WINAMPPLUGIN'] + \
+    PARSER_DSP_NAMES[15:21] + ['LADSPAPLUGIN'] + PARSER_DSP_NAMES[21:28] + \
+    ['ENVELOPEFOLLOWER'] + PARSER_DSP_NAMES[28:]
+
+
+def effect_type(value, version):
+    if version != 142:
+        raise ValueError(f'unverified Studio DSP enum for bank version {version}')
+    number = PARSER_DSP_NAMES.index(value.removeprefix('FMOD_DSP_TYPE_')) if isinstance(value, str) else value
+    names = BANK_DSP_NAMES
+    if not 0 <= number < len(names):
+        raise ValueError(f'unsupported Studio DSP type {number}, bank version {version}')
+    return names[number]
+
+
+def effect_parameter(p):
+    if p['type'] == 1:
+        # The parser reads the union's integer member as float. Preserve bits,
+        # including tiny denormals such as an enum value of one.
+        return struct.unpack('<i', struct.pack('<f', p['floatValue']))[0]
+    if p['type'] == 2:
+        return bool(p['floatValue'])
+    return p['buffer'] if p['type'] == 3 else p['floatValue']
+
 
 def controller_sources(raw, chunks, start=12, end=None):
     result = {}
@@ -59,10 +90,10 @@ def compile_bank(bank, sources):
                 raise ValueError('unsupported Studio condition ' + e['type'])
         return result
 
-    def controls(owner):
+    def controls(owner, allowed=(0, 1)):
         out = []
         for key, c in data('controllerNodes').items():
-            if c['propertyOwnerGuid'] != owner or c['propertyIndex'] not in (0, 1):
+            if c['propertyOwnerGuid'] != owner or allowed is not None and c['propertyIndex'] not in allowed:
                 continue
             source = sources.get(key)
             if source not in timelines and source not in layouts:
@@ -72,11 +103,18 @@ def compile_bank(bank, sources):
             for p in curves[c['curveGuid']]['curvePoints']:
                 x = p['x'] if param else struct.unpack('<I', struct.pack('<f', p['x']))[0] / 48000
                 points.append([x, p['y'], p['shape'], p['type']])
-            out.append({'property': c['propertyIndex'], 'parameter': param, 'points': points})
+            control = {'property': c['propertyIndex'], 'parameter': param, 'points': points}
+            if allowed is None:
+                for prop in data('propertyNodes').values():
+                    if key in prop['controllers']:
+                        mapping = data('mappingNodes').get(prop['mappingGuid'], {})
+                        control.update(method=prop['method'], mapping=[[p['x'], p['y']]
+                                       for p in mapping.get('mappingPoints', [])])
+            out.append(control)
         return out
 
-    def properties(owner):
-        result = {'controls': controls(owner), 'mods': []}
+    def properties(owner, allowed=(0, 1)):
+        result = {'controls': controls(owner, allowed), 'mods': []}
         for m in data('modulatorNodes').values():
             if m['ownerGuid'] == owner:
                 result['mods'].append({'kind': m['type'], 'property': m['propertyIndex'], **m['subnode']})
@@ -121,6 +159,22 @@ def compile_bank(bank, sources):
     for key, b in data('busNodes').items():
         strip = b['busBody']['mixerStrip']
         program['buses'][key] = {'parent': b['routable']['baseGuid'], 'volume': strip['volume'], 'pitch': strip['pitch'], **properties(key)}
+        for field, source in (('pre', 'preFaderEffects'), ('post', 'postFaderEffects')):
+            if b['busBody'][source]:
+                program['buses'][key][field] = b['busBody'][source]
+    program['effects'] = {}
+    for key, wrapper in g['effectNodes'].items():
+        n = wrapper['data']
+        kind = wrapper['type'].removesuffix('EffectNode')
+        effect = {'kind': effect_type(n['dspType'], bank['version']) if kind == 'BuiltIn' else kind,
+                  **properties(key, None)}
+        if kind == 'BuiltIn':
+            effect['params'] = [effect_parameter(p) for p in n['paramEffectBody']['parameters']]
+        elif kind == 'Send':
+            effect.update(target=n['returnGuid'], level=n['sendLevel'])
+        if n.get('effectBody'):
+            effect['mix'] = n['effectBody']
+        program['effects'][key] = {k: v for k, v in effect.items() if v != []}
     transitions = data('transitionNodes')
     for key, e in data('eventNodes').items():
         t = timelines[e['timelineGuid']]

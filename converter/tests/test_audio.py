@@ -26,6 +26,43 @@ def page(granule, final=False):
 
 
 class Audio(unittest.TestCase):
+    def test_effect_ids_use_the_bank_version_and_preserve_integer_bits(self):
+        self.assertEqual(audio_events.effect_type('FMOD_DSP_TYPE_LOUDNESS_METER', 142), 'PAN')
+        self.assertEqual(audio_events.effect_type('FMOD_DSP_TYPE_DELAY', 142), 'SFXREVERB')
+        self.assertEqual(audio_events.effect_type('FMOD_DSP_TYPE_CONVOLUTIONREVERB', 142), 'THREE_EQ')
+        self.assertEqual(audio_events.effect_type(36, 142), 'MULTIBAND_EQ')
+        value = struct.unpack('<f', struct.pack('<i', 9))[0]
+        self.assertEqual(audio_events.effect_parameter(dict(type=1, floatValue=value)), 9)
+        self.assertIs(audio_events.effect_parameter(dict(type=2, floatValue=1)), True)
+        with self.assertRaises(ValueError):
+            audio_events.effect_type(100, 142)
+        with self.assertRaises(ValueError):
+            audio_events.effect_type(19, 146)
+
+    def test_compiled_effects_keep_bus_order_and_automation_units(self):
+        groups = ('parameterNodes parameterLayoutNodes timelineNodes curveNodes instrumentNodes '
+                  'controllerNodes modulatorNodes busNodes effectNodes transitionNodes eventNodes '
+                  'propertyNodes mappingNodes').split()
+        g = {name: {} for name in groups}
+        g['busNodes']['track'] = dict(data=dict(routable=dict(baseGuid=audio_events.ZERO),
+            busBody=dict(mixerStrip=dict(volume=-3, pitch=0), preFaderEffects=['send', 'pan'], postFaderEffects=[])))
+        g['effectNodes']['send'] = dict(type='SendEffectNode', data=dict(returnGuid='return', sendLevel=-20))
+        g['effectNodes']['pan'] = dict(type='BuiltInEffectNode', data=dict(
+            dspType='FMOD_DSP_TYPE_LOUDNESS_METER', paramEffectBody=dict(parameters=[
+                dict(type=1, floatValue=struct.unpack('<f', struct.pack('<i', 1))[0])])))
+        g['timelineNodes']['time'] = dict(data={})
+        g['curveNodes']['curve'] = dict(data=dict(curvePoints=[dict(
+            x=struct.unpack('<f', struct.pack('<I', 48000))[0], y=-20, shape=0, type=0)]))
+        g['controllerNodes']['control'] = dict(data=dict(propertyOwnerGuid='send', propertyIndex=0, curveGuid='curve'))
+        g['propertyNodes']['property'] = dict(data=dict(controllers=['control'], mappingGuid='mapping', method=2))
+        g['mappingNodes']['mapping'] = dict(data=dict(mappingPoints=[dict(x=-42, y=-80), dict(x=0, y=0)]))
+        p = audio_events.compile_bank(dict(graph=g, version=142), {'control': 'time'})
+        self.assertEqual(p['buses']['track']['pre'], ['send', 'pan'])
+        self.assertEqual(p['effects']['pan']['kind'], 'PAN')
+        self.assertEqual(p['effects']['pan']['params'], [1])
+        self.assertEqual(p['effects']['send']['controls'][0]['points'][0][:2], [1, -20])
+        self.assertEqual(p['effects']['send']['controls'][0]['mapping'], [[-42, -80], [0, 0]])
+
     def test_controller_context_survives_flat_transition_chunks(self):
         timeline, controller = uuid.UUID(int=1), uuid.UUID(int=2)
         def chunk(tag, data):

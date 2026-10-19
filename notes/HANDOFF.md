@@ -61,6 +61,19 @@ checks 42 exactly timed spawns. Linear transition fades are checked against
 individual output samples. Nonlinear curve shapes and authored DSP still
 need verification.
 
+Fidelity fixes are published in `23fc0e9`. The compact compiler now retains
+ordered pre/post-fader effects, sends, typed parameters and effect automation
+with its unit mappings. FModBankParser 1.2.0 uses the newer DSP enum names;
+the installed v142 banks use the [2.02 enum](https://github.com/fmod/fmod-for-unity/blob/2.02/Assets/Plugins/FMOD/src/fmod_dsp.cs).
+Correct inventory: 444 PAN, 105 sends, 46 multiband EQ, 31 echo, 19 flange,
+10 SFX reverb, 5 chorus, 4 three-band EQ, 2 limiters, 2 sidechains, 1
+distortion and 1 fader. Earlier labels for loudness meters, delay and
+convolution reverb were parser enum mismatches. Integer parameter union bits
+are recovered before writing programs. These effects are **not executed by
+the runtime yet**. Converter tests: 29 pass; all installed bus effect
+references resolve. A new complete pack/check run is in progress under
+`work/pack-sound-effects`, with logs `work/audio-effects-*`.
+
 The game's Vine Shambler code requests `vine_shambler_cast`, which is absent
 from the installed bank's string table (the bank has `grasping_vines`). Keep
 this content mismatch visible; do not silently invent a replacement cue.
