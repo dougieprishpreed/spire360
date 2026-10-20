@@ -85,8 +85,13 @@ struct VfxParams {
  *  SCREEN_DOOM (doom_overlay): the copy in YIQ, its chroma times
  *      mix(1, mix, a) and all of it times mix(1, strength, a) (a: the
  *      vertex colour's alpha), back to RGB, plus color * SCREEN_UV.y^6 *
- *      power * a (power: 0.7 * the shader's pulse at this time). */
-enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4, SCREEN_GLASS = 5, SCREEN_DOOM = 6 };
+ *      power * a (power: 0.7 * the shader's pulse at this time).
+ *  SCREEN_DISTORT (vfx_screen_distortion_outward, vfx_scream_distortion_polar):
+ *      at SCREEN_UV + strength * a * m * normalize((0.5, 0.5) - UV) (a: the
+ *      vertex colour's alpha); m the texel's red, or with count 1 the
+ *      texel's alpha times its red at the polar uv * center + noise_offset
+ *      (polar: distance from the middle * 2, angle / 2 pi). */
+enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4, SCREEN_GLASS = 5, SCREEN_DOOM = 6, SCREEN_DISTORT = 7 };
 
 struct ScreenParams {
     int mode;
@@ -106,8 +111,8 @@ struct ScreenParams {
 struct EffectParams {
     int id;
     float p[16];
-    Texture* tex[4];
-    unsigned repeat;
+    Texture* tex[5];
+    unsigned repeat; /* bit i: tex[i] repeats */
 };
 
 class Renderer {

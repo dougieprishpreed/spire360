@@ -263,7 +263,7 @@ void D3D9Renderer::destroy_texture(Texture* t) {
     if (gm_ == d) gm_ = NULL;
     if (vfx_on_ && vfx_.lut == t) { vfx_.lut = NULL; vfx_on_ = false; }
     if (screen_on_ && (screen_.noise == t || screen_.mask == t)) screen_on_ = false;
-    for (int k = 0; effect_on_ && k < 4; ++k)
+    for (int k = 0; effect_on_ && k < 5; ++k)
         if (effect_.tex[k] == t) effect_on_ = false;
     if (fire_on_ && (fire_.noise1 == t || fire_.noise2 == t || fire_.noise_mask == t ||
         fire_.dist1 == t || fire_.dist2 == t || fire_.dist_mask == t)) fire_on_ = false;
@@ -850,8 +850,8 @@ void D3D9Renderer::apply_state() {
             dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         }
     } else if (effect_on_) {
-        /* the effect's textures (s3..s6), white where unset */
-        for (int k = 0; k < 4; ++k) {
+        /* the effect's textures (s3..s7), white where unset */
+        for (int k = 0; k < 5; ++k) {
             D3D9Texture* t = (D3D9Texture*)effect_.tex[k];
             DWORD stage = (DWORD)(3 + k);
             dev_->SetTexture(stage, t && t->tex ? t->tex : white_);
@@ -862,7 +862,7 @@ void D3D9Renderer::apply_state() {
             dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
             dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         }
-        for (DWORD stage = 7; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
+        dev_->SetTexture(8, NULL);
     } else {
         for (DWORD stage = 3; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
     }
@@ -980,6 +980,16 @@ void D3D9Renderer::apply_state() {
             c[94] = screen_.color[2];
             c[95] = screen_.color[3];
         }
+        if (screen_.mode == SCREEN_DISTORT) {
+            /* c22.yw: polar, strength; c23: polar offset, tiling */
+            c[89] = screen_.count == 1 ? 1.0f : 0.0f;
+            c[90] = 0;
+            c[91] = screen_.strength;
+            c[92] = screen_.noise_offset[0];
+            c[93] = screen_.noise_offset[1];
+            c[94] = screen_.center[0];
+            c[95] = screen_.center[1];
+        }
         if (screen_.mode == SCREEN_RADIAL) {
             /* c22.yzw: count, power; c23.xy: centre */
             c[89] = (float)(screen_.count < 1 ? 1 : (screen_.count > 16 ? 16 : screen_.count));
@@ -992,7 +1002,8 @@ void D3D9Renderer::apply_state() {
         for (DWORD stage = 9; stage < 13; ++stage) dev_->SetTexture(stage, NULL);
         for (int k = 88; k < 94; ++k) c[k] = 0.0f;
     }
-    if (!(screen_on_ && screen_levels_ > 0 && (screen_.mode == SCREEN_GLASS || screen_.mode == SCREEN_DOOM)))
+    if (!(screen_on_ && screen_levels_ > 0 &&
+          (screen_.mode == SCREEN_GLASS || screen_.mode == SCREEN_DOOM || screen_.mode == SCREEN_DISTORT)))
         c[94] = c[95] = 0.0f;
     dev_->SetPixelShaderConstantF(0, c, 24);
     if (effect_on_) dev_->SetPixelShaderConstantF(24, effect_.p, 4);

@@ -2,7 +2,7 @@
  * of the canvas shader's modes. Godot 4's fragment COLOR starts as the
  * vertex colour times the texel (the shaders keep a vertex_color varying
  * for the vertex colour alone). Each has an id, up to 16 parameters and up
- * to 4 textures (EffectParams); the software renderer runs a C++ version
+ * to 5 textures (EffectParams); the software renderer runs a C++ version
  * (sw_effects.cpp), the D3D9 renderer a pixel shader of its own
  * (shaders/effects.hlsl, entry point ps_e<id>). The draw's texture is the
  * shader's TEXTURE, the vertex colour its COLOR's input; the output is what
@@ -119,6 +119,95 @@ enum EffectId {
      * radius (p0 * 32 texels; p1p2 the texel size). Opaque, as the game's
      * (COLOR.a = 1). */
     EFFECT_PORTRAIT_BLUR = 21,
+    /* shaders/vfx/goopy_impact/vfx_goopy_impact_bits_shader.gdshader
+     * (particles): the flipbook frame floor(p5) of a p6 x p7 sheet read at
+     * its uv + d * p4, d = (TEXTURE(UV + p2p3).b - 0.5) * 2; (lut(tex0 at
+     * (t.r, t.r)).rgb, smoothstep(p0, p0 + p1, t.g)) * vertex colour. p0 the
+     * erosion curve at the life, p5 CUSTOM.z * frame_count * 0.99. */
+    EFFECT_GOOPY_BITS = 22,
+    /* shaders/vfx/ui/card/afflictions/bound/..._bound_main_shader: rgb
+     * TEXTURE.r * vertex rgb * mix(1, p4, TEXTURE(UV * p0p1 + p2p3).g),
+     * alpha TEXTURE.a * vertex a. */
+    EFFECT_BOUND_MAIN = 23,
+    /* ..._bound_border_shader: rgb TEXTURE(polar uv * p0p1 + p2p3).rgb *
+     * vertex rgb, alpha smoothstep(p4, p4 + p5, vertex a * mask(UV).a)
+     * (tex0 mask). Polar uv: fract(distance from the middle * 2, angle / 2
+     * pi). */
+    EFFECT_POLAR_BORDER = 24,
+    /* shaders/vfx/scream/vfx_scream_squiggly_ring_polar_shader (particles):
+     * dm = TEXTURE(polar(UV) * p2p3 + p4p5 + p6); the ring TEXTURE at
+     * polar(UV + normalize(0.5 - UV) * dm.g * dm.b * p7) * p8p9 + (p10 +
+     * p11, 0); rgb vertex rgb, alpha vertex a * TEXTURE.a * smoothstep(p0,
+     * p0 + p1, ring.r). p0 the erosion curve at the life, p6 CUSTOM.x (the
+     * rotation), p11 (x_offsets.y - x) * the offset curve at the life. */
+    EFFECT_SQUIGGLY_RING = 25,
+    /* shaders/vfx/fire/fire_shader_1.tres (the queen's flames): rgb
+     * p13..15, alpha smoothstep(p11, p12, gradient * shape); gradient =
+     * tex2(UV + (-1.065, -0.24) + (p6 + n1) * (n2 + p7)).r, n1 = tex0(UV *
+     * p2 + p0p1).r, n2 = tex1(UV * p5 + p3p4).r; shape = tex4(UV +
+     * tex3(UV + p8p9).rg * p10).r. No vertex colour. */
+    EFFECT_FIRE_SHAPE = 26,
+    /* shaders/vfx/simple_distortion_flat_shader.tres: t = TEXTURE at UV +
+     * p2p3 * tex0(UV + p0p1).r; rgb p4..6 * t.rgb, alpha t.a (no vertex
+     * colour). */
+    EFFECT_SIMPLE_DISTORTION = 27,
+    /* ..._affliction_entangled_main_shader (and tainted): d =
+     * TEXTURE(UV * p0p1 + (p2, p3)).b * p4; t = TEXTURE at UV + (d *
+     * TEXTURE(UV).g, 0); rgb vertex rgb * lut(tex0 at t.r), alpha vertex a *
+     * t.a. */
+    EFFECT_ENTANGLED = 28,
+    /* shaders/vfx/2d_sphere_shader.tres (blend_add): t = TEXTURE at UV +
+     * p5p6 + (0, -0.075 * tex1(UV).g) + tex0(UV * p2p3 + p0p1).rg * p4; rgb
+     * p7..9 + t.rgb, alpha t.a * smoothstep(p10, p11, tex2(UV).r) *
+     * smoothstep(p12, p13, tex3(UV + p14p15).r) (no vertex colour). */
+    EFFECT_SPHERE = 29,
+    /* shaders/vfx/scream/vfx_scream_ring_polar_shader (particles): rgb
+     * vertex rgb, alpha vertex a * TEXTURE(polar(UV) * p0p1 + (p2 + p3,
+     * 0)).r * TEXTURE.a; p3 (x_offsets.y - x) * the offset curve at the
+     * life. */
+    EFFECT_SCREAM_RING = 30,
+    /* ..._affliction_hexed_main_shader: n = smoothstep(p4, p4 + p5,
+     * TEXTURE(polar(UV) * p0p1 + p2p3).b); c = mix(border p12..14,
+     * mix(main p6..8, bright p9..11, n), TEXTURE.r); rgb c * vertex rgb,
+     * alpha TEXTURE.a * vertex a. */
+    EFFECT_HEXED = 31,
+    /* ..._affliction_ringing_main_shader: f = p0 (fract(TIME * speed)); a
+     * = max(TEXTURE.rgb * tex0(f, f).rgb, TEXTURE(polar(UV, zoom 0.8) * 0.5
+     * + (tex1(f, f).r, 0)).a * tex1(f, f).g); rgb vertex rgb (the vertex
+     * alpha is not applied). */
+    EFFECT_RINGING = 32,
+    /* shaders/vfx/missile/vfx_missile_core_shader: the flipbook frame p0
+     * of a p1 x p2 sheet; rgb lut(tex0 at (t.r, t.r)) * vertex rgb, alpha
+     * t.a * vertex a. */
+    EFFECT_LUT_FLIPBOOK = 33,
+    /* shaders/vfx/vfx_noisy_dissolve_shader.tres: rgb COLOR's (vertex times
+     * texel), alpha smoothstep(p0, p0 + p1, tex0(UV + p2p3).r) * TEXTURE.a
+     * (the vertex alpha is not applied). */
+    EFFECT_NOISY_DISSOLVE = 34,
+    /* ..._affliction_smog_main_shader: r = rotate(UV, 0.5, PI) = (v, 1 -
+     * u); s = mix(TEXTURE(r * p0p1 + p2p3).r, TEXTURE(r * p4p5 + p6p7).r,
+     * p8) * mask.r; a = smoothstep(p9, p9 + p10, s); rgb vertex rgb *
+     * lut(a, a), alpha a * vertex a + mask.g (tex0 lut, tex1 mask). */
+    EFFECT_SMOG = 35,
+    /* ..._entangled_leaf_shader (particles): the texture turned about p5p6
+     * by p4 * (TEXTURE(UV * p0p1 + (p2, p2 + p3)).b - 0.5) * PI (rotate()
+     * at PI / 2 + that); rgb vertex rgb * lut(t.r) (tex0), alpha vertex a *
+     * t.a. p2 CUSTOM.z. */
+    EFFECT_LEAF = 36,
+    /* scenes/backgrounds/vantom_boss/oil.gdshader (no texture, no vertex
+     * colour): the oil disc of radius p0 (min(1, max / rank advance mana) *
+     * inset) with its noisy border (p8 wide, colour p10..13, noise tex0 at
+     * the border time p2), the grooves (tex1 at UV + p3, lines p5 apart p6
+     * wide, sin(TIME * speed) p4, opacity p7) and the mana (ratio p1, glow
+     * p9; its colour 8-bit packed: p14 = r * 256 + g, p15 = b * 256 + a,
+     * + 65536 when current_mana > 0). */
+    EFFECT_OIL = 37,
+    /* ..._affliction_galvanized_main_shader: blink = smoothstep(p8, p8 +
+     * p9, TEXTURE(UV.x * p0 + p1, 0).b); dt = TEXTURE(polar(UV) * p2p3 +
+     * p4p5); t = TEXTURE at UV + (UV + (dt.b - 0.5) * 2 * p6 - 0.5) * dt.b *
+     * -p7; l = lut(blink, 0) (tex0); rgb l.rgb * vertex rgb, alpha vertex a *
+     * max(t.r, t.g * l.a * blink) * smoothstep(p10, p10 + p11, TEXTURE.a). */
+    EFFECT_GALVANIZED = 38,
     EFFECT_COUNT
 };
 

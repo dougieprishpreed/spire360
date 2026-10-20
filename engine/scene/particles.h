@@ -24,6 +24,8 @@ struct CurveData {
     bool valid() const { return !points.empty(); }
     float sample(float x) const;
     static bool from(Resource* r, CurveData& out); /* Curve or CurveTexture */
+    /* A CurveXYZTexture's curve_x, curve_y or curve_z (channel 0..2). */
+    static bool from_xyz(Resource* r, int channel, CurveData& out);
 };
 
 struct GradientData {

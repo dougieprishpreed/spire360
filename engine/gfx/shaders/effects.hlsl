@@ -2,7 +2,7 @@
 // shader per ported game shader, entry point ps_e<id>, used with the canvas
 // shader's vertex shader. Output premultiplied, as the canvas shader's.
 //
-// s0: the draw's texture (TEXTURE); s3..s6: the effect's textures
+// s0: the draw's texture (TEXTURE); s3..s7: the effect's textures
 // (EffectParams.tex); s9: the screen copy when the effect reads it.
 // c24..c27: EffectParams.p[0..15].
 //
@@ -21,6 +21,7 @@ sampler2D g_e0 : register(s3);
 sampler2D g_e1 : register(s4);
 sampler2D g_e2 : register(s5);
 sampler2D g_e3 : register(s6);
+sampler2D g_e4 : register(s7);
 sampler2D g_screen : register(s9);
 float4 g_p0 : register(c24);
 float4 g_p1 : register(c25);
@@ -244,6 +245,233 @@ float4 ps_e20(VsOut i) : COLOR {
     float4 t = tex2D(g_tex, i.uv + db * g_p1.x);
     float4 l = tex2D(g_e0, float2(t.r, 0.5));
     float a = saturate(i.color.a * smoothstep(g_p0.x, g_p0.x + g_p0.y, t.a));
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// fract polar coordinates about the middle: (distance * 2, angle / 2 pi).
+float2 polar_uv(float2 uv) {
+    float2 d = uv - 0.5;
+    return frac(float2(length(d) * 2.0, atan2(d.y, d.x) / 6.2831853));
+}
+
+// 22: vfx_goopy_impact_bits: a flipbook frame wobbled by the texture's
+// blue, coloured by the lut, eroded by its green over the life.
+float4 ps_e22(VsOut i) : COLOR {
+    float off = (tex2D(g_tex, i.uv + g_p0.zw).b - 0.5) * 2.0 * g_p1.x;
+    float f = floor(g_p1.y);
+    float2 fuv = (i.uv + float2(fmod(f, g_p1.z), floor(f / g_p1.z))) / g_p1.zw;
+    float4 t = tex2D(g_tex, fuv + off);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(smoothstep(g_p0.x, g_p0.x + g_p0.y, t.g) * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 23: the Bound affliction's card: the texture's red brightened where its
+// tiled panning copy is green.
+float4 ps_e23(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float bg = tex2D(g_tex, i.uv * g_p0.xy + g_p0.zw).g;
+    float a = saturate(t.a * i.color.a);
+    return float4(saturate(t.r * i.color.rgb * lerp(1.0, g_p1.x, bg)) * a, a);
+}
+
+// 24: the Bound affliction's border: the texture in panning polar
+// coordinates, its alpha the mask's eroded.
+float4 ps_e24(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, polar_uv(i.uv) * g_p0.xy + g_p0.zw);
+    float a = saturate(smoothstep(g_p1.x, g_p1.x + g_p1.y, i.color.a * tex2D(g_e0, i.uv).a));
+    return float4(saturate(t.rgb * i.color.rgb) * a, a);
+}
+
+// 25: vfx_scream_squiggly_ring_polar: a polar ring pushed about by its own
+// polar distortion, eroded over the life.
+float4 ps_e25(VsOut i) : COLOR {
+    float4 dm = tex2D(g_tex, polar_uv(i.uv) * g_p0.zw + g_p1.xy + g_p1.z);
+    float2 dir = 0.5 - i.uv;
+    float len = length(dir);
+    float k = len > 1e-6 ? dm.g * dm.b * g_p1.w / len : 0.0;
+    float2 q = polar_uv(i.uv + dir * k) * g_p2.xy + float2(g_p2.z + g_p2.w, 0.0);
+    float ring = tex2D(g_tex, q).r;
+    float a = saturate(i.color.a * tex2D(g_tex, i.uv).a * smoothstep(g_p0.x, g_p0.x + g_p0.y, ring));
+    return float4(saturate(i.color.rgb) * a, a);
+}
+
+// 26: fire_shader_1 (the queen's flames): two noises bend a gradient, the
+// shape mask wobbled by a third; a flat colour.
+float4 ps_e26(VsOut i) : COLOR {
+    float n1 = tex2D(g_e0, i.uv * g_p0.z + g_p0.xy).r;
+    float n2 = tex2D(g_e1, i.uv * g_p1.y + float2(g_p0.w, g_p1.x)).r;
+    float w = (g_p1.z + n1) * (n2 + g_p1.w);
+    float g = tex2D(g_e2, i.uv + float2(-1.065, -0.24) + w).r;
+    float2 mn = tex2D(g_e3, i.uv + g_p2.xy).rg * g_p2.z;
+    float sh = tex2D(g_e4, i.uv + mn).r;
+    float a = saturate(smoothstep(g_p2.w, g_p3.x, g * sh));
+    return float4(saturate(g_p3.yzw) * a, a);
+}
+
+// polar_coordinates with a zoom.
+float2 polar_zoom(float2 uv, float zoom) {
+    float2 d = uv - 0.5;
+    return frac(float2(length(d) * 2.0 * zoom, atan2(d.y, d.x) / 6.2832));
+}
+
+// 27: simple_distortion_flat: the texture read through a panning noise,
+// tinted (no vertex colour).
+float4 ps_e27(VsOut i) : COLOR {
+    float n = tex2D(g_e0, i.uv + g_p0.xy).r;
+    float4 t = tex2D(g_tex, i.uv + g_p0.zw * n);
+    float a = saturate(t.a);
+    return float4(saturate(g_p1.xyz * t.rgb) * a, a);
+}
+
+// 28: the Entangled (and Tainted) affliction: vines wobbled sideways,
+// coloured by the lut.
+float4 ps_e28(VsOut i) : COLOR {
+    float d = tex2D(g_tex, i.uv * g_p0.xy + g_p0.zw).b * g_p1.x;
+    float g = tex2D(g_tex, i.uv).g;
+    float4 t = tex2D(g_tex, i.uv + float2(d * g, 0.0));
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(i.color.a * t.a);
+    return float4(saturate(i.color.rgb * l.rgb) * a, a);
+}
+
+// 29: 2d_sphere_shader (additive): the texture panning round the sphere,
+// masked at the sides and top / bottom.
+float4 ps_e29(VsOut i) : COLOR {
+    float2 n = tex2D(g_e0, i.uv * g_p0.zw + g_p0.xy).rg * g_p1.x;
+    float g = tex2D(g_e1, i.uv).g;
+    float4 t = tex2D(g_tex, i.uv + g_p1.yz + float2(0.0, -0.075 * g) + n);
+    float a = t.a * smoothstep(g_p2.z, g_p2.w, tex2D(g_e2, i.uv).r) * smoothstep(g_p3.x, g_p3.y, tex2D(g_e3, i.uv + g_p3.zw).r);
+    a = saturate(a);
+    return float4(saturate(float3(g_p1.w, g_p2.x, g_p2.y) + t.rgb) * a, a);
+}
+
+// 30: vfx_scream_ring_polar: a ring of the texture's red in polar
+// coordinates, sliding over the life.
+float4 ps_e30(VsOut i) : COLOR {
+    float ring = tex2D(g_tex, polar_uv(i.uv) * g_p0.xy + float2(g_p0.z + g_p0.w, 0.0)).r;
+    float a = saturate(i.color.a * ring * tex2D(g_tex, i.uv).a);
+    return float4(saturate(i.color.rgb) * a, a);
+}
+
+// 31: the Hexed affliction: border, main and bright colours by the
+// texture's red and a polar noise.
+float4 ps_e31(VsOut i) : COLOR {
+    float n = smoothstep(g_p1.x, g_p1.x + g_p1.y, tex2D(g_tex, polar_uv(i.uv) * g_p0.xy + g_p0.zw).b);
+    float4 t = tex2D(g_tex, i.uv);
+    float3 inner = lerp(float3(g_p1.z, g_p1.w, g_p2.x), float3(g_p2.y, g_p2.z, g_p2.w), n);
+    float3 c = lerp(g_p3.xyz, inner, t.r);
+    float a = saturate(t.a * i.color.a);
+    return float4(saturate(c * i.color.rgb) * a, a);
+}
+
+// 32: the Ringing affliction: the rings blinking by the base alpha
+// animation, a thin polar ring running round.
+float4 ps_e32(VsOut i) : COLOR {
+    float f = g_p0.x;
+    float4 tr = tex2D(g_e1, float2(f, f));
+    float4 rb = tex2D(g_e0, float2(f, f));
+    float4 t = tex2D(g_tex, i.uv);
+    float4 mp = tex2D(g_tex, polar_zoom(i.uv, 0.8) * 0.5 + float2(tr.r, 0.0));
+    float a = max(max(t.r * rb.r, t.g * rb.g), max(t.b * rb.b, mp.a * tr.g));
+    a = saturate(a);
+    return float4(saturate(i.color.rgb) * a, a);
+}
+
+// 33: vfx_missile_core: a flipbook frame by time, coloured by the lut.
+float4 ps_e33(VsOut i) : COLOR {
+    float total = g_p0.y * g_p0.z;
+    float f = floor(g_p0.x);
+    f -= total * floor(f / total);
+    float2 fuv = i.uv / g_p0.yz + float2(fmod(f, g_p0.y) / g_p0.y, floor((f + 0.5) / g_p0.y) / g_p0.z);
+    float4 t = tex2D(g_tex, fuv);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(t.a * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 34: vfx_noisy_dissolve: the sprite eaten by a panning noise.
+float4 ps_e34(VsOut i) : COLOR {
+    float n = tex2D(g_e0, i.uv + g_p0.zw).r;
+    float4 t = tex2D(g_tex, i.uv);
+    float a = saturate(smoothstep(g_p0.x, g_p0.x + g_p0.y, n) * t.a);
+    return float4(saturate(i.color.rgb * t.rgb) * a, a);
+}
+
+// 35: the Smog affliction: two smoke layers (the uv turned a quarter),
+// masked, eroded and coloured by the lut.
+float4 ps_e35(VsOut i) : COLOR {
+    float2 r = float2(i.uv.y, 1.0 - i.uv.x);
+    float m1 = tex2D(g_tex, r * g_p0.xy + g_p0.zw).r;
+    float m2 = tex2D(g_tex, r * g_p1.xy + g_p1.zw).r;
+    float4 mk = tex2D(g_e1, i.uv);
+    float a = smoothstep(g_p2.y, g_p2.y + g_p2.z, lerp(m1, m2, g_p2.x) * mk.r);
+    float4 l = tex2D(g_e0, float2(a, a));
+    float alpha = saturate(a * i.color.a + mk.g);
+    return float4(saturate(i.color.rgb * l.rgb) * alpha, alpha);
+}
+
+// 36: the Entangled leaf: the texture swaying about its pivot.
+float4 ps_e36(VsOut i) : COLOR {
+    float b = tex2D(g_tex, i.uv * g_p0.xy + float2(g_p0.z, g_p0.z + g_p0.w)).b;
+    float ang = 1.5707963 + g_p1.x * (b - 0.5) * 2.0 * 1.5707963;
+    float s = sin(ang), c = cos(ang);
+    float2 d = i.uv - g_p1.yz;
+    float4 t = tex2D(g_tex, float2(d.x * s - d.y * c, d.x * c + d.y * s) + g_p1.yz);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(i.color.a * t.a);
+    return float4(saturate(i.color.rgb * l.rgb) * a, a);
+}
+
+// 37: the Vantom fight's oil: a noisy disc with its border, grooves and
+// mana (effects.h).
+float4 ps_e37(VsOut i) : COLOR {
+    float2 st = (i.uv - 0.5) * 2.0;
+    float d = length(st);
+    float ang = atan2(st.x, st.y) / 6.2831853;
+    float tb = g_p0.z, tb5 = frac(5.0 * tb);
+    float nv1 = (tex2D(g_e0, float2(tb, frac(ang - tb))).r - 0.5) / 10.0;
+    float nv = nv1 + (tex2D(g_e0, float2(frac(ang + tb5), tb)).r - 0.5) / 12.0;
+    float bw = g_p2.x, R = g_p0.x + nv;
+    float mm = 0.0;
+    if (bw > 0.0) {
+        float L = (d - R) / bw;
+        mm = (step(d, R + bw) - step(d, R)) * L * L;
+    }
+    float gm = step(d, R + bw) - step(d, 0.0);
+    float gn = tex2D(g_e1, frac(i.uv + g_p0.w)).r;
+    float ga = gn * 3.0;
+    float ry = -sin(ga) * st.x + cos(ga) * (st.y + g_p1.x);
+    float md = g_p1.y != 0.0 ? ry - g_p1.y * floor(ry / g_p1.y) : 0.0;
+    gm *= md < g_p1.z ? 1.0 : 0.0;
+    float mr = g_p0.y, x = d - nv1 * d * 2.0;
+    float mana = (smoothstep(-0.1, -0.05, x) - smoothstep(mr + 0.05, mr + 0.1, x)) * (d < R + bw / 1.5 ? 1.0 : 0.0);
+    float q0 = g_p3.z, q1 = g_p3.w;
+    float on = q1 >= 65536.0 ? 1.0 : 0.0;
+    q1 -= 65536.0 * on;
+    float4 mc = float4(floor(q0 / 256.0), q0 - 256.0 * floor(q0 / 256.0), floor(q1 / 256.0), q1 - 256.0 * floor(q1 / 256.0)) / 255.0;
+    float4 border = float4(g_p2.zw, g_p3.xy);
+    float4 c = 0.0;
+    if (mm > 0.0) c = float4(border.rgb, border.a * mm);
+    if (mana > 0.0 && on > 0.5) {
+        float g = mr != 0.0 ? d / mr * g_p2.y : 0.0;
+        c = float4(mc.rgb + mc.rgb * g, mana * mc.a);
+    }
+    if (gm > 0.0) c = lerp(c * max(mana, mm), border, g_p1.w);
+    float a = saturate(c.a);
+    return float4(saturate(c.rgb) * a, a);
+}
+
+// 38: the Galvanized affliction: lines wobbled about the middle by a
+// polar distortion, glowing as the blink runs.
+float4 ps_e38(VsOut i) : COLOR {
+    float blink = smoothstep(g_p2.x, g_p2.x + g_p2.y, tex2D(g_tex, float2(i.uv.x * g_p0.x + g_p0.y, 0.0)).b);
+    float4 dt = tex2D(g_tex, polar_uv(i.uv) * g_p0.zw + g_p1.xy);
+    float2 dist = (i.uv + (dt.b - 0.5) * 2.0 * g_p1.z - 0.5) * dt.b * -g_p1.w;
+    float4 t = tex2D(g_tex, i.uv + dist);
+    float mask = smoothstep(g_p2.z, g_p2.z + g_p2.w, tex2D(g_tex, i.uv).a);
+    float4 l = tex2D(g_e0, float2(blink, 0.0));
+    float a = saturate(i.color.a * max(t.r, t.g * l.a * blink) * mask);
     return float4(saturate(l.rgb * i.color.rgb) * a, a);
 }
 

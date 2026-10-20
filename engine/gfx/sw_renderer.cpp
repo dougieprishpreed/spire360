@@ -214,6 +214,23 @@ static void shift_hue(float rgb[3], float shift) {
     for (int k = 0; k < 3; ++k) rgb[k] = uu[k] * c + vv[k] * s + p[k];
 }
 
+/* A premultiplied texel as straight colour. */
+static void unpremul(float t[4]) {
+    float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+    t[0] *= ia;
+    t[1] *= ia;
+    t[2] *= ia;
+}
+
+/* polar_coordinates (shaders/vfx/_util): fract(distance from the middle *
+ * 2 * zoom, angle / 2 pi). */
+static void polar(float u, float v, float zoom, float* pu, float* pv) {
+    float dx = u - 0.5f, dy = v - 0.5f;
+    float r = sqrtf(dx * dx + dy * dy) * 2.0f * zoom, a = atan2f(dy, dx) / 6.2832f;
+    *pu = r - floorf(r);
+    *pv = a - floorf(a);
+}
+
 /* An effect's texture i at uv (NULL: white). */
 static void effect_texel(const EffectParams& e, int i, float u, float v, float out[4]) {
     fire_texel(e.tex[i], u, v, (e.repeat >> i) & 1, out);
@@ -443,6 +460,318 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         float il = l[3] > 0 ? 1.0f / l[3] : 0.0f;
         float a = clampf(col[3] * smoothstepf(e.p[0], e.p[0] + e.p[1], erosion_in), 0, 1);
         for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * il * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_GOOPY_BITS: {
+        float d[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, u + e.p[2], v + e.p[3], flags, d);
+        float off = ((d[3] > 0 ? d[2] / d[3] : 0.0f) - 0.5f) * 2.0f * e.p[4];
+        float f = floorf(e.p[5]);
+        float fu = (u + fmodf(f, e.p[6])) / e.p[6], fv = (v + floorf(f / e.p[6])) / e.p[7];
+        if (tex) sample(tex->img, fu + off, fv + off, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f, r = t[0] * ia;
+        effect_texel(e, 0, r, r, l);
+        float il = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[0], e.p[0] + e.p[1], t[1] * ia) * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * il * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_BOUND_MAIN: {
+        float t[4] = { 1, 1, 1, 1 }, b[4] = { 0, 0, 0, 0 };
+        if (tex) {
+            sample(tex->img, u, v, flags, t);
+            sample(tex->img, u * e.p[0] + e.p[2], v * e.p[1] + e.p[3], flags, b);
+        }
+        float bg = b[3] > 0 ? b[1] / b[3] : 0.0f, k = 1 + (e.p[4] - 1) * bg;
+        float r = t[3] > 0 ? t[0] / t[3] : 0.0f;
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int q = 0; q < 3; ++q) out[q] = clampf(r * col[q] * k, 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_POLAR_BORDER: {
+        float dx = u - 0.5f, dy = v - 0.5f;
+        float pr = sqrtf(dx * dx + dy * dy) * 2.0f, pa = atan2f(dy, dx) / 6.2831853f;
+        pr -= floorf(pr);
+        pa -= floorf(pa);
+        float t[4] = { 1, 1, 1, 1 }, m[4];
+        if (tex) sample(tex->img, pr * e.p[0] + e.p[2], pa * e.p[1] + e.p[3], flags, t);
+        effect_texel(e, 0, u, v, m);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[4], e.p[4] + e.p[5], col[3] * m[3]), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(t[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SQUIGGLY_RING: {
+        float dx = u - 0.5f, dy = v - 0.5f;
+        float pr = sqrtf(dx * dx + dy * dy) * 2.0f, pa = atan2f(dy, dx) / 6.2831853f;
+        pr -= floorf(pr);
+        pa -= floorf(pa);
+        float dm[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, ring[4] = { 0, 0, 0, 0 };
+        if (tex) sample(tex->img, pr * e.p[2] + e.p[4] + e.p[6], pa * e.p[3] + e.p[5] + e.p[6], flags, dm);
+        float id = dm[3] > 0 ? 1.0f / dm[3] : 0.0f;
+        float len = sqrtf(dx * dx + dy * dy);
+        float k = len > 1e-6f ? dm[1] * id * dm[2] * id * e.p[7] / len : 0.0f;
+        float qx = u - dx * k - 0.5f, qy = v - dy * k - 0.5f;
+        float qr = sqrtf(qx * qx + qy * qy) * 2.0f, qa = atan2f(qy, qx) / 6.2831853f;
+        qr -= floorf(qr);
+        qa -= floorf(qa);
+        if (tex) {
+            sample(tex->img, u, v, flags, t);
+            sample(tex->img, qr * e.p[8] + e.p[10] + e.p[11], qa * e.p[9], flags, ring);
+        }
+        float rr = ring[3] > 0 ? ring[0] / ring[3] : 0.0f;
+        float a = clampf(col[3] * t[3] * smoothstepf(e.p[0], e.p[0] + e.p[1], rr), 0, 1);
+        for (int q = 0; q < 3; ++q) out[q] = clampf(col[q], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_FIRE_SHAPE: {
+        float n1[4], n2[4], g[4], mn[4], sh[4];
+        effect_texel(e, 0, u * e.p[2] + e.p[0], v * e.p[2] + e.p[1], n1);
+        effect_texel(e, 1, u * e.p[5] + e.p[3], v * e.p[5] + e.p[4], n2);
+        float w = (e.p[6] + n1[0]) * (n2[0] + e.p[7]);
+        effect_texel(e, 2, u - 1.065f + w, v - 0.24f + w, g);
+        effect_texel(e, 3, u + e.p[8], v + e.p[9], mn);
+        float im = mn[3] > 0 ? e.p[10] / mn[3] : 0.0f;
+        effect_texel(e, 4, u + mn[0] * im, v + mn[1] * im, sh);
+        /* straight colours (the images are premultiplied) */
+        float gr = g[3] > 0 ? g[0] / g[3] : 0.0f, sr = sh[3] > 0 ? sh[0] / sh[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[11], e.p[12], gr * sr), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[13 + k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SIMPLE_DISTORTION: {
+        float n[4], t[4] = { 1, 1, 1, 1 };
+        effect_texel(e, 0, u + e.p[0], v + e.p[1], n);
+        unpremul(n);
+        if (tex) sample(tex->img, u + e.p[2] * n[0], v + e.p[3] * n[0], flags, t);
+        unpremul(t);
+        float a = clampf(t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[4 + k] * t[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_ENTANGLED: {
+        float d[4] = { 0, 0, 0, 0 }, mt[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) {
+            sample(tex->img, u * e.p[0] + e.p[2], v * e.p[1] + e.p[3], flags, d);
+            sample(tex->img, u, v, flags, mt);
+            unpremul(d);
+            unpremul(mt);
+            sample(tex->img, u + d[2] * e.p[4] * mt[1], v, flags, t);
+            unpremul(t);
+        }
+        effect_texel(e, 0, t[0], t[0], l);
+        unpremul(l);
+        float a = clampf(col[3] * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * l[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SPHERE: {
+        float n[4], g[4], sm[4], tb[4], t[4] = { 0, 0, 0, 0 };
+        effect_texel(e, 0, u * e.p[2] + e.p[0], v * e.p[3] + e.p[1], n);
+        effect_texel(e, 1, u, v, g);
+        unpremul(n);
+        unpremul(g);
+        if (tex) sample(tex->img, u + e.p[5] + n[0] * e.p[4], v + e.p[6] - 0.075f * g[1] + n[1] * e.p[4], flags, t);
+        unpremul(t);
+        effect_texel(e, 2, u, v, sm);
+        effect_texel(e, 3, u + e.p[14], v + e.p[15], tb);
+        unpremul(sm);
+        unpremul(tb);
+        float a = clampf(t[3] * smoothstepf(e.p[10], e.p[11], sm[0]) * smoothstepf(e.p[12], e.p[13], tb[0]), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[7 + k] + t[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SCREAM_RING: {
+        float pu, pv, ring[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 };
+        polar(u, v, 1, &pu, &pv);
+        if (tex) {
+            sample(tex->img, pu * e.p[0] + e.p[2] + e.p[3], pv * e.p[1], flags, ring);
+            sample(tex->img, u, v, flags, t);
+        }
+        unpremul(ring);
+        float a = clampf(col[3] * ring[0] * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_HEXED: {
+        float pu, pv, nt[4] = { 0, 0, 0, 0 }, t[4] = { 1, 1, 1, 1 };
+        polar(u, v, 1, &pu, &pv);
+        if (tex) {
+            sample(tex->img, pu * e.p[0] + e.p[2], pv * e.p[1] + e.p[3], flags, nt);
+            sample(tex->img, u, v, flags, t);
+        }
+        unpremul(nt);
+        unpremul(t);
+        float n = smoothstepf(e.p[4], e.p[4] + e.p[5], nt[2]);
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) {
+            float inner = e.p[6 + k] + (e.p[9 + k] - e.p[6 + k]) * n;
+            float c = e.p[12 + k] + (inner - e.p[12 + k]) * t[0];
+            out[k] = clampf(c * col[k], 0, 1) * a;
+        }
+        out[3] = a;
+        return;
+    }
+    case EFFECT_RINGING: {
+        float f = e.p[0], pu, pv, tr[4], rb[4], t[4] = { 0, 0, 0, 0 }, mp[4] = { 0, 0, 0, 0 };
+        polar(u, v, 0.8f, &pu, &pv);
+        effect_texel(e, 1, f, f, tr);
+        effect_texel(e, 0, f, f, rb);
+        unpremul(tr);
+        unpremul(rb);
+        if (tex) {
+            sample(tex->img, u, v, flags, t);
+            sample(tex->img, pu * 0.5f + tr[0], pv * 0.5f, flags, mp);
+        }
+        unpremul(t);
+        float a = maxf(maxf(t[0] * rb[0], t[1] * rb[1]), maxf(t[2] * rb[2], mp[3] * tr[1]));
+        a = clampf(a, 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_LUT_FLIPBOOK: {
+        float total = e.p[1] * e.p[2], f = floorf(e.p[0]);
+        f -= total * floorf(f / total);
+        float fu = u / e.p[1] + fmodf(f, e.p[1]) / e.p[1], fv = v / e.p[2] + floorf((f + 0.5f) / e.p[1]) / e.p[2];
+        float t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, fu, fv, flags, t);
+        unpremul(t);
+        effect_texel(e, 0, t[0], t[0], l);
+        unpremul(l);
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_NOISY_DISSOLVE: {
+        float n[4], t[4] = { 1, 1, 1, 1 };
+        effect_texel(e, 0, u + e.p[2], v + e.p[3], n);
+        unpremul(n);
+        if (tex) sample(tex->img, u, v, flags, t);
+        unpremul(t);
+        float a = clampf(smoothstepf(e.p[0], e.p[0] + e.p[1], n[0]) * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * t[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SMOG: {
+        float ru = v, rv = 1 - u, m1[4] = { 0, 0, 0, 0 }, m2[4] = { 0, 0, 0, 0 }, mk[4], l[4];
+        if (tex) {
+            sample(tex->img, ru * e.p[0] + e.p[2], rv * e.p[1] + e.p[3], flags, m1);
+            sample(tex->img, ru * e.p[4] + e.p[6], rv * e.p[5] + e.p[7], flags, m2);
+        }
+        unpremul(m1);
+        unpremul(m2);
+        effect_texel(e, 1, u, v, mk);
+        unpremul(mk);
+        float s = (m1[0] + (m2[0] - m1[0]) * e.p[8]) * mk[0];
+        float a = smoothstepf(e.p[9], e.p[9] + e.p[10], s);
+        effect_texel(e, 0, a, a, l);
+        unpremul(l);
+        float alpha = clampf(a * col[3] + mk[1], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * l[k], 0, 1) * alpha;
+        out[3] = alpha;
+        return;
+    }
+    case EFFECT_LEAF: {
+        float rt[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, u * e.p[0] + e.p[2], v * e.p[1] + e.p[2] + e.p[3], flags, rt);
+        unpremul(rt);
+        float ang = 1.5707963f + e.p[4] * (rt[2] - 0.5f) * 2.0f * 1.5707963f;
+        float s = sinf(ang), c = cosf(ang), dx = u - e.p[5], dy = v - e.p[6];
+        if (tex) sample(tex->img, dx * s - dy * c + e.p[5], dx * c + dy * s + e.p[6], flags, t);
+        unpremul(t);
+        effect_texel(e, 0, t[0], t[0], l);
+        unpremul(l);
+        float a = clampf(col[3] * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * l[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_OIL: {
+        float sx = (u - 0.5f) * 2, sy = (v - 0.5f) * 2, d = sqrtf(sx * sx + sy * sy);
+        float ang = atan2f(sx, sy) / 6.2831853f;
+        float tb = e.p[2], tb5 = 5 * tb - floorf(5 * tb), n[4];
+        float a1 = ang - tb, a2 = ang + tb5;
+        effect_texel(e, 0, tb, a1 - floorf(a1), n);
+        unpremul(n);
+        float nv1 = (n[0] - 0.5f) / 10.0f;
+        effect_texel(e, 0, a2 - floorf(a2), tb, n);
+        unpremul(n);
+        float nv = nv1 + (n[0] - 0.5f) / 12.0f;
+        float bw = e.p[8], R = e.p[0] + nv;
+        float mm = 0;
+        if (bw > 0) {
+            float L = (d - R) / bw;
+            mm = ((R + bw >= d ? 1.0f : 0.0f) - (R >= d ? 1.0f : 0.0f)) * L * L;
+        }
+        float gm = (R + bw >= d ? 1.0f : 0.0f) - (0 >= d ? 1.0f : 0.0f);
+        float gu = u + e.p[3], gv = v + e.p[3], gn[4];
+        effect_texel(e, 1, gu - floorf(gu), gv - floorf(gv), gn);
+        unpremul(gn);
+        float ga = gn[0] * 3.0f, vy = sy + e.p[4];
+        float ry = -sinf(ga) * sx + cosf(ga) * vy;
+        float md = e.p[5] != 0 ? ry - e.p[5] * floorf(ry / e.p[5]) : 0.0f;
+        gm *= md < e.p[6] ? 1.0f : 0.0f;
+        float mr = e.p[1], x = d - nv1 * d * 2.0f;
+        float mana = (smoothstepf(-0.1f, -0.05f, x) - smoothstepf(mr + 0.05f, mr + 0.1f, x)) * (d < R + bw / 1.5f ? 1.0f : 0.0f);
+        float q0 = e.p[14], q1 = e.p[15];
+        bool on = q1 >= 65536.0f;
+        if (on) q1 -= 65536.0f;
+        float mc[4] = { floorf(q0 / 256.0f) / 255.0f, (q0 - 256.0f * floorf(q0 / 256.0f)) / 255.0f,
+                        floorf(q1 / 256.0f) / 255.0f, (q1 - 256.0f * floorf(q1 / 256.0f)) / 255.0f };
+        float c[4] = { 0, 0, 0, 0 };
+        if (mm > 0) {
+            for (int k = 0; k < 4; ++k) c[k] = e.p[10 + k];
+            c[3] *= mm;
+        }
+        if (mana > 0 && on) {
+            float g = mr != 0 ? d / mr * e.p[9] : 0.0f;
+            for (int k = 0; k < 3; ++k) c[k] = mc[k] + mc[k] * g;
+            c[3] = mana * mc[3];
+        }
+        if (gm > 0) {
+            float k2 = maxf(mana, mm);
+            for (int k = 0; k < 4; ++k) c[k] = c[k] * k2 + (e.p[10 + k] - c[k] * k2) * e.p[7];
+        }
+        float a = clampf(c[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(c[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_GALVANIZED: {
+        float bt[4] = { 0, 0, 0, 0 }, dt[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, mt[4] = { 0, 0, 0, 0 }, l[4];
+        float pu, pv;
+        polar(u, v, 1, &pu, &pv);
+        if (tex) {
+            sample(tex->img, u * e.p[0] + e.p[1], 0, flags, bt);
+            sample(tex->img, pu * e.p[2] + e.p[4], pv * e.p[3] + e.p[5], flags, dt);
+        }
+        unpremul(bt);
+        unpremul(dt);
+        float blink = smoothstepf(e.p[8], e.p[8] + e.p[9], bt[2]);
+        float o = (dt[2] - 0.5f) * 2.0f * e.p[6], k = dt[2] * -e.p[7];
+        if (tex) {
+            sample(tex->img, u + (u + o - 0.5f) * k, v + (v + o - 0.5f) * k, flags, t);
+            sample(tex->img, u, v, flags, mt);
+        }
+        unpremul(t);
+        effect_texel(e, 0, blink, 0, l);
+        unpremul(l);
+        float mask = smoothstepf(e.p[10], e.p[10] + e.p[11], mt[3]);
+        float a = clampf(col[3] * maxf(t[0], t[1] * l[3] * blink) * mask, 0, 1);
+        for (int q = 0; q < 3; ++q) out[q] = clampf(l[q] * col[q], 0, 1) * a;
         out[3] = a;
         return;
     }
@@ -713,7 +1042,27 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 /* ScreenParams: COLOR is the screen copy (the vertex colour
                  * is not applied). */
                 float su = ((float)x + 0.5f) / (float)fb_.w, sv = ((float)y + 0.5f) / (float)fb_.h;
-                if (screen_.mode == SCREEN_DOOM) {
+                if (screen_.mode == SCREEN_DISTORT) {
+                    float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                    float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                    float t[4], m = 0;
+                    if (tex) {
+                        sample(tex->img, u, v, flags, t);
+                        m = t[3] > 0 ? t[0] / t[3] : 0.0f;
+                        if (screen_.count == 1) {
+                            float dx = u - 0.5f, dy = v - 0.5f;
+                            float r = sqrtf(dx * dx + dy * dy) * 2.0f, an = atan2f(dy, dx) / 6.2831853f;
+                            float pu = r * screen_.center[0] + screen_.noise_offset[0];
+                            float pv = an * screen_.center[1] + screen_.noise_offset[1];
+                            float p[4];
+                            sample(tex->img, pu, pv, flags, p);
+                            m = t[3] * (p[3] > 0 ? p[0] / p[3] : 0.0f);
+                        }
+                    }
+                    float dx = 0.5f - u, dy = 0.5f - v, len = sqrtf(dx * dx + dy * dy);
+                    float k = len > 1e-6f ? screen_.strength * col[3] * m / len : 0.0f;
+                    sample_screen(su + dx * k, sv + dy * k, 0, s);
+                } else if (screen_.mode == SCREEN_DOOM) {
                     /* doom_overlay: inverse(YIQ) * diag(v, s*v, s*v) * YIQ */
                     float a = col[3], sf = 1 + (screen_.mix - 1) * a, vf = 1 + (screen_.strength - 1) * a;
                     float sc[4];

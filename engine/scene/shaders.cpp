@@ -177,11 +177,32 @@ static Texture* gradient_2d(Canvas& c, Resource* r) {
 }
 
 /* A CurveTexture (texture_mode RGB: the value in every channel, RED: in
- * red), 256 wide, values clamped to 0..1, once per resource. */
+ * red) or a CurveXYZTexture (curve_x, curve_y, curve_z in red, green,
+ * blue), 256 wide, values clamped to 0..1, once per resource. */
 static Texture* curve_texture(Canvas& c, Resource* r) {
     std::string key = "curvetex:" + r->path + format("%p", (void*)r);
     Texture* cached = c.cached_texture(key);
     if (cached) return cached;
+    if (r->type == "CurveXYZTexture") {
+        CurveData xyz[3];
+        for (int k = 0; k < 3; ++k) CurveData::from_xyz(r, k, xyz[k]);
+        TextureData td;
+        td.format = TEX_ARGB8;
+        td.flags = TEXF_DATA;
+        td.width = td.orig_width = 256;
+        td.height = td.orig_height = 1;
+        td.levels.resize(1);
+        td.levels[0].resize(256 * 4);
+        for (int i = 0; i < 256; ++i) {
+            u8* px = &td.levels[0][(size_t)i * 4]; /* B G R A */
+            for (int k = 0; k < 3; ++k) {
+                float v = xyz[k].valid() ? clampf(xyz[k].sample((float)i / 255.0f), 0, 1) : 0.0f;
+                px[2 - k] = (u8)(v * 255 + 0.5f);
+            }
+            px[3] = 255;
+        }
+        return c.cache_texture(key, td);
+    }
     CurveData curve;
     CurveData::from(r, curve);
     bool red = r->props && (*r->props)["texture_mode"].i(0) == 1;
@@ -212,7 +233,7 @@ static Texture* effect_texture(Canvas& c, const MaterialRes* m, const char* name
     if (r->is_texture()) return param_texture(c, m, name);
     if (r->type == "GradientTexture1D") return gradient_lut(c, r);
     if (r->type == "GradientTexture2D" && r->props) return gradient_2d(c, r);
-    if (r->type == "CurveTexture") return curve_texture(c, r);
+    if (r->type == "CurveTexture" || r->type == "CurveXYZTexture") return curve_texture(c, r);
     return NULL;
 }
 
@@ -222,7 +243,7 @@ static int g_effect_particle = 0; /* the effect when it changes per particle */
 /* Per particle: parameter g_life_param[i] = g_life_scale[i] * curve i at
  * the particle's life (hint_default_black: 0 without a curve; -1: none);
  * g_cz_param[i] += g_cz_scale[i] * CUSTOM.z. */
-static int g_life_param[2], g_cz_param[3];
+static int g_life_param[2], g_cz_param[3], g_cx_param;
 static float g_life_scale[2], g_cz_scale[3];
 static CurveData g_effect_curve, g_effect_curve2;
 
@@ -230,10 +251,11 @@ static void effect_particles(int id) {
     g_effect_particle = id;
     g_life_param[0] = g_life_param[1] = -1;
     g_cz_param[0] = g_cz_param[1] = g_cz_param[2] = -1;
+    g_cx_param = -1;
     g_life_scale[0] = g_life_scale[1] = 1;
 }
 
-bool shader_effect_particle(float life, float custom_z, EffectParams* out) {
+bool shader_effect_particle(float life, float custom_z, EffectParams* out, float custom_x) {
     if (!g_effect_particle) return false;
     *out = g_effect;
     const CurveData* curves[2] = { &g_effect_curve, &g_effect_curve2 };
@@ -242,6 +264,7 @@ bool shader_effect_particle(float life, float custom_z, EffectParams* out) {
             out->p[g_life_param[i]] = g_life_scale[i] * (curves[i]->valid() ? curves[i]->sample(life) : 0.0f);
     for (int i = 0; i < 3; ++i)
         if (g_cz_param[i] >= 0) out->p[g_cz_param[i]] += custom_z * g_cz_scale[i];
+    if (g_cx_param >= 0) out->p[g_cx_param] += custom_x;
     return true;
 }
 
@@ -299,6 +322,19 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
             e.p[9] = pan(p2.y);
             e.tex[1] = effect_texture(c, m, "noise_tex2");
         }
+        e.repeat = 3;
+    } else if (s == "inline:08658321c711a98e") {
+        /* The spectral knight's flame: the one-noise simple noise, its
+         * noise at UV + TIME * mask_offset * (2, 0.2). */
+        e.id = EFFECT_SIMPLE_NOISE;
+        Vec2 st = shader_param_vec2(m, "Step", Vec2(0, 0)), off = shader_param_vec2(m, "mask_offset", Vec2(2, 3));
+        e.p[0] = st.x;
+        e.p[1] = st.y;
+        e.p[2] = e.p[3] = 1;
+        e.p[4] = pan(off.x * 2.0f);
+        e.p[5] = pan(off.y * 0.2f);
+        e.p[6] = e.p[7] = 1;
+        e.tex[0] = effect_texture(c, m, "noise_tex");
         e.repeat = 3;
     } else if (s == "shaders/vfx/monsters/decimillipede_suck_shader.tres") {
         float dir = param(m, "direction", 1.0f);
@@ -495,6 +531,290 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "lut");
         effect_particles(e.id);
         g_life_param[0] = 0;
+    } else if (s == "shaders/vfx/goopy_impact/vfx_goopy_impact_bits_shader.gdshader") {
+        e.id = EFFECT_GOOPY_BITS;
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[0] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[1] = param(m, "erosion_offset", 0.25f);
+        Vec2 speed = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
+        e.p[2] = pan(speed.x);
+        e.p[3] = pan(speed.y);
+        e.p[4] = param(m, "distortion_strength", 0.0f);
+        Vec2 size = shader_param_vec2(m, "flipbook_size", Vec2(2, 2));
+        e.p[6] = size.x < 1 ? 1 : size.x;
+        e.p[7] = size.y < 1 ? 1 : size.y;
+        e.tex[0] = effect_texture(c, m, "lut");
+        effect_particles(e.id);
+        g_life_param[0] = 0;
+        g_cz_param[0] = 5;
+        g_cz_scale[0] = param(m, "frame_count", 4.0f) * 0.99f;
+    } else if (s == "shaders/vfx/ui/card/afflictions/bound/vfx_ui_card_affliction_bound_main_shader.gdshader") {
+        e.id = EFFECT_BOUND_MAIN;
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float st[4];
+        param_vec4(m, "bright_st", st0, st);
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[2] = pan(st[2]);
+        e.p[3] = pan(st[3]);
+        e.p[4] = param(m, "bright_energy", 0.0f);
+    } else if (s == "shaders/vfx/ui/card/afflictions/bound/vfx_ui_card_affliction_bound_border_shader.gdshader") {
+        e.id = EFFECT_POLAR_BORDER;
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float st[4];
+        param_vec4(m, "main_st", st0, st);
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[2] = pan(st[2]);
+        e.p[3] = pan(st[3]);
+        Vec2 me = shader_param_vec2(m, "mask_erosion", Vec2(0, 0));
+        e.p[4] = me.x;
+        e.p[5] = me.y;
+        e.tex[0] = effect_texture(c, m, "mask");
+    } else if (s == "shaders/vfx/scream/vfx_scream_squiggly_ring_polar_shader.gdshader") {
+        e.id = EFFECT_SQUIGGLY_RING;
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        CurveData::from(shader_param_resource(m, "offset_curve"), g_effect_curve2);
+        Vec2 xo = shader_param_vec2(m, "x_offsets", Vec2(0, 0));
+        e.p[0] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[1] = param(m, "erosion_offset", 0.0f);
+        Vec2 dt = shader_param_vec2(m, "distortion_tiling", Vec2(0, 0));
+        Vec2 ds = shader_param_vec2(m, "distortion_offset_speed", Vec2(0, 0));
+        e.p[2] = dt.x;
+        e.p[3] = dt.y;
+        e.p[4] = pan(ds.x);
+        e.p[5] = pan(ds.y);
+        e.p[7] = param(m, "distortion_strength", 0.05f);
+        Vec2 tl = shader_param_vec2(m, "tiling", Vec2(0, 0));
+        e.p[8] = tl.x;
+        e.p[9] = tl.y;
+        e.p[10] = xo.x;
+        e.p[11] = (xo.y - xo.x) * (g_effect_curve2.valid() ? g_effect_curve2.sample(0) : 0.0f);
+        effect_particles(e.id);
+        g_life_param[0] = 0;
+        g_life_param[1] = 11;
+        g_life_scale[1] = xo.y - xo.x;
+        g_cx_param = 6;
+    } else if (s == "shaders/vfx/fire/fire_shader_1.tres") {
+        e.id = EFFECT_FIRE_SHAPE;
+        float t = (float)g_shader_time + param(m, "TimeOffset", 0.0f);
+        Vec2 s1 = shader_param_vec2(m, "Noise_Scroll_1", Vec2(0.2f, 0.2f));
+        Vec2 s2 = shader_param_vec2(m, "Noise_Scroll_2", Vec2(0.2f, 0.2f));
+        Vec2 ms = shader_param_vec2(m, "MaskNoiseScroll", Vec2(0, 0));
+        Vec2 ss = shader_param_vec2(m, "Smooth_Step", Vec2(0.48f, 0.5f));
+        e.p[0] = fmodf(t * s1.x, 1.0f);
+        e.p[1] = fmodf(t * s1.y, 1.0f);
+        e.p[2] = param(m, "NoiseScale1", 1.0f);
+        e.p[3] = fmodf(t * s2.x * 3.0f, 1.0f);
+        e.p[4] = fmodf(t * s2.y * 3.0f, 1.0f);
+        e.p[5] = param(m, "NoiseScale2", 1.0f);
+        e.p[6] = 1.0f - param(m, "Noise_Intensity_1", 1.0f);
+        e.p[7] = 1.0f - param(m, "Noise_Intensity_2", 1.0f);
+        e.p[8] = pan(ms.x);
+        e.p[9] = pan(ms.y);
+        e.p[10] = param(m, "MaskNoiseIntensity", 0.0f);
+        e.p[11] = ss.x;
+        e.p[12] = ss.y;
+        Color k = param_color(m, "ColorParameter", Color(0, 0, 0, 1));
+        e.p[13] = k.r;
+        e.p[14] = k.g;
+        e.p[15] = k.b;
+        e.tex[0] = effect_texture(c, m, "NoiseTexture1");
+        e.tex[1] = effect_texture(c, m, "NoiseTexture2");
+        e.tex[2] = effect_texture(c, m, "top_gradient");
+        e.tex[3] = effect_texture(c, m, "MaskNoiseTexture");
+        e.tex[4] = effect_texture(c, m, "Shape_Mask");
+        e.repeat = 1 | 2 | 8;
+    } else if (s == "shaders/vfx/simple_distortion_flat_shader.tres") {
+        e.id = EFFECT_SIMPLE_DISTORTION;
+        Vec2 pn = shader_param_vec2(m, "distortionPanning1", Vec2(0.2f, 0.2f));
+        Vec2 amt = shader_param_vec2(m, "distortionAmount", Vec2(0, 0));
+        e.p[0] = pan(pn.x);
+        e.p[1] = pan(pn.y);
+        e.p[2] = amt.x;
+        e.p[3] = amt.y;
+        Color k = param_color(m, "Color_Multiply", Color(1, 1, 1, 1));
+        e.p[4] = k.r;
+        e.p[5] = k.g;
+        e.p[6] = k.b;
+        e.tex[0] = effect_texture(c, m, "distortionTexture1");
+        e.repeat = 1;
+    } else if (s == "shaders/vfx/ui/card/afflictions/entangled/vfx_ui_card_affliction_entangled_main_shader.gdshader") {
+        e.id = EFFECT_ENTANGLED;
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float st[4];
+        param_vec4(m, "distortion_st", st0, st);
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[2] = st[2];
+        e.p[3] = pan(st[3]);
+        e.p[4] = param(m, "distortion_intensity", 0.0f);
+        e.tex[0] = effect_texture(c, m, "vine_lut");
+    } else if (s == "shaders/vfx/2d_sphere_shader.tres") {
+        e.id = EFFECT_SPHERE;
+        Vec2 nps = shader_param_vec2(m, "NoisePanSpeed", Vec2(0, 0)), ns = shader_param_vec2(m, "NoiseScale", Vec2(10, 10));
+        Vec2 tps = shader_param_vec2(m, "TexturePanSpeed", Vec2(1, 1)), to = shader_param_vec2(m, "TextureOffset", Vec2(0, 0));
+        e.p[0] = pan(nps.x * ns.x);
+        e.p[1] = pan(nps.y * ns.y);
+        e.p[2] = ns.x;
+        e.p[3] = ns.y;
+        e.p[4] = param(m, "NoiseStrength", 0.01f);
+        /* TIME * TexturePanSpeed + 1 + TextureOffset (TEXTURE repeats) */
+        e.p[5] = pan(tps.x) + to.x;
+        e.p[6] = pan(tps.y) + to.y;
+        Color k = param_color(m, "AddColor", Color(0, 0.483333f, 1, 1));
+        e.p[7] = k.r;
+        e.p[8] = k.g;
+        e.p[9] = k.b;
+        Vec2 sm = shader_param_vec2(m, "SidesMaskStep", Vec2(0.1f, 0.3f)), tb = shader_param_vec2(m, "TopBottomMaskStep", Vec2(0.5f, 0.7f));
+        Vec2 tbo = shader_param_vec2(m, "TopBottomMaskOffset", Vec2(0, 0));
+        e.p[10] = sm.x;
+        e.p[11] = sm.y;
+        e.p[12] = tb.x;
+        e.p[13] = tb.y;
+        e.p[14] = tbo.x;
+        e.p[15] = tbo.y;
+        e.tex[0] = effect_texture(c, m, "NoiseTexture");
+        e.tex[1] = effect_texture(c, m, "tex_frg_30");
+        e.tex[2] = effect_texture(c, m, "Sides_Mask");
+        e.tex[3] = effect_texture(c, m, "TopBottomMask");
+        e.repeat = 1;
+    } else if (s == "shaders/vfx/scream/vfx_scream_ring_polar_shader.gdshader") {
+        e.id = EFFECT_SCREAM_RING;
+        CurveData::from(shader_param_resource(m, "offset_curve"), g_effect_curve);
+        Vec2 tl = shader_param_vec2(m, "tiling", Vec2(0, 0)), xo = shader_param_vec2(m, "x_offsets", Vec2(0, 0));
+        e.p[0] = tl.x;
+        e.p[1] = tl.y;
+        e.p[2] = xo.x;
+        e.p[3] = (xo.y - xo.x) * (g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f);
+        effect_particles(e.id);
+        g_life_param[0] = 3;
+        g_life_scale[0] = xo.y - xo.x;
+    } else if (s == "shaders/vfx/ui/card/afflictions/hexed/vfx_ui_card_affliction_hexed_main_shader.gdshader") {
+        e.id = EFFECT_HEXED;
+        static const float st0[4] = { 1, 1, 0, 0 };
+        float st[4];
+        param_vec4(m, "noise_st", st0, st);
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[2] = pan(st[2]);
+        e.p[3] = pan(st[3]);
+        Vec2 ns = shader_param_vec2(m, "noise_smoothstep", Vec2(0, 1));
+        e.p[4] = ns.x;
+        e.p[5] = ns.y;
+        static const char* const names[3] = { "main_color", "bright_color", "border_color" };
+        for (int i = 0; i < 3; ++i) {
+            Color k = param_color(m, names[i], Color(0, 0, 0, 1));
+            e.p[6 + i * 3] = k.r;
+            e.p[7 + i * 3] = k.g;
+            e.p[8 + i * 3] = k.b;
+        }
+    } else if (s == "shaders/vfx/ui/card/afflictions/ringing/vfx_ui_card_affliction_ringing_main_shader.gdshader") {
+        e.id = EFFECT_RINGING;
+        e.p[0] = pan(param(m, "animation_speed", 1.0f));
+        e.tex[0] = effect_texture(c, m, "ring_base_alpha");
+        e.tex[1] = effect_texture(c, m, "thin_ring_animation");
+    } else if (s == "shaders/vfx/missile/vfx_missile_core_shader.gdshader") {
+        e.id = EFFECT_LUT_FLIPBOOK;
+        float frames = param(m, "frame_count", 9.0f);
+        Vec2 size = shader_param_vec2(m, "flipbook_size", Vec2(3, 3));
+        e.p[0] = frames > 0 ? fmodf((float)g_shader_time * param(m, "flipbook_speed", 1.0f), frames) : 0.0f;
+        e.p[1] = size.x < 1 ? 1 : size.x;
+        e.p[2] = size.y < 1 ? 1 : size.y;
+        e.tex[0] = effect_texture(c, m, "lut");
+    } else if (s == "shaders/vfx/vfx_noisy_dissolve_shader.tres") {
+        e.id = EFFECT_NOISY_DISSOLVE;
+        Vec2 pn = shader_param_vec2(m, "NoisePanning", Vec2(0, 0));
+        e.p[0] = param(m, "step", 0.0f);
+        e.p[1] = param(m, "step_spread", 0.1f);
+        e.p[2] = pan(pn.x);
+        e.p[3] = pan(pn.y);
+        e.tex[0] = effect_texture(c, m, "NoiseTexture");
+        e.repeat = 1;
+    } else if (s == "shaders/vfx/ui/card/afflictions/smog/vfx_ui_card_affliction_smog_main_shader.gdshader") {
+        /* tiling_and_offset(uv, (st.xyz, 0), (0, st.w)) */
+        e.id = EFFECT_SMOG;
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float a[4], b[4];
+        param_vec4(m, "main_st", st0, a);
+        param_vec4(m, "secondary_st", st0, b);
+        e.p[0] = a[0];
+        e.p[1] = a[1];
+        e.p[2] = pan(a[2]);
+        e.p[3] = a[3];
+        e.p[4] = b[0];
+        e.p[5] = b[1];
+        e.p[6] = pan(b[2]);
+        e.p[7] = b[3];
+        e.p[8] = param(m, "secondary_smoke_influence", 0.0f);
+        Vec2 ef = shader_param_vec2(m, "erosion_factors", Vec2(0, 0));
+        e.p[9] = ef.x;
+        e.p[10] = ef.y;
+        e.tex[0] = effect_texture(c, m, "lut");
+        e.tex[1] = effect_texture(c, m, "mask");
+    } else if (s == "shaders/vfx/ui/card/afflictions/entangled/vfx_ui_card_affliction_entangled_leaf_shader.gdshader") {
+        e.id = EFFECT_LEAF;
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float st[4];
+        param_vec4(m, "rotation_st", st0, st);
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[3] = pan(st[3]);
+        e.p[4] = param(m, "rotation_range", 0.0f);
+        Vec2 ro = shader_param_vec2(m, "rotation_offset", Vec2(0, 0));
+        e.p[5] = ro.x;
+        e.p[6] = ro.y;
+        e.tex[0] = effect_texture(c, m, "lut");
+        effect_particles(e.id);
+        g_cz_param[0] = 2;
+        g_cz_scale[0] = 1;
+    } else if (s == "scenes/backgrounds/vantom_boss/oil.gdshader") {
+        e.id = EFFECT_OIL;
+        float cur = param(m, "current_mana", 0.5f), mx = param(m, "max_mana", 1.0f);
+        float rank = param(m, "rank_advance_mana", 1.0f);
+        float ratio = (rank != 0 ? minf(1.0f, mx / rank) : 1.0f) * param(m, "inset", 0.8f);
+        float gs = param(m, "groove_speed", 0.1f);
+        e.p[0] = ratio;
+        e.p[1] = mx != 0 ? cur / mx * ratio * 1.05f : 0.0f;
+        e.p[2] = pan(param(m, "border_speed", 0.02f));
+        e.p[3] = pan(gs);
+        e.p[4] = sinf((float)g_shader_time * gs);
+        e.p[5] = param(m, "groove_distance", 0.3f);
+        e.p[6] = param(m, "groove_width", 0.075f);
+        e.p[7] = param(m, "groove_opacity", 0.5f);
+        e.p[8] = param(m, "border_width", 0.1f);
+        e.p[9] = param(m, "glow_strength", 0.5f);
+        Color bc = param_color(m, "border_color", Color(0, 0, 0, 0)), mc = param_color(m, "mana_color", Color(0, 0, 0, 0));
+        e.p[10] = bc.r;
+        e.p[11] = bc.g;
+        e.p[12] = bc.b;
+        e.p[13] = bc.a;
+        float q[4] = { mc.r, mc.g, mc.b, mc.a };
+        for (int i = 0; i < 4; ++i) q[i] = floorf(clampf(q[i], 0, 1) * 255.0f + 0.5f);
+        e.p[14] = q[0] * 256.0f + q[1];
+        e.p[15] = q[2] * 256.0f + q[3] + (cur > 0 ? 65536.0f : 0.0f);
+        e.tex[0] = effect_texture(c, m, "noise");
+        e.tex[1] = effect_texture(c, m, "groovy_noise");
+    } else if (s == "shaders/vfx/ui/card/afflictions/galvanized/vfx_ui_card_affliction_galvanized_main_shader.gdshader") {
+        e.id = EFFECT_GALVANIZED;
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float b[4], d[4];
+        param_vec4(m, "blink_st", st0, b);
+        param_vec4(m, "distortion_st", st0, d);
+        e.p[0] = b[0];
+        e.p[1] = pan(b[2]);
+        e.p[2] = d[0];
+        e.p[3] = d[1];
+        e.p[4] = pan(d[2]);
+        e.p[5] = pan(d[3]);
+        e.p[6] = param(m, "distortion_offset", 0.0f);
+        e.p[7] = param(m, "distortion_intensity", 0.0f);
+        Vec2 bs = shader_param_vec2(m, "blink_smoothstep", Vec2(0, 0)), sf = shader_param_vec2(m, "smoothstep_factors", Vec2(0, 0));
+        e.p[8] = bs.x;
+        e.p[9] = bs.y;
+        e.p[10] = sf.x;
+        e.p[11] = sf.y;
+        e.tex[0] = effect_texture(c, m, "lut");
     } else if (s == "shaders/blur/Blur.gdshader") {
         /* textureSize(TEXTURE): the drawn TextureRect's */
         Vec2 ts(512, 512);
@@ -634,7 +954,8 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.set_color_matrix(cm);
         return true;
     }
-    if (m->shader == "shaders/vfx/wind_sway.gdshader") {
+    if (m->shader == "shaders/vfx/wind_sway.gdshader" || m->shader == "inline:c4e318138159a7c6") {
+        /* inline:c4e3...: the overgrowth rest site's copy */
         /* getWind in the vertex shader: time = TIME * speed + offset; the
          * strength eases between minStrength and maxStrength (GLSL clamp:
          * min(max(x, lo), hi), so maxStrength wins when it is the lower),
@@ -655,6 +976,11 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         Color mc = param_color(m, "map_color", Color(1, 1, 1, 1)), bl = param_color(m, "black_layer_color", Color(0, 0, 0, 1));
         float cm[12] = { mc.r, 1, bl.r, 0, mc.g, 1, bl.g, 0, mc.b, 1, bl.b, 0 };
         c.set_color_matrix(cm);
+        return true;
+    }
+    if (m->shader == "shaders/vfx/monsters/amalgam_glare_shader.tres") {
+        /* an empty fragment(): COLOR = texel * vertex colour, render_mode
+         * blend_add (shader_blend) */
         return true;
     }
     if (m->shader == "shaders/vfx/common/vfx_common_subtractive.gdshader") {
@@ -682,7 +1008,8 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         p.mix = param(m, "mix_percentage", 0.3f);
         return c.renderer()->set_screen(&p);
     }
-    if (m->shader == "shaders/vfx/vfx_water_reflection.gdshader") {
+    if (m->shader == "shaders/vfx/vfx_water_reflection.gdshader" || m->shader == "inline:79431f9d3f8deb72") {
+        /* inline:7943...: the fake merchant's copy */
         EffectParams e;
         memset(&e, 0, sizeof(e));
         e.id = EFFECT_WATER_REFLECTION;
@@ -725,6 +1052,23 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         p.color[1] = cc.g;
         p.color[2] = cc.b;
         p.color[3] = cc.a;
+        return c.renderer()->set_screen(&p);
+    }
+    if (m->shader == "shaders/vfx/distortion/vfx_screen_distortion_outward_shader.gdshader" ||
+        m->shader == "shaders/vfx/scream/vfx_scream_distortion_polar_shader.gdshader") {
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_DISTORT;
+        p.strength = param(m, "distortion_base_intensity", 0.05f);
+        if (m->shader == "shaders/vfx/scream/vfx_scream_distortion_polar_shader.gdshader") {
+            /* tiling_and_offset: uv * tiling + offset_speed * TIME */
+            Vec2 tiling = shader_param_vec2(m, "tiling", Vec2(1, 1)), speed = shader_param_vec2(m, "offset_speed", Vec2(0, 0));
+            p.count = 1;
+            p.center[0] = tiling.x;
+            p.center[1] = tiling.y;
+            p.noise_offset[0] = fmodf(speed.x * (float)g_shader_time, 1.0f);
+            p.noise_offset[1] = fmodf(speed.y * (float)g_shader_time, 1.0f);
+        }
         return c.renderer()->set_screen(&p);
     }
     if (m->shader == "shaders/radial_blur.gdshader") {
@@ -840,8 +1184,9 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
     }
     if (m->shader == "shaders/vfx/vfx_stepped_shader_fire_add.tres" ||
         m->shader == "shaders/vfx/vfx_stepped_shader_fire_flat.tres" ||
-        m->shader == "shaders/vfx/vfx_stepped_shader_fire_dark.tres") {
-        /* The stepped fire (FireParams; add: blend_add, see shader_blend). The
+        m->shader == "shaders/vfx/vfx_stepped_shader_fire_dark.tres" || m->shader == "inline:0e24d7d5bad2b589") {
+        /* inline:0e24...: the flat one's copy (the waterfall giant's and
+         * the insatiable's backgrounds). The stepped fire (FireParams; add: blend_add, see shader_blend). The
          * dark variant moves every panning by GlobalOffset. */
         bool dark = m->shader == "shaders/vfx/vfx_stepped_shader_fire_dark.tres";
         Vec2 g = dark ? shader_param_vec2(m, "GlobalOffset", Vec2(0, 0)) : Vec2(0, 0);
@@ -912,7 +1257,9 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
 /* Blend modes from a shader's render_mode (the tree applies the item's
  * blend after shader_begin). */
 bool shader_blend(const MaterialRes* m, BlendMode* out) {
-    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/vfx_stepped_shader_fire_add.tres") {
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && (m->shader == "shaders/vfx/vfx_stepped_shader_fire_add.tres" ||
+                                                         m->shader == "shaders/vfx/monsters/amalgam_glare_shader.tres" ||
+                                                         m->shader == "shaders/vfx/2d_sphere_shader.tres")) {
         *out = BLEND_ADD;
         return true;
     }

@@ -71,7 +71,8 @@ sampler2D g_scrNoise : register(s11); // noise (repeats), mask (clamped); unset:
 sampler2D g_scrMask : register(s12);
 float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass, 4 radial blur,
                                       // 5 glass border (z: corner weight, w: add, c23: corner colour),
-                                      // 6 doom overlay (y: saturation, z: value, w: pulse, c23: gradient);
+                                      // 6 doom overlay (y: saturation, z: value, w: pulse, c23: gradient),
+                                      // 7 distortion (y: polar, w: strength, c23: polar offset, tiling);
                                       // (y: count, z: power, c23.xy: centre);
                                       // y: lod fraction, z: mix, w: strength
 float4 g_scr2 : register(c23);        // xy: noise offset, zw: the level pass's texel size
@@ -83,6 +84,22 @@ float median3(float r, float g, float b) {
 float4 ps_main(VsOut i) : COLOR {
     [branch] if (g_scr.x > 0.5) {
         // Screen-reading shaders (ScreenParams); the vertex colour is not applied.
+        [branch] if (g_scr.x > 6.5) {
+            // The screen distortions: pushed toward the middle of the quad by
+            // the texel's red (polar: its alpha times its red at the polar uv),
+            // times the vertex alpha.
+            float4 t = tex2Dlod(g_tex, float4(i.uv, 0.0, 0.0));
+            float m = t.r;
+            [branch] if (g_scr.y > 0.5) {
+                float2 d = i.uv - 0.5;
+                float2 p = float2(length(d) * 2.0, atan2(d.y, d.x) / 6.2831853) * g_scr2.zw + g_scr2.xy;
+                m = t.a * tex2Dlod(g_tex, float4(p, 0.0, 0.0)).r;
+            }
+            float2 dir = 0.5 - i.uv;
+            float len = length(dir);
+            float k = len > 1e-6 ? g_scr.w * i.color.a * m / len : 0.0;
+            return tex2Dlod(g_scrA, float4(i.screen + dir * k, 0.0, 0.0));
+        }
         [branch] if (g_scr.x > 5.5) {
             // doom_overlay: desaturated and darkened by the vertex alpha in
             // YIQ, a pulsing gradient rising from the bottom of the screen.

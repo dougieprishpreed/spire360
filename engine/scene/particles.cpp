@@ -86,6 +86,13 @@ bool CurveData::from(Resource* r, CurveData& out) {
     return out.valid();
 }
 
+bool CurveData::from_xyz(Resource* r, int channel, CurveData& out) {
+    static const char* const keys[3] = { "curve_x", "curve_y", "curve_z" };
+    out.points.clear();
+    if (!r || !r->props || r->type != "CurveXYZTexture" || channel < 0 || channel > 2) return false;
+    return from(sub_of(r, keys[channel]), out);
+}
+
 float CurveData::sample(float x) const {
     if (points.empty()) return 0;
     if (points.size() == 1) return points[0].pos.y;
@@ -467,6 +474,7 @@ void Particles2D::step(double p_delta) {
             base_angle += p.custom[1] * (float)lifetime * tc[P_ANGULAR_VELOCITY] *
                           lerpf(pmin[P_ANGULAR_VELOCITY], pmax[P_ANGULAR_VELOCITY], rand_from_seed(s));
             p.rotation = deg2rad(base_angle);
+            p.custom[0] = p.rotation; /* CUSTOM.x: the angle */
             p.custom[2] = tc[P_ANIM_OFFSET] * lerpf(pmin[P_ANIM_OFFSET], pmax[P_ANIM_OFFSET], p.anim_offset_rand) +
                           tv * tc[P_ANIM_SPEED] * lerpf(pmin[P_ANIM_SPEED], pmax[P_ANIM_SPEED], rand_from_seed(s));
         }
@@ -621,7 +629,7 @@ void Particles2D::draw(Canvas& c) {
         for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
         if (per_effect && img) {
             float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
-            shader_effect_particle(life, p.custom[2], &effect);
+            shader_effect_particle(life, p.custom[2], &effect, p.custom[0]);
             c.renderer()->set_effect(&effect);
             c.draw_triangles(img, v, uv, col, idx);
             v.clear();
