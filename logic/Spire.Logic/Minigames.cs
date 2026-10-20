@@ -11,6 +11,10 @@ namespace Spire.Logic;
 public partial class RunDriver
 {
     private CrystalSphereMinigame? _crystalSphere;
+    // The one just finished and the floor it was on: NCrystalSphereScreen
+    // stays (its last divination revealed) under the rewards it gives.
+    private CrystalSphereMinigame? _crystalSphereDone;
+    private int _crystalSphereDoneFloor = -1;
 
     /// <summary>Called for every UI cue; picks up minigame models being shown.</summary>
     internal void OnUiCall(string id, object?[] args)
@@ -30,9 +34,28 @@ public partial class RunDriver
         if (mg == null) return null;
         if (mg.IsFinished)
         {
+            _crystalSphereDone = mg;
+            _crystalSphereDoneFloor = _runState!.TotalFloor;
             _crystalSphere = null;
             return null;
         }
+        return CrystalSphereState(mg);
+    }
+
+    /// <summary>The finished Crystal Sphere behind this floor's rewards, or null.</summary>
+    private Dictionary<string, object?>? CrystalSphereBehind()
+    {
+        if (_crystalSphereDone == null || _runState == null) return null;
+        if (_runState.TotalFloor != _crystalSphereDoneFloor)
+        {
+            _crystalSphereDone = null;
+            return null;
+        }
+        return CrystalSphereState(_crystalSphereDone);
+    }
+
+    private Dictionary<string, object?> CrystalSphereState(CrystalSphereMinigame mg)
+    {
         var size = mg.GridSize;
         var cells = new List<Dictionary<string, object?>>();
         for (int x = 0; x < size.X; x++)

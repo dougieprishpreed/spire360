@@ -113,6 +113,10 @@ static unsigned pad_bits(const XINPUT_GAMEPAD& g) {
     if (g.sThumbLX > 16000) b |= PadState::RIGHT;
     if (g.sThumbLY > 16000) b |= PadState::UP;
     if (g.sThumbLY < -16000) b |= PadState::DOWN;
+    if (g.sThumbRX < -16000) b |= PadState::RS_LEFT;
+    if (g.sThumbRX > 16000) b |= PadState::RS_RIGHT;
+    if (g.sThumbRY > 16000) b |= PadState::RS_UP;
+    if (g.sThumbRY < -16000) b |= PadState::RS_DOWN;
     return b;
 }
 

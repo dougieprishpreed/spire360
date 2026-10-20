@@ -7,7 +7,63 @@ Why things are the way they are: [DECISIONS.md](DECISIONS.md). Dialect rules:
 Last rewrite: 2026-10-18, when the work moved from a cloud session (game
 data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
-and 2026-10-20 (coverage and screen-texture checkpoint below).
+and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
+parts 2 and 3 above it).
+
+## Alpha push, part 3 (2026-10-20; commits 40ced41 and the next)
+
+Paused here at the user's request. Validation at the pause: traces
+`differences: 0` (base5 vs new15), `spire_check` on new15 0 failures
+(1,421 / 995 / 366 / 181 / 26), D3D9 check rc=0, strict C++98 PC build
+clean, content coverage (all suites, `--act-runs 3`) all ok.
+
+- GodotStubs: the generator emits `return default` for every member the
+  manual stubs lack. `Vector2I.One` was zero (the Crystal Sphere's small
+  gold had no cells; `==` on Vector2I was always false). Real versions of
+  the value-type / math members are in `Manual/ValueMath.cs` (Vector2,
+  Vector2I, Vector3, Quaternion, Rect2, Transform2D, Colors, Mathf);
+  Transform2D.Identity is the identity now. A full content-coverage run
+  with every remaining generated stub instrumented hit none of them.
+- Crystal Sphere end flow: the logic adds the finished minigame's state
+  (`crystal_sphere`, presentation only) to that floor's rewards and card
+  reward decisions; the client keeps the sphere (its last divination
+  revealed) under them and opens the rewards 0.75 s later
+  (`RewardsScreen::set_delay`, CompleteMinigame's Cmd.Wait).
+- Monster spine setup: the logic reads what each monster's SetupSkins does
+  to its spine (the bindings are UI calls in the logic; `Steps.Intercept`
+  diverts them to `SpineRecorder`) and sends `spine_ops` (composite skins,
+  track animations) and `phobia_skin`; the client applies them after the
+  idle starts (`SpineSprite::set_skins` / `add_animation`). Calcified
+  Cultist's coral, Damp Cultist's slug, Two-Tailed Rat's parts, Queen /
+  Vantom tracks, Bowlbug Egg's cocoon were all missing before.
+- Phobia mode works: PhobiaModeVisuals bodies, normal / phobia skins,
+  NCombatBackgroundLayer (PhobiaModeVisual), NPhobiaAnimationToggler
+  (AnimationPlayer inactive), the event phobia portrait; toggling it
+  updates the fight in place. Not done: Decimillipede's shriveled phobia
+  texture on a segment's death (ChangePhobiaModeTexture).
+- PadState has right-stick bits (RS_UP / DOWN / LEFT / RIGHT; main.cpp maps
+  sThumbR) for the Bestiary's move hotkeys 6-9.
+- Bestiary, logic side done (presentation only): `bestiary` (sections per
+  discovered act + events, entries with discovered / room type /
+  encounter / monster, stats per filter with STATS.layout text, filters
+  with quotes and dialogue colours, stats_mode), `bestiary_entry
+  {monster, encounter}` (monsters with spine_ops, moves from
+  GenerateBestiaryMoveList(null), hurt / death sfx), `bestiary_move
+  {monster, index}` (runs the move on a fresh copy in NullCombatState; the
+  response's steps carry its cues: sfx, `anim` on `who`, vfx).
+
+Resume with: the client `bestiary_screen.{h,cpp}` (scenes/screens/bestiary:
+sidebar of label dividers + entries in the Sidebar ScrollArea, selection
+arrow at entry pos + (-42, 119), default layout with the creature in
+%MonsterVisualsContainer at (0, hitbox.h / 2) fading in from black, name /
+epithet / dialogue tweens, move buttons with glyphs LB RB RT LT X then the
+right stick, Y toggles moves / stats, LB / RB pick unlocked filters in
+stats mode; anim moves play on the spine (+ idle_loop unless die), state
+moves ask `bestiary_move` and play its cues; the Kaiser Crab and
+Decimillipede layouts); show the Bestiary button from the compendium
+answer's `bestiary`. Then: Spine dark colour, LightOccluder2D /
+SpineMesh2D, long-press confirmation, intro logo, language setting, soak
+runs, a small `spire_gaps` sweep.
 
 ## Alpha push, part 2 (2026-10-20; commits 9c95c67..11a1afd)
 

@@ -449,11 +449,29 @@ void GameClient::update(const PadState& pad) {
     else handle_input(pad);
 }
 
+/* The finished Crystal Sphere under its rewards (behind_), changing from
+ * the state before. */
+Node* GameClient::crystal_sphere_behind(const Json& sphere, const Json& before) {
+    std::string err;
+    CrystalSphereScreen* s = new CrystalSphereScreen(lib_);
+    s->set_previous(before);
+    behind_ = s;
+    Node* n = s->build(sphere, &err);
+    if (!n) {
+        log_warn("crystal sphere screen: %s", err.c_str());
+        delete behind_;
+        behind_ = NULL;
+    }
+    return n;
+}
+
 /* What shows behind an overlay screen (rewards, card reward): the fight's
  * room after it (aftermath: the player's state as it is now), else the
  * event's room; NULL for none. */
 Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     std::string err;
+    /* NCrystalSphereScreen stays under the rewards it gives, as it is. */
+    if (d["crystal_sphere"].is_object()) return crystal_sphere_behind(d["crystal_sphere"], d["crystal_sphere"]);
     const std::string& rt = d["context"]["room_type"].str();
     bool in_fight = rt == "Monster" || rt == "Elite" || rt == "Boss";
     if (room_ && room_->root_node() && !room_->root_node()->parent) {
@@ -594,7 +612,14 @@ void GameClient::show(const Json& d) {
          * reward taken) without its slide-in; back from the card reward
          * screen it slides in again (AfterOverlayShown). */
         RewardsScreen* s = new RewardsScreen(lib_);
-        s->set_background(overlay_background(d, true));
+        if (d["crystal_sphere"].is_object() && prev_kind == "crystal_sphere") {
+            /* Just after the last divination: what it revealed, and the
+             * rewards 0.75 s later (CompleteMinigame's Cmd.Wait). */
+            s->set_delay(0.75);
+            s->set_background(crystal_sphere_behind(d["crystal_sphere"], last_crystal_));
+        } else {
+            s->set_background(overlay_background(d, true));
+        }
         bool again = prev_kind == "rewards" || prev_kind == "card_reward";
         s->set_continuing(prev_kind != "rewards", again ? reward_focus_ : 0);
         ported_ = s;
@@ -1050,6 +1075,8 @@ void GameClient::apply_settings(const Json& s) {
     int k = s["screenshake"].i(2);
     ScreenShake::get().set_multiplier(k >= 0 && k < 5 ? shake[k] : (float)k);
     if (settings_screen_) settings_screen_->set_settings(s);
+    if (combat_) combat_->update_phobia_mode();
+    if (room_) room_->update_phobia_mode();
 }
 
 /* NSettingsScreen over the run (the pause menu's Settings); true when it

@@ -47,6 +47,8 @@ public:
     Node* build(const Json& decision, std::string* error);
     /* NCombatRoom lives for the fight. Apply a response to that room;
      * state changes are presented when their steps reach the playhead. */
+    /* After the setting changed (NGame.PhobiaModeToggled). */
+    void update_phobia_mode();
     void update_decision(const Json& decision, bool finishing = false);
     void show_aftermath(const Json& player);
     Node* root_node() const { return root_; }

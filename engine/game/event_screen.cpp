@@ -131,7 +131,13 @@ Node* EventScreen::build_default(const Json& d) {
     Node* lay = instance(lib_, "scenes/events/default_event_layout.tscn");
     if (!lay) return NULL;
     std::string id = d["event_id"].is_string() ? d["event_id"].str() : std::string();
-    if (!id.empty()) set_texture(lib_, lay->find_unique("Portrait"), "images/events/" + id + ".png");
+    if (!id.empty()) {
+        /* SetPortrait: the phobia mode portrait when there is one and the
+         * mode is on (EventModel.HasPhobiaModePortrait) */
+        std::string phobia = "images/events/" + id + "_phobia_mode.png";
+        bool alt = client_settings()["phobia_mode"].b() && lib_->ext(phobia) != NULL;
+        set_texture(lib_, lay->find_unique("Portrait"), alt ? phobia : "images/events/" + id + ".png");
+    }
 
     /* AnimateIn (from SetDescription, after the setup's wait): the title
      * fades in after 0.5 s; the description 0.25 s later, typed out. */

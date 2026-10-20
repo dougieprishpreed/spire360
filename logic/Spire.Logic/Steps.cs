@@ -51,9 +51,13 @@ internal static class Steps
     /// A call the game logic made into its UI layer ("ui|Namespace.Type::Method").
     /// Property reads and singleton lookups are not cues and are skipped.
     /// </summary>
+    /// <summary>While set, UI calls go here instead of the steps (SpineRecorder
+    /// reads what a monster's SetupSkins does to its spine).</summary>
+    public static Action<string, List<object?>>? Intercept;
+
     public static void Ui(string id, object?[] args)
     {
-        if (!Enabled || !RecordUi) return;
+        if (Intercept == null && (!Enabled || !RecordUi)) return;
         var sep = id.LastIndexOf("::", StringComparison.Ordinal);
         if (sep < 0) return;
         var method = id[(sep + 2)..];
@@ -109,6 +113,11 @@ internal static class Steps
                     outArgs.Add(tn);
                     break;
             }
+        }
+        if (Intercept != null)
+        {
+            Intercept(type + "." + method, outArgs);
+            return;
         }
         if (_pendingUi.Count < 500)
             _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });

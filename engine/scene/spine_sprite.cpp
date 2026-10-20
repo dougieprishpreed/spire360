@@ -5,6 +5,8 @@
 #include "scene.h"
 #include "shaders.h"
 
+#include <algorithm>
+#include <map>
 #include <math.h>
 
 namespace spire {
@@ -70,11 +72,14 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
     return data_;
 }
 
-SpineSprite::SpineSprite() : data_res(NULL), time_scale(1), lib_(NULL), skel_(NULL), failed_(false) {
+SpineSprite::SpineSprite() : data_res(NULL), time_scale(1), lib_(NULL), skel_(NULL), custom_skin_(NULL), failed_(false) {
     for (int i = 0; i < 4; ++i) slot_material[i] = NULL;
 }
 
-SpineSprite::~SpineSprite() { delete skel_; }
+SpineSprite::~SpineSprite() {
+    delete skel_;
+    delete custom_skin_;
+}
 
 bool SpineSprite::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     if (key == "skeleton_data_res") {
@@ -143,6 +148,57 @@ bool SpineSprite::set_skin(const std::string& name) {
     skel_->update_world_transform(SP_PHYSICS_UPDATE);
     return true;
 }
+
+static void add_unique(std::vector<int>& to, const std::vector<int>& from) {
+    for (size_t i = 0; i < from.size(); ++i)
+        if (std::find(to.begin(), to.end(), from[i]) == to.end()) to.push_back(from[i]);
+}
+
+bool SpineSprite::set_skins(const std::vector<std::string>& names) {
+    if (!ensure()) return false;
+    SpSkin* skin = new SpSkin();
+    skin->name = "custom-skin";
+    bool any = false;
+    for (size_t i = 0; i < names.size(); ++i) {
+        const SpSkin* s = skel_->data()->find_skin(names[i]);
+        if (!s) continue;
+        any = true;
+        /* Skin.AddSkin: its bones and constraints once, its attachments over
+         * any with the same slot and name */
+        add_unique(skin->bones, s->bones);
+        add_unique(skin->ik, s->ik);
+        add_unique(skin->transform, s->transform);
+        add_unique(skin->path, s->path);
+        add_unique(skin->physics, s->physics);
+        for (std::map<std::string, SpAttachment*>::const_iterator it = s->lookup.begin(); it != s->lookup.end(); ++it)
+            skin->lookup[it->first] = it->second;
+    }
+    if (!any) {
+        delete skin;
+        return false;
+    }
+    skel_->set_skin(skin);
+    delete custom_skin_;
+    custom_skin_ = skin;
+    skel_->set_slots_to_setup_pose();
+    state_.apply(*skel_);
+    skel_->update_world_transform(SP_PHYSICS_UPDATE);
+    return true;
+}
+
+bool SpineSprite::add_animation(const std::string& name, bool loop, float delay, int track) {
+    if (!ensure()) return false;
+    const SpAnimation* a = skel_->data()->find_animation(name);
+    if (!a) return false;
+    state_.add_animation(track, a, loop, delay);
+    return true;
+}
+
+void SpineSprite::add_empty_animation(int track) {
+    if (ensure()) state_.set_empty_animation(track);
+}
+
+void SpineSprite::set_state_time_scale(float scale) { state_.time_scale = scale; }
 
 bool SpineSprite::has_animation(const std::string& name) {
     return ensure() && skel_->data()->find_animation(name) != NULL;

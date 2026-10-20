@@ -130,6 +130,9 @@ internal static class Program
                 "potion_lab" => driver.PotionLab(),
                 "statistics" => driver.Statistics(),
                 "compendium" => driver.CompendiumState(),
+                "bestiary" => driver.Bestiary(),
+                "bestiary_entry" => driver.BestiaryEntry(Protocol.Str(cmd.Value, "monster"), Protocol.Str(cmd.Value, "encounter") ?? ""),
+                "bestiary_move" => driver.BestiaryMove(Protocol.Str(cmd.Value, "monster"), cmd.Value.TryGetProperty("index", out var nestedMoveIndex) ? nestedMoveIndex.GetInt32() : 0),
                 "run_history" => driver.RunHistoryView(cmd.Value.TryGetProperty("index", out var nestedRunIndex) ? nestedRunIndex.GetInt32() : 0),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
@@ -256,6 +259,15 @@ internal static class Program
 
             case "compendium":
                 return sim.CompendiumState();
+
+            case "bestiary":
+                return sim.Bestiary();
+
+            case "bestiary_entry":
+                return sim.BestiaryEntry(Protocol.Str(cmd, "monster"), Protocol.Str(cmd, "encounter") ?? "");
+
+            case "bestiary_move":
+                return sim.BestiaryMove(Protocol.Str(cmd, "monster"), cmd.TryGetProperty("index", out var moveIndex) ? moveIndex.GetInt32() : 0);
 
             case "run_history":
                 return sim.RunHistoryView(cmd.TryGetProperty("index", out var runIndex) ? runIndex.GetInt32() : 0);

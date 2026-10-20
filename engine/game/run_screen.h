@@ -14,7 +14,9 @@ class Node;
 struct PadState {
     enum {
         A = 1 << 0, B = 1 << 1, X = 1 << 2, Y = 1 << 3, LB = 1 << 4, RB = 1 << 5, LT = 1 << 6, RT = 1 << 7,
-        UP = 1 << 8, DOWN = 1 << 9, LEFT = 1 << 10, RIGHT = 1 << 11, START = 1 << 12, BACK = 1 << 13
+        UP = 1 << 8, DOWN = 1 << 9, LEFT = 1 << 10, RIGHT = 1 << 11, START = 1 << 12, BACK = 1 << 13,
+        /* the right stick pushed (MegaInput.altUp / altDown / altLeft / altRight) */
+        RS_UP = 1 << 14, RS_DOWN = 1 << 15, RS_LEFT = 1 << 16, RS_RIGHT = 1 << 17
     };
     unsigned held;
     unsigned pressed; /* went down this frame */

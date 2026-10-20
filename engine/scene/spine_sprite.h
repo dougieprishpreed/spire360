@@ -60,6 +60,13 @@ public:
     void set_data(SceneLibrary* lib, SpineDataRes* res);
     /* Skeleton.SetSkin + SetSlotsToSetupPose; false without that skin. */
     bool set_skin(const std::string& name);
+    /* The same with a skin made of these (NewSkin + AddSkin for each one the
+     * skeleton has); false when it has none of them. */
+    bool set_skins(const std::vector<std::string>& names);
+    /* AnimationState.AddAnimation / AddEmptyAnimation / TimeScale */
+    bool add_animation(const std::string& name, bool loop, float delay, int track);
+    void add_empty_animation(int track);
+    void set_state_time_scale(float scale);
 
 private:
     bool ensure();
@@ -68,6 +75,7 @@ private:
     SpineFollowNode* follow_node(Node* n);
     SceneLibrary* lib_;
     SpSkeleton* skel_;
+    SpSkin* custom_skin_; /* set_skins' (its attachments are the data's) */
     SpAnimationState state_;
     bool failed_;
     std::vector<float> world_;

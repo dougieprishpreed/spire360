@@ -1216,6 +1216,66 @@ static SpineSprite* first_spine(Node* n) {
     return NULL;
 }
 
+/* NCreatureVisuals.SetUpSkin and UpdatePhobiaMode, after the idle starts:
+ * what the monster's SetupSkins did to its spine (the logic records it:
+ * spine_ops), then phobia mode: the %PhobiaModeVisuals body shown instead
+ * of %Visuals when there is one, and a spine with "normal" / "phobia"
+ * skins in the mode's (MonsterModel.OnPhobiaModeToggled). */
+static void phobia_mode(Node* visuals, const Json& data) {
+    if (!visuals) return;
+    bool phobia = client_settings()["phobia_mode"].b();
+    Node* alt = visuals->find_unique("PhobiaModeVisuals");
+    Node* body = visuals->find_unique("Visuals");
+    if (alt && body) {
+        set_visible(alt, phobia);
+        set_visible(body, !phobia);
+    }
+    SpineSprite* s = first_spine(body ? body : visuals);
+    if (s && data["phobia_skin"].b()) s->set_skins(std::vector<std::string>(1, phobia ? "phobia" : "normal"));
+}
+
+static void setup_spine(Node* visuals, const Json& data) {
+    if (!visuals) return;
+    Node* body = visuals->find_unique("Visuals");
+    SpineSprite* s = first_spine(body ? body : visuals);
+    const Json& ops = s ? data["spine_ops"] : Json();
+    for (size_t i = 0; i < ops.size(); ++i) {
+        const Json& op = ops[i];
+        const std::string& kind = op["op"].str();
+        if (kind == "skin") {
+            std::vector<std::string> names;
+            for (size_t k = 0; k < op["skins"].size(); ++k) names.push_back(op["skins"][k].str());
+            s->set_skins(names);
+        } else if (kind == "set_animation") {
+            s->set_animation(op["name"].str(), op["loop"].b(true), op["track"].i());
+        } else if (kind == "add_animation") {
+            s->add_animation(op["name"].str(), op["loop"].b(true), op["delay"].f(), op["track"].i());
+        } else if (kind == "add_empty_animation") {
+            s->add_empty_animation(op["track"].i());
+        } else if (kind == "time_scale") {
+            s->set_state_time_scale(op["scale"].f(1));
+        }
+    }
+    phobia_mode(visuals, data);
+}
+
+/* NGame.PhobiaModeToggled: the creatures and the background layers change
+ * (NCreature / NCombatBackgroundLayer.UpdatePhobiaMode). */
+static void phobia_layers(Node* n, bool phobia) {
+    Node* alt = n->get_node("PhobiaModeVisual");
+    Node* normal = n->get_node("Visual");
+    if (alt && normal) {
+        set_visible(alt, phobia);
+        set_visible(normal, !phobia);
+    }
+    for (size_t i = 0; i < n->children.size(); ++i) phobia_layers(n->children[i], phobia);
+}
+
+void CombatScreen::update_phobia_mode() {
+    for (size_t i = 0; i < enemies_.size(); ++i) phobia_mode(enemies_[i].visuals, enemies_[i].data);
+    if (root_) phobia_layers(root_, client_settings()["phobia_mode"].b());
+}
+
 /* A pet other than Osty (NCombatRoom.AddCreature, NCreature._Ready): its
  * visuals in the skin its relic picked (MonsterModel.SetupSkins), no
  * state display and not targetable (IsHealthBarVisible is false). */
@@ -1604,6 +1664,8 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
             (*places_)[enemy_node_ids[i]] = at[i];
     }
     play_idle(root);
+    for (size_t i = 0; i < enemies_.size(); ++i) setup_spine(enemies_[i].visuals, enemies_[i].data);
+    for (size_t i = 0; i < ghosts_.size(); ++i) setup_spine(ghosts_[i].c.visuals, ghosts_[i].c.data);
     if (visual_only_) {
         /* NCreature.ToggleIsInteractable(false) hides the state display. */
         hide(player_.node ? player_.node->find_unique("HealthBar") : NULL);
@@ -1735,6 +1797,7 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
                 if (places_ && places_->find(es[i]["combat_id"].i()) != places_->end()) c.node->set_position((*places_)[es[i]["combat_id"].i()]);
                 else c.node->set_position(Vec2(250.0f + (float)i * 220.0f, 200));
                 play_idle(c.node);
+                setup_spine(c.visuals, c.data);
                 c.node->visible = false; /* revealed by spawn or the final sync */
             }
             next.push_back(c);

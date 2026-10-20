@@ -21,6 +21,8 @@ public:
      * autoplay one); false if it has none by that name. */
     bool play(const std::string& name);
     void stop() { playing_ = false; }
+    /* AnimationMixer.Active: false, nothing plays (not even autoplay). */
+    void set_active(bool on) { active_ = on; }
     bool is_playing() const { return playing_; }
     /* The animation that last ran to its end (animation_finished), until
      * the next play; "" if none. */
@@ -35,7 +37,7 @@ private:
     std::string autoplay_, current_, finished_;
     const Json* anim_; /* the current animation's props */
     double time_, length_;
-    bool loop_, playing_, started_;
+    bool loop_, playing_, started_, active_;
     std::map<int, int> discrete_; /* track -> key last set */
 };
 

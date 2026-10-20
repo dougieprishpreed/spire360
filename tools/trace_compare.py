@@ -36,6 +36,8 @@ DROP = {
     "ancient_border", "ancient_text_bg", "enchantment_view", "overlay",  # a card's look (NCard)
     "death_fade", "death_padding", "death_anim_length",  # a monster's death (NCreature.AnimDie)
     "run_time", "icon_base", "relic_icon_base", "inspect_upgrade", "inspect", "item_views",  # NRunTimer (wall clock)
+    "crystal_sphere",  # the finished NCrystalSphereScreen under its rewards
+    "spine_ops", "phobia_skin",  # MonsterModel.SetupSkins / OnPhobiaModeToggled on the spine sprite
 }
 
 

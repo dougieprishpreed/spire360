@@ -134,7 +134,7 @@ public partial class RunDriver
             }
             return d;
         }).ToList();
-        return new Dictionary<string, object?>
+        var state = new Dictionary<string, object?>
         {
             ["type"] = "decision",
             ["decision"] = "rewards",
@@ -144,6 +144,9 @@ public partial class RunDriver
             ["rewards"] = rewards,
             ["player"] = PlayerSummary(player),
         };
+        var sphere = CrystalSphereBehind();
+        if (sphere != null) state["crystal_sphere"] = sphere;
+        return state;
     }
 
     private static string SafeText(Func<string?> f)

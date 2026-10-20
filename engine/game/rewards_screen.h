@@ -31,9 +31,13 @@ public:
         animate_in_ = animate_in;
         start_focus_ = focus;
     }
+    /* Before build: the overlay opens after this long (the Crystal
+     * Sphere's Cmd.Wait(0.75) after its last divination). */
+    void set_delay(double seconds) { delay_ = seconds; }
     int focused() const { return focus_; }
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool busy() const { return delay_ > 0; }
     virtual void frame(double dt);
 
 private:
@@ -54,6 +58,8 @@ private:
     ProceedButton proceed_;
     int focus_, start_focus_;
     bool animate_in_, terminal_, can_skip_;
+    double delay_;
+    Node* overlay_[2]; /* the backstop and the screen, hidden while delayed */
     TweenSet tweens_;
 };
 

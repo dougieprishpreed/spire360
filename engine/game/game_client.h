@@ -100,6 +100,7 @@ public:
 private:
     void send(const std::string& command);
     void show(const Json& d);
+    Node* crystal_sphere_behind(const Json& sphere, const Json& before);
     Node* overlay_background(const Json& d, bool aftermath);
     void pick(size_t i);
     unsigned next_rand();

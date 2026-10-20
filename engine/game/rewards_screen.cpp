@@ -15,7 +15,9 @@ static const unsigned CREAM = 0xFFF6E2, GOLD = 0xEFC851, OUTLINE = 0x225157, GOL
 
 RewardsScreen::RewardsScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), window_(NULL), focus_(-1), start_focus_(0), animate_in_(true), terminal_(true),
-      can_skip_(true) {}
+      can_skip_(true), delay_(0) {
+    overlay_[0] = overlay_[1] = NULL;
+}
 
 /* Reward.CreateIcon: a texture filling the 56x56 %Icon (gold, cards),
  * the potion (NPotion at 0.8), the relic's big icon. */
@@ -86,6 +88,12 @@ Node* RewardsScreen::build(const Json& d, std::string* error) {
         return NULL;
     }
     root->add_child(screen);
+    overlay_[0] = back;
+    overlay_[1] = screen;
+    if (delay_ > 0) {
+        set_visible(back, false);
+        set_visible(screen, false);
+    }
     hide(screen->find_unique("WaitingForOtherPlayers"));
     hide(screen->find_unique("Scrollbar"));
     set_label(screen->find_unique("HeaderLabel"), Loc::get("gameplay_ui", "COMBAT_REWARD_HEADER_LOOT"));
@@ -199,6 +207,13 @@ std::string RewardsScreen::input(const PadState& pad) {
 }
 
 void RewardsScreen::frame(double dt) {
+    if (delay_ > 0) {
+        delay_ -= dt;
+        if (delay_ > 0) return;
+        delay_ = 0;
+        set_visible(overlay_[0], true);
+        set_visible(overlay_[1], true);
+    }
     tweens_.update(dt);
     proceed_.frame(dt);
 }

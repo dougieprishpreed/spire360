@@ -2601,7 +2601,7 @@ public partial class RunDriver
             });
         }).ToList();
 
-        return new Dictionary<string, object?>
+        var state = new Dictionary<string, object?>
         {
             ["type"] = "decision",
             ["decision"] = "card_reward",
@@ -2611,6 +2611,9 @@ public partial class RunDriver
             ["gold_earned"] = _runState!.Players[0].Gold - _goldBeforeCombat,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+        var sphere = CrystalSphereBehind();
+        if (sphere != null) state["crystal_sphere"] = sphere;
+        return state;
     }
 
     private void ForceToMap()
@@ -3769,6 +3772,10 @@ internal static class CreatureViewExtensions
                 d["death_fade"] = c.Monster.ShouldFadeAfterDeath;
                 d["death_padding"] = new[] { c.Monster.ExtraDeathVfxPadding.X, c.Monster.ExtraDeathVfxPadding.Y };
                 d["death_anim_length"] = c.Monster.DeathAnimLengthOverride;
+                // NCreatureVisuals.SetUpSkin / UpdatePhobiaMode
+                var ops = SpineRecorder.Ops(c);
+                if (ops.Count > 0) d["spine_ops"] = ops;
+                if (SpineRecorder.HasPhobiaSkin(c)) d["phobia_skin"] = true;
             }
         }
         catch (Exception ex) { Console.Error.WriteLine($"[SIM] CreatureView: {ex.Message}"); }
