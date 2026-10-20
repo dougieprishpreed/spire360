@@ -122,6 +122,7 @@ internal static class Program
             {
                 "get_map" => driver.GetFullMap(),
                 "view_pile" => driver.ViewPile(Protocol.Str(cmd.Value, "pile", "deck")!),
+                "view_map" => driver.ViewMap(),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
                 {
@@ -226,6 +227,9 @@ internal static class Program
 
             case "view_pile":
                 return sim.ViewPile(Protocol.Str(cmd, "pile", "deck")!);
+
+            case "view_map":
+                return sim.ViewMap();
 
             case "set_player":
             {

@@ -3627,6 +3627,25 @@ public partial class RunDriver
         };
     }
 
+    // The map as the map screen shows it, for NTopBarMapButton's look at it
+    // between rooms (a query that changes nothing; no point to travel to).
+    public Dictionary<string, object?> ViewMap()
+    {
+        if (_runState?.Map == null) return Error("No map available");
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "map_view",
+            ["decision"] = "map_select",
+            ["context"] = RunContext(),
+            ["choices"] = new List<Dictionary<string, object?>>(),
+            ["map"] = MapView(_runState.Map),
+            ["player"] = PlayerSummary(_runState.Players[0]),
+            ["act"] = _runState.CurrentActIndex + 1,
+            ["act_name"] = _loc.Act(_runState.Act?.Id.Entry ?? "OVERGROWTH"),
+            ["floor"] = _runState.ActFloor,
+        };
+    }
+
     public Dictionary<string, object?> GetFullMap()
     {
         if (_runState?.Map == null)

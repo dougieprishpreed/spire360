@@ -4,8 +4,8 @@
  * Left / right move between the rooms that can be chosen (the pulsing
  * ones), A travels.
  *
- * Not yet: the boss node's Spine silhouette, drawing
- * on and scrolling the map. */
+ * Up / down scroll the map. Not yet: the boss node's Spine silhouette and
+ * drawing on the map. */
 #ifndef SPIRE_MAP_SCREEN_H
 #define SPIRE_MAP_SCREEN_H
 
@@ -58,6 +58,10 @@ private:
     int current_col_, current_row_;
     double opening_, travel_t_;
     Control* marker_;
+    /* NMapScreen's scroll (up / down): the map's offset, eased to its
+     * target, within the act's first and last rows. */
+    Control* map_ctl_;
+    float scroll_, scroll_to_, scroll_lo_, scroll_hi_, scroll_step_;
     Vec2 marker_to_;
 };
 

@@ -103,7 +103,8 @@ static std::string outline_name(const std::string& type, const std::string& room
 }
 
 MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1), next_tick_(0), current_col_(-1), current_row_(-1),
-    opening_(0), travel_t_(-1), marker_(NULL) {}
+    opening_(0), travel_t_(-1), marker_(NULL), map_ctl_(NULL), scroll_(0), scroll_to_(0), scroll_lo_(0), scroll_hi_(0),
+    scroll_step_(1) {}
 
 Node* MapScreen::build(const Json& d, std::string* error) {
     points_.clear();
@@ -193,6 +194,11 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     current_row_ = cur_row;
     Control* map_ctl = (Control*)the_map;
     map_ctl->offset[SIDE_TOP] = map_ctl->offset[SIDE_BOTTOM] = -600.0f + (float)cur_row * dist_y;
+    map_ctl_ = map_ctl;
+    scroll_ = scroll_to_ = -600.0f + (float)cur_row * dist_y;
+    scroll_lo_ = -600.0f;
+    scroll_hi_ = -600.0f + (float)(rows > 1 ? rows - 1 : 0) * dist_y;
+    scroll_step_ = dist_y * 2.0f;
 
     /* Visited coordinates (traveled), choices (travelable). */
     std::vector<std::pair<int, int> > visited;
@@ -438,6 +444,8 @@ void MapScreen::focus(int i) {
 
 std::string MapScreen::input(const PadState& pad) {
     if (busy()) return std::string();
+    if (pad.pressed & PadState::UP) scroll_to_ = minf(scroll_to_ + scroll_step_, scroll_hi_);
+    if (pad.pressed & PadState::DOWN) scroll_to_ = maxf(scroll_to_ - scroll_step_, scroll_lo_);
     int n = (int)choices_.size();
     if (n == 0) return std::string();
     if ((pad.pressed & PadState::LEFT) && focus_ > 0) focus(focus_ - 1);
@@ -473,6 +481,12 @@ void MapScreen::begin_travel(int col, int row) {
 void MapScreen::frame(double dt) {
     tweens_.update(dt);
     opening_ += dt;
+    if (map_ctl_ && fabsf(scroll_ - scroll_to_) > 0.1f) {
+        float k = (float)dt * 10.0f;
+        scroll_ += (scroll_to_ - scroll_) * (k > 1 ? 1 : k);
+        if (fabsf(scroll_ - scroll_to_) < 0.5f) scroll_ = scroll_to_;
+        map_ctl_->offset[SIDE_TOP] = map_ctl_->offset[SIDE_BOTTOM] = scroll_;
+    }
     if (travel_t_ >= 0) {
         double before = travel_t_;
         travel_t_ += dt;

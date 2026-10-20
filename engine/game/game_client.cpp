@@ -245,7 +245,8 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
-      answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), piles_button_(0), piles_asked_(false),
+      answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL), piles_button_(0),
+      piles_asked_(false),
       confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {}
 
 GameClient::~GameClient() {
@@ -363,6 +364,10 @@ void GameClient::update(const PadState& pad) {
             if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
             else show(msg);
+        } else if (type == "map_view") {
+            waiting_ = false;
+            if (piles_asked_) open_map_view(msg);
+            piles_asked_ = false;
         } else if (type == "pile") {
             /* view_pile's answer: the pile screen (a query, not a step) */
             waiting_ = false;
@@ -980,6 +985,22 @@ void GameClient::close_piles() {
     }
     delete piles_;
     piles_ = NULL;
+    delete map_view_;
+    map_view_ = NULL;
+}
+
+void GameClient::open_map_view(const Json& msg) {
+    close_piles();
+    std::string err;
+    map_view_ = new MapScreen(lib_);
+    piles_node_ = map_view_->build(msg, &err);
+    if (!piles_node_) {
+        log_warn("map view: %s", err.c_str());
+        delete map_view_;
+        map_view_ = NULL;
+        return;
+    }
+    tree_->root()->add_child(piles_node_);
 }
 
 /* The pile screens' input while one is open, or the buttons that open
@@ -993,12 +1014,28 @@ bool GameClient::piles_input(const PadState& pad) {
         }
         return true;
     }
+    if (map_view_) {
+        if (pad.pressed & (PadState::B | PadState::BACK)) {
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_close");
+            close_piles();
+        } else {
+            map_view_->input(pad);
+        }
+        return true;
+    }
     if (piles_asked_ || waiting_ || decision_.is_null() || game_over() || potions_.active()) return false;
     if (combat_ && (combat_->busy() || target_ >= 0)) return false;
     const std::string& kind = decision_["decision"].str();
     if (kind == "card_select" || kind == "card_reward") return false;
     const char* pile = NULL;
     unsigned button = 0;
+    if ((pad.pressed & PadState::BACK) && kind != "map_select") {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_open");
+        piles_button_ = PadState::BACK;
+        piles_asked_ = true;
+        send("{\"cmd\":\"view_map\"}");
+        return true;
+    }
     if (pad.pressed & PadState::LB) {
         pile = "deck";
         button = PadState::LB;
