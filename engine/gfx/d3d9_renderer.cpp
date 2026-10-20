@@ -36,6 +36,10 @@ D3D9Renderer::D3D9Renderer()
     memset(&effect_, 0, sizeof(effect_));
     effect_on_ = false;
     for (int i = 0; i < EFFECT_COUNT; ++i) effect_ps_[i] = NULL;
+    cap_w_ = cap_h_ = 0;
+#if !defined(_XBOX)
+    capture_sys_ = NULL;
+#endif
     for (int i = 0; i < SCREEN_LEVELS; ++i) {
         screen_lv_[i] = NULL;
 #if defined(_XBOX)
@@ -346,7 +350,92 @@ void D3D9Renderer::release_group_target() {
     RELEASE(group_rt_);
     RELEASE(group_tex_);
     RELEASE(main_rt_);
+#if !defined(_XBOX)
+    RELEASE(capture_sys_);
+#endif
+    cap_w_ = cap_h_ = 0;
     group_failed_ = false;
+}
+
+/* ---- captures (SubViewport): the group target, copied out ---- */
+
+bool D3D9Renderer::begin_capture(int w, int h) {
+    if (main_rt_ || cap_w_ || w <= 0 || h <= 0 || w > width_ || h > height_ || !make_group_target()) return false;
+    flush();
+    if (FAILED(dev_->GetRenderTarget(0, &main_rt_))) {
+        main_rt_ = NULL;
+        return false;
+    }
+    dev_->SetRenderTarget(0, group_rt_);
+    dev_->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    dev_->Clear(0, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    cap_w_ = w;
+    cap_h_ = h;
+    dirty_ = true;
+    return true;
+}
+
+Texture* D3D9Renderer::end_capture(Texture* reuse) {
+    if (!cap_w_ || !main_rt_) return NULL;
+    flush();
+    int w = cap_w_, h = cap_h_;
+    cap_w_ = cap_h_ = 0;
+    D3D9Texture* t = (D3D9Texture*)reuse;
+    if (t && (t->width != w || t->height != h)) {
+        destroy_texture(t);
+        t = NULL;
+    }
+    bool fresh = !t;
+    if (fresh) {
+        t = new D3D9Texture();
+        t->width = t->orig_width = w;
+        t->height = t->orig_height = h;
+        t->premultiplied = true;
+        t->memory_bytes = (size_t)w * h * 4;
+#if defined(_XBOX)
+        if (FAILED(dev_->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, 0, &t->tex, NULL))) t->tex = NULL;
+#else
+        if (FAILED(dev_->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t->tex, NULL))) t->tex = NULL;
+#endif
+    }
+    bool ok = t->tex != NULL;
+#if defined(_XBOX)
+    if (ok) {
+        D3DRECT src = { 0, 0, w, h };
+        D3DPOINT dst = { 0, 0 };
+        ok = SUCCEEDED(dev_->Resolve(D3DRESOLVE_RENDERTARGET0, &src, t->tex, &dst, 0, 0, NULL, 1.0f, 0, NULL));
+    }
+#else
+    /* Read back through system memory into a managed texture (survives a
+     * device reset). */
+    if (ok && !capture_sys_ &&
+        FAILED(dev_->CreateOffscreenPlainSurface(width_, height_, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &capture_sys_, NULL)))
+        capture_sys_ = NULL;
+    ok = ok && capture_sys_ && SUCCEEDED(dev_->GetRenderTargetData(group_rt_, capture_sys_));
+    if (ok) {
+        D3DLOCKED_RECT src, dst;
+        RECT r = { 0, 0, w, h };
+        ok = SUCCEEDED(capture_sys_->LockRect(&src, &r, D3DLOCK_READONLY));
+        if (ok) {
+            if (SUCCEEDED(t->tex->LockRect(0, &dst, NULL, 0))) {
+                for (int y = 0; y < h; ++y)
+                    memcpy((u8*)dst.pBits + (size_t)y * dst.Pitch, (const u8*)src.pBits + (size_t)y * src.Pitch, (size_t)w * 4);
+                t->tex->UnlockRect(0);
+            } else {
+                ok = false;
+            }
+            capture_sys_->UnlockRect();
+        }
+    }
+#endif
+    dev_->SetRenderTarget(0, main_rt_);
+    RELEASE(main_rt_);
+    dirty_ = true;
+    if (!ok) {
+        if (fresh) destroy_texture(t);
+        return fresh ? NULL : t;
+    }
+    return t;
 }
 
 bool D3D9Renderer::make_group_target() {
@@ -907,6 +996,9 @@ void D3D9Renderer::apply_state() {
         c[94] = c[95] = 0.0f;
     dev_->SetPixelShaderConstantF(0, c, 24);
     if (effect_on_) dev_->SetPixelShaderConstantF(24, effect_.p, 4);
+    /* c28.x: the texture holds premultiplied colours (a capture) */
+    float premul[4] = { tex_ && tex_->premultiplied ? 1.0f : 0.0f, 0, 0, 0 };
+    dev_->SetPixelShaderConstantF(28, premul, 1);
     dirty_ = false;
 }
 

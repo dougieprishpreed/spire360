@@ -16,8 +16,16 @@ Canvas::~Canvas() {
         if (it->second.texture) r_->destroy_texture(it->second.texture);
 }
 
+static std::vector<Texture*> g_released;
+
+void Canvas::release_later(Texture* t) {
+    if (t) g_released.push_back(t);
+}
+
 void Canvas::begin_frame() {
     ++frame_;
+    for (size_t i = 0; i < g_released.size(); ++i) r_->destroy_texture(g_released[i]);
+    g_released.clear();
     /* Each tree is a canvas of its own: its first screen-reading item
      * copies the screen again. */
     r_->screen_barrier();
@@ -167,6 +175,7 @@ bool Canvas::derive(const DerivedImage& d, TextureData& out) {
 
 Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (!img) return NULL;
+    if (img->render_target) return img->rendered;
     const std::string key = "pack:" + img->path;
     std::map<std::string, CachedTexture>::iterator it = textures_.find(key);
     if (it != textures_.end()) return cached_texture(key);

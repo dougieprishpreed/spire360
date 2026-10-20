@@ -2043,6 +2043,35 @@ void CombatScreen::radial_blur(const std::string& position) {
     radial_off_at_ = life_t_ + 1.0;
 }
 
+/* NCreature.AnimDie: the state display fades (AnimDisableUi); a player
+ * stays. A monster waits for its death animation (and half a second, or
+ * its DeathAnimLengthOverride without one), then fades through
+ * NMonsterDeathVfx (ShouldFadeAfterDeath) or is gone. */
+void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSprite* s) {
+    Node* state = cr.node->find_unique("StateDisplay");
+    if (state && state->is_canvas_item())
+        tweens_.tween(&((CanvasItem*)state)->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+    else
+        tweens_.tween(&cr.node->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+    if (cr.player || who.empty() || who[0] != 'e') return;
+    double wait = 0;
+    SpAnimationState* st = s ? s->animation_state() : NULL;
+    const SpAnimation* a = st ? st->current(0) : NULL;
+    if (a) wait = minf(a->duration - maxf(st->track_time(0), 0.0f) + 0.5f, 20.0f);
+    else wait = cr.data["death_anim_length"].f(0);
+    if (wait < 0) wait = 0;
+    bool fade = cr.data["death_fade"].is_bool() ? cr.data["death_fade"].b() : true;
+    if (fade && cr.node->parent) {
+        Vec2 pad(1.2f, 1.2f);
+        const Json& p = cr.data["death_padding"];
+        if (p.size() >= 2) pad = Vec2(p[(size_t)0].f(1.2f), p[(size_t)1].f(1.2f));
+        spawn_monster_death(lib_, cr.node->parent, *this, who, wait, pad);
+    } else if (cr.visuals && cr.visuals->is_canvas_item()) {
+        /* freed at once (the end of its animation leaves nothing) */
+        tweens_.tween(&((CanvasItem*)cr.visuals)->modulate.a, 0.0f, 0.01f, TRANS_LINEAR, EASE_IN_OUT, (float)wait);
+    }
+}
+
 Node* CombatScreen::take_visuals(const std::string& who) {
     Creature* cr = creature_for(who);
     if (!cr) return NULL;
@@ -2112,16 +2141,15 @@ void CombatScreen::fire(const Cue& c) {
         SpineSprite* s = cr ? first_spine(cr->visuals) : NULL;
         const char* name = trigger_animation(c.name);
         std::string anim = name ? name : lower(c.name);
-        if (c.name == "Dead" && cr && cr->node) {
+        bool dying = c.name == "Dead" && cr && cr->node;
+        if (dying) {
             cr->data.set("hp", Json::make_number(0));
             refresh_state(*cr, true);
             hide(cr->node->find_unique("Intents"));
-            /* NCreature's death: the creature fades once the animation has
-             * played (the game frees it). */
-            tweens_.tween(&cr->node->modulate.a, 0.0f, 0.6f, TRANS_LINEAR, EASE_IN_OUT, 0.9f);
         }
-        if (!s) return;
-        if (!s->set_animation(anim, false, 0)) return;
+        bool played = s && s->set_animation(anim, false, 0);
+        if (dying) monster_death(*cr, c.who, played ? s : NULL);
+        if (!played) return;
         SpSkeleton* sk = s->skeleton();
         const SpAnimation* idle = sk && anim != "die" ? sk->data()->find_animation("idle_loop") : NULL;
         if (idle && s->animation_state()) s->animation_state()->add_animation(0, idle, true, 0);

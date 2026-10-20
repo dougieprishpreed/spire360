@@ -3675,6 +3675,10 @@ internal static class CreatureViewExtensions
             {
                 d["hp_bar_reduction"] = c.Monster.HpBarSizeReduction;
                 d["health_bar_visible"] = c.Monster.IsHealthBarVisible;
+                // NCreature.AnimDie: the fade (NMonsterDeathVfx) and its look
+                d["death_fade"] = c.Monster.ShouldFadeAfterDeath;
+                d["death_padding"] = new[] { c.Monster.ExtraDeathVfxPadding.X, c.Monster.ExtraDeathVfxPadding.Y };
+                d["death_anim_length"] = c.Monster.DeathAnimLengthOverride;
             }
         }
         catch (Exception ex) { Console.Error.WriteLine($"[SIM] CreatureView: {ex.Message}"); }

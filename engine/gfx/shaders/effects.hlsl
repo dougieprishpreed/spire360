@@ -127,3 +127,23 @@ float4 ps_e11(VsOut i) : COLOR {
     float a = saturate(l.a * t.a * i.color.a);
     return float4(saturate(l.rgb * i.color.rgb) * a, a);
 }
+
+// 12: dissolve (NMonsterDeathVfx): a capture (premultiplied), warped up and
+// to the right as the threshold falls, eaten through two noises.
+float dissolve_strength(float2 uv, float offset) {
+    float2 scaling = (1.0 / 400.0) / g_p0.zw;
+    uv.x += offset;
+    float2 at = uv * scaling + float2(g_p0.y, uv.x * uv.x * uv.x);
+    float s1 = (tex2D(g_e0, at).r + uv.x) * 0.5;
+    float s2 = (tex2D(g_e1, at).r + uv.x) * 0.5;
+    return g_p0.x >= lerp(s1, s2, 0.4) ? 1.0 : 0.0;
+}
+
+float4 ps_e12(VsOut i) : COLOR {
+    float2 warp = float2(-200.0, 1024.0) * g_p0.zw;
+    float2 o = max(i.uv.x - (g_p0.x * 1.9 - 0.55), 0.0) * warp;
+    float4 c = tex2D(g_tex, i.uv + o * o);
+    c.rgb *= dissolve_strength(i.uv, 0.05);
+    c.rgb = lerp(dot(c.rgb, float3(0.299, 0.587, 0.114)).xxx, c.rgb, g_p0.x);
+    return c * dissolve_strength(i.uv, 0.0);
+}

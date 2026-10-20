@@ -10,6 +10,7 @@ SwRenderer::SwRenderer()
     : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), screen_on_(false), effect_on_(false),
       screen_levels_(0) {
     for (int i = 0; i < 4; ++i) ripple_[i] = 0;
+    cap_w_ = cap_h_ = 0;
 }
 
 Texture* SwRenderer::create_texture(const TextureData& d) {
@@ -46,7 +47,39 @@ void SwRenderer::begin(int w, int h, const Color& c) {
     screen_levels_ = 0;
 }
 
+bool SwRenderer::begin_capture(int w, int h) {
+    if (cap_w_ || target_ != &fb_ || w <= 0 || h <= 0 || w > fb_.w || h > fb_.h) return false;
+    if (capture_.w != fb_.w || capture_.h != fb_.h) capture_.resize(fb_.w, fb_.h);
+    for (int y = 0; y < h; ++y) memset(capture_.at(0, y), 0, (size_t)w * 4);
+    cap_w_ = w;
+    cap_h_ = h;
+    target_ = &capture_;
+    return true;
+}
+
+Texture* SwRenderer::end_capture(Texture* reuse) {
+    if (!cap_w_) return NULL;
+    target_ = &fb_;
+    SwTexture* t = (SwTexture*)reuse;
+    if (t && (t->width != cap_w_ || t->height != cap_h_)) {
+        destroy_texture(t);
+        t = NULL;
+    }
+    if (!t) {
+        t = new SwTexture();
+        t->width = t->orig_width = cap_w_;
+        t->height = t->orig_height = cap_h_;
+        t->img.resize(cap_w_, cap_h_);
+        t->memory_bytes = (size_t)cap_w_ * cap_h_ * 4;
+        t->premultiplied = true;
+    }
+    for (int y = 0; y < cap_h_; ++y) memcpy(t->img.at(0, y), capture_.at(0, y), (size_t)cap_w_ * 4);
+    cap_w_ = cap_h_ = 0;
+    return t;
+}
+
 bool SwRenderer::begin_group(const Rect2& b) {
+    if (cap_w_) return false; /* not inside a capture */
     if (layer_.w != fb_.w || layer_.h != fb_.h) {
         layer_.resize(fb_.w, fb_.h);
         for (size_t i = 0; i < layer_.px.size(); ++i) layer_.px[i] = 0;
@@ -275,6 +308,30 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         float a = clampf(smoothstepf(e.p[0], e.p[1], x) * e.p[4], 0, 1);
         for (int k = 0; k < 3; ++k) out[k] = e.p[12 + k] * a;
         out[3] = a;
+        return;
+    }
+    case EFFECT_DISSOLVE: {
+        float thr = e.p[0];
+        float wx = -200.0f * e.p[2], wy = 1024.0f * e.p[3];
+        float d = u - (thr * 1.9f - 0.55f);
+        if (d < 0) d = 0;
+        float ox = d * wx, oy = d * wy;
+        float t[4] = { 1, 1, 1, 1 };
+        if (tex) sample(tex->img, u + ox * ox, v + oy * oy, flags, t);
+        float strength[2];
+        for (int k = 0; k < 2; ++k) {
+            float x = u + (k == 0 ? 0.05f : 0.0f);
+            float sx = e.p[2] > 0 ? (1.0f / 400.0f) / e.p[2] : 1.0f, sy = e.p[3] > 0 ? (1.0f / 400.0f) / e.p[3] : 1.0f;
+            float n1[4], n2[4];
+            effect_texel(e, 0, x * sx + e.p[1], v * sy + x * x * x, n1);
+            effect_texel(e, 1, x * sx + e.p[1], v * sy + x * x * x, n2);
+            float s1 = (n1[0] + x) * 0.5f, s2 = (n2[0] + x) * 0.5f;
+            strength[k] = thr >= s1 + (s2 - s1) * 0.4f ? 1.0f : 0.0f;
+        }
+        for (int k = 0; k < 3; ++k) t[k] *= strength[0];
+        float l = t[0] * 0.299f + t[1] * 0.587f + t[2] * 0.114f;
+        for (int k = 0; k < 3; ++k) t[k] = l + (t[k] - l) * thr;
+        for (int k = 0; k < 4; ++k) out[k] = t[k] * strength[1];
         return;
     }
     case EFFECT_TEXTURE_TRANSITION: {

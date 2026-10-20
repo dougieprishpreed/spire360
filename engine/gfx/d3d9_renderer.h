@@ -62,6 +62,8 @@ public:
     virtual void screen_barrier() { screen_levels_ = 0; }
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
+    virtual bool begin_capture(int w, int h);
+    virtual Texture* end_capture(Texture* reuse);
     virtual void end();
 
     long draw_calls() const { return draws_; }
@@ -123,6 +125,12 @@ private:
     bool group_failed_;
     RECT group_rect_;
     D3D9Texture group_view_; /* group_tex_ as a Texture (debug view) */
+    /* A capture (begin_capture) on the group target: its size (0: none);
+     * on PC the system-memory copy it is read back through. */
+    int cap_w_, cap_h_;
+#if !defined(_XBOX)
+    IDirect3DSurface9* capture_sys_;
+#endif
     int group_debug_, group_log_;
     /* The screen copy (level 0) and its blurred levels. */
     bool screen_on_;

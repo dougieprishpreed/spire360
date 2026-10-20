@@ -43,6 +43,7 @@ public:
     std::string script;  /* res:// path of the attached script ("" if none) */
     ScriptBehavior* behavior; /* its C++ port, if there is one (owned) */
     std::map<std::string, const Json*> extra; /* properties without a native field (script exports, metadata) */
+    std::vector<class Resource*> owned_resources; /* resources bound to this node (deleted with it) */
     u32 flags;
 
     bool is_canvas_item() const { return (flags & NF_CANVAS_ITEM) != 0; }

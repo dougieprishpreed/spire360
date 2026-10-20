@@ -64,6 +64,14 @@ enum EffectId {
     /* shaders/vfx/dagger/vfx_dagger_spray_single_shader.gdshader: (lut.rgb,
      * lut.a * TEXTURE.a) * vertex colour; lut (tex0) at TEXTURE.r. */
     EFFECT_LUT_ALPHA = 11,
+    /* shaders/dissolve.gdshader (NMonsterDeathVfx, a SubViewport's picture,
+     * premultiplied): TEXTURE at UV + o * o, o = max(UV.x - (p0 * 1.9 -
+     * 0.55), 0) * (-200, 1024) * p2p3; blackened outside strength(UV, 0.05),
+     * greyed as p0 falls, times strength(UV, 0). strength(uv, k): uv.x += k,
+     * step(mix(n1, n2, 0.4), p0), ni = (tex_i(uv * (1 / 400) / p2p3 + (p1,
+     * uv.x^3)).r + uv.x) / 2. p0 threshold, p1 -TIME / 4, p2p3
+     * TEXTURE_PIXEL_SIZE; tex0, tex1 the noises (repeat). */
+    EFFECT_DISSOLVE = 12,
     EFFECT_COUNT
 };
 

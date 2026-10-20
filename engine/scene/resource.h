@@ -32,12 +32,15 @@ public:
         RES_CANVAS_ITEM_MATERIAL,
         RES_SHADER_MATERIAL,
         RES_PACKED_SCENE,
-        RES_SPINE_DATA
+        RES_SPINE_DATA,
+        RES_VIEWPORT_TEXTURE /* viewport.h */
     };
     Resource(Kind k, const std::string& cls) : kind(k), type(cls), props(NULL), file(NULL) {}
     virtual ~Resource() {}
 
-    bool is_texture() const { return kind == RES_IMAGE_TEXTURE || kind == RES_ATLAS_TEXTURE; }
+    bool is_texture() const {
+        return kind == RES_IMAGE_TEXTURE || kind == RES_ATLAS_TEXTURE || kind == RES_VIEWPORT_TEXTURE;
+    }
     bool is_stylebox() const { return kind == RES_STYLEBOX_EMPTY || kind == RES_STYLEBOX_FLAT || kind == RES_STYLEBOX_TEXTURE; }
 
     Kind kind;
@@ -75,12 +78,17 @@ struct DerivedImage {
 
 class ImageTextureRes : public Texture2DRes {
 public:
-    ImageTextureRes() : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D"), derived(NULL) {}
+    ImageTextureRes()
+        : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D"), derived(NULL), render_target(false), rendered(NULL) {}
     virtual Vec2 size() const { return size_; }
     virtual bool get_rect_region(const Rect2& dst, const Rect2& src, Rect2& out_dst, Rect2& out_src,
                                  ImageTextureRes** image);
     Vec2 size_;     /* layout units (the game's size) */
     const DerivedImage* derived; /* NULL: the pack entry at path */
+    /* A SubViewport's texture: rendered (NULL until it is) instead of a
+     * pack entry. */
+    bool render_target;
+    class Texture* rendered;
 };
 
 class AtlasTextureRes : public Texture2DRes {

@@ -28,6 +28,9 @@ public:
     /* Generated sampler textures share the same ownership and budget. */
     Texture* cached_texture(const std::string& key);
     Texture* cache_texture(const std::string& key, const TextureData& data);
+    /* A renderer texture its owner no longer uses (a SubViewport's capture),
+     * destroyed at the next begin_frame. */
+    static void release_later(Texture* t);
 
     /* Item state. xform maps local coordinates to screen pixels. */
     void set_item(const Xform2D& xform, const Color& modulate, BlendMode blend, int tex_flags);

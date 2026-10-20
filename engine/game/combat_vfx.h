@@ -42,6 +42,13 @@ public:
  * NCombatRoom.CombatVfxContainer. */
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors);
 bool is_combat_vfx_call(const std::string& call);
+/* NCreature.AnimDie's fade (MonsterModel.ShouldFadeAfterDeath), added to
+ * parent (the creature's container): after delay (its death animation's
+ * rest and half a second), NMonsterDeathVfx takes the creature's body
+ * into its viewport and dissolves its picture. padding:
+ * ExtraDeathVfxPadding. */
+void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::string& who, double delay,
+                         const Vec2& padding);
 
 void install_combat_vfx_scripts();
 

@@ -16,11 +16,12 @@ enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2, DRAW_MSDF = 4, DRAW_GROUP = 8 };
 
 class Texture {
 public:
-    Texture() : width(0), height(0), orig_width(0), orig_height(0), memory_bytes(0) {}
+    Texture() : width(0), height(0), orig_width(0), orig_height(0), memory_bytes(0), premultiplied(false) {}
     virtual ~Texture() {}
     int width, height;           /* stored pixels */
     int orig_width, orig_height; /* layout units (the game's size) */
     size_t memory_bytes;        /* renderer allocation estimate */
+    bool premultiplied;         /* a capture (end_capture): premultiplied alpha */
 };
 
 struct Vertex {
@@ -165,6 +166,23 @@ public:
     }
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;
+    /* Render to texture (Godot's SubViewport): draws between begin_capture
+     * and end_capture go to a transparent offscreen layer, w x h pixels at
+     * the top left of the screen (w and h multiples of 32, within the
+     * screen). end_capture copies them into reuse when it has that size,
+     * else into a new texture (reuse is destroyed), and returns it, its
+     * colours premultiplied (Texture::premultiplied; the draws that sample
+     * it take that into account). NULL / false: not available. Not inside
+     * a group; one capture at a time. */
+    virtual bool begin_capture(int w, int h) {
+        (void)w;
+        (void)h;
+        return false;
+    }
+    virtual Texture* end_capture(Texture* reuse) {
+        (void)reuse;
+        return NULL;
+    }
     virtual void end() = 0;
 };
 

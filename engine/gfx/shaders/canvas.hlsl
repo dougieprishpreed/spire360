@@ -57,7 +57,8 @@ float4 g_fd1p : register(c11);
 float4 g_fd2p : register(c12);
 float4 g_fdmaskp : register(c13);
 float4 g_fstr : register(c14);        // noise 1, noise 2 strength, invert mask, dark variant
-float4 g_fdstr : register(c15);       // distortion 1, 2 strength
+float4 g_fdstr : register(c15);
+float4 g_premul : register(c28);      // x: the texture is premultiplied (a capture)       // distortion 1, 2 strength
 float4 g_fsteps : register(c16);      // inner step xy, outer step zw
 float4 g_finner : register(c17);
 float4 g_fouter : register(c18);
@@ -190,6 +191,7 @@ float4 ps_main(VsOut i) : COLOR {
         return float4(vc.rgb * vc.a, vc.a);
     }
     float4 t = tex2D(g_tex, i.uv);
+    if (g_premul.x > 0.5) t.rgb = t.a > 0.0 ? t.rgb / t.a : float3(0.0, 0.0, 0.0);
     [branch] if (g_gm.x > 0.5) {
         // The game's grayscale / flipbook VFX shaders: the red through the
         // gradient, the alpha from the red or the texel.

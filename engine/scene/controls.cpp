@@ -3,6 +3,7 @@
 #include "canvas.h"
 #include "shaders.h"
 #include "value.h"
+#include "viewport.h"
 
 #include <math.h>
 #include <string.h>
@@ -14,7 +15,7 @@ static Texture2DRes* as_texture(Resource* r) { return r && r->is_texture() ? (Te
 /* ---- TextureRect ---- */
 
 bool TextureRect::set(const std::string& key, const Json& v, const PropCtx& ctx) {
-    if (key == "texture") texture = as_texture(ctx.resource(v));
+    if (key == "texture") texture = bind_texture(this, ctx.resource(v));
     else if (key == "expand_mode") expand_mode = v.i();
     else if (key == "expand") expand_mode = v.b() ? EXPAND_IGNORE_SIZE : EXPAND_KEEP_SIZE; /* Godot 3 name */
     else if (key == "stretch_mode") stretch_mode = v.i();
@@ -612,7 +613,7 @@ void FlowContainer::sort_children() {
 /* ---- Sprite2D ---- */
 
 bool Sprite2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
-    if (key == "texture") texture = as_texture(ctx.resource(v));
+    if (key == "texture") texture = bind_texture(this, ctx.resource(v));
     else if (key == "centered") centered = v.b(true);
     else if (key == "offset") jv_vec2(v, offset);
     else if (key == "flip_h") flip_h = v.b();

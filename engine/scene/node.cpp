@@ -141,6 +141,7 @@ Node::Node() : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), fl
 
 Node::~Node() {
     delete behavior;
+    for (size_t i = 0; i < owned_resources.size(); ++i) delete owned_resources[i];
     for (size_t i = 0; i < children.size(); ++i) delete children[i];
 }
 

@@ -6,6 +6,9 @@
 #include "../scene/particles.h"
 #include "../scene/scene.h"
 #include "../scene/script.h"
+#include "../scene/spine_sprite.h"
+#include "../scene/viewport.h"
+#include "../spine/spine.h"
 #include "../scene/tween.h"
 #include "../scene/value.h"
 #include "loc.h"
@@ -1285,6 +1288,138 @@ private:
 
 ScriptBehavior* make_doom_sub_emitter(Node* n) { return new DoomSubEmitter(n); }
 ScriptBehavior* make_doom_vfx(Node*) { return new DoomVfx(); }
+
+/* NMonsterDeathVfx (scenes/vfx/vfx_monster_death.tscn): Viewport, a
+ * SubViewport the body is moved into and rendered once; Visual, a Sprite2D
+ * of its picture through shaders/dissolve.gdshader; %Particles, the flakes
+ * thrown off. */
+class MonsterDeath : public Effect {
+public:
+    MonsterDeath() : anchors_(NULL), delay_(0), end_(-1), visual_(NULL) {}
+    void setup(VfxAnchors* anchors, const std::string& who, double delay, const Vec2& padding) {
+        anchors_ = anchors;
+        who_ = who;
+        delay_ = delay;
+        padding_ = padding;
+    }
+    /* nothing shown while the death animation plays (the root stays
+     * visible: hidden nodes do not process) */
+    virtual void begin(Node* n) { set_visible(n->get_node("Visual"), false); }
+    virtual void tick(Node* n, double) {
+        if (end_ < 0 && t_ >= delay_) {
+            if (!play(n)) {
+                n->queue_free();
+                end_ = 0;
+                return;
+            }
+        }
+        if (end_ >= 0 && t_ >= end_ && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    /* The body's bounds (Godot's MegaSkeleton.GetBounds) on screen. */
+    static bool spine_bounds(SpineSprite* s, Rect2* out) {
+        SpSkeleton* sk = s ? s->skeleton() : NULL;
+        if (!sk) return false;
+        std::vector<float> v;
+        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+        for (size_t i = 0; i < sk->slots.size(); ++i) {
+            const SpSlot& slot = sk->slots[i];
+            if (!slot.attachment || !sk->bones[slot.data->bone].active) continue;
+            if (slot.attachment->type != SP_ATT_REGION && slot.attachment->type != SP_ATT_MESH) continue;
+            sk->world_vertices(slot, v);
+            for (size_t k = 0; k + 1 < v.size(); k += 2) {
+                x0 = minf(x0, v[k]);
+                x1 = maxf(x1, v[k]);
+                y0 = minf(y0, v[k + 1]);
+                y1 = maxf(y1, v[k + 1]);
+            }
+        }
+        if (x1 < x0 || y1 < y0) return false;
+        Xform2D xf = s->global_transform();
+        Vec2 c[4] = { xf.xform(Vec2(x0, y0)), xf.xform(Vec2(x1, y0)), xf.xform(Vec2(x1, y1)), xf.xform(Vec2(x0, y1)) };
+        Vec2 lo = c[0], hi = c[0];
+        for (int k = 1; k < 4; ++k) {
+            lo = Vec2(minf(lo.x, c[k].x), minf(lo.y, c[k].y));
+            hi = Vec2(maxf(hi.x, c[k].x), maxf(hi.y, c[k].y));
+        }
+        *out = Rect2(lo, hi - lo);
+        return true;
+    }
+    static SpineSprite* find_spine(Node* n) {
+        if (n->type == "SpineSprite") return (SpineSprite*)n;
+        for (size_t i = 0; i < n->children.size(); ++i) {
+            SpineSprite* s = find_spine(n->children[i]);
+            if (s) return s;
+        }
+        return NULL;
+    }
+    /* PlayVfx: false when there is nothing to fade. */
+    bool play(Node* n) {
+        VfxCreature who;
+        if (!anchors_ || !anchors_->creature(who_, &who)) return false;
+        Node* visuals = anchors_->take_visuals(who_);
+        if (!visuals || !visuals->is_canvas_item() || !((CanvasItem*)visuals)->is_visible_in_tree()) return false;
+        /* GetCurrentBody: %Visuals, the spine body when there is one */
+        Node* body = visuals->find_unique("Visuals");
+        SpineSprite* spine = find_spine(body ? body : visuals);
+        if (!body) body = spine ? (Node*)spine : visuals;
+        if (!body->is_node2d()) return false;
+        Rect2 r;
+        if (!spine_bounds(spine, &r)) r = who.hitbox;
+        Vec2 grown(r.size.x * padding_.x, r.size.y * padding_.y);
+        r = Rect2(r.pos - (grown - r.size) * 0.5f, grown);
+        Vec2 center = r.pos + r.size * 0.5f;
+        float num = floorf(maxf(r.size.x, r.size.y) + 0.5f);
+        if (num < 2) return false;
+        Node* vpn = n->get_node("Viewport");
+        visual_ = n->get_node("Visual");
+        if (!vpn || vpn->type != "SubViewport" || !visual_ || visual_->type != "Sprite2D") return false;
+        SubViewport* vp = (SubViewport*)vpn;
+        set_global(n, center);
+        vp->set_size((int)num * 2, (int)num * 2);
+        vp->size_2d_override = Vec2(num, num);
+        /* the room's scale: the effect's parent's */
+        Xform2D pxf = n->parent && n->parent->is_canvas_item() ? ((CanvasItem*)n->parent)->global_transform() : Xform2D();
+        float room = sqrtf(pxf.x.x * pxf.x.x + pxf.x.y * pxf.x.y);
+        Sprite2D* sprite = (Sprite2D*)visual_;
+        sprite->scale = sprite->scale * (1.0f / (2.0f * (room > 0 ? room : 1.0f)));
+        /* the body, its global transform kept, at its place in the viewport */
+        Node2D* b = (Node2D*)body;
+        Xform2D bg = b->global_transform();
+        b->parent->remove_child(b);
+        vp->add_child(b);
+        b->position = bg.origin - (center - Vec2(num, num) * 0.5f);
+        b->rotation = 0;
+        b->skew = 0;
+        float sx = sqrtf(bg.x.x * bg.x.x + bg.x.y * bg.x.y), sy = sqrtf(bg.y.x * bg.y.x + bg.y.y * bg.y.y);
+        b->scale = Vec2(bg.x.x < 0 ? -sx : sx, bg.y.y < 0 ? -sy : sy);
+        b->visible = true;
+        vp->update_mode = SubViewport::UPDATE_ONCE;
+        ((CanvasItem*)visuals)->visible = false;
+        set_visible(visual_, true);
+        /* PlayVfxInternal */
+        play_sfx("event:/sfx/enemy/enemy_fade");
+        Node* p = n->find_unique("Particles");
+        if (is_particles(p)) {
+            ((Particles2D*)p)->emission_sphere_radius = (float)vp->height / 4.0f;
+            restart(p);
+        }
+        float time = minf((float)vp->width / (0.1f * 1920.0f) * 2.5f, 2.5f);
+        sprite->shader_params["threshold"] = 1.0f;
+        tweens_.tween(&sprite->shader_params["threshold"], 0.0f, time, TRANS_SINE, EASE_OUT);
+        end_ = t_ + time;
+        return true;
+    }
+    VfxAnchors* anchors_;
+    std::string who_;
+    double delay_, end_;
+    Vec2 padding_;
+    Node* visual_;
+};
+
+ScriptBehavior* make_monster_death(Node*) { return new MonsterDeath(); }
+
 ScriptBehavior* make_doom_overlay(Node*) { return new DoomOverlay(); }
 
 ScriptBehavior* make_item_throw(Node* n) { return new ItemThrow(n); }
@@ -1697,6 +1832,14 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     return true;
 }
 
+void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::string& who, double delay,
+                         const Vec2& padding) {
+    if (!lib || !parent) return;
+    Node* fx = add_effect(lib, parent, "scenes/vfx/vfx_monster_death.tscn");
+    if (!fx) return;
+    if (fx->behavior) ((MonsterDeath*)fx->behavior)->setup(&anchors, who, delay, padding);
+}
+
 void install_combat_vfx_scripts() {
     for (size_t i = 0; i < sizeof(SPECS) / sizeof(SPECS[0]); ++i)
         register_script((std::string("res://src/Core/Nodes/Vfx/") + SPECS[i].script).c_str(), make_sequence);
@@ -1721,6 +1864,7 @@ void install_combat_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/NDoomSubEmitterVfx.cs", make_doom_sub_emitter);
     register_script("res://src/Core/Nodes/Vfx/NDoomVfx.cs", make_doom_vfx);
     register_script("res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs", make_doom_overlay);
+    register_script("res://src/Core/Nodes/Vfx/NMonsterDeathVfx.cs", make_monster_death);
 }
 
 } /* namespace spire */

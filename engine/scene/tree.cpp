@@ -4,6 +4,7 @@
 #include "controls.h"
 #include "script.h"
 #include "shaders.h"
+#include "viewport.h"
 
 #include <algorithm>
 #include <math.h>
@@ -52,6 +53,14 @@ void SceneTree::set_viewport(const Vec2& design_size, const Xform2D& to_screen) 
 }
 
 void SceneTree::layout_node(Node* n) {
+    if (n->type == "SubViewport") {
+        /* Its Controls anchor to its canvas. */
+        Rect2 saved = g_viewport_rect;
+        g_viewport_rect = Rect2(Vec2(0, 0), ((SubViewport*)n)->canvas_size());
+        for (size_t i = 0; i < n->children.size(); ++i) layout_node(n->children[i]);
+        g_viewport_rect = saved;
+        return;
+    }
     if (n->is_control()) {
         Control* c = (Control*)n;
         CanvasItem* p = c->parent_item();
@@ -123,6 +132,11 @@ static bool draws_something(Canvas& canvas, SceneTree::DrawItem& d) {
 
 void SceneTree::collect(Node* n, const Xform2D& parent_xf, const Color& parent_mod, int z, const Rect2* clip,
                         MaterialRes* parent_mat, bool in_group, std::vector<DrawItem>& out) {
+    if (n->type == "SubViewport") {
+        /* drawn into its texture (render_viewport), not here */
+        viewports_.push_back((SubViewport*)n);
+        return;
+    }
     if (!n->is_canvas_item()) {
         /* CanvasItems under a plain Node start again from the canvas. */
         for (size_t i = 0; i < n->children.size(); ++i)
@@ -195,13 +209,50 @@ static Rect2 group_bounds(const SceneTree::DrawItem& d) {
     return Rect2(r.pos.x - 2, r.pos.y - 2, r.size.x + 4, r.size.y + 4);
 }
 
+/* A SubViewport's children into its texture: its canvas scaled to the
+ * texture's pixels (its size at the screen's scale, within the screen,
+ * in multiples of 32) at the screen's top left. */
+void SceneTree::render_viewport(Canvas& canvas, SubViewport* vp) {
+    if (!vp->wants_render()) return;
+    Vec2 units = vp->canvas_size();
+    if (units.x <= 0 || units.y <= 0) return;
+    float k = sqrtf(to_screen_.x.x * to_screen_.x.x + to_screen_.x.y * to_screen_.x.y);
+    Vec2 screen = design_size_ * k;
+    float px = vp->width * k, py = vp->height * k;
+    float fit = minf(1.0f, minf(screen.x / px, screen.y / py));
+    int w = ((int)ceilf(px * fit) + 31) & ~31, h = ((int)ceilf(py * fit) + 31) & ~31;
+    if (w > (int)screen.x) w = (int)screen.x & ~31;
+    if (h > (int)screen.y) h = (int)screen.y & ~31;
+    if (w <= 0 || h <= 0) return;
+    Xform2D xf(Vec2(w / units.x, 0), Vec2(0, h / units.y), Vec2(0, 0));
+    std::vector<DrawItem> items;
+    for (size_t i = 0; i < vp->children.size(); ++i) collect(vp->children[i], xf, Color(), 0, NULL, NULL, false, items);
+    if (!vp->transparent_bg) {
+        /* Godot's default clear colour */
+        canvas.set_item(Xform2D(), Color(), BLEND_MIX, 0);
+        canvas.set_clip(NULL);
+        canvas.draw_rect(Rect2(Vec2(0, 0), Vec2((float)w, (float)h)), Color(0.3f, 0.3f, 0.3f, 1));
+    }
+    draw_items(canvas, items);
+    vp->rendered(canvas.renderer()->end_capture(vp->texture));
+}
+
 void SceneTree::render(Canvas& canvas) {
     canvas.begin_frame();
     skipped.clear();
     items_drawn = 0;
     std::vector<DrawItem> items;
     canvas_ = &canvas;
+    viewports_.clear();
     collect(&root_, to_screen_, Color(), 0, NULL, NULL, false, items);
+    /* the viewports first (one inside another: found as its turn comes) */
+    for (size_t i = 0; i < viewports_.size(); ++i) render_viewport(canvas, viewports_[i]);
+    draw_items(canvas, items);
+    canvas.set_clip(NULL);
+    canvas.end_frame();
+}
+
+void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
     std::vector<DrawItem*> order(items.size());
     for (size_t i = 0; i < items.size(); ++i) {
         items[i].seq = (int)i;
@@ -255,8 +306,6 @@ void SceneTree::render(Canvas& canvas) {
         ++items_drawn;
     }
     if (group_mask) canvas.renderer()->end_group();
-    canvas.set_clip(NULL);
-    canvas.end_frame();
 }
 
 } /* namespace spire */

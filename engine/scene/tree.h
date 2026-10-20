@@ -37,6 +37,9 @@ private:
     void process_node(Node* n, double dt);
     void collect(Node* n, const Xform2D& xf, const Color& mod, int z, const Rect2* clip, MaterialRes* mat,
                  bool in_group, std::vector<DrawItem>& out);
+    void draw_items(Canvas& canvas, std::vector<DrawItem>& items);
+    void render_viewport(Canvas& canvas, class SubViewport* vp);
+    std::vector<class SubViewport*> viewports_; /* found by collect */
 
     Node root_;
     Vec2 design_size_;

@@ -5,7 +5,8 @@
 
 Reads every scene and resource in a pack (the converter's JSON), finds each
 ShaderMaterial's shader (a .gdshader / .tres file, or an inline one named
-"<entry>::<sub id>" as the engine names it) and the scenes whose nodes use
+as the engine names it: "inline:<hash of its code>", "<entry>::<sub id>"
+when it has no code) and the scenes whose nodes use
 it (directly or through a material resource), and compares the list with
 the shaders the engine ports: the names engine/scene/*.cpp tests for.
 """
@@ -28,6 +29,18 @@ def load(reader, name):
         return json.loads(zlib.decompress(data))
 
 
+def inline_name(doc, entry, sub):
+    """engine/scene/scene.cpp's inline_shader_name."""
+    code = (((doc.get("sub") or {}).get(sub) or {}).get("props") or {}).get("code")
+    if not isinstance(code, str) or not code:
+        return entry + "::" + sub
+    norm = re.sub(r"\s", "", re.sub(r"//[^\n]*", "", code))
+    h = 0xCBF29CE484222325
+    for b in norm.encode("utf-8"):
+        h = ((h ^ b) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return "inline:%016x" % h
+
+
 def ported_names(root):
     names = set()
     for d in ("engine/scene", "engine/game"):
@@ -35,6 +48,7 @@ def ported_names(root):
             if f.endswith(".cpp"):
                 text = open(os.path.join(root, d, f), encoding="utf-8").read()
                 names.update(re.findall(r'"((?:shaders|scenes|images|materials)/[^"]+\.(?:gdshader|tres)[^"]*)"', text))
+                names.update(re.findall(r'"(inline:[0-9a-f]{16})"', text))
     return names
 
 
@@ -59,7 +73,7 @@ def main():
             if isinstance(sh, dict) and sh.get("ext"):
                 material_shader[n] = sh["ext"]
             elif isinstance(sh, dict) and sh.get("sub"):
-                material_shader[n] = n + "::" + sh["sub"]
+                material_shader[n] = inline_name(d, n, sh["sub"])
     uses = {}  # shader -> set(scene)
 
     def note(shader, where):
@@ -75,7 +89,7 @@ def main():
             if isinstance(sh, dict) and sh.get("ext"):
                 mats[sid] = sh["ext"]
             elif isinstance(sh, dict) and sh.get("sub"):
-                mats[sid] = n + "::" + sh["sub"]
+                mats[sid] = inline_name(d, n, sh["sub"])
         text = json.dumps(d)
         for sid, sh in mats.items():
             if '{"sub": "%s"}' % sid in text:

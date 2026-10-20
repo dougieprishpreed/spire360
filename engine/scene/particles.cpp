@@ -4,6 +4,7 @@
 #include "canvas.h"
 #include "scene.h"
 #include "value.h"
+#include "viewport.h"
 
 #include <math.h>
 #include <string.h>
@@ -212,7 +213,7 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (key == "seed") seed = (u32)v.num();
     else if (key == "texture") {
         Resource* r = ctx.resource(v);
-        texture = r && r->is_texture() ? (Texture2DRes*)r : NULL;
+        texture = bind_texture(this, r);
     } else if (key == "process_material") {
         apply_process_material(ctx.resource(v));
     } else if (!gpu) {

@@ -1,6 +1,7 @@
 #include "shaders.h"
 
 #include "canvas.h"
+#include "controls.h"
 #include "../gfx/effects.h"
 #include "node.h"
 #include "particles.h"
@@ -387,6 +388,19 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.id = EFFECT_RAY;
         e.tex[0] = effect_texture(c, m, "lut");
         e.tex[1] = effect_texture(c, m, "vertical_alpha");
+    } else if (s == "shaders/dissolve.gdshader") {
+        /* TEXTURE_PIXEL_SIZE: the drawn texture's (a Sprite2D's viewport) */
+        Vec2 ts(1, 1);
+        if (g_item && g_item->type == "Sprite2D" && ((const Sprite2D*)g_item)->texture)
+            ts = ((const Sprite2D*)g_item)->texture->size();
+        e.id = EFFECT_DISSOLVE;
+        e.p[0] = param(m, "threshold", 0.0f);
+        e.p[1] = -pan(0.25f);
+        e.p[2] = ts.x > 0 ? 1.0f / ts.x : 1.0f;
+        e.p[3] = ts.y > 0 ? 1.0f / ts.y : 1.0f;
+        e.tex[0] = effect_texture(c, m, "dissolveGradient1");
+        e.tex[1] = effect_texture(c, m, "dissolveGradient2");
+        e.repeat = 3;
     } else if (s == "shaders/vfx/dagger/vfx_dagger_spray_single_shader.gdshader") {
         e.id = EFFECT_LUT_ALPHA;
         e.tex[0] = effect_texture(c, m, "lut");
@@ -777,6 +791,10 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/power_flash_vfx.gdshader") {
         *out = BLEND_ADD;
+        return true;
+    }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/dissolve.gdshader") {
+        *out = BLEND_PREMULT_ALPHA;
         return true;
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "images/vfx/simple_noise_add_shader.tres") {
