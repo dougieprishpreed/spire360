@@ -76,6 +76,11 @@ private:
     Control* multi_box_;
     Button close_, confirm_, preview_cancel_, preview_confirm_;
     TweenSet tweens_;
+    class InspectCardScreen* inspect_; /* OpenPreviewScreen (Y on the row) */
+    Node* inspect_node_;
+
+public:
+    ~CardSelectScreen();
 };
 
 } /* namespace spire */

@@ -573,6 +573,14 @@ void Particles2D::draw(Canvas& c) {
     EffectParams effect;
     bool per_effect = shader_effect_particle(0, 0, &effect);
     bool ray = sm && sm->shader == "shaders/vfx/common/vfx_ray_shader.gdshader";
+    /* vfx_sweeping_beam_flipbook_shader's vertex(): the quad grows by
+     * tan(fov / 2) * (1 - inset) of its size */
+    float grow = 1;
+    if (sm && sm->shader == "shaders/vfx/sweeping_beam/vfx_sweeping_beam_flipbook_shader.gdshader")
+        grow = 1 + tanf(shader_param(sm, "fov", 90.0f) * 0.017453293f * 0.5f) * (1 - shader_param(sm, "inset", 0.0f));
+    /* a screen shader per particle (vfx_screen_chromatic_aberration) */
+    ScreenParams screen;
+    bool per_screen = shader_screen_particle(0, &screen);
     CurveData erosion;
     if (vfx && sm) CurveData::from(shader_param_resource(sm, "erosion_curve"), erosion);
     std::vector<Vec2> v, uv;
@@ -613,7 +621,8 @@ void Particles2D::draw(Canvas& c) {
             fv0 = floorf(frame / fb_size.x) / fb_size.y;
         }
         Vec2 po(pivot.x * ts.x, pivot.y * ts.y);
-        Vec2 corners[4] = { Vec2(-h.x, -h.y) + po, Vec2(h.x, -h.y) + po, Vec2(h.x, h.y) + po, Vec2(-h.x, h.y) + po };
+        Vec2 hg = h * grow;
+        Vec2 corners[4] = { Vec2(-hg.x, -hg.y) + po, Vec2(hg.x, -hg.y) + po, Vec2(hg.x, hg.y) + po, Vec2(-hg.x, hg.y) + po };
         if (ray) /* vfx_ray_shader: VERTEX.x *= CUSTOM.z */
             for (int k = 0; k < 4; ++k) corners[k].x *= p.custom[2];
         float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
@@ -627,7 +636,16 @@ void Particles2D::draw(Canvas& c) {
         }
         int q[6] = { 0, 1, 2, 2, 3, 0 };
         for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
-        if (per_effect && img) {
+        if (per_screen && img) {
+            float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
+            shader_screen_particle(life, &screen);
+            c.renderer()->set_screen(&screen);
+            c.draw_triangles(img, v, uv, col, idx);
+            v.clear();
+            uv.clear();
+            col.clear();
+            idx.clear();
+        } else if (per_effect && img) {
             float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
             shader_effect_particle(life, p.custom[2], &effect, p.custom[0]);
             c.renderer()->set_effect(&effect);

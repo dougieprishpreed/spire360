@@ -34,7 +34,8 @@ GameOverScreen::GameOverScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), backstop_(NULL), ui_(NULL), banner_(NULL), quote_(NULL), victory_(NULL),
       summary_backstop_(NULL), summary_(NULL), continue_(NULL), main_menu_(NULL), phase_(INTRO), t_(0), step_(0), lines_started_(0),
       continue_on_(false), menu_on_(false), done_(false), bar_(NULL), bar_fg_(NULL), bar_score_(0), bar_threshold_(0),
-      bar_t_(0), bar_step_(0) {}
+      bar_t_(0), bar_step_(0), badges_started_(0), discoveries_started_(0),
+      discoveries_t_(-1), badge_focus_(-1), badge_tip_(NULL), root_(NULL), screen_(NULL) {}
 
 Node* GameOverScreen::build(const Json& d, std::string* error) {
     decision_ = d;
@@ -50,12 +51,15 @@ Node* GameOverScreen::build(const Json& d, std::string* error) {
         return NULL;
     }
     root->add_child(screen);
+    root_ = root;
+    screen_ = screen;
+    hide(screen->find_unique("BadgeContainer"));
     hide(screen->find_unique("DailyRunLeaderboard"));
     hide(screen->find_unique("RunMocker"));
     hide(find_named(screen, "TestModeLabel"));
     hide(screen->find_unique("LeaderboardButton"));
     hide(screen->find_unique("ViewRunButton"));
-    hide(screen->find_unique("BadgeContainer"));
+    /* the badges: shown on the summary (AnimateBadges) */
     bar_ = ctl(screen, "ScoreBar");
     bar_fg_ = ctl(screen, "ScoreFg");
     bar_step_ = 0;
@@ -64,7 +68,11 @@ Node* GameOverScreen::build(const Json& d, std::string* error) {
         hide(bar_);
         bar_ = NULL;
     }
-    hide(find_named(screen, "DiscoveryContainer"));
+    /* NRunSummary._Ready: the discovered items hidden, the header out */
+    static const char* const disc[5] = { "DiscoveredCards", "DiscoveredRelics", "DiscoveredPotions", "DiscoveredEnemies",
+                                         "DiscoveredEpochs" };
+    for (int k = 0; k < 5; ++k) hide(screen->find_unique(disc[k]));
+    if (Control* dh = ctl(screen, "DiscoveryHeader")) dh->modulate.a = 0;
 
     /* The backstop's wipe (texture_transition.gdshader) as a fade. */
     backstop_ = ctl(screen, "Backstop");
@@ -207,7 +215,38 @@ void GameOverScreen::start_score_bar() {
     bar_step_ = 1;
 }
 
+/* NBadge.OnFocus / OnUnfocus: the reticle, the tip 10 px right and 132 px
+ * above it. */
+void GameOverScreen::focus_badge(int i) {
+    if (badge_focus_ >= 0 && badge_focus_ < (int)focusables_.size())
+        hide(focusables_[(size_t)badge_focus_]->find_unique("SelectionReticle"));
+    if (badge_tip_) {
+        if (badge_tip_->parent) badge_tip_->parent->remove_child(badge_tip_);
+        delete badge_tip_;
+        badge_tip_ = NULL;
+    }
+    badge_focus_ = i;
+    if (i < 0 || i >= (int)focusables_.size()) return;
+    Control* b = focusables_[(size_t)i];
+    set_visible(b->find_unique("SelectionReticle"), true);
+    const Json& d = *focus_tips_[(size_t)i];
+    badge_tip_ = make_hover_tip(lib_, d["title"].str(), d["description"].str());
+    if (badge_tip_ && root_) {
+        badge_tip_->z_index = 10;
+        Vec2 at = b->global_transform().origin + Vec2(10, -132);
+        badge_tip_->set_position(at);
+        root_->add_child(badge_tip_);
+    }
+}
+
 std::string GameOverScreen::input(const PadState& pad) {
+    if (phase_ == SUMMARY && menu_on_ && !focusables_.empty() && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
+        /* the badges' and discoveries' focus neighbours wrap left and right */
+        int n = (int)focusables_.size();
+        int i = badge_focus_ < 0 ? 0 : (badge_focus_ + ((pad.pressed & PadState::LEFT) ? n - 1 : 1)) % n;
+        focus_badge(i);
+        return std::string();
+    }
     if (!(pad.pressed & PadState::A)) return std::string();
     if (phase_ == TITLE && continue_on_) {
         /* OpenSummaryScreen. */
@@ -229,6 +268,30 @@ std::string GameOverScreen::input(const PadState& pad) {
         if (banner_) {
             tweens_.tween(&banner_->offset[SIDE_TOP], banner_->offset[SIDE_TOP] - 32, 0.5f, TRANS_CUBIC, EASE_OUT);
             tweens_.tween(&banner_->offset[SIDE_BOTTOM], banner_->offset[SIDE_BOTTOM] - 32, 0.5f, TRANS_CUBIC, EASE_OUT);
+        }
+        /* AnimateBadges: each NBadge.Create, hidden until its AnimateIn */
+        Node* bc = screen_ ? screen_->find_unique("BadgeContainer") : NULL;
+        const Json& bl = decision_["progress"]["badges"];
+        set_visible(bc, bl.size() > 0);
+        for (size_t i = 0; bc && i < bl.size(); ++i) {
+            Control* b = as_control(instance(lib_, "scenes/screens/game_over_screen/badge.tscn"));
+            if (!b) continue;
+            set_texture(lib_, b->find_unique("BadgeHolder"), bl[i]["base"].str());
+            set_texture(lib_, b->find_unique("Icon"), bl[i]["icon"].str());
+            hide(b->find_unique("SelectionReticle"));
+            b->modulate.a = 0;
+            bc->add_child(b);
+            badges_.push_back(b);
+            focusables_.push_back(b);
+            focus_tips_.push_back(&bl[i]);
+        }
+        const Json& dl = decision_["progress"]["discoveries"];
+        for (size_t i = 0; i < dl.size(); ++i) {
+            Control* item = screen_ ? ctl(screen_, dl[i]["node"].str().c_str()) : NULL;
+            if (!item) continue;
+            set_label(item->find_unique("Label"), format("%d", dl[i]["count"].i()));
+            hide(item->find_unique("SelectionReticle"));
+            discoveries_.push_back(item);
         }
         if (summary_) {
             summary_->visible = true;
@@ -288,13 +351,26 @@ void GameOverScreen::frame(double dt) {
             }
         }
         /* The score lines one by one (0.3 s each and 0.1 s between), half
-         * a second; badges, the score bar and discoveries are not shown. */
+         * a second; then the badges, the score bar and the discoveries. */
         float line_t = 0.4f;
         while (lines_started_ < lines_.size() && t_ >= line_t * (float)lines_started_) {
             tweens_.tween(&lines_[lines_started_]->modulate.a, 1.0f, 0.3f);
             ++lines_started_;
         }
         float lines_end = line_t * (float)lines_.size() + 0.5f;
+        /* AnimateBadges: a quarter second, each badge in (0.25 s: alpha,
+         * up from 40 px below), half a second */
+        while (badges_started_ < badges_.size() && t_ >= lines_end + 0.25f + 0.25f * (float)badges_started_) {
+            Control* b = badges_[badges_started_];
+            tweens_.tween(&b->modulate.a, 1.0f, 0.25f);
+            Control* holder = as_control(b->find_unique("BadgeHolder"));
+            if (holder) {
+                tweens_.tween_from(&holder->offset[SIDE_TOP], holder->offset[SIDE_TOP] + 40, holder->offset[SIDE_TOP], 0.25f, TRANS_SPRING, EASE_OUT);
+                tweens_.tween_from(&holder->offset[SIDE_BOTTOM], holder->offset[SIDE_BOTTOM] + 40, holder->offset[SIDE_BOTTOM], 0.25f, TRANS_SPRING, EASE_OUT);
+            }
+            ++badges_started_;
+        }
+        lines_end += 0.75f + 0.25f * (float)badges_.size();
         if (step_ == 1 && bar_ && t_ >= lines_end && bar_step_ == 0) start_score_bar();
         if (bar_step_ > 0 && bar_step_ < 4) {
             bar_t_ += dt;
@@ -354,7 +430,35 @@ void GameOverScreen::frame(double dt) {
                 if (bar_t_ >= 1.5) bar_step_ = 4;
             }
         }
-        if (step_ == 1 && (bar_ ? bar_step_ == 4 : t_ >= lines_end + 0.75f)) {
+        /* AnimateInDiscoveries: the header (0.25 s), 0.1 s, then each item
+         * in turn (0.3 s: white, up from 100 px, Back Out) */
+        if (step_ == 1 && discoveries_t_ < 0 && (bar_ ? bar_step_ == 4 : t_ >= lines_end)) {
+            discoveries_t_ = t_;
+            if (!discoveries_.empty()) {
+                if (Control* dh = ctl(screen_, "DiscoveryHeader")) tweens_.tween(&dh->modulate.a, 1.0f, 0.25f);
+            }
+        }
+        while (discoveries_t_ >= 0 && discoveries_started_ < discoveries_.size() &&
+               t_ >= discoveries_t_ + 0.1 + 0.3 * (double)discoveries_started_) {
+            Control* item = discoveries_[discoveries_started_];
+            item->visible = true;
+            item->modulate = Color(0, 0, 0, 0);
+            tweens_.tween(&item->modulate.r, 1.0f, 0.3f);
+            tweens_.tween(&item->modulate.g, 1.0f, 0.3f);
+            tweens_.tween(&item->modulate.b, 1.0f, 0.3f);
+            tweens_.tween(&item->modulate.a, 1.0f, 0.3f);
+            Control* inner = as_control(item->get_node("HBoxContainer"));
+            if (inner) {
+                tweens_.tween_from(&inner->offset[SIDE_TOP], inner->offset[SIDE_TOP] + 100, inner->offset[SIDE_TOP], 0.3f, TRANS_BACK, EASE_OUT);
+                tweens_.tween_from(&inner->offset[SIDE_BOTTOM], inner->offset[SIDE_BOTTOM] + 100, inner->offset[SIDE_BOTTOM], 0.3f, TRANS_BACK, EASE_OUT);
+            }
+            focusables_.push_back(item);
+            const Json& dl = decision_["progress"]["discoveries"];
+            for (size_t k = 0; k < dl.size(); ++k)
+                if (ctl(screen_, dl[k]["node"].str().c_str()) == item) focus_tips_.push_back(&dl[k]);
+            ++discoveries_started_;
+        }
+        if (step_ == 1 && discoveries_t_ >= 0 && t_ >= discoveries_t_ + (discoveries_.empty() ? 0.0 : 0.1 + 0.3 * (double)discoveries_.size())) {
             step_ = 2;
             enable_button(main_menu_, false);
             menu_on_ = true;

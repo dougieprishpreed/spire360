@@ -558,7 +558,11 @@ public partial class RunDriver
                 SaveManager.Instance.SaveProgressFile();
             }
             foreach (var badge in badges)
-                badgeList.Add(new Dictionary<string, object?> { ["id"] = badge.Id, ["rarity"] = badge.Rarity.ToString() });
+            {
+                var view = BadgeView(badge.Id, badge.Rarity.ToString());
+                view["rarity"] = badge.Rarity.ToString();
+                badgeList.Add(view);
+            }
             d["badges"] = badgeList;
 
             // AnimateScoreBar.
@@ -602,6 +606,42 @@ public partial class RunDriver
             var epochs = new List<string>();
             foreach (var id in me.DiscoveredEpochs) epochs.Add(id);
             d["discovered_epochs"] = epochs;
+
+            // NRunSummary.AnimateInDiscoveries: the item, its count and tip
+            // (GetDiscoveryBodyText: the count line, then up to ten titles).
+            var discoveries = new List<Dictionary<string, object?>>();
+            void Discovery<T>(string node, List<T> ids, Func<T, string> title, string kind, string countParam)
+            {
+                if (ids.Count == 0) return;
+                var body = new LocString("game_over_screen", "DISCOVERY_BODY_" + kind);
+                body.Add(countParam, ids.Count);
+                string text = string.Join("\n", ids.Take(10).Select(title));
+                if (ids.Count > 10) text += "\n....";
+                discoveries.Add(new Dictionary<string, object?>
+                {
+                    ["node"] = node,
+                    ["count"] = ids.Count,
+                    ["title"] = Text(() => new LocString("game_over_screen", "DISCOVERY_HEADER_" + kind).GetFormattedText()),
+                    ["description"] = Text(() => body.GetFormattedText() + "\n\n" + text),
+                });
+            }
+            Discovery("DiscoveredCards", player.DiscoveredCards, id => SaveUtil.CardOrDeprecated(id).Title, "CARD", "CardCount");
+            Discovery("DiscoveredRelics", player.DiscoveredRelics, id => SaveUtil.RelicOrDeprecated(id).Title.GetFormattedText(), "RELIC", "RelicCount");
+            Discovery("DiscoveredPotions", player.DiscoveredPotions, id => SaveUtil.PotionOrDeprecated(id).Title.GetFormattedText(), "POTION", "PotionCount");
+            Discovery("DiscoveredEnemies", player.DiscoveredEnemies, id => SaveUtil.MonsterOrDeprecated(id).Title.GetFormattedText(), "ENEMY", "EnemyCount");
+            if (player.DiscoveredEpochs.Count > 0)
+            {
+                var body = new LocString("game_over_screen", "DISCOVERY_BODY_EPOCH");
+                body.Add("EpochCount", player.DiscoveredEpochs.Count);
+                discoveries.Add(new Dictionary<string, object?>
+                {
+                    ["node"] = "DiscoveredEpochs",
+                    ["count"] = player.DiscoveredEpochs.Count,
+                    ["title"] = Text(() => new LocString("game_over_screen", "DISCOVERY_HEADER_EPOCH").GetFormattedText()),
+                    ["description"] = Text(() => body.GetFormattedText()),
+                });
+            }
+            d["discoveries"] = discoveries;
         }
         catch (Exception ex) { Log($"Game over progress: {ex}"); d["error"] = ex.Message; }
         return d;

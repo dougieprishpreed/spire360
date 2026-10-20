@@ -120,7 +120,7 @@ public partial struct Rect2
 public partial struct Transform2D
 {
     public Vector2 X, Y, Origin;
-    public static Transform2D Identity { get; } = new();
+    public static Transform2D Identity { get; } = new(new Vector2(1, 0), new Vector2(0, 1), Vector2.Zero);
     public Transform2D SampleBakedWithRotation() => this;
 }
 

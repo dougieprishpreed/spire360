@@ -1604,6 +1604,7 @@ public partial class RunDriver
                     ["stats"] = stats.Count > 0 ? stats : null,
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card),
+                    ["inspect_upgrade"] = UpgradePreviewView(cr.Card),
                 });
             }).ToList();
 
@@ -1642,6 +1643,7 @@ public partial class RunDriver
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card),
                     ["upgrade_preview"] = _cardSelector.PendingKind == "upgrade" ? UpgradePreviewView(card) : null,
+                    ["inspect_upgrade"] = _cardSelector.PendingKind == "upgrade" ? null : UpgradePreviewView(card),
                 });
             }).ToList();
 
@@ -2595,6 +2597,7 @@ public partial class RunDriver
                 ["stats"] = stats.Count > 0 ? stats : null,
                 ["keywords"] = crkws?.Count > 0 ? crkws : null,
                 ["after_upgrade"] = GetUpgradedInfo(c),
+                ["inspect_upgrade"] = UpgradePreviewView(c),
             });
         }).ToList();
 
@@ -3018,6 +3021,7 @@ public partial class RunDriver
                     ["is_stocked"] = e.IsStocked,
                     ["on_sale"] = e.IsOnSale,
                     ["colorless"] = i >= characterCards,
+                    ["inspect_upgrade"] = card != null ? UpgradePreviewView(card) : null,
                 });
             }).ToList();
 
@@ -3030,6 +3034,8 @@ public partial class RunDriver
             ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
             ["is_stocked"] = e.IsStocked,
+            // NMerchantRelic.OnPreview (Y): NInspectRelicScreen
+            ["inspect"] = e.Model != null ? InspectRelicView(e.Model, SaveManager.Instance.GenerateUnlockStateFromProgress().Relics.ToHashSet()) : null,
         }).ToList();
 
         var potions = inv.PotionEntries.Select((e, i) => new Dictionary<string, object?>

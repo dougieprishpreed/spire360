@@ -39,6 +39,11 @@ private:
     int focus_;
     bool can_skip_;
     TweenSet tweens_;
+    class InspectCardScreen* inspect_; /* InspectCard (Y) */
+    Node* inspect_node_;
+
+public:
+    ~CardRewardScreen();
 };
 
 } /* namespace spire */

@@ -1,5 +1,6 @@
 #include "ui_util.h"
 
+#include "loc.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/rich_text.h"
@@ -207,6 +208,15 @@ Vec2 offset_size(const Control* c) {
 
 Color hex(unsigned v) {
     return Color(((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f, 1.0f);
+}
+
+void setup_inspect_prompt(SceneLibrary* lib, Node* prompt) {
+    if (!prompt) return;
+    show_glyph(lib, prompt->find_unique("HotkeyIcon"), "y");
+    Node* label = prompt->find_unique("Label");
+    if (!label) label = find_named(prompt, "Label");
+    set_label(label, Loc::get("gameplay_ui", "TO_INSPECT_PROMPT"));
+    set_visible(prompt, true);
 }
 
 Control* full_rect_control(const char* name) {

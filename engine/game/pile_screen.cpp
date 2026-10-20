@@ -1,5 +1,6 @@
 #include "pile_screen.h"
 
+#include "inspect_screens.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "card_view.h"
@@ -20,9 +21,12 @@ static const float SCROLL_LEFT = 150.0f, SCROLL_RIGHT = 200.0f, GRID_TOP = 80.0f
 
 PileScreen::PileScreen(SceneLibrary* lib)
     : lib_(lib), deck_(false), upgrades_(false), root_(NULL), rows_(NULL), focus_(-1), sorter_focus_(-1), columns_(1),
-      top_(80), scroll_(0), scroll_to_(0), lim_lo_(0), lim_hi_(0), grid_h_(1000), tickbox_(NULL) {
+      top_(80), scroll_(0), scroll_to_(0), lim_lo_(0), lim_hi_(0), grid_h_(1000), tickbox_(NULL), inspect_(NULL), inspect_node_(NULL) {
     memset(sorters_, 0, sizeof(sorters_));
 }
+
+/* The inspect node is under root_, freed with it by the owner. */
+PileScreen::~PileScreen() { delete inspect_; }
 
 Node* PileScreen::build(const Json& msg, std::string* error) {
     msg_ = msg;
@@ -258,8 +262,35 @@ void PileScreen::focus_sorter(int i) {
 }
 
 bool PileScreen::input(const PadState& pad, unsigned close_buttons) {
+    if (inspect_) {
+        if (!inspect_->input(pad)) {
+            if (inspect_node_->parent) inspect_node_->parent->remove_child(inspect_node_);
+            delete inspect_node_;
+            delete inspect_;
+            inspect_node_ = NULL;
+            inspect_ = NULL;
+        }
+        return true;
+    }
     if (pad.pressed & (PadState::B | close_buttons)) return false;
     int n = (int)order_.size();
+    if (deck_ && sorter_focus_ < 0 && focus_ >= 0 && focus_ < n && (pad.pressed & PadState::A)) {
+        /* NDeckViewScreen: a card pressed opens NInspectCardScreen over the
+         * cards shown */
+        Json list = Json::make_array();
+        for (size_t k = 0; k < order_.size(); ++k) list.append(msg_["cards"][(size_t)order_[k]]);
+        inspect_ = new InspectCardScreen(lib_);
+        std::string err;
+        inspect_node_ = inspect_->build(list, focus_, upgrades_, &err);
+        if (inspect_node_) {
+            tips_.hide();
+            root_->add_child(inspect_node_);
+        } else {
+            delete inspect_;
+            inspect_ = NULL;
+        }
+        return true;
+    }
     if (sorter_focus_ >= 0) {
         if ((pad.pressed & PadState::LEFT) && sorter_focus_ > 0) focus_sorter(sorter_focus_ - 1);
         if ((pad.pressed & PadState::RIGHT) && sorter_focus_ + 1 < SORTS) focus_sorter(sorter_focus_ + 1);

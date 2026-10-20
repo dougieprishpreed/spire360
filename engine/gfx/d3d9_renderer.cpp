@@ -980,6 +980,11 @@ void D3D9Renderer::apply_state() {
             c[94] = screen_.color[2];
             c[95] = screen_.color[3];
         }
+        if (screen_.mode == SCREEN_CHROMA) {
+            /* c22.w: strength; s11 the distance curve */
+            c[89] = c[90] = 0;
+            c[91] = screen_.strength;
+        }
         if (screen_.mode == SCREEN_DISTORT) {
             /* c22.yw: polar, strength; c23: polar offset, tiling */
             c[89] = screen_.count == 1 ? 1.0f : 0.0f;
@@ -1007,6 +1012,7 @@ void D3D9Renderer::apply_state() {
         c[94] = c[95] = 0.0f;
     dev_->SetPixelShaderConstantF(0, c, 24);
     if (effect_on_) dev_->SetPixelShaderConstantF(24, effect_.p, 4);
+    if (effect_on_ && effect_.extra_count > 0) dev_->SetPixelShaderConstantF(29, effect_.extra, (UINT)effect_.extra_count);
     /* c28.x: the texture holds premultiplied colours (a capture) */
     float premul[4] = { tex_ && tex_->premultiplied ? 1.0f : 0.0f, 0, 0, 0 };
     dev_->SetPixelShaderConstantF(28, premul, 1);

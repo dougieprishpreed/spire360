@@ -237,6 +237,37 @@ static Texture* effect_texture(Canvas& c, const MaterialRes* m, const char* name
     return NULL;
 }
 
+/* NCrystalSphereMask's gridFadeParams as the cells' alphas now: the item's
+ * shader params "cell_<i>" (the screen computes them; 1 when unset) in an
+ * 11 x 11 texture's red, rebuilt when they change. */
+static Texture* scry_cells(Canvas& c, const CanvasItem* item) {
+    static std::map<const CanvasItem*, std::pair<std::vector<u8>, Texture*> > cache;
+    std::vector<u8> a(121, 255);
+    for (int i = 0; item && i < 121; ++i) {
+        std::map<std::string, float>::const_iterator it = item->shader_params.find(format("cell_%d", i));
+        if (it != item->shader_params.end()) a[(size_t)i] = (u8)(clampf(it->second, 0, 1) * 255 + 0.5f);
+    }
+    std::pair<std::vector<u8>, Texture*>& slot = cache[item];
+    if (slot.second && slot.first == a) return slot.second;
+    if (slot.second) Canvas::release_later(slot.second);
+    TextureData td;
+    td.format = TEX_ARGB8;
+    td.flags = TEXF_DATA;
+    td.width = td.orig_width = 11;
+    td.height = td.orig_height = 11;
+    td.levels.resize(1);
+    td.levels[0].resize(121 * 4);
+    for (int i = 0; i < 121; ++i) {
+        u8* px = &td.levels[0][(size_t)i * 4]; /* B G R A */
+        px[0] = px[1] = 0;
+        px[2] = a[(size_t)i];
+        px[3] = 255;
+    }
+    slot.first = a;
+    slot.second = c.renderer()->create_texture(td);
+    return slot.second;
+}
+
 /* The effect applied now and how it changes per particle. */
 static EffectParams g_effect;
 static int g_effect_particle = 0; /* the effect when it changes per particle */
@@ -265,6 +296,18 @@ bool shader_effect_particle(float life, float custom_z, EffectParams* out, float
     for (int i = 0; i < 3; ++i)
         if (g_cz_param[i] >= 0) out->p[g_cz_param[i]] += custom_z * g_cz_scale[i];
     if (g_cx_param >= 0) out->p[g_cx_param] += custom_x;
+    return true;
+}
+
+/* The screen shader applied now when it changes per particle. */
+static ScreenParams g_screen_base;
+static bool g_screen_particle = false;
+static CurveData g_screen_curve;
+
+bool shader_screen_particle(float life, ScreenParams* out) {
+    if (!g_screen_particle) return false;
+    *out = g_screen_base;
+    out->strength = g_screen_base.strength * (g_screen_curve.valid() ? g_screen_curve.sample(life) : 1.0f);
     return true;
 }
 
@@ -815,6 +858,68 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[10] = sf.x;
         e.p[11] = sf.y;
         e.tex[0] = effect_texture(c, m, "lut");
+    } else if (s == "shaders/vfx/sweeping_beam/vfx_sweeping_beam_flipbook_shader.gdshader") {
+        /* vertex(): the quad tilted in 3D (rot_y, rot_x) and seen through
+         * fov; world = R * (UV - 0.5, 0.5 / tan(fov / 2)), its xy times
+         * depth_scale * R[2].z; offset = depth_scale * R[2].xy. */
+        e.id = EFFECT_SWEEP_FLIPBOOK;
+        float ry = param(m, "rot_y_deg", 0.0f) * 0.017453293f, rx = param(m, "rot_x_deg", 0.0f) * 0.017453293f;
+        float sy = sinf(ry), cy = cosf(ry), sx = sinf(rx), cx = cosf(rx);
+        float ps = tanf(param(m, "fov", 90.0f) * 0.017453293f * 0.5f);
+        float zc = ps != 0 ? 0.5f / ps : 0.0f, depth = zc + 0.5f;
+        float col[3][3] = { { cy, 0, -sy }, { sy * sx, cx, cy * sx }, { sy * cx, -sx, cy * cx } };
+        for (int k = 0; k < 3; ++k) {
+            e.p[k] = col[0][k];
+            e.p[3 + k] = col[1][k];
+            e.p[6 + k] = col[2][k] * zc;
+        }
+        e.p[9] = depth * col[2][2];
+        e.p[10] = depth * col[2][0];
+        e.p[11] = depth * col[2][1];
+        CurveData::from(shader_param_resource(m, "flipbook_curve"), g_effect_curve);
+        float frames = param(m, "frame_count", 9.0f);
+        e.p[12] = frames * 0.99f * (g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f);
+        Vec2 size = shader_param_vec2(m, "flipbook_size", Vec2(3, 3));
+        e.p[13] = size.x < 1 ? 1 : size.x;
+        e.p[14] = size.y < 1 ? 1 : size.y;
+        e.tex[0] = effect_texture(c, m, "lut");
+        e.tex[1] = effect_texture(c, m, "mask_texture");
+        effect_particles(e.id);
+        g_life_param[0] = 12;
+        g_life_scale[0] = frames * 0.99f;
+    } else if (s == "shaders/crystal_sphere_item.gdshader") {
+        e.id = EFFECT_SHINE;
+        e.p[0] = param(m, "val", 1.0f);
+    } else if (s == "shaders/scry_reveal.gdshader") {
+        e.id = EFFECT_SCRY;
+        e.p[0] = param(m, "circles", 8.0f);
+        e.p[1] = param(m, "outerCircle", -1.0f);
+        e.p[2] = param(m, "uvMargin", 0.0f);
+        Color b = param_color(m, "borderColor", Color(0, 0, 0, 1));
+        e.p[3] = b.r;
+        e.p[4] = b.g;
+        e.p[5] = b.b;
+        e.p[6] = fmodf((float)g_shader_time * 0.0065f, 1.0f);
+        e.p[7] = fmodf((float)g_shader_time * 0.0011f, 1.0f);
+        /* colors[8] (and the ninth the last circle reads: zero), then
+         * circleData[8] */
+        const Json& cols = (*m->props)["shader_parameter/colors"]["v"];
+        const Json& data = (*m->props)["shader_parameter/circleData"]["v"];
+        for (int k = 0; k < 8; ++k)
+            for (int q = 0; q < 3; ++q) {
+                size_t at = (size_t)(k * 4 + q);
+                e.extra[k * 4 + q] = at < cols.size() ? jv_float(cols[at]) : 0.0f;
+                e.extra[(9 + k) * 4 + q] = at < data.size() ? jv_float(data[at]) : 0.0f;
+            }
+        for (int k = 0; k < 8; ++k) {
+            size_t at = (size_t)(k * 4 + 3);
+            e.extra[(9 + k) * 4 + 3] = at < data.size() ? jv_float(data[at]) : 0.0f;
+        }
+        e.extra_count = 17;
+        e.tex[0] = effect_texture(c, m, "noiseTex1");
+        e.tex[1] = effect_texture(c, m, "noiseTex2");
+        e.tex[2] = scry_cells(c, g_item);
+        e.repeat = 1 | 2;
     } else if (s == "shaders/blur/Blur.gdshader") {
         /* textureSize(TEXTURE): the drawn TextureRect's */
         Vec2 ts(512, 512);
@@ -1071,6 +1176,19 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         }
         return c.renderer()->set_screen(&p);
     }
+    if (m->shader == "shaders/vfx/common/vfx_screen_chromatic_aberration_shader.gdshader") {
+        /* intensity = intensity_curve(life) * base_intensity (an instance
+         * uniform) * distance_curve(dist) * TEXTURE.r */
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_CHROMA;
+        p.strength = param(m, "base_intensity", 1.0f);
+        p.noise = effect_texture(c, m, "distance_curve");
+        CurveData::from(shader_param_resource(m, "intensity_curve"), g_screen_curve);
+        g_screen_base = p;
+        g_screen_particle = true;
+        return c.renderer()->set_screen(&p);
+    }
     if (m->shader == "shaders/radial_blur.gdshader") {
         ScreenParams p;
         memset(&p, 0, sizeof(p));
@@ -1299,6 +1417,7 @@ void shader_end(Canvas& c, const MaterialRes* m) {
         c.renderer()->set_effect(NULL);
         g_vfx_on = false;
         g_effect_particle = 0;
+        g_screen_particle = false;
     }
 }
 

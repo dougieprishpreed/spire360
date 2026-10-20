@@ -775,6 +775,87 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_SWEEP_FLIPBOOK: {
+        float x = u - 0.5f, y = v - 0.5f;
+        float wz = e.p[2] * x + e.p[5] * y + e.p[8];
+        out[0] = out[1] = out[2] = out[3] = 0;
+        if (wz <= 0) return;
+        float pu = (e.p[0] * x + e.p[3] * y + e.p[6]) * e.p[9] / wz - e.p[10] + 0.5f;
+        float pv = (e.p[1] * x + e.p[4] * y + e.p[7]) * e.p[9] / wz - e.p[11] + 0.5f;
+        if (pu < 0 || pu > 1 || pv < 0 || pv > 1) return;
+        float total = e.p[13] * e.p[14], f = floorf(e.p[12]);
+        f -= total * floorf(f / total);
+        float fu = pu / e.p[13] + fmodf(f, e.p[13]) / e.p[13], fv = pv / e.p[14] + floorf((f + 0.5f) / e.p[13]) / e.p[14];
+        float t[4] = { 0, 0, 0, 0 }, l[4], mk[4];
+        if (tex) sample(tex->img, fu, fv, flags, t);
+        unpremul(t);
+        effect_texel(e, 0, t[0], t[0], l);
+        unpremul(l);
+        effect_texel(e, 1, pu, pv, mk);
+        unpremul(mk);
+        float a = clampf(l[3] * col[3] * t[3] * mk[0], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SCRY: {
+        const float g = 11.0f, m = e.p[2];
+        float gx = ((u * g - g * 0.5f) * (1 + m * 2) - m) + g * 0.5f, gy = ((v * g - g * 0.5f) * (1 + m * 2) - m) + g * 0.5f;
+        float fx = floorf(gx), fy = floorf(gy);
+        bool valid = fx >= 0 && fy >= 0 && fx < g && fy < g;
+        float cell[4];
+        effect_texel(e, 2, (fx + 0.5f) / g, (fy + 0.5f) / g, cell);
+        float alpha = valid ? cell[0] : 1.0f;
+        float border = 0;
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) {
+                if (!dx && !dy) continue;
+                float nx = fx + dx, ny = fy + dy;
+                if (nx < 0 || ny < 0 || nx >= g || ny >= g) continue;
+                float nc[4];
+                effect_texel(e, 2, (nx + 0.5f) / g, (ny + 0.5f) / g, nc);
+                float bx = maxf(maxf(nx - gx, 0), gx - (nx + 1)), by = maxf(maxf(ny - gy, 0), gy - (ny + 1));
+                float bd = sqrtf(bx * bx + by * by);
+                border = maxf(border, smoothstepf(0.05f, 0.02f, bd) * fabsf(alpha - nc[0]));
+            }
+        float cx = u - 0.5f, cy = v - 0.5f, dist = sqrtf(cx * cx + cy * cy);
+        float ang = (atan2f(cy, cx) + 3.14159265f) / 6.2831853f;
+        float n1[4], n2[4];
+        effect_texel(e, 0, dist * 2.0f, ang + e.p[6], n1);
+        effect_texel(e, 1, dist * 0.5f, ang + e.p[7], n2);
+        float ns = powf(n1[0], 0.8f) * (n2[0] + 0.4f) * 2.0f;
+        float cc[3] = { e.extra[0], e.extra[1], e.extra[2] }, lastmask = 0;
+        int circles = (int)e.p[0], outer = (int)e.p[1];
+        float hx = 5.0f - fabsf(5.0f - fx), hy = 5.0f - fabsf(5.0f - fy);
+        bool corner = hx + hy < 3.0f || !valid;
+        for (int i = 0; i < 8 && i < circles; ++i) {
+            const float* d = &e.extra[(9 + i) * 4];
+            float circle = smoothstepf(d[0] * 0.5f, (d[0] + d[1]) * 0.5f, dist);
+            float pw = circle > 0 ? powf(circle, d[2]) : (d[2] == 0 ? 1.0f : 0.0f);
+            float mask = (1 + (ns - 1) * pw) * (1 - circle);
+            mask = mask >= d[3] ? 1.0f : 0.0f;
+            if (i == outer && corner) mask = 0;
+            lastmask = mask;
+            const float* next = &e.extra[(i + 1) * 4];
+            for (int k = 0; k < 3; ++k) cc[k] = next[k] + (cc[k] - next[k]) * mask;
+        }
+        if (outer < 0) lastmask = corner ? 0.0f : 1.0f;
+        float oa = clampf(maxf(alpha, border) * lastmask * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf((cc[k] + e.p[3 + k] * border) * col[k], 0, 1) * oa;
+        out[3] = oa;
+        return;
+    }
+    case EFFECT_SHINE: {
+        float t[4] = { 1, 1, 1, 1 };
+        if (tex) sample(tex->img, u, v, flags, t);
+        unpremul(t);
+        float ang = u - v, o = -1.0f + 2.5f * e.p[0];
+        float add = (fabsf(ang - o) <= 0.17f ? 0.75f : 0.0f) + (fabsf(ang - o + 0.3f) <= 0.03f ? 0.5f : 0.0f);
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(t[k] * col[k] + add, 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_PORTRAIT_BLUR: {
         static const float w[7] = { 0.0702f, 0.1311f, 0.1907f, 0.2160f, 0.1907f, 0.1311f, 0.0702f };
         float tx = e.p[1], ty = e.p[2];
@@ -1042,7 +1123,24 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 /* ScreenParams: COLOR is the screen copy (the vertex colour
                  * is not applied). */
                 float su = ((float)x + 0.5f) / (float)fb_.w, sv = ((float)y + 0.5f) / (float)fb_.h;
-                if (screen_.mode == SCREEN_DISTORT) {
+                if (screen_.mode == SCREEN_CHROMA) {
+                    float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                    float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                    float t[4] = { 0, 0, 0, 0 }, n[4], a[4], b[4], g[4];
+                    if (tex) sample(tex->img, u, v, flags, t);
+                    float tr = t[3] > 0 ? t[0] / t[3] : 0.0f;
+                    float dx = 0.5f - u, dy = 0.5f - v, len = sqrtf(dx * dx + dy * dy);
+                    fire_texel(screen_.noise, len, len, true, n);
+                    float k = screen_.strength * (n[3] > 0 ? n[0] / n[3] : 0.0f) * tr;
+                    float nx = len > 1e-6f ? dx / len : 0.0f, ny = len > 1e-6f ? dy / len : 0.0f;
+                    sample_screen(su + nx * 0.5f * k, sv + ny * 0.5f * k, 0, a);
+                    sample_screen(su, sv, 0, g);
+                    sample_screen(su + nx * k, sv + ny * k, 0, b);
+                    s[0] = a[0];
+                    s[1] = g[1];
+                    s[2] = b[2];
+                    s[3] = 1;
+                } else if (screen_.mode == SCREEN_DISTORT) {
                     float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
                     float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
                     float t[4], m = 0;

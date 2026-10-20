@@ -29,6 +29,7 @@
 #include "shop_screen.h"
 #include "top_bar.h"
 #include "treasure_screen.h"
+#include "crystal_sphere_screen.h"
 #include "logic_link.h"
 
 #include <stdio.h>
@@ -679,6 +680,18 @@ void GameClient::show(const Json& d) {
         screen_ = s->build(d, &err);
         if (!screen_) {
             log_warn("treasure screen: %s", err.c_str());
+            delete ported_;
+            ported_ = NULL;
+        }
+    }
+    if (kind == "crystal_sphere") {
+        CrystalSphereScreen* s = new CrystalSphereScreen(lib_);
+        if (prev_kind == "crystal_sphere") s->set_previous(last_crystal_);
+        last_crystal_ = d;
+        ported_ = s;
+        screen_ = s->build(d, &err);
+        if (!screen_) {
+            log_warn("crystal sphere screen: %s", err.c_str());
             delete ported_;
             ported_ = NULL;
         }

@@ -27,6 +27,7 @@ float4 g_p0 : register(c24);
 float4 g_p1 : register(c25);
 float4 g_p2 : register(c26);
 float4 g_p3 : register(c27);
+float4 g_x[17] : register(c29); // EffectParams.extra
 
 float4 premul(float4 c) { return float4(c.rgb * c.a, c.a); }
 
@@ -473,6 +474,80 @@ float4 ps_e38(VsOut i) : COLOR {
     float4 l = tex2D(g_e0, float2(blink, 0.0));
     float a = saturate(i.color.a * max(t.r, t.g * l.a * blink) * mask);
     return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 39: vfx_sweeping_beam_flipbook: the flipbook on a quad tilted away in
+// 3D, masked, coloured by the lut.
+float4 ps_e39(VsOut i) : COLOR {
+    float2 q = i.uv - 0.5;
+    float wz = g_p0.z * q.x + g_p1.y * q.y + g_p2.x;
+    float2 p = (float2(g_p0.x, g_p0.y) * q.x + float2(g_p0.w, g_p1.x) * q.y + float2(g_p1.z, g_p1.w)) * g_p2.y / max(wz, 1e-6)
+             - g_p2.zw + 0.5;
+    float inside = (wz > 0.0 && p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0) ? 1.0 : 0.0;
+    float total = g_p3.y * g_p3.z;
+    float f = floor(g_p3.x);
+    f -= total * floor(f / total);
+    float2 fuv = p / g_p3.yz + float2(fmod(f, g_p3.y) / g_p3.y, floor((f + 0.5) / g_p3.y) / g_p3.z);
+    float4 t = tex2D(g_tex, fuv);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(l.a * i.color.a * t.a * tex2D(g_e1, p).r) * inside;
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 40: scry_reveal (the Crystal Sphere): the ball's noisy circles and the
+// fog's cells (their alphas in tex2) with borders between them.
+float4 ps_e40(VsOut i) : COLOR {
+    const float g = 11.0;
+    float m = g_p0.z;
+    float2 gp = ((i.uv * g - g * 0.5) * (1.0 + m * 2.0) - m) + g * 0.5;
+    float2 f = floor(gp);
+    float valid = (f.x >= 0.0 && f.y >= 0.0 && f.x < g && f.y < g) ? 1.0 : 0.0;
+    float alpha = valid > 0.5 ? tex2Dlod(g_e2, float4((f + 0.5) / g, 0.0, 0.0)).r : 1.0;
+    float border = 0.0;
+    [unroll] for (int dx = -1; dx <= 1; ++dx) {
+        [unroll] for (int dy = -1; dy <= 1; ++dy) {
+            if (dx != 0 || dy != 0) {
+                float2 n = f + float2(dx, dy);
+                float inside = (n.x >= 0.0 && n.y >= 0.0 && n.x < g && n.y < g) ? 1.0 : 0.0;
+                float an = tex2Dlod(g_e2, float4((n + 0.5) / g, 0.0, 0.0)).r;
+                float2 tb = max(max(n - gp, 0.0), gp - (n + 1.0));
+                border = max(border, inside * smoothstep(0.05, 0.02, length(tb)) * abs(alpha - an));
+            }
+        }
+    }
+    float2 c = i.uv - 0.5;
+    float dist = length(c);
+    float ang = (atan2(c.y, c.x) + 3.14159265) / 6.2831853;
+    float n1 = pow(tex2D(g_e0, float2(dist * 2.0, ang + g_p1.z)).r, 0.8);
+    float n2 = tex2D(g_e1, float2(dist * 0.5, ang + g_p1.w)).r + 0.4;
+    float ns = n1 * n2 * 2.0;
+    float3 col = g_x[0].rgb;
+    float lastmask = 0.0;
+    float2 h = 5.0 - abs(5.0 - f);
+    float corner = (h.x + h.y < 3.0 || valid < 0.5) ? 1.0 : 0.0;
+    [unroll] for (int k = 0; k < 8; ++k) {
+        float4 d = g_x[9 + k];
+        float circle = smoothstep(d.x * 0.5, (d.x + d.y) * 0.5, dist);
+        float mask = lerp(1.0, ns, pow(max(circle, 1e-6), d.z)) * (1.0 - circle);
+        float hp = fwidth(mask) * 0.5;
+        mask = saturate((mask - (d.w - hp)) / max(hp * 2.0, 1e-6));
+        mask = (abs(k - g_p0.y) < 0.5 && corner > 0.5) ? 0.0 : mask;
+        float use = k < g_p0.x ? 1.0 : 0.0;
+        lastmask = lerp(lastmask, mask, use);
+        col = lerp(col, lerp(g_x[k + 1].rgb, col, mask), use);
+    }
+    lastmask = g_p0.y < 0.0 ? 1.0 - corner : lastmask;
+    float a = saturate(max(alpha, border) * lastmask * i.color.a);
+    return float4(saturate((col + float3(g_p0.w, g_p1.x, g_p1.y) * border) * i.color.rgb) * a, a);
+}
+
+// 41: crystal_sphere_item: a shine sweeping across as val goes 0 to 1.
+float4 ps_e41(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv) * i.color;
+    float ang = i.uv.x - i.uv.y, o = lerp(-1.0, 1.5, g_p0.x);
+    float add = (abs(ang - o) <= 0.17 ? 0.75 : 0.0) + (abs(ang - o + 0.3) <= 0.03 ? 0.5 : 0.0);
+    float a = saturate(t.a);
+    return float4(saturate(t.rgb + add) * a, a);
 }
 
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.

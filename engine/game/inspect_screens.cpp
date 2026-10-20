@@ -95,7 +95,8 @@ void InspectCardScreen::set_card(int index, int slide) {
     set_visible(screen_->get_node("RightArrow"), index_ < n - 1);
     const Json& c = cards_[(size_t)index_];
     const Json& in = c["inspect"];
-    bool upgradable = in.is_object() ? in["upgradable"].b() : (c["upgrade_preview"].is_object() || c["upgraded"].b());
+    bool upgradable = in.is_object() ? in["upgradable"].b()
+                                     : (c["upgrade_preview"].is_object() || c["inspect_upgrade"].is_object() || c["upgraded"].b());
     bool start = in.is_object() ? in["start_upgraded"].b() : c["upgraded"].b();
     set_visible(screen_->find_unique("Upgrade"), upgradable);
     ticked_ = start || view_all_;
@@ -112,7 +113,7 @@ void InspectCardScreen::show() {
     const Json& c = cards_[(size_t)index_];
     const Json& in = c["inspect"];
     const Json& base = in.is_object() ? in["base"] : c;
-    const Json& up = in.is_object() ? in["upgraded"] : c["upgrade_preview"];
+    const Json& up = in.is_object() ? in["upgraded"] : c["upgrade_preview"].is_object() ? c["upgrade_preview"] : c["inspect_upgrade"];
     const Json& view = ticked_ && up.is_object() ? up : base;
     Node* tv = screen_->find_unique("TickboxVisuals");
     set_visible(tv ? tv->get_node("Ticked") : NULL, ticked_);
@@ -188,7 +189,8 @@ void InspectRelicScreen::set_relic(int index, int slide) {
     index_ = index < 0 ? 0 : (index >= n ? n - 1 : index);
     set_visible(screen_->find_unique("LeftArrow"), index_ > 0);
     set_visible(screen_->find_unique("RightArrow"), index_ < n - 1);
-    const Json& r = relics_[(size_t)index_];
+    const Json& r0 = relics_[(size_t)index_];
+    const Json& r = r0["inspect"].is_object() ? r0["inspect"] : r0;
     bool unlocked = r["unlocked"].b(r["visibility"].str() != "locked");
     bool seen = r["seen"].b(r["visibility"].str() == "visible");
     Node* name = screen_->find_unique("RelicName");

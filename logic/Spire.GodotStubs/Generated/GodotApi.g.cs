@@ -161,11 +161,6 @@ namespace Godot
         public global::Godot.Vector2I Range { get => default; set { } }
         public void SetGlyphIndex(uint p0) { }
     }
-    public partial struct Color
-    {
-        public static global::Godot.Color FromHtml(global::System.ReadOnlySpan<char> p0) { return default; }
-        public static global::Godot.Color operator *(global::Godot.Color p0, global::Godot.Color p1) { return default; }
-    }
     public partial class ColorRect
     {
         public partial class MethodName : global::Godot.Control.MethodName
@@ -180,12 +175,6 @@ namespace Godot
         {
             public SignalName() { }
         }
-    }
-    public static partial class Colors
-    {
-        public static global::Godot.Color DarkRed { get => default; }
-        public static global::Godot.Color Gold { get => default; }
-        public static global::Godot.Color DimGray { get => default; }
     }
     public partial class ConfirmationDialog : global::Godot.AcceptDialog
     {
@@ -860,21 +849,6 @@ namespace Godot
             public SignalName() { }
         }
     }
-    public static partial class Mathf
-    {
-        public static double Sin(double p0) { return default; }
-        public static float Atan2(float p0, float p1) { return default; }
-        public static float LinearToDb(float p0) { return default; }
-        public static double Max(double p0, double p1) { return default; }
-        public static double Lerp(double p0, double p1, double p2) { return default; }
-        public static float InverseLerp(float p0, float p1, float p2) { return default; }
-        public static float Wrap(float p0, float p1, float p2) { return default; }
-        public static int Abs(int p0) { return default; }
-        public static int Sign(int p0) { return default; }
-        public static float Log(float p0) { return default; }
-        public static float LerpAngle(float p0, float p1, float p2) { return default; }
-        public static double DegToRad(double p0) { return default; }
-    }
     public sealed partial class MustBeVariantAttribute : global::System.Attribute
     {
         public MustBeVariantAttribute() { }
@@ -1095,11 +1069,6 @@ namespace Godot
     {
         public global::Godot.PropertyTweener FromCurrent() { return default; }
     }
-    public partial struct Quaternion
-    {
-        public static global::Godot.Quaternion FromEuler(global::Godot.Vector3 p0) { return default; }
-        public static global::Godot.Vector3 operator *(global::Godot.Quaternion p0, global::Godot.Vector3 p1) { return default; }
-    }
     public partial class Range
     {
         public partial class MethodName : global::Godot.Control.MethodName
@@ -1110,14 +1079,6 @@ namespace Godot
         {
             public PropertyName() { }
         }
-    }
-    public partial struct Rect2
-    {
-        public global::Godot.Vector2 End { get => default; set { } }
-        public global::Godot.Vector2 GetCenter() { return default; }
-        public bool HasPoint(global::Godot.Vector2 p0) { return default; }
-        public bool Intersects(global::Godot.Rect2 p0, bool p1 = false) { return default; }
-        public global::Godot.Rect2 Merge(global::Godot.Rect2 p0) { return default; }
     }
     public partial class RefCounted
     {
@@ -1420,15 +1381,6 @@ namespace Godot
             public static readonly global::Godot.StringName Timeout = "Timeout";
         }
     }
-    public partial struct Transform2D
-    {
-        public global::Godot.Vector2 Scale { get => default; }
-        public float Rotation { get => default; }
-        public global::Godot.Transform2D TranslatedLocal(global::Godot.Vector2 p0) { return default; }
-        public global::Godot.Transform2D RotatedLocal(float p0) { return default; }
-        public static global::Godot.Vector2 operator *(global::Godot.Transform2D p0, global::Godot.Vector2 p1) { return default; }
-        public global::Godot.Transform2D Inverse() { return default; }
-    }
     public static partial class TranslationServer
     {
         public static void SetLocale(string p0) { }
@@ -1478,35 +1430,6 @@ namespace Godot
         public static global::Godot.Variant CreateFrom(string p0) { return default; }
         public static implicit operator global::Godot.Variant(global::Godot.Collections.Dictionary p0) { return default; }
         public byte[] AsByteArray() { return default; }
-    }
-    public partial struct Vector2
-    {
-        public float DistanceSquaredTo(global::Godot.Vector2 p0) { return default; }
-        public global::Godot.Vector2 LimitLength(float p0 = 1f) { return default; }
-        public global::Godot.Vector2 Rotated(float p0) { return default; }
-        public bool IsEqualApprox(global::Godot.Vector2 p0) { return default; }
-        public float Angle() { return default; }
-        public global::Godot.Vector2 Inverse() { return default; }
-    }
-    public partial struct Vector2I
-    {
-        public static global::Godot.Vector2I One { get => default; }
-        public static global::Godot.Vector2I operator +(global::Godot.Vector2I p0, global::Godot.Vector2I p1) { return default; }
-        public static bool operator ==(global::Godot.Vector2I p0, global::Godot.Vector2I p1) { return default; }
-        public static bool operator !=(global::Godot.Vector2I p0, global::Godot.Vector2I p1) { return default; }
-        public static global::Godot.Vector2I operator /(global::Godot.Vector2I p0, int p1) { return default; }
-        public static global::Godot.Vector2I operator -(global::Godot.Vector2I p0, global::Godot.Vector2I p1) { return default; }
-        public static bool operator >=(global::Godot.Vector2I p0, global::Godot.Vector2I p1) { return default; }
-        public static bool operator <=(global::Godot.Vector2I p0, global::Godot.Vector2I p1) { return default; }
-        public static global::Godot.Vector2I operator *(global::Godot.Vector2I p0, int p1) { return default; }
-        public static explicit operator global::Godot.Vector2I(global::Godot.Vector2 p0) { return default; }
-        public float DistanceTo(global::Godot.Vector2I p0) { return default; }
-    }
-    public partial struct Vector3
-    {
-        public static global::Godot.Vector3 Up { get => default; }
-        public static global::Godot.Vector3 operator *(global::Godot.Vector3 p0, float p1) { return default; }
-        public static global::Godot.Vector3 operator +(global::Godot.Vector3 p0, global::Godot.Vector3 p1) { return default; }
     }
     public enum VerticalAlignment : long
     {

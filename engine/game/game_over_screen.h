@@ -66,6 +66,21 @@ private:
     int bar_threshold_;
     double bar_t_;        /* time in the bar's current step */
     int bar_step_;        /* 0 not started, 1 fading in, 2 counting, 3 after an unlock, 4 done */
+    /* AnimateBadges: NBadge in %BadgeContainer; AnimateInDiscoveries:
+     * NDiscoveredItem in %DiscoveredContents; the d-pad focuses them, each
+     * with its tip */
+    std::vector<Control*> badges_;
+    size_t badges_started_;
+    std::vector<Control*> discoveries_;
+    size_t discoveries_started_;
+    double discoveries_t_; /* when they began (< 0 not yet) */
+    std::vector<Control*> focusables_;
+    std::vector<const Json*> focus_tips_;
+    int badge_focus_;
+    Control* badge_tip_;
+    void focus_badge(int i);
+    Node* root_;   /* the overlay */
+    Node* screen_; /* game_over_screen.tscn */
     TweenSet tweens_;
 };
 

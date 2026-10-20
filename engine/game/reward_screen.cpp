@@ -1,4 +1,5 @@
 #include "reward_screen.h"
+#include "inspect_screens.h"
 #include "card_view.h"
 #include "loc.h"
 
@@ -19,9 +20,12 @@ static const float HOVER_SCALE = 1.0f;
 static const float CARD_ROW_X = 960.0f, CARD_ROW_Y = 590.0f;
 
 CardRewardScreen::CardRewardScreen(SceneLibrary* lib)
-    : lib_(lib), background_(NULL), focus_(0), can_skip_(true) {
+    : lib_(lib), background_(NULL), focus_(0), can_skip_(true), inspect_(NULL), inspect_node_(NULL) {
     root_ = NULL;
 }
+
+/* The inspect node is under root_, freed with it by the owner. */
+CardRewardScreen::~CardRewardScreen() { delete inspect_; }
 
 Node* CardRewardScreen::build(const Json& d, std::string* error) {
     decision_ = d;
@@ -81,6 +85,15 @@ Node* CardRewardScreen::build(const Json& d, std::string* error) {
             ui->add_child(skip);
         }
     }
+    /* %InspectPrompt (card_reward_selection_screen.tscn) */
+    Node* scene = instance(lib_, "scenes/screens/card_selection/card_reward_selection_screen.tscn");
+    Node* prompt = scene ? scene->find_unique("InspectPrompt") : NULL;
+    if (prompt) {
+        prompt->parent->remove_child(prompt);
+        setup_inspect_prompt(lib_, prompt);
+        ui->add_child(prompt);
+    }
+    delete scene;
     root->add_child(frame_driver(this));
     /* Default focus: the middle card. */
     focus_ = -1;
@@ -111,7 +124,33 @@ void CardRewardScreen::focus(int i) {
 }
 
 std::string CardRewardScreen::input(const PadState& pad) {
+    if (inspect_) {
+        if (!inspect_->input(pad)) {
+            if (inspect_node_->parent) inspect_node_->parent->remove_child(inspect_node_);
+            delete inspect_node_;
+            delete inspect_;
+            inspect_node_ = NULL;
+            inspect_ = NULL;
+        }
+        return std::string();
+    }
     int n = (int)holders_.size();
+    if ((pad.pressed & PadState::Y) && focus_ >= 0 && focus_ < n) {
+        /* InspectCard: that card alone */
+        Json list = Json::make_array();
+        list.append(decision_["cards"][(size_t)focus_]);
+        inspect_ = new InspectCardScreen(lib_);
+        std::string err;
+        inspect_node_ = inspect_->build(list, 0, false, &err);
+        if (inspect_node_) {
+            tips_.hide();
+            root_->add_child(inspect_node_);
+        } else {
+            delete inspect_;
+            inspect_ = NULL;
+        }
+        return std::string();
+    }
     if (n > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT)))
         focus((pad.pressed & PadState::LEFT) ? (focus_ + n - 1) % n : (focus_ + 1) % n);
     if ((pad.pressed & PadState::A) && n > 0 && focus_ >= 0)

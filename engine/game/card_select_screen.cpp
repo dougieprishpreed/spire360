@@ -1,4 +1,5 @@
 #include "card_select_screen.h"
+#include "inspect_screens.h"
 #include "card_view.h"
 #include "loc.h"
 
@@ -35,7 +36,7 @@ static Control* control(Node* n) { return n && n->is_control() ? (Control*)n : N
 CardSelectScreen::CardSelectScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), row_(false), min_(0), max_(1), cancelable_(false), focus_(-1), columns_(1),
       rows_(NULL), scroll_(0), scroll_to_(0), lim_lo_(0), lim_hi_(0), grid_h_(1000), preview_(false), preview_box_(NULL),
-      single_box_(NULL), multi_box_(NULL) {
+      single_box_(NULL), multi_box_(NULL), inspect_(NULL), inspect_node_(NULL) {
     root_ = NULL;
     Button none = { NULL, 0, 0, 0, false };
     close_ = confirm_ = preview_cancel_ = preview_confirm_ = none;
@@ -212,7 +213,7 @@ Node* CardSelectScreen::build_row(const Json& d) {
     if (banner) set_label(banner->find_unique("Label"), Loc::get("gameplay_ui", "CHOOSE_CARD_HEADER"));
     hide(screen->find_unique("CombatPiles"));
     hide(screen->find_unique("PeekButton"));
-    hide(screen->find_unique("InspectPrompt"));
+    setup_inspect_prompt(lib_, screen->find_unique("InspectPrompt"));
     Node* row = screen->get_node("CardRow");
     if (!row) row = screen;
     const Json& cs = d["cards"];
@@ -396,8 +397,36 @@ std::string CardSelectScreen::confirm() {
     return protocol_action("select_cards", "\"indices\":\"" + list + "\"");
 }
 
+/* The inspect node is under root_, freed with it by the owner. */
+CardSelectScreen::~CardSelectScreen() { delete inspect_; }
+
 std::string CardSelectScreen::input(const PadState& pad) {
     int n = (int)holders_.size();
+    if (inspect_) {
+        if (!inspect_->input(pad)) {
+            if (inspect_node_->parent) inspect_node_->parent->remove_child(inspect_node_);
+            delete inspect_node_;
+            delete inspect_;
+            inspect_node_ = NULL;
+            inspect_ = NULL;
+        }
+        return std::string();
+    }
+    if (row_ && (pad.pressed & PadState::Y) && focus_ >= 0 && focus_ < n) {
+        Json list = Json::make_array();
+        list.append(decision_["cards"][(size_t)focus_]);
+        inspect_ = new InspectCardScreen(lib_);
+        std::string err;
+        inspect_node_ = inspect_->build(list, 0, false, &err);
+        if (inspect_node_) {
+            tips_.hide();
+            root_->add_child(inspect_node_);
+        } else {
+            delete inspect_;
+            inspect_ = NULL;
+        }
+        return std::string();
+    }
     if (row_) {
         if (n > 0 && (pad.pressed & PadState::LEFT)) focus(focus_ - 1);
         if (n > 0 && (pad.pressed & PadState::RIGHT)) focus(focus_ + 1);

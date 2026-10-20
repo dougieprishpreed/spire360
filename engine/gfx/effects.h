@@ -208,6 +208,27 @@ enum EffectId {
      * -p7; l = lut(blink, 0) (tex0); rgb l.rgb * vertex rgb, alpha vertex a *
      * max(t.r, t.g * l.a * blink) * smoothstep(p10, p10 + p11, TEXTURE.a). */
     EFFECT_GALVANIZED = 38,
+    /* shaders/vfx/sweeping_beam/vfx_sweeping_beam_flipbook_shader
+     * (particles): x, y = UV - 0.5; z = p2 x + p5 y + p8 (nothing behind
+     * the eye); the projected uv = (p0p1 x + p3p4 y + p6p7) * p9 / z -
+     * p10p11 + 0.5 (nothing outside 0..1); its flipbook frame floor(p12) of
+     * a p13 x p14 sheet; (lut(t.r, t.r) (tex0) * vertex colour, alpha also
+     * times t.a * mask(projected uv).r (tex1)). The particle quads grow by
+     * 1 + tan(fov / 2) (Particles2D::draw). */
+    EFFECT_SWEEP_FLIPBOOK = 39,
+    /* shaders/scry_reveal.gdshader (the Crystal Sphere's ball and fog): the
+     * 11 x 11 grid inset by p2 (uvMargin); each cell's alpha from tex2
+     * (its red, 1 outside the grid) and the borders where it differs from
+     * a neighbour's (p3..5 the border colour); the ball's noise (tex0 at
+     * the polar uv + (0, p6), tex1 at + (0, p7)) through p0 circles
+     * (extra: colours 0..8 then circle data 0..7) clipped at the grid's
+     * corners (p1: the outer circle, < 0 the inside); times the vertex
+     * colour. */
+    EFFECT_SCRY = 40,
+    /* shaders/crystal_sphere_item.gdshader: COLOR (vertex times texel) with
+     * 0.75 added where |UV.x - UV.y - o| <= 0.17 and 0.5 where |UV.x - UV.y
+     * - o + 0.3| <= 0.03, o = mix(-1, 1.5, p0) (val). */
+    EFFECT_SHINE = 41,
     EFFECT_COUNT
 };
 

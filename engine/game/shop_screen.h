@@ -24,6 +24,7 @@ class SceneLibrary;
 class ShopScreen : public RunScreen, public FrameListener {
 public:
     explicit ShopScreen(SceneLibrary* lib);
+    ~ShopScreen();
     /* Before build: the inventory open (no opening animation), the slot
      * to focus (its kind and index: "card" 3, "relic" 0, "removal" 0...). */
     void set_state(bool open, const std::string& kind, int index) {
@@ -55,6 +56,11 @@ private:
     Vec2 slot_centre(const Slot& s) const;
     SceneLibrary* lib_;
     Json decision_;
+    Node* root_;
+    class InspectCardScreen* inspect_card_; /* OnPreview (Y on a slot) */
+    class InspectRelicScreen* inspect_relic_;
+    Node* inspect_node_;
+    void close_inspect();
     Control* inventory_;
     Control* backstop_;
     Control* slots_;

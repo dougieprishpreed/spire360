@@ -57,8 +57,47 @@ public partial class RunDriver
             ["tools"] = new List<string> { "Small", "Big" },
             ["cells"] = cells,
             ["items"] = mg.Items?.Select(i => i.GetType().Name).ToList(),
+            ["item_views"] = CrystalSphereItemViews(mg),
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
+    }
+
+    /// <summary>NCrystalSphereItem: where each item lies (under the fog),
+    /// its picture, and whether its cells are all clear.</summary>
+    private static List<Dictionary<string, object?>> CrystalSphereItemViews(CrystalSphereMinigame mg)
+    {
+        var list = new List<Dictionary<string, object?>>();
+        const System.Reflection.BindingFlags Inst = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic;
+        foreach (var item in mg.Items ?? new List<CrystalSphereItem>())
+        {
+            string? texture = null, banner = null, frame = null;
+            try { texture = item.GetType().GetProperty("TexturePath", Inst)?.GetValue(item) as string; } catch { }
+            try { banner = item.GetType().GetProperty("BannerMaterialPath", Inst)?.GetValue(item) as string; } catch { }
+            try
+            {
+                var owner = item.GetType().GetField("_owner", Inst)?.GetValue(item) as MegaCrit.Sts2.Core.Entities.Players.Player;
+                if (banner != null) frame = owner?.Character.CardPool.FrameMaterialPath;
+            }
+            catch { }
+            bool revealed = true;
+            for (int i = 0; i < item.Size.X; i++)
+                for (int j = 0; j < item.Size.Y; j++)
+                    if (mg.cells[item.Position.X + i, item.Position.Y + j].IsHidden) revealed = false;
+            list.Add(new Dictionary<string, object?>
+            {
+                ["type"] = item.GetType().Name,
+                ["x"] = item.Position.X,
+                ["y"] = item.Position.Y,
+                ["w"] = item.Size.X,
+                ["h"] = item.Size.Y,
+                ["texture"] = ResPath(texture),
+                ["good"] = item.IsGood,
+                ["revealed"] = revealed,
+                ["banner_material"] = ResPath(banner),
+                ["frame_material"] = ResPath(frame),
+            });
+        }
+        return list;
     }
 
     private Dictionary<string, object?> DoCrystalSphereTool(Dictionary<string, object?>? args)

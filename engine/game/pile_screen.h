@@ -25,6 +25,7 @@ class TextureRect;
 class PileScreen : public FrameListener {
 public:
     explicit PileScreen(SceneLibrary* lib);
+    ~PileScreen();
     /* msg: {"type":"pile","pile":...,"cards":[...],"info":...}; the tree
      * takes the node. */
     Node* build(const Json& msg, std::string* error);
@@ -66,6 +67,8 @@ private:
     float top_;
     float scroll_, scroll_to_, lim_lo_, lim_hi_, grid_h_;
     Node* tickbox_;
+    class InspectCardScreen* inspect_; /* NCardsViewScreen.ShowCardDetail */
+    Node* inspect_node_;
     TipFollower tips_;
     TweenSet tweens_;
 };

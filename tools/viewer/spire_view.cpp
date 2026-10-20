@@ -19,6 +19,7 @@
 #include "../../engine/game/collection_screen.h"
 #include "../../engine/game/stats_screen.h"
 #include "../../engine/game/run_history_screen.h"
+#include "../../engine/game/crystal_sphere_screen.h"
 #include "../../engine/game/event_screen.h"
 #include "../../engine/game/title_screen.h"
 #include "../../engine/game/map_screen.h"
@@ -240,6 +241,12 @@ int main(int argc, char** argv) {
             EventScreen* es = new EventScreen(&lib); /* lives as long as the scene */
             scene = es->build(d, &err);
             ported = es;
+        } else if (d["decision"].str() == "crystal_sphere") {
+            /* "previous" (a viewer-only key): the decision it comes after. */
+            CrystalSphereScreen* cs = new CrystalSphereScreen(&lib); /* lives as long as the scene */
+            if (d["previous"].is_object()) cs->set_previous(d["previous"]);
+            scene = cs->build(d, &err);
+            ported = cs;
         } else if (d["decision"].str() == "map_select") {
             MapScreen* ms = new MapScreen(&lib); /* lives as long as the scene */
             scene = ms->build(d, &err);

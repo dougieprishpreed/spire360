@@ -58,6 +58,8 @@ void set_capstone_open(bool open);
 
 /* A full-screen Control (anchors 0..1), named. */
 Control* full_rect_control(const char* name);
+/* An InspectPrompt (the card selection screens'): Y and "to inspect". */
+void setup_inspect_prompt(SceneLibrary* lib, Node* prompt);
 
 /* A card's hover tips beside it (NHoverTipSet.SetAlignmentForCardHolder):
  * right of the card, left of it past three quarters of the screen or when

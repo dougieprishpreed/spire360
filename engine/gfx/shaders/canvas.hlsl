@@ -72,7 +72,8 @@ sampler2D g_scrMask : register(s12);
 float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass, 4 radial blur,
                                       // 5 glass border (z: corner weight, w: add, c23: corner colour),
                                       // 6 doom overlay (y: saturation, z: value, w: pulse, c23: gradient),
-                                      // 7 distortion (y: polar, w: strength, c23: polar offset, tiling);
+                                      // 7 distortion (y: polar, w: strength, c23: polar offset, tiling),
+                                      // 8 chromatic aberration (w: strength, s11: distance curve);
                                       // (y: count, z: power, c23.xy: centre);
                                       // y: lod fraction, z: mix, w: strength
 float4 g_scr2 : register(c23);        // xy: noise offset, zw: the level pass's texel size
@@ -84,6 +85,18 @@ float median3(float r, float g, float b) {
 float4 ps_main(VsOut i) : COLOR {
     [branch] if (g_scr.x > 0.5) {
         // Screen-reading shaders (ScreenParams); the vertex colour is not applied.
+        [branch] if (g_scr.x > 7.5) {
+            // Chromatic aberration: red and blue read along the quad's
+            // radius by the distance curve and the texel's red.
+            float2 dir = 0.5 - i.uv;
+            float len = length(dir);
+            float2 nd = len > 1e-6 ? dir / len : float2(0.0, 0.0);
+            float k = g_scr.w * tex2Dlod(g_scrNoise, float4(len, len, 0.0, 0.0)).r * tex2Dlod(g_tex, float4(i.uv, 0.0, 0.0)).r;
+            float r = tex2Dlod(g_scrA, float4(i.screen + nd * 0.5 * k, 0.0, 0.0)).r;
+            float g = tex2Dlod(g_scrA, float4(i.screen, 0.0, 0.0)).g;
+            float b = tex2Dlod(g_scrA, float4(i.screen + nd * k, 0.0, 0.0)).b;
+            return float4(r, g, b, 1.0);
+        }
         [branch] if (g_scr.x > 6.5) {
             // The screen distortions: pushed toward the middle of the quad by
             // the texel's red (polar: its alpha times its red at the polar uv),

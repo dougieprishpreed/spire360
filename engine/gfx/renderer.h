@@ -90,8 +90,14 @@ struct VfxParams {
  *      at SCREEN_UV + strength * a * m * normalize((0.5, 0.5) - UV) (a: the
  *      vertex colour's alpha); m the texel's red, or with count 1 the
  *      texel's alpha times its red at the polar uv * center + noise_offset
- *      (polar: distance from the middle * 2, angle / 2 pi). */
-enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4, SCREEN_GLASS = 5, SCREEN_DOOM = 6, SCREEN_DISTORT = 7 };
+ *      (polar: distance from the middle * 2, angle / 2 pi).
+ *  SCREEN_CHROMA (vfx_screen_chromatic_aberration): i = strength *
+ *      noise(d, d).r * the texel's red, d the distance from the middle of
+ *      the quad (noise: the distance curve); red from SCREEN_UV + dir / 2 *
+ *      i, green at SCREEN_UV, blue from SCREEN_UV + dir * i, dir =
+ *      normalize((0.5, 0.5) - UV); opaque. */
+enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4, SCREEN_GLASS = 5, SCREEN_DOOM = 6, SCREEN_DISTORT = 7,
+                  SCREEN_CHROMA = 8 };
 
 struct ScreenParams {
     int mode;
@@ -113,6 +119,9 @@ struct EffectParams {
     float p[16];
     Texture* tex[5];
     unsigned repeat; /* bit i: tex[i] repeats */
+    /* more constants for the shaders that need them (vec4s from c29) */
+    float extra[17 * 4];
+    int extra_count;
 };
 
 class Renderer {

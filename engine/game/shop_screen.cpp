@@ -1,4 +1,5 @@
 #include "shop_screen.h"
+#include "inspect_screens.h"
 #include "card_view.h"
 #include "loc.h"
 #include "top_bar.h"
@@ -32,7 +33,7 @@ static void play_idle_all(Node* n) {
 }
 
 ShopScreen::ShopScreen(SceneLibrary* lib)
-    : lib_(lib), inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL),
+    : lib_(lib), root_(NULL), inspect_card_(NULL), inspect_relic_(NULL), inspect_node_(NULL), inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL),
       back_button_(NULL), focus_(-1), open_(false), start_open_(false), start_index_(0), slots_closed_top_(0),
       slots_open_top_(0), slots_height_(0) {}
 
@@ -203,6 +204,7 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
         proceed_.enable(start_open_);
         focus_merchant(true);
     }
+    root_ = root;
     return root;
 }
 
@@ -301,7 +303,51 @@ int ShopScreen::nearest(int from, int dx, int dy) const {
     return best;
 }
 
+/* The inspect node is under root_, freed with it by the owner. */
+ShopScreen::~ShopScreen() {
+    delete inspect_card_;
+    delete inspect_relic_;
+}
+
+void ShopScreen::close_inspect() {
+    if (inspect_node_ && inspect_node_->parent) inspect_node_->parent->remove_child(inspect_node_);
+    delete inspect_node_;
+    delete inspect_card_;
+    delete inspect_relic_;
+    inspect_node_ = NULL;
+    inspect_card_ = NULL;
+    inspect_relic_ = NULL;
+}
+
 std::string ShopScreen::input(const PadState& pad) {
+    if (inspect_card_ || inspect_relic_) {
+        if (!(inspect_card_ ? inspect_card_->input(pad) : inspect_relic_->input(pad))) close_inspect();
+        return std::string();
+    }
+    if (open_ && focus_ >= 0 && (pad.pressed & PadState::Y)) {
+        /* NMerchantSlot._GuiInput: confirm previews (a card or a relic in
+         * its inspect screen; the others nothing) and is handled */
+        const Slot& s = slots_list_[(size_t)focus_];
+        const char* key = s.kind == "card" ? "cards" : s.kind == "relic" ? "relics" : NULL;
+        const Json* entry = NULL;
+        for (size_t k = 0; key && k < decision_[key].size(); ++k)
+            if (decision_[key][k]["index"].i((int)k) == s.index) entry = &decision_[key][k];
+        if (entry && root_) {
+            Json list = Json::make_array();
+            list.append(*entry);
+            std::string err;
+            if (s.kind == "card") {
+                inspect_card_ = new InspectCardScreen(lib_);
+                inspect_node_ = inspect_card_->build(list, 0, false, &err);
+            } else {
+                inspect_relic_ = new InspectRelicScreen(lib_);
+                inspect_node_ = inspect_relic_->build(list, 0, &err);
+            }
+            if (inspect_node_) root_->add_child(inspect_node_);
+            else close_inspect();
+        }
+        return std::string();
+    }
     if (!open_) {
         if ((pad.pressed & PadState::A) && inventory_) {
             open_inventory(true);

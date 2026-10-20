@@ -150,6 +150,7 @@ private:
     Json last_event_;      /* the last event_choice decision (its room) */
     Json last_rest_;       /* the last rest_site decision (its room) */
     Json last_shop_;       /* the last shop decision (its room) */
+    Json last_crystal_;    /* the Crystal Sphere's decision before (its reveals animate) */
     int reward_focus_;     /* the rewards screen's focus, kept while it is up */
     bool shop_open_;       /* the shop's inventory open, and its focused slot */
     std::string shop_kind_;

@@ -30,6 +30,10 @@ const VfxParams* shader_vfx();
  * erosion at the particle's life, the offset by its CUSTOM.z): the
  * particle's parameters in out; false: none applied. */
 bool shader_effect_particle(float life, float custom_z, EffectParams* out, float custom_x = 0);
+/* A screen-reading shader that changes per particle (the chromatic
+ * aberration: its strength by the intensity curve at the life); false:
+ * none applied. */
+bool shader_screen_particle(float life, ScreenParams* out);
 /* The blend a ported shader's render_mode asks for (blend_add, ...). */
 bool shader_blend(const MaterialRes* m, BlendMode* out);
 
