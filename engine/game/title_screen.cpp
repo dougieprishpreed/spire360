@@ -14,7 +14,7 @@ static const unsigned CREAM = 0xFFF6E2, GOLD = 0xEFC851;
 
 TitleScreen::TitleScreen(SceneLibrary* lib)
     : lib_(lib), menu_(NULL), reticle_l_(NULL), reticle_r_(NULL), run_info_(NULL), profile_(NULL), buttons_box_(NULL),
-      logo_(NULL), menu_known_(false), submenu_(false), has_profile_(false), run_info_top_(0), run_info_shown_(false),
+      logo_(NULL), blur_(NULL), menu_known_(false), submenu_(false), has_profile_(false), run_info_top_(0), run_info_shown_(false),
       focus_(-1), covered_(false), last_action_(NONE), carets_pending_(0) {}
 
 Node* TitleScreen::build(const std::string& version, std::string* error) {
@@ -30,7 +30,12 @@ Node* TitleScreen::build(const std::string& version, std::string* error) {
     hide(menu_->get_node("ModdedWarning"));
     hide(menu_->get_node("ModWarningContainer"));
     hide(menu_->get_node("PatchNotesScreen"));
-    hide(menu_->get_node("BlurBackstop"));
+    Node* blur = menu_->get_node("BlurBackstop");
+    blur_ = blur && blur->is_canvas_item() ? (CanvasItem*)blur : NULL;
+    if (blur_) {
+        blur_->shader_params["lod"] = 0;
+        blur_->shader_params["mix_percentage"] = 0;
+    }
     hide(menu_->get_node("Fps"));
     set_label(menu_->get_node("ReleaseInfo"), version.empty() ? std::string("Spire360 preview")
                                                               : "Spire360 preview\n" + version);
@@ -71,6 +76,11 @@ void TitleScreen::set_submenu(bool open) {
     set_visible(profile_, !open && has_profile_);
     if (logo_ && logo_->is_canvas_item())
         tweens_.tween(&((CanvasItem*)logo_)->modulate.a, open ? 0.0f : 1.0f, 1.0f, TRANS_CUBIC, EASE_OUT);
+    if (blur_) {
+        /* NMainMenu.EnableBackstop / DisableBackstop */
+        tweens_.tween(&blur_->shader_params["lod"], open ? 3.0f : 0.0f, open ? 0.25f : 0.15f);
+        tweens_.tween(&blur_->shader_params["mix_percentage"], open ? 0.7f : 0.0f, open ? 0.25f : 0.15f);
+    }
     if (open) show_run_info(false);
 }
 
@@ -79,6 +89,7 @@ void TitleScreen::detach() {
     buttons_.clear();
     reticle_l_ = reticle_r_ = run_info_ = profile_ = NULL;
     buttons_box_ = logo_ = NULL;
+    blur_ = NULL;
     focus_ = -1;
     carets_pending_ = 0;
     tweens_.clear();

@@ -131,6 +131,40 @@ public:
     virtual void draw(Canvas& c);
 };
 
+/* Godot 4.5's AnimatedSprite2D: an animation of its SpriteFrames, started
+ * by autoplay. A frame lasts its relative duration / (the animation's
+ * speed * speed_scale) seconds; a looping animation wraps, another holds
+ * its last frame. Drawn like Sprite2D (centered, offset, flips). */
+class AnimatedSprite2D : public Node2D {
+public:
+    AnimatedSprite2D() : frame(0), progress(0), speed_scale(1), playing(false), centered(true), flip_h(false),
+                         flip_v(false) {}
+    struct Frame {
+        Texture2DRes* texture;
+        float duration;
+    };
+    struct Animation {
+        std::string name;
+        float speed;
+        bool loop;
+        std::vector<Frame> frames;
+    };
+    std::vector<Animation> animations;
+    std::string animation;
+    int frame;
+    float progress; /* frame_progress: 0..1 through the current frame */
+    float speed_scale;
+    bool playing, centered, flip_h, flip_v;
+    Vec2 offset;
+    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+    virtual void process(double dt);
+    virtual void draw(Canvas& c);
+    void play(const std::string& name);
+
+private:
+    const Animation* current() const;
+};
+
 } /* namespace spire */
 
 #endif

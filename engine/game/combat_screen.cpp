@@ -18,6 +18,7 @@
 #include "../scene/value.h"
 #include "../spine/spine.h"
 
+#include <algorithm>
 #include <ctype.h>
 #include <math.h>
 
@@ -487,7 +488,7 @@ void CombatScreen::position_enemies(std::vector<Creature>& cs, float scaling, st
 /* NCombatRoom.PositionPlayersAndPets, for the local player (pets come
  * later: Necrobinder's Osty). */
 void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bool fully_center, Creature* osty,
-                                    float osty_max_hp) {
+                                    float osty_max_hp, float* pets_x) {
     if (cs.empty()) return;
     float half = 960.0f / scaling, gap = 70.0f;
     int n = (int)cs.size();
@@ -528,6 +529,7 @@ void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bo
                 osty->node->set_position(Vec2(-x, 200.0f - row_rise * (float)r) + off);
                 x += 100.0f;
             }
+            if (k == 0 && pets_x) *pets_x = x;
             if (r > 0 && cs[k].visuals && cs[k].visuals->is_canvas_item())
                 ((CanvasItem*)cs[k].visuals)->modulate = Color(0.5f, 0.5f, 0.5f);
             x += cs[k].width + gap;
@@ -1162,6 +1164,52 @@ static void play_idle(Node* n) {
     for (size_t i = 0; i < n->children.size(); ++i) play_idle(n->children[i]);
 }
 
+static SpineSprite* first_spine(Node* n) {
+    if (!n) return NULL;
+    if (n->type == "SpineSprite") return (SpineSprite*)n;
+    for (size_t i = 0; i < n->children.size(); ++i) {
+        SpineSprite* s = first_spine(n->children[i]);
+        if (s) return s;
+    }
+    return NULL;
+}
+
+/* A pet other than Osty (NCombatRoom.AddCreature, NCreature._Ready): its
+ * visuals in the skin its relic picked (MonsterModel.SetupSkins), no
+ * state display and not targetable (IsHealthBarVisible is false). */
+bool CombatScreen::make_pet(const Json& pet, Creature& out) {
+    if (!make_creature(pet["id"].str(), false, out)) return false;
+    SpineSprite* s = first_spine(out.visuals);
+    if (s && pet["skin"].is_string()) s->set_skin(pet["skin"].str());
+    hide(out.node->find_unique("HealthBar"));
+    hide(out.node->find_unique("Intents"));
+    out.data = pet;
+    return true;
+}
+
+/* PositionPlayersAndPets / AddCreature: the pets at the player's feet,
+ * 20 px in from where the player's slot began, spread over the player's
+ * width when there are several, 10 px lower; after the player in draw
+ * order. */
+void CombatScreen::position_pets(float pets_x) {
+    if (pets_.empty() || !player_.node) return;
+    float step = pets_.size() > 1 ? player_.width / (float)(pets_.size() - 1) : 0.0f;
+    float y = offset_pos(player_.node).y + 10.0f;
+    Node* allies = player_.node->parent;
+    for (size_t i = 0; i < pets_.size(); ++i) {
+        Creature& p = pets_[i];
+        if (!p.node) continue;
+        p.node->set_position(Vec2(-pets_x + 20.0f - (float)i * step - p.width * 0.5f, y));
+        if (allies && p.node->parent == allies) {
+            /* MoveChild(pet, player's index + 1 + i). */
+            std::vector<Node*>& ch = allies->children;
+            ch.erase(std::find(ch.begin(), ch.end(), (Node*)p.node));
+            std::vector<Node*>::iterator at = std::find(ch.begin(), ch.end(), (Node*)player_.node);
+            ch.insert(at == ch.end() ? ch.end() : at + 1 + (std::ptrdiff_t)i, p.node);
+        }
+    }
+}
+
 /* NOrbManager (scenes/orbs/orb_manager.tscn) on the player: one NOrb per
  * slot (OrbQueue.Capacity), the channelled orbs first, on an arc above the
  * creature (TweenLayout's places at rest). */
@@ -1420,6 +1468,17 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         set_nameplate_text(c.nameplate, osty["name"].str());
         osty_ = c;
     }
+    pets_.clear();
+    pet_who_.clear();
+    const Json& ps = d["pets"];
+    for (size_t i = 0; !aftermath_ && i < ps.size(); ++i) {
+        if (!ps[i]["alive"].b(true) || !make_pet(ps[i], c)) continue;
+        allies->add_child(c.node);
+        update_bounds(c);
+        play_idle(c.node);
+        pets_.push_back(c);
+        pet_who_.push_back(format("e%d", ps[i]["combat_id"].i(-1)));
+    }
     static const Json no_enemies;
     const Json& es = aftermath_ ? no_enemies : d["enemies"];
     enemy_who_.clear();
@@ -1484,7 +1543,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         setup_combat_ui(root, d);
         build_hand(find_named(root, "CombatUi"), d);
     }
-    position_players(ally_nodes, scaling, view["fully_center_players"].b(), &osty_, osty_max_hp);
+    pets_x_ = 0;
+    position_players(ally_nodes, scaling, view["fully_center_players"].b(), &osty_, osty_max_hp, &pets_x_);
+    position_pets(pets_x_);
     /* Where the enemies stand: as before in this fight; laid out again
      * (all of them) when one has no place yet. */
     bool known = places_ != NULL && !enemy_nodes.empty();
@@ -1642,6 +1703,24 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
         }
         enemies_ = next;
         enemy_who_ = who;
+        /* A pet that joined during the fight (Byrdpip hatched mid-combat,
+         * Pael's Legion): beside the player, revealed by its spawn. */
+        const Json& ps = d["pets"];
+        bool added = false;
+        for (size_t i = 0; i < ps.size(); ++i) {
+            std::string id = format("e%d", ps[i]["combat_id"].i(-1));
+            if (std::find(pet_who_.begin(), pet_who_.end(), id) != pet_who_.end() || !ps[i]["alive"].b(true)) continue;
+            Node* allies = root_->find_unique("AllyContainer");
+            Creature pc;
+            if (!allies || !make_pet(ps[i], pc)) continue;
+            allies->add_child(pc.node);
+            update_bounds(pc);
+            play_idle(pc.node);
+            pets_.push_back(pc);
+            pet_who_.push_back(id);
+            added = true;
+        }
+        if (added) position_pets(pets_x_);
         if (!osty_.node && d["osty"]["alive"].b()) {
             Node* allies = root_->find_unique("AllyContainer");
             if (allies && make_creature("osty", false, osty_)) {
@@ -1833,6 +1912,8 @@ void CombatScreen::finish_state() {
 CombatScreen::Creature* CombatScreen::creature_for(const std::string& who) {
     if (who == "player") return player_.node ? &player_ : NULL;
     if (who == "osty") return osty_.node ? &osty_ : NULL;
+    for (size_t i = 0; i < pet_who_.size() && i < pets_.size(); ++i)
+        if (pet_who_[i] == who) return pets_[i].node ? &pets_[i] : NULL;
     for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i)
         if (enemy_who_[i] == who) return enemies_[i].node ? &enemies_[i] : NULL;
     for (size_t i = 0; i < ghosts_.size(); ++i)
@@ -1877,16 +1958,6 @@ bool CombatScreen::vfx_position(const Cue& c, Vec2* out) {
     if (!cr) return false;
     *out = c.where == "feet" || !cr->center ? global_origin(cr->node) : global_origin(cr->center);
     return true;
-}
-
-static SpineSprite* first_spine(Node* n) {
-    if (!n) return NULL;
-    if (n->type == "SpineSprite") return (SpineSprite*)n;
-    for (size_t i = 0; i < n->children.size(); ++i) {
-        SpineSprite* s = first_spine(n->children[i]);
-        if (s) return s;
-    }
-    return NULL;
 }
 
 /* CreatureAnimator's default states (MonsterModel.GenerateAnimator): the

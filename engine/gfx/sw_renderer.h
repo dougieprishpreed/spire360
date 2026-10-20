@@ -50,6 +50,9 @@ public:
         msdf_outline_ = outline;
     }
 
+    virtual bool set_screen(const ScreenParams* p);
+    virtual void screen_barrier() { screen_levels_ = 0; }
+
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
 
@@ -76,6 +79,12 @@ private:
     FireParams fire_;
     bool vfx_on_;
     VfxParams vfx_;
+    bool screen_on_;
+    ScreenParams screen_;
+    std::vector<Image> screen_mips_; /* the screen copy and its levels */
+    int screen_levels_;              /* levels made this canvas (0: no copy yet) */
+    void screen_level(int level);
+    void sample_screen(float u, float v, float lod, float out[4]) const;
 };
 
 } /* namespace spire */

@@ -7,15 +7,21 @@
 namespace spire {
 
 Canvas::Canvas(Renderer* r, const Pack* pack)
-    : texture_bytes_(0), texture_budget_(80 * 1024 * 1024), texture_clock_(0), frame_(0),
-      r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false) {}
+    : texture_bytes_(0), texture_budget_(80 * 1024 * 1024), texture_clock_(0), frame_(0), decoded_w_(0), decoded_h_(0),
+      r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false), wind_on_(false), wind_(0),
+      wind_height_(0) {}
 
 Canvas::~Canvas() {
     for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it)
         if (it->second.texture) r_->destroy_texture(it->second.texture);
 }
 
-void Canvas::begin_frame() { ++frame_; }
+void Canvas::begin_frame() {
+    ++frame_;
+    /* Each tree is a canvas of its own: its first screen-reading item
+     * copies the screen again. */
+    r_->screen_barrier();
+}
 
 size_t Canvas::texture_count() const {
     size_t count = 0;
@@ -30,6 +36,12 @@ void Canvas::end_frame() {
     r_->set_gradient_map(NULL, false);
     r_->set_fire(NULL);
     r_->set_vfx(NULL);
+    r_->set_screen(NULL);
+    if (!decoded_path_.empty()) {
+        decoded_path_.clear();
+        std::vector<u8>().swap(decoded_.px);
+        decoded_.w = decoded_.h = 0;
+    }
     for (;;) {
         std::map<std::string, CachedTexture>::iterator oldest = textures_.end();
         for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it) {
@@ -78,6 +90,80 @@ void Canvas::set_item(const Xform2D& xform, const Color& modulate, BlendMode ble
 
 void Canvas::set_clip(const Rect2* screen_rect) { r_->set_clip(screen_rect); }
 
+/* DerivedImage: the source's pixels (decoded from the pack, bilinear) at
+ * width x height as a stretched TextureRect draws them, the colour matrix,
+ * over the clear colour; the dark_blur of that (its mip chain, the level at
+ * lod, mixed toward black). */
+bool Canvas::derive(const DerivedImage& d, TextureData& out) {
+    if (!d.source || d.width <= 0 || d.height <= 0 || !pack_) return false;
+    Rect2 od, os;
+    ImageTextureRes* src = NULL;
+    Rect2 full(Vec2(0, 0), Vec2((float)d.width, (float)d.height));
+    if (!d.source->get_rect_region(full, Rect2(), od, os, &src) || !src || src->derived) return false;
+    if (os.size.x == 0 && os.size.y == 0) os = Rect2(Vec2(0, 0), src->size());
+    if (decoded_path_ != src->path) {
+        std::vector<u8> data;
+        TextureData td;
+        if (!pack_->read(src->path.c_str(), data) || !Pack::parse_texture(data, td) || td.levels.empty() ||
+            td.levels[0].empty() ||
+            !decode_texture_level(td.format, td.width, td.height, &td.levels[0][0], td.levels[0].size(), decoded_,
+                                  (td.flags & TEXF_DATA) == 0))
+            return false;
+        decoded_path_ = src->path;
+        decoded_w_ = td.orig_width > 0 ? td.orig_width : td.width;
+        decoded_h_ = td.orig_height > 0 ? td.orig_height : td.height;
+    }
+    std::vector<Image> levels(1);
+    Image& base = levels[0];
+    base.resize(d.width, d.height);
+    for (int y = 0; y < d.height; ++y)
+        for (int x = 0; x < d.width; ++x) {
+            float px = x + 0.5f, py = y + 0.5f, c[4] = { 0, 0, 0, 0 };
+            if (px >= od.pos.x && py >= od.pos.y && px < od.pos.x + od.size.x && py < od.pos.y + od.size.y) {
+                float lx = os.pos.x + (px - od.pos.x) / od.size.x * os.size.x;
+                float ly = os.pos.y + (py - od.pos.y) / od.size.y * os.size.y;
+                image_bilinear(decoded_, lx / decoded_w_, ly / decoded_h_, c);
+            }
+            if (d.cm_on) {
+                float r = c[0], g = c[1], b = c[2];
+                c[0] = d.cm[0] * r + d.cm[1] * g + d.cm[2] * b + d.cm[3] * c[3];
+                c[1] = d.cm[4] * r + d.cm[5] * g + d.cm[6] * b + d.cm[7] * c[3];
+                c[2] = d.cm[8] * r + d.cm[9] * g + d.cm[10] * b + d.cm[11] * c[3];
+            }
+            float k = 1 - c[3];
+            float o[4] = { c[0] + d.clear.r * d.clear.a * k, c[1] + d.clear.g * d.clear.a * k,
+                           c[2] + d.clear.b * d.clear.a * k, c[3] + d.clear.a * k };
+            u8* p = base.at(x, y);
+            for (int i = 0; i < 4; ++i) p[i] = (u8)(clampf(o[i], 0, 1) * 255 + 0.5f);
+        }
+    int need = (int)ceilf(d.lod);
+    while ((int)levels.size() <= need) {
+        const Image& top = levels.back();
+        if (top.w <= 1 && top.h <= 1) break;
+        levels.push_back(Image());
+        blur_mip_level(levels[levels.size() - 2], levels.back());
+    }
+    out.format = TEX_ARGB8;
+    out.flags = 0; /* straight alpha: premultiplied on upload */
+    out.width = out.orig_width = d.width;
+    out.height = out.orig_height = d.height;
+    out.levels.assign(1, std::vector<u8>((size_t)d.width * d.height * 4));
+    for (int y = 0; y < d.height; ++y)
+        for (int x = 0; x < d.width; ++x) {
+            float c[4];
+            image_lod(&levels[0], (int)levels.size(), (x + 0.5f) / d.width, (y + 0.5f) / d.height, d.lod, c);
+            /* mix(color, vec4(0, 0, 0, 1), mix): straight */
+            float a = c[3], na = a * (1 - d.mix) + d.mix;
+            float ka = a > 0 ? (1 - d.mix) / a : 0.0f;
+            u8* p = &out.levels[0][((size_t)y * d.width + x) * 4]; /* B G R A */
+            p[0] = (u8)(clampf(c[2] * ka, 0, 1) * 255 + 0.5f);
+            p[1] = (u8)(clampf(c[1] * ka, 0, 1) * 255 + 0.5f);
+            p[2] = (u8)(clampf(c[0] * ka, 0, 1) * 255 + 0.5f);
+            p[3] = (u8)(clampf(na, 0, 1) * 255 + 0.5f);
+        }
+    return true;
+}
+
 Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (!img) return NULL;
     const std::string key = "pack:" + img->path;
@@ -85,6 +171,12 @@ Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (it != textures_.end()) return cached_texture(key);
     std::vector<u8> data;
     TextureData td;
+    if (img->derived) {
+        if (derive(*img->derived, td)) return cache_texture(key, td);
+        log_warn("texture %s: could not be made", img->path.c_str());
+        textures_[key] = CachedTexture();
+        return NULL;
+    }
     if (pack_ && pack_->read(img->path.c_str(), data) && Pack::parse_texture(data, td))
         return cache_texture(key, td);
     log_warn("texture %s: not in the pack", img->path.c_str());
@@ -94,8 +186,8 @@ Texture* Canvas::gpu_texture(ImageTextureRes* img) {
 
 void Canvas::emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2& uv0, const Vec2& uv1, const Color& c,
                        int flags) {
-    Vec2 a = xform_.xform(p0), b = xform_.xform(Vec2(p1.x, p0.y));
-    Vec2 cc = xform_.xform(p1), d = xform_.xform(Vec2(p0.x, p1.y));
+    Vec2 a = xform_.xform(sway(p0, uv0)), b = xform_.xform(sway(Vec2(p1.x, p0.y), Vec2(uv1.x, uv0.y)));
+    Vec2 cc = xform_.xform(sway(p1, uv1)), d = xform_.xform(sway(Vec2(p0.x, p1.y), Vec2(uv0.x, uv1.y)));
     Vertex v[6];
     v[0] = Vertex(a, uv0, c);
     v[1] = Vertex(b, Vec2(uv1.x, uv0.y), c);
@@ -301,7 +393,7 @@ void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, co
     verts_.resize(idx.size());
     for (size_t i = 0; i < idx.size(); ++i) {
         int k = idx[i];
-        verts_[i] = Vertex(xform_.xform(v[k]), uv[k], modulate_ * (colors.empty() ? Color() : colors[k]));
+        verts_[i] = Vertex(xform_.xform(sway(v[k], uv[k])), uv[k], modulate_ * (colors.empty() ? Color() : colors[k]));
     }
     if (!count_only_) r_->draw_triangles(tex, &verts_[0], (int)verts_.size(), blend_, tex_flags_ | flags);
     ++calls_;

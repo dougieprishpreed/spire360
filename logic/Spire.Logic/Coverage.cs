@@ -7,7 +7,11 @@ using System.Text.Json;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Events;
+using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Timeline;
 
@@ -87,10 +91,50 @@ public partial class RunDriver
         catch (Exception ex) { return ErrorWithTrace("content failed", ex); }
     }
 
+    /// <summary>The skin a pet's relic chose (Byrdpip.Skin, PaelsLegion.Skin).</summary>
+    private static string? PetSkin(MegaCrit.Sts2.Core.Entities.Players.Player player, MegaCrit.Sts2.Core.Entities.Creatures.Creature pet)
+    {
+        var name = pet.Monster?.GetType().Name;
+        var relic = player.Relics.FirstOrDefault(r => r.GetType().Name == name);
+        return relic?.GetType().GetProperty("Skin")?.GetValue(relic) as string;
+    }
+
     private static object? Safe(Func<object?> f)
     {
         try { return f(); }
         catch { return null; }
+    }
+
+    private static int _madScienceVariant;
+
+    /// <summary>
+    /// What the event that hands out a piece of content sets on it first:
+    /// Darv's Dusty Tome picks its ancient card, Orobas's Sea Glass a
+    /// character (another one than the player's), Tinker Time's Mad Science a
+    /// type and rider (each new one the next of the nine).
+    /// </summary>
+    private static void EventSetup(AbstractModel model, Player player)
+    {
+        switch (model)
+        {
+            case DustyTome tome:
+                tome.SetupForPlayer(player);
+                break;
+            case SeaGlass glass:
+                glass.CharacterId = (ModelDb.AllCharacters.FirstOrDefault(c => c.Id != player.Character.Id)
+                                     ?? player.Character).Id;
+                break;
+            case MadScience science:
+                int v = _madScienceVariant++ % 9;
+                science.TinkerTimeType = new[] { CardType.Attack, CardType.Skill, CardType.Power }[v / 3];
+                science.TinkerTimeRider = new[]
+                {
+                    TinkerTime.RiderEffect.Sapping, TinkerTime.RiderEffect.Violence, TinkerTime.RiderEffect.Choking,
+                    TinkerTime.RiderEffect.Energized, TinkerTime.RiderEffect.Wisdom, TinkerTime.RiderEffect.Chaos,
+                    TinkerTime.RiderEffect.Expertise, TinkerTime.RiderEffect.Curious, TinkerTime.RiderEffect.Improvement,
+                }[v];
+                break;
+        }
     }
 
     /// <summary>
@@ -105,12 +149,17 @@ public partial class RunDriver
             if (_runState == null) return Error("No run in progress");
             var player = _runState.Players[0];
             var missing = new List<string>();
+            var notAllowed = new List<string>();
             if (cmd.TryGetProperty("relics", out var rs))
                 foreach (var r in rs.EnumerateArray())
                 {
                     var model = ModelDb.GetByIdOrNull<RelicModel>(new ModelId("RELIC", r.GetString() ?? ""));
                     if (model == null) { missing.Add("RELIC." + r.GetString()); continue; }
-                    Sched.Run(() => RelicCmd.Obtain(model.ToMutable(), player));
+                    // Multiplayer-only relics (Massive Scroll) never reach a solo run.
+                    if (!model.IsAllowed(_runState)) { notAllowed.Add("RELIC." + r.GetString()); continue; }
+                    var relic = model.ToMutable();
+                    EventSetup(relic, player);
+                    Sched.Run(() => RelicCmd.Obtain(relic, player));
                 }
             if (cmd.TryGetProperty("potions", out var ps))
                 foreach (var p in ps.EnumerateArray())
@@ -125,11 +174,13 @@ public partial class RunDriver
                     var model = ModelDb.GetByIdOrNull<CardModel>(new ModelId("CARD", c.GetString() ?? ""));
                     if (model == null) { missing.Add("CARD." + c.GetString()); continue; }
                     var card = _runState.CreateCard(model, player);
+                    EventSetup(card, player);
                     Sched.Run(() => CardPileCmd.Add(card, PileType.Deck));
                 }
             WaitForActionExecutor();
             var d = DetectDecisionPoint();
             if (missing.Count > 0) d["missing"] = missing;
+            if (notAllowed.Count > 0) d["not_allowed"] = notAllowed;
             return d;
         }
         catch (Exception ex) { return ErrorWithTrace("obtain failed", ex); }
@@ -154,6 +205,7 @@ public partial class RunDriver
                     var model = ModelDb.GetByIdOrNull<CardModel>(new ModelId("CARD", c.GetString() ?? ""));
                     if (model == null) return Error($"Unknown card {c.GetString()}");
                     var card = combat.CreateCard(model, player);
+                    EventSetup(card, player);
                     if (upgraded && card.IsUpgradable) CardCmd.Upgrade(card);
                     Sched.Run(() => CardPileCmd.AddGeneratedCardToCombat(card, PileType.Hand, player));
                 }

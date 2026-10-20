@@ -6,7 +6,7 @@
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false) {
+    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), screen_on_(false), screen_levels_(0) {
     for (int i = 0; i < 4; ++i) ripple_[i] = 0;
 }
 
@@ -41,6 +41,7 @@ void SwRenderer::begin(int w, int h, const Color& c) {
     clip_on_ = false;
     tris_ = 0;
     target_ = &fb_;
+    screen_levels_ = 0;
 }
 
 bool SwRenderer::begin_group(const Rect2& b) {
@@ -129,6 +130,34 @@ static void fire_texel(const Texture* t, float u, float v, bool repeat, float ou
         return;
     }
     sample(((const SwTexture*)t)->img, u, v, repeat ? DRAW_REPEAT : 0, out);
+}
+
+void SwRenderer::screen_level(int level) {
+    if ((int)screen_mips_.size() <= level) screen_mips_.resize((size_t)level + 1);
+    blur_mip_level(screen_mips_[(size_t)level - 1], screen_mips_[(size_t)level]);
+    screen_levels_ = level + 1;
+}
+
+bool SwRenderer::set_screen(const ScreenParams* p) {
+    screen_on_ = p != NULL;
+    if (!p) return true;
+    screen_ = *p;
+    if (screen_levels_ == 0) {
+        if (screen_mips_.empty()) screen_mips_.resize(1);
+        screen_mips_[0] = fb_;
+        screen_levels_ = 1;
+    }
+    int need = p->mode == SCREEN_DARK ? (int)ceilf(p->lod) : 0;
+    while (screen_levels_ <= need) {
+        const Image& top = screen_mips_[(size_t)screen_levels_ - 1];
+        if (top.w <= 1 && top.h <= 1) break;
+        screen_level(screen_levels_);
+    }
+    return true;
+}
+
+void SwRenderer::sample_screen(float u, float v, float lod, float out[4]) const {
+    image_lod(&screen_mips_[0], screen_levels_, u, v, lod, out);
 }
 
 static float smoothstepf(float e0, float e1, float x) {
@@ -318,6 +347,31 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 s[1] = lut[1] * na;
                 s[2] = lut[2] * na;
                 s[3] = na;
+            }
+            if (screen_on_ && screen_levels_ > 0) {
+                /* ScreenParams: COLOR is the screen copy (the vertex colour
+                 * is not applied). */
+                float su = ((float)x + 0.5f) / (float)fb_.w, sv = ((float)y + 0.5f) / (float)fb_.h;
+                if (screen_.mode == SCREEN_DARK) {
+                    sample_screen(su, sv, screen_.lod, s);
+                    /* mix(color, vec4(0, 0, 0, 1), k) on the straight colour */
+                    float a = s[3], k = screen_.mix, na = a * (1 - k) + k;
+                    float ka = a > 0 ? (1 - k) * na / a : 0.0f;
+                    s[0] *= ka;
+                    s[1] *= ka;
+                    s[2] *= ka;
+                    s[3] = na;
+                } else {
+                    float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                    float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                    float n[4], m[4];
+                    fire_texel(screen_.noise, u + screen_.noise_offset[0], v + screen_.noise_offset[1], true, n);
+                    float d = n[0] * screen_.strength - screen_.strength * 0.5f;
+                    sample_screen(su + d, sv + d, 0, s);
+                    fire_texel(screen_.mask, u, v, false, m);
+                    for (int c = 0; c < 4; ++c) s[c] *= m[3];
+                }
+                col[0] = col[1] = col[2] = col[3] = 1.0f;
             }
             if (flags & DRAW_GROUP) {
                 /* The layer (premultiplied) through the mask's alpha. */

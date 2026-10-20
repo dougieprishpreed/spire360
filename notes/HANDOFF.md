@@ -6,7 +6,57 @@ Why things are the way they are: [DECISIONS.md](DECISIONS.md). Dialect rules:
 
 Last rewrite: 2026-10-18, when the work moved from a cloud session (game
 data reached it as zip "bundles") to a local desktop session on the user's
-PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below).
+PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
+and 2026-10-20 (coverage and screen-texture checkpoint below).
+
+## Coverage and screen-texture checkpoint (2026-10-20)
+
+Content coverage (`tools/content_coverage.py`, everything unlocked): all
+suites pass with no logic exceptions: cards (each pool with its own
+character, 25 a batch, plain and upgraded; 60 cases), 66 potions, 299
+relics (obtain, then monster/rest/shop/treasure), 198 events (every option
+probed), 85 encounters, scenarios (Byrdonis egg hatching into Byrdpip at a
+rest site, Byrdonis nest), 10 game-flow runs (Overgrowth/Underdocks, Hive,
+Glory reached; 4 victories). The harness gives event-made content what its
+event sets (`Coverage.cs` EventSetup: Darv's Dusty Tome card, Orobas's Sea
+Glass character, Tinker Time's Mad Science type and rider) and skips
+relics the game never allows in a solo run (Massive Scroll). Remaining
+"unplayable" notes are curses/statuses/quest cards and upgraded Regent
+cards after the batch spent its stars (harness, not logic).
+
+Screen-reading shaders: `Renderer::set_screen(ScreenParams)` copies the
+screen once per canvas (tree render) with Godot's back-buffer mipmaps
+(halve, 7-tap Gaussian; `image.cpp` blur_mip_level). Software renderer and
+D3D9 (PC: StretchRect + render-target level textures; Xbox 360: Resolve of
+the back buffer, level passes in an EDRAM surface after the group surface,
+resolved; the HLSL compiles for vs_3_0/ps_3_0 with d3dcompiler_47 and the
+PC C++ syntax-checks; the Xbox path is unbuilt: no XDK build was run).
+Ported: dark_blur (main menu BlurBackstop tweened as NMainMenu
+EnableBackstop/DisableBackstop), vfx_water_reflection_post (Neow),
+the_insatiable_sand_fall_2. The NotObtained epoch slot shows its
+SubViewport's blurred portrait through a canvas-made texture
+(`DerivedImage`: source stretched to 162x100 over the clear colour, hsv,
+dark_blur lod 2). Still to port: radial_blur (NRadialBlurVfx, a
+BackBufferCopy; the logic now emits `NCombatRoom.RadialBlur`), doom_overlay,
+chromatic aberration (glass orb), scream distortion.
+
+Logic: the `ui` patch has `stand_in_singletons`: a UI singleton getter
+heading a `?.` chain that is a statement of its own returns a stand-in, so
+`NCombatRoom.Instance?.PlaySplashVfx(...)`, `?.RadialBlur(...)` and
+`?.CombatVfxContainer.AddChildSafely(NThinSliceVfx.Create(...))` now reach
+the steps as ui cues (220 sites) instead of being skipped; a stack-taint
+check keeps the null wherever a chain would dereference or keep a UI
+result outside the UI (`IsStatementUiChain`). Godot colours in cue args
+are `#rrggbbaa`. Seeded traces: differences 0. The console logic (wasm)
+needs the patch stage rebuilt to pick this up.
+
+Next: combat_screen draws only damage numbers of the ~55 scripted VFX
+classes the logic creates (`NThinSliceVfx`, `NGroundFireVfx`,
+`NSplashVfx`/`NLiquidOverlayVfx` from PlaySplashVfx, `NHyperbeamVfx`, ...;
+scene paths and Create signatures listed by the decomp). Port them as a
+table (scene, anchor, tint, flip) plus the per-class motion their C# adds;
+then radial blur; then the rest of the gaps list (`out/engine/spire_gaps`
+over `work/coverage*/` traces: `work/gaps-full.sh`).
 
 ## Profiles, saves and progression checkpoint (2026-10-19)
 
@@ -57,13 +107,11 @@ unlock screens for cards/relics/potions/character/text -> expansion).
 Checked with spire_play menu drives on the imported profile and a new
 one (screens under ignored `work/menu-test/`).
 
-Open in this area: dark_blur (menu backstop blur, locked slot blur) needs
-a screen-texture path in both renderers; the epoch chains' shard VFX,
+Open in this area: the epoch chains' shard VFX,
 stars particles and some timeline tweens; badges/discoveries on the game
 over screen; profile deletion; Settings/Compendium/run history screens;
 NCharacterSelectScreen's character unlock animation (pending_unlock is
-exported). The content coverage harness (`tools/content_coverage.py`) is
-written; its full run and the fixes it finds are the next step.
+exported). Coverage: see the 2026-10-20 checkpoint above.
 
 PC tool runs from this shell: PowerShell 5.1 mangles embedded quotes, so
 MSYS2 commands go through `work/msys_run.sh <script>` (scripts under

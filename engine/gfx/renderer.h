@@ -63,6 +63,28 @@ struct VfxParams {
     float distortion[4];  /* offset.xy (the panning now), strength, on (0/1) */
 };
 
+/* Shaders that read the screen (hint_screen_texture). Godot copies the
+ * screen as drawn so far once per canvas, at the first item reading it, and
+ * makes its mipmaps by downsampling each level by two and blurring it (a
+ * 7-tap Gaussian, CopyEffects::gaussian_blur). The draws replace texel and
+ * colour by the copy read at the pixel's screen uv (SCREEN_UV):
+ *  SCREEN_DARK (dark_blur): the copy at lod (trilinear), mixed toward
+ *      opaque black by mix.
+ *  SCREEN_NOISE (vfx_water_reflection_post, the_insatiable_sand_fall_2):
+ *      at SCREEN_UV - strength / 2 + noise(UV + noise_offset).r * strength
+ *      (noise repeats; NULL: white), its alpha times mask(UV).a (NULL:
+ *      white). */
+enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2 };
+
+struct ScreenParams {
+    int mode;
+    float lod, mix;
+    Texture* noise;
+    Texture* mask;
+    float noise_offset[2];
+    float strength;
+};
+
 class Renderer {
 public:
     virtual ~Renderer() {}
@@ -103,6 +125,14 @@ public:
     /* The erosion particle shaders (VfxParams); NULL: off. */
     virtual void set_vfx(const VfxParams* p) = 0;
     virtual void set_ripple(const float* p) = 0;
+    /* The screen-reading shaders (ScreenParams) on the next draws; NULL:
+     * off. false: not available (the caller does not draw the item). */
+    virtual bool set_screen(const ScreenParams* p) {
+        (void)p;
+        return false;
+    }
+    /* A new canvas: the next screen-reading draw copies the screen again. */
+    virtual void screen_barrier() {}
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;
     virtual void end() = 0;

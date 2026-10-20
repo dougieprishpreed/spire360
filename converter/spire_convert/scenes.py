@@ -67,6 +67,39 @@ def pack_name_for(res, path, uid=None):
     return p if res.resolve(p) is not None else None
 
 
+_SHADER_FILES = {}
+
+
+def known_shader(res, code):
+    """The game's .gdshader file whose code an inline Shader repeats (the
+    Overgrowth rest site embeds copies of shaders/vfx/wind_sway.gdshader),
+    or None. The engine ports shaders by file, so such a copy is that
+    file."""
+    files = _SHADER_FILES.get(id(res))
+    if files is None:
+        files = {}
+        for f in res.src.list():
+            if f.endswith(".gdshader"):
+                files.setdefault(_normal(res.src.read(f).decode("utf-8", "replace")), f)
+        _SHADER_FILES[id(res)] = files
+    return files.get(_normal(code)) if isinstance(code, str) else None
+
+
+def _normal(code):
+    return code.replace("\r\n", "\n").strip()
+
+
+def _same_shader(v, copies):
+    """{"sub": id} of an inline copy -> the file's {"ext": path}."""
+    if isinstance(v, dict):
+        if set(v) == {"sub"} and v["sub"] in copies:
+            return {"ext": copies[v["sub"]], "type": "Shader"}
+        return {k: _same_shader(x, copies) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_same_shader(x, copies) for x in v]
+    return v
+
+
 def to_json(tr, res):
     ext_names = {}
     ext = {}
@@ -91,4 +124,14 @@ def to_json(tr, res):
         out["connections"] = [{k: _value(v, ext_names) for k, v in c.items()} for c in tr.connections]
     else:
         out["resource"] = {k: _value(v, ext_names) for k, v in tr.resource.items()}
+    copies = {}
+    for id_, s in tr.sub_resources.items():
+        if s["type"] == "Shader":
+            path = known_shader(res, s["props"].get("code"))
+            if path:
+                copies[id_] = path
+    if copies:
+        for k in ("sub", "nodes", "resource"):
+            if k in out:
+                out[k] = _same_shader(out[k], copies)
     return out

@@ -64,12 +64,47 @@ float4 g_fouter : register(c18);
 float4 g_vfx : register(c19);         // erosion particles: x on, y polar, z lut
 float4 g_verosion : register(c20);    // threshold, width, on, from the alpha
 float4 g_vdist : register(c21);       // distortion offset.xy, strength, on
+sampler2D g_scrA : register(s9);      // the screen copy: the level at floor(lod)
+sampler2D g_scrB : register(s10);     // and the next (level passes: the level above in s9)
+sampler2D g_scrNoise : register(s11); // noise (repeats), mask (clamped); unset: white
+sampler2D g_scrMask : register(s12);
+float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass;
+                                      // y: lod fraction, z: mix, w: strength
+float4 g_scr2 : register(c23);        // xy: noise offset, zw: the level pass's texel size
 
 float median3(float r, float g, float b) {
     return max(min(r, g), min(max(r, g), b));
 }
 
 float4 ps_main(VsOut i) : COLOR {
+    [branch] if (g_scr.x > 0.5) {
+        // Screen-reading shaders (ScreenParams); the vertex colour is not applied.
+        [branch] if (g_scr.x > 2.5) {
+            // A level of the screen copy: the 7-tap Gaussian across and down
+            // of the bilinear reads of the level above (Godot's back buffer
+            // mipmaps).
+            const float k[4] = { 0.214607, 0.189879, 0.131514, 0.071303 };
+            float4 s = 0;
+            for (int y = -3; y <= 3; ++y)
+                for (int x = -3; x <= 3; ++x)
+                    s += tex2Dlod(g_scrA, float4(i.uv + float2(x, y) * g_scr2.zw, 0.0, 0.0)) * (k[abs(x)] * k[abs(y)]);
+            return s;
+        }
+        [branch] if (g_scr.x < 1.5) {
+            // dark_blur: the copy at lod (two levels blended), mixed toward
+            // opaque black on the straight colour.
+            float4 c = lerp(tex2Dlod(g_scrA, float4(i.screen, 0.0, 0.0)), tex2Dlod(g_scrB, float4(i.screen, 0.0, 0.0)),
+                            g_scr.y);
+            float na = c.a * (1.0 - g_scr.z) + g_scr.z;
+            float ka = c.a > 0.0 ? (1.0 - g_scr.z) * na / c.a : 0.0;
+            return float4(c.rgb * ka, na);
+        }
+        // vfx_water_reflection_post / the_insatiable_sand_fall_2.
+        float n = tex2Dlod(g_scrNoise, float4(i.uv + g_scr2.xy, 0.0, 0.0)).r;
+        float d = n * g_scr.w - g_scr.w * 0.5;
+        float4 sc = tex2Dlod(g_scrA, float4(i.screen + d, 0.0, 0.0));
+        return sc * tex2Dlod(g_scrMask, float4(i.uv, 0.0, 0.0)).a;
+    }
     [branch] if (g_fire.x > 0.5) {
         [branch] if (g_fstr.w > 1.5) {
             // Doom bar: the scene's noise texture, sampled in screen space.

@@ -86,6 +86,8 @@ public:
     bool menu_requested() const { return menu_requested_; }
     /* The pause menu or its Give Up confirmation is open. */
     bool paused() const { return pause_ != NULL; }
+    /* The decision shown has no ported screen: the plain list of choices. */
+    bool showing_plain_list() const { return plain_; }
     /* The last error the logic reported ("" if none). */
     const std::string& last_error() const { return error_; }
 
@@ -151,6 +153,7 @@ private:
     ConfirmPopup* confirm_;
     Node* confirm_node_;
     bool quitting_; /* Save and Quit sent, waiting for the menu */
+    bool plain_;    /* the screen shown is the plain list */
 };
 
 } /* namespace spire */

@@ -24,7 +24,10 @@
 //                          followed by a safe default of the return type (completed
 //                          Task, empty sequence, default value). Used to cut the game
 //                          logic off from its Godot UI layer while recording what it
-//                          asked the UI to do.
+//                          asked the UI to do. "stand_in_singletons": a UI singleton
+//                          getter (UiType.Instance) heading a ?. chain that is a
+//                          statement of its own returns Hooks.StandIn instead of null,
+//                          so the chain's calls are recorded rather than skipped.
 //   null_safe_calls_into   every instance call from code outside the given namespaces
 //                          to a class method declared inside them checks its receiver:
 //                          null -> skip the call and use the same safe default;
@@ -53,6 +56,11 @@ internal sealed class PatchSpec
     public string? Note;
     public List<string>? NamespacePrefixes;
     public bool GodotSubclasses;
+    /// <summary>redirect_calls_into: UI singleton getters heading a statement ?. chain return a stand-in.</summary>
+    public bool StandInSingletons;
+    /// <summary>Methods outside the UI that a stand-in chain may pass UI results to ("Type::Method"):
+    /// they do nothing with a null argument.</summary>
+    public List<string>? NullTolerant;
     /// <summary>replace_calls: only call sites in these types (and the types nested in them),
     /// or in "Type::Method" (and that method's compiler-generated state machine or closures).</summary>
     public List<string>? InTypes;
@@ -74,6 +82,9 @@ internal sealed class PatchSpec
         if (e.TryGetProperty("value", out var v)) p.Value = v.Clone();
         if (e.TryGetProperty("note", out var n)) p.Note = n.GetString();
         if (e.TryGetProperty("godot_subclasses", out var gs)) p.GodotSubclasses = gs.GetBoolean();
+        if (e.TryGetProperty("stand_in_singletons", out var si)) p.StandInSingletons = si.GetBoolean();
+        if (e.TryGetProperty("null_tolerant", out var nt) && nt.ValueKind == JsonValueKind.Array)
+            p.NullTolerant = nt.EnumerateArray().Select(x => x.GetString()!).ToList();
         if (e.TryGetProperty("namespaces", out var ns) && ns.ValueKind == JsonValueKind.Array)
             p.NamespacePrefixes = ns.EnumerateArray().Select(x => x.GetString()!).ToList();
         if (e.TryGetProperty("in_types", out var it) && it.ValueKind == JsonValueKind.Array)
@@ -190,6 +201,7 @@ internal sealed class Patcher
 {
     private readonly ModuleDefinition _module;
     private readonly MethodReference _invoke;
+    private readonly FieldReference _standIn;
     private readonly MethodReference _after;
 
     public Patcher(ModuleDefinition module, ModuleDefinition bridge)
@@ -198,6 +210,7 @@ internal sealed class Patcher
         var hooks = bridge.GetType("Spire.HookBridge.Hooks")
             ?? throw new InvalidOperationException("Spire.HookBridge.Hooks not found");
         _invoke = module.ImportReference(hooks.Methods.Single(m => m.Name == "Invoke"));
+        _standIn = module.ImportReference(hooks.Fields.Single(f => f.Name == "StandIn"));
         _after = module.ImportReference(hooks.Methods.Single(m => m.Name == "After"));
     }
 
@@ -681,7 +694,7 @@ internal sealed class Patcher
     {
         var prefixes = spec.NamespacePrefixes ?? throw new InvalidOperationException("redirect_calls_into needs \"namespaces\"");
         bool IsUi(TypeReference t) => InNamespaces(t, prefixes) || (spec.GodotSubclasses && DerivesFromGodot(t.GetElementType()));
-        int count = 0;
+        int count = 0, standIns = 0;
         var callers = new HashSet<string>();
         foreach (var type in _module.GetTypes())
         {
@@ -707,7 +720,10 @@ internal sealed class Patcher
                         changed = true;
                     }
                     var name = spec.Id + "|" + target.DeclaringType.GetElementType().FullName + "::" + target.Name;
-                    ReplaceCallWithDefault(method, ins, target, name);
+                    bool standIn = spec.StandInSingletons && !target.HasThis && target.Name == "get_Instance" &&
+                                   IsStatementUiChain(body.Instructions, idx, IsUi, spec.NullTolerant);
+                    ReplaceCallWithDefault(method, ins, target, name, standIn);
+                    if (standIn) standIns++;
                     count++;
                     callers.Add(method.FullName);
                 }
@@ -715,6 +731,7 @@ internal sealed class Patcher
             }
         }
         result.Count = count;
+        if (spec.StandInSingletons) result.Targets.Add($"{standIns} singleton ?. statements with a stand-in receiver");
         result.Targets.AddRange(callers.OrderBy(x => x).Take(50));
         if (callers.Count > 50) result.Targets.Add($"... and {callers.Count - 50} more methods");
         result.Status = count > 0 ? "applied" : "missing";
@@ -873,7 +890,101 @@ internal sealed class Patcher
         return t;
     }
 
-    private void ReplaceCallWithDefault(MethodDefinition caller, Instruction call, MethodReference target, string id)
+    private static bool Is(Instruction i, OpCode a, OpCode b) => i.OpCode == a || i.OpCode == b;
+
+    private static bool IsGodot(TypeReference t)
+    {
+        while (t.IsNested) t = t.DeclaringType;
+        var ns = t.Namespace ?? "";
+        return ns == "Godot" || ns.StartsWith("Godot.", StringComparison.Ordinal);
+    }
+
+    private static int StackCount(StackBehaviour b)
+    {
+        var s = b.ToString();
+        if (s is "Pop0" or "Push0") return 0;
+        if (s is "PopAll" or "Varpop" or "Varpush") return -1;
+        return s.Split('_').Length;
+    }
+
+    /// <summary>
+    /// The getter call at idx heads `UiType.Instance?.Chain(...)` as a
+    /// statement: dup; brtrue L; pop; br END; L: straight-line code that leaves
+    /// nothing on the stack at END. With a non-null receiver the chain runs:
+    /// its calls into the UI (and Godot, null-safe) become recorded cues whose
+    /// results are null. So the chain must not dereference such a result
+    /// outside those layers (an instance call or a field access on it), pass
+    /// it to other code, or store it anywhere; each value on the simulated
+    /// stack carries whether it may be such a result.
+    /// </summary>
+    private static bool IsStatementUiChain(Mono.Collections.Generic.Collection<Instruction> ins, int idx,
+                                           Func<TypeReference, bool> isUi, List<string>? nullTolerant)
+    {
+        if (idx + 5 >= ins.Count) return false;
+        if (ins[idx + 1].OpCode != OpCodes.Dup) return false;
+        if (!Is(ins[idx + 2], OpCodes.Brtrue, OpCodes.Brtrue_S) || ins[idx + 2].Operand != ins[idx + 5]) return false;
+        if (ins[idx + 3].OpCode != OpCodes.Pop) return false;
+        if (!Is(ins[idx + 4], OpCodes.Br, OpCodes.Br_S) || ins[idx + 4].Operand is not Instruction end) return false;
+        int endIdx = ins.IndexOf(end);
+        if (endIdx <= idx + 5) return false;
+        var stack = new List<bool> { true }; // the receiver
+        bool Pop()
+        {
+            var v = stack[^1];
+            stack.RemoveAt(stack.Count - 1);
+            return v;
+        }
+        for (int k = idx + 5; k < endIdx; k++)
+        {
+            var i = ins[k];
+            var flow = i.OpCode.FlowControl;
+            if (flow is FlowControl.Branch or FlowControl.Cond_Branch or FlowControl.Return or FlowControl.Throw)
+                return false;
+            if (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt || i.OpCode == OpCodes.Newobj)
+            {
+                if (i.Operand is not MethodReference m) return false;
+                bool newobj = i.OpCode == OpCodes.Newobj;
+                bool hasThis = m.HasThis && !newobj;
+                if (stack.Count < m.Parameters.Count + (hasThis ? 1 : 0)) return false;
+                bool safe = isUi(m.DeclaringType) || IsGodot(m.DeclaringType) ||
+                            (nullTolerant != null && nullTolerant.Contains(m.DeclaringType.FullName + "::" + m.Name));
+                bool tainted = false;
+                for (int p = 0; p < m.Parameters.Count; p++) tainted |= Pop();
+                if (hasThis) tainted |= Pop();
+                if (tainted && !safe) return false;
+                if (newobj) stack.Add(false);
+                else if (m.ReturnType.MetadataType != MetadataType.Void) stack.Add(safe && !m.ReturnType.IsValueType);
+                continue;
+            }
+            if (i.OpCode.Code is Code.Stloc or Code.Stloc_S or Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or Code.Stloc_3 or
+                Code.Starg or Code.Starg_S or Code.Stsfld or Code.Stfld or Code.Stobj or Code.Stind_Ref or
+                Code.Ldfld or Code.Ldflda or Code.Ldelem_Ref or Code.Ldlen or Code.Unbox or Code.Unbox_Any)
+            {
+                int pops = StackCount(i.OpCode.StackBehaviourPop);
+                if (pops < 0 || stack.Count < pops) return false;
+                for (int p = 0; p < pops; p++)
+                    if (Pop()) return false;
+                int pushes = StackCount(i.OpCode.StackBehaviourPush);
+                for (int p = 0; p < pushes; p++) stack.Add(false);
+                continue;
+            }
+            if (i.OpCode == OpCodes.Dup)
+            {
+                if (stack.Count < 1) return false;
+                stack.Add(stack[^1]);
+                continue;
+            }
+            int n = StackCount(i.OpCode.StackBehaviourPop), m2 = StackCount(i.OpCode.StackBehaviourPush);
+            if (n < 0 || m2 < 0 || stack.Count < n) return false;
+            bool t = false;
+            for (int p = 0; p < n; p++) t |= Pop();
+            for (int p = 0; p < m2; p++) stack.Add(t);
+        }
+        return stack.Count == 0;
+    }
+
+    private void ReplaceCallWithDefault(MethodDefinition caller, Instruction call, MethodReference target, string id,
+                                        bool standIn = false)
     {
         var il = caller.Body.GetILProcessor();
         var locals = new List<VariableDefinition>();
@@ -907,7 +1018,10 @@ internal sealed class Patcher
         seq.Add(il.Create(OpCodes.Call, _invoke));
         seq.Add(il.Create(OpCodes.Pop));
         var ret = _module.ImportReference(Concrete(target.ReturnType, target));
-        seq.AddRange(SafeDefault(il, caller, ret));
+        if (standIn)
+            seq.Add(il.Create(OpCodes.Ldsfld, _standIn)); /* only redirected calls consume it, as object */
+        else
+            seq.AddRange(SafeDefault(il, caller, ret));
 
         var first = seq[0];
         call.OpCode = first.OpCode;

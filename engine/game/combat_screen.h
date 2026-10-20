@@ -152,7 +152,9 @@ private:
     std::vector<FadingOrb> fading_orbs_;
     void position_enemies(std::vector<Creature>& c, float scaling, std::vector<Vec2>* out = NULL);
     void position_players(std::vector<Creature>& c, float scaling, bool fully_center, Creature* osty = NULL,
-                          float osty_max_hp = 0);
+                          float osty_max_hp = 0, float* pets_x = NULL);
+    bool make_pet(const Json& pet, Creature& out);
+    void position_pets(float pets_x);
     SceneLibrary* lib_;
     int hand_focus_;
     bool aftermath_;
@@ -162,6 +164,9 @@ private:
     std::vector<Creature> enemies_;   /* the decision's enemies (node NULL: not shown) */
     Creature player_;
     Creature osty_;                   /* Necrobinder's Osty (node NULL: none) */
+    std::vector<Creature> pets_;      /* the other pets (Byrdpip, Pael's Legion) */
+    std::vector<std::string> pet_who_; /* their "e<combat id>" */
+    float pets_x_;                    /* PositionPlayersAndPets' targetXPos for them */
     TweenSet tweens_;
     int play_card_;                   /* the card being played, -1: none */
     bool aiming_;                     /* a potion aimed (begin_aim) */

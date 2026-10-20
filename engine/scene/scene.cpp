@@ -388,6 +388,7 @@ static Node* new_node(const std::string& type) {
     if (type == "Label") return new Label();
     if (type == "RichTextLabel") return new RichTextLabel();
     if (type == "Sprite2D") return new Sprite2D();
+    if (type == "AnimatedSprite2D") return new AnimatedSprite2D();
     if (type == "Line2D") return new Line2D();
     if (type == "CPUParticles2D") return new Particles2D(false);
     if (type == "GPUParticles2D") return new Particles2D(true);
@@ -428,7 +429,8 @@ static bool is_native(const std::string& type) {
            type == "Panel" || type == "PanelContainer" || type == "VBoxContainer" || type == "HBoxContainer" ||
            type == "MarginContainer" || type == "CenterContainer" || type == "GridContainer" ||
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
-           type == "RichTextLabel" || type == "Sprite2D" || type == "Line2D" || type == "Node" || type == "Node2D" ||
+           type == "RichTextLabel" || type == "Sprite2D" || type == "AnimatedSprite2D" || type == "Line2D" ||
+           type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
            type == "GPUParticles2D" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||
            type == "Control";

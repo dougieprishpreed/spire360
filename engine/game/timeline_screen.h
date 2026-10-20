@@ -24,6 +24,7 @@
 #define SPIRE_TIMELINE_SCREEN_H
 
 #include "../core/json.h"
+#include "../scene/resource.h"
 #include "../scene/tween.h"
 #include "run_screen.h"
 #include "ui_util.h"
@@ -37,6 +38,7 @@ class TimelineScreen : public FrameListener {
 public:
     enum Action { NONE, BACK };
     explicit TimelineScreen(SceneLibrary* lib);
+    virtual ~TimelineScreen();
     Node* build(std::string* error);
     /* A timeline answer (the screen, a reveal, the tutorial's end). */
     void set_data(const Json& timeline);
@@ -76,6 +78,13 @@ private:
     void next_unlock();
     void close_unlock();
     void refresh_reminder();
+    /* A NotObtained slot's portrait: its SubViewport's blurred copy. */
+    struct Blurred {
+        DerivedImage recipe;
+        ImageTextureRes image;
+    };
+    Texture2DRes* blurred_portrait(Slot& s, const std::string& path);
+    std::map<std::string, Blurred*> blurred_;
     SceneLibrary* lib_;
     Node* root_;
     Control* slots_box_;  /* %EpochSlots */

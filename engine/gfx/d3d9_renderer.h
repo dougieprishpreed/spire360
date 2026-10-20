@@ -11,7 +11,13 @@
  * Canvas groups (clip_children) draw into an offscreen target: on PC a
  * render-target texture; on Xbox 360 a second EDRAM surface after the back
  * buffer, resolved into a texture for the mask pass (only the group's
- * bounds, aligned to the resolve granularity). */
+ * bounds, aligned to the resolve granularity).
+ *
+ * Screen-reading shaders (set_screen): the screen is copied into a texture
+ * (PC: StretchRect; Xbox 360: Resolve), and each blurred level of the copy
+ * is a texture of its own, drawn by a pass of the canvas shader from the
+ * level above (PC: into the texture; Xbox 360: into an EDRAM surface after
+ * the group surface, resolved). */
 #ifndef SPIRE_D3D9_RENDERER_H
 #define SPIRE_D3D9_RENDERER_H
 
@@ -50,6 +56,8 @@ public:
     virtual void set_gradient_map(Texture* lut, bool alpha_from_red);
     virtual void set_fire(const FireParams* p);
     virtual void set_vfx(const VfxParams* p);
+    virtual bool set_screen(const ScreenParams* p);
+    virtual void screen_barrier() { screen_levels_ = 0; }
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
     virtual void end();
@@ -75,6 +83,11 @@ private:
     void apply_state();
     bool make_group_target();
     void release_group_target();
+    enum { SCREEN_LEVELS = 6 };
+    bool copy_screen();
+    bool screen_pass(int level);
+    void release_screen();
+    void level_size(int level, int* w, int* h) const;
     IDirect3DDevice9* dev_;
     IDirect3DVertexShader9* vs_;
     IDirect3DPixelShader9* ps_;
@@ -109,6 +122,15 @@ private:
     RECT group_rect_;
     D3D9Texture group_view_; /* group_tex_ as a Texture (debug view) */
     int group_debug_, group_log_;
+    /* The screen copy (level 0) and its blurred levels. */
+    bool screen_on_;
+    ScreenParams screen_;
+    IDirect3DTexture9* screen_lv_[SCREEN_LEVELS];
+#if defined(_XBOX)
+    IDirect3DSurface9* screen_rt_[SCREEN_LEVELS]; /* EDRAM surfaces of the passes */
+#endif
+    int screen_levels_; /* levels made this canvas (0: no copy yet) */
+    bool screen_failed_;
     int width_, height_;
     long draws_;
 };

@@ -32,6 +32,7 @@ DROP = {
     "description_multi", "text_bbcode", "relic", "will_kill", "event_id", "layout", "button_color",
     "title_text", "description_bbcode", "kind", "prompt", "cancelable", "manual_confirm", "upgrade_preview",
     "usage", "usable", "discardable", "use_label",
+    "pets",  # the pets beside the player (their own state stays in the steps)
 }
 
 

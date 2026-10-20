@@ -6,6 +6,7 @@
 #ifndef SPIRE_CANVAS_H
 #define SPIRE_CANVAS_H
 
+#include "../gfx/image.h"
 #include "../gfx/renderer.h"
 #include "resource.h"
 
@@ -34,6 +35,14 @@ public:
     /* Ported material shaders that reduce to a colour matrix (NULL: none). */
     void set_color_matrix(const float* m) { r_->set_color_matrix(m); }
     void set_ripple(const float* p) { r_->set_ripple(p); }
+    /* A vertex shader's sway (shaders/vfx/wind_sway.gdshader): each local
+     * vertex moves amount * max(0, (1 - UV.y) - height_offset) along x
+     * before the item's transform. on false: none. */
+    void set_wind(bool on, float amount, float height_offset) {
+        wind_on_ = on;
+        wind_ = amount;
+        wind_height_ = height_offset;
+    }
     const Xform2D& xform() const { return xform_; }
     /* Per-draw blend inside an item (Spine slots). */
     void set_blend(BlendMode b) { blend_ = b; }
@@ -58,6 +67,9 @@ public:
                         const std::vector<Color>& colors, const std::vector<int>& idx, int flags = 0);
 
     Texture* gpu_texture(ImageTextureRes* img);
+    /* The colour matrix of shaders/hsv.gdshader at h, s, v (rows of r, g,
+     * b, offset). */
+    static void hsv_matrix(float h, float s, float v, float out[12]);
     Renderer* renderer() const { return r_; }
     long draw_calls() const { return calls_; }
     /* Count the draws without sending them (does an item draw anything?). */
@@ -76,6 +88,11 @@ private:
     size_t texture_bytes_, texture_budget_;
     u64 texture_clock_, frame_;
     void image_quad(ImageTextureRes* img, Rect2 dst, Rect2 src, const Color& mod, int extra_flags);
+    bool derive(const DerivedImage& d, TextureData& out);
+    /* The last pack image derive decoded (until the frame ends). */
+    std::string decoded_path_;
+    Image decoded_;
+    int decoded_w_, decoded_h_;
     void emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2& uv0, const Vec2& uv1, const Color& c,
                    int flags);
 
@@ -87,6 +104,13 @@ private:
     int tex_flags_;
     long calls_;
     bool count_only_;
+    bool wind_on_;
+    float wind_, wind_height_;
+    Vec2 sway(const Vec2& p, const Vec2& uv) const {
+        if (!wind_on_) return p;
+        float k = 1.0f - uv.y - wind_height_;
+        return k > 0 ? Vec2(p.x + wind_ * k, p.y) : p;
+    }
     std::vector<Vertex> verts_;
 };
 

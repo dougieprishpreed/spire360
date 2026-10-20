@@ -2468,6 +2468,19 @@ public partial class RunDriver
             {
                 result["osty"] = new Dictionary<string, object?> { ["alive"] = false };
             }
+
+            // The other pets (Byrdpip, Pael's Legion): beside the player, in
+            // the skin their relic picked (MonsterModel.SetupSkins).
+            var pets = player.PlayerCombatState?.Pets?.Where(p => !ReferenceEquals(p, osty)).ToList();
+            if (pets != null && pets.Count > 0)
+                result["pets"] = pets.Select(p => new Dictionary<string, object?>
+                {
+                    ["id"] = p.Monster?.Id.Entry,
+                    ["combat_id"] = p.CombatId,
+                    ["name"] = _loc.Monster(p.Monster?.Id.Entry ?? ""),
+                    ["alive"] = p.IsAlive,
+                    ["skin"] = PetSkin(player, p),
+                }).ToList();
         }
         catch (Exception ex)
         {

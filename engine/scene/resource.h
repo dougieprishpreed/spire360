@@ -59,13 +59,28 @@ public:
                                  class ImageTextureRes** image) = 0;
 };
 
+/* An image the canvas makes from another texture (Canvas::gpu_texture), as
+ * the game renders one in a SubViewport: source drawn stretched to width x
+ * height over the viewport's clear colour, through a colour matrix (rows of
+ * r, g, b, offset; the portrait's hsv material), then read through
+ * dark_blur (lod, mix). */
+struct DerivedImage {
+    Texture2DRes* source;
+    int width, height;
+    bool cm_on;
+    float cm[12];
+    float lod, mix;
+    Color clear;
+};
+
 class ImageTextureRes : public Texture2DRes {
 public:
-    ImageTextureRes() : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D") {}
+    ImageTextureRes() : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D"), derived(NULL) {}
     virtual Vec2 size() const { return size_; }
     virtual bool get_rect_region(const Rect2& dst, const Rect2& src, Rect2& out_dst, Rect2& out_src,
                                  ImageTextureRes** image);
     Vec2 size_;     /* layout units (the game's size) */
+    const DerivedImage* derived; /* NULL: the pack entry at path */
 };
 
 class AtlasTextureRes : public Texture2DRes {

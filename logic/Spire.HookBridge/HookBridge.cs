@@ -21,6 +21,14 @@ public static class Hooks
 
     public static bool IsRegistered(string id) => Handlers.ContainsKey(id) || AfterHandlers.ContainsKey(id);
 
+    /// <summary>
+    /// The receiver a UI singleton getter returns where its ?. chain is a
+    /// statement (redirect_calls_into "stand_in_singletons"): the chain then
+    /// reaches the redirected calls instead of being skipped. Only those
+    /// calls ever receive it.
+    /// </summary>
+    public static readonly object StandIn = new object();
+
     /// <summary>Called from redirected method bodies.</summary>
     public static object? Invoke(string id, object?[] args)
     {

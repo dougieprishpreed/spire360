@@ -8,8 +8,12 @@
         "MegaCrit.Sts2.Core.Nodes",
         "MegaCrit.sts2.Core.Nodes"
       ],
-      "note": "Cuts the game logic off from its Godot UI layer: every call from logic into a UI class (namespace MegaCrit.Sts2.Core.Nodes.*, or any game class deriving from a Godot class, e.g. NDebugAudioManager) becomes a recorded presentation cue (sound, VFX, speech, music) with a safe default result.",
-      "godot_subclasses": true
+      "note": "Cuts the game logic off from its Godot UI layer: every call from logic into a UI class (namespace MegaCrit.Sts2.Core.Nodes.*, or any game class deriving from a Godot class, e.g. NDebugAudioManager) becomes a recorded presentation cue (sound, VFX, speech, music) with a safe default result. A singleton getter (NCombatRoom.Instance) heading a ?. chain that is a statement of its own returns a stand-in instead of null, so calls such as Instance?.PlaySplashVfx(...) or Instance?.CombatVfxContainer.AddChildSafely(NThinSliceVfx.Create(...)) are recorded rather than skipped; chains that dereference or keep a UI result outside the UI keep the null (Spire.Patcher IsStatementUiChain).",
+      "godot_subclasses": true,
+      "stand_in_singletons": true,
+      "null_tolerant": [
+        "MegaCrit.Sts2.Core.Helpers.GodotTreeExtensions::AddChildSafely"
+      ]
     },
     {
       "id": "ui.strip",

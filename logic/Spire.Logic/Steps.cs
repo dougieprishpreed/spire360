@@ -66,6 +66,7 @@ internal static class Steps
         // args[0] is the receiver for instance calls; it is null here (no UI), skip it.
         foreach (var a in args)
         {
+            if (ReferenceEquals(a, Spire.HookBridge.Hooks.StandIn)) continue; // a singleton's stand-in receiver
             switch (a)
             {
                 case null: continue;
@@ -83,6 +84,14 @@ internal static class Steps
                     break;
                 default:
                     var tn = a.GetType().Name;
+                    if (tn == "Color" && a.GetType().Namespace == "Godot")
+                    {
+                        // PlaySplashVfx(target, color): the colour as #rrggbbaa.
+                        float F(string f) => Convert.ToSingle(a.GetType().GetField(f)?.GetValue(a) ?? 1f);
+                        int B(float v) => (int)Math.Round(Math.Clamp(v, 0f, 1f) * 255f);
+                        outArgs.Add($"#{B(F("R")):x2}{B(F("G")):x2}{B(F("B")):x2}{B(F("A")):x2}");
+                        break;
+                    }
                     if (tn.StartsWith("N", StringComparison.Ordinal)) continue; // UI node receivers
                     outArgs.Add(tn);
                     break;

@@ -7,6 +7,8 @@
 #include "../scene/node.h"
 #include "../scene/rich_text.h"
 #include "../scene/scene.h"
+#include "../scene/canvas.h"
+#include "../scene/shaders.h"
 #include "../scene/spine_sprite.h"
 #include "../spine/spine.h"
 
@@ -119,12 +121,48 @@ void TimelineScreen::show_name_and_year(Column& c) {
     }
 }
 
+TimelineScreen::~TimelineScreen() {
+    for (std::map<std::string, Blurred*>::iterator it = blurred_.begin(); it != blurred_.end(); ++it) delete it->second;
+}
+
+/* NEpochSlot.SetState(NotObtained): the portrait drawn into the slot's
+ * 162 x 100 SubViewport (BlurPortrait, with the slot's hsv material: the
+ * same per-instance material as the Portrait, so at s 0.25), under its Blur
+ * rect (dark_blur at lod 2, its material's mix_percentage); the Portrait
+ * shows that viewport (epoch_slot.tscn). */
+Texture2DRes* TimelineScreen::blurred_portrait(Slot& s, const std::string& path) {
+    std::map<std::string, Blurred*>::iterator it = blurred_.find(path);
+    if (it != blurred_.end()) return &it->second->image;
+    Resource* r = path.empty() ? NULL : lib_->ext(path);
+    if (!r || !r->is_texture()) return NULL;
+    Blurred* b = new Blurred();
+    b->recipe.source = (Texture2DRes*)r;
+    b->recipe.width = 162;
+    b->recipe.height = 100;
+    b->recipe.cm_on = true;
+    Canvas::hsv_matrix(1.0f, 0.25f, 1.0f, b->recipe.cm);
+    b->recipe.lod = 2.0f;
+    Node* blur = s.node ? find_named(s.node, "Blur") : NULL;
+    MaterialRes* m = blur && blur->is_canvas_item() ? ((CanvasItem*)blur)->material : NULL;
+    b->recipe.mix = m ? shader_param(m, "mix_percentage", 0.25f) : 0.25f;
+    b->recipe.clear = Color(0.3f, 0.3f, 0.3f, 1); /* Godot's default clear colour */
+    b->image.path = "derived/epoch_slot_blur/" + path;
+    b->image.size_ = Vec2(162, 100);
+    b->image.derived = &b->recipe;
+    blurred_[path] = b;
+    return &b->image;
+}
+
 /* NEpochSlot.SetState. */
 void TimelineScreen::set_slot_state(Slot& s, const std::string& state) {
     s.state = state;
     if (s.image) s.image->modulate = Color(1, 1, 1, 1);
     set_visible(s.portrait, true);
     set_texture(lib_, s.portrait, s.data["portrait"].str());
+    if (state == "NotObtained" && s.portrait && s.portrait->type == "TextureRect") {
+        Texture2DRes* t = blurred_portrait(s, s.data["portrait"].str());
+        if (t) ((TextureRect*)s.portrait)->texture = t;
+    }
     if (s.portrait) {
         float sat = state == "Complete" ? 1.0f : state == "Obtained" ? 0.0f : 0.25f;
         float val = state == "Obtained" ? 0.5f : 1.0f;
@@ -216,7 +254,8 @@ void TimelineScreen::refresh_reminder() {
     if (!reminder_) return;
     bool show = data_["revealable"].i() > 0;
     set_visible(reminder_, show);
-    set_label(ctl(reminder_, "ReminderLabel"), "[center]" + data_["reminder_text"].str() + "[/center]");
+    /* NEpochReminderText: plain text (no bbcode), centred by the label. */
+    set_label(ctl(reminder_, "ReminderLabel"), data_["reminder_text"].str());
 }
 
 void TimelineScreen::set_data(const Json& d) {

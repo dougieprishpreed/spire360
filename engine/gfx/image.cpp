@@ -1,6 +1,7 @@
 #include "image.h"
 #include "../core/pack.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -108,6 +109,74 @@ bool decode_texture_level(int format, int w, int h, const u8* data, size_t size,
 
 static u32 crc_table[256];
 static bool crc_ready = false;
+
+void image_bilinear(const Image& img, float u, float v, float out[4]) {
+    if (img.w <= 0 || img.h <= 0) {
+        out[0] = out[1] = out[2] = out[3] = 0;
+        return;
+    }
+    float x = u * img.w - 0.5f, y = v * img.h - 0.5f;
+    int x0 = (int)floorf(x), y0 = (int)floorf(y);
+    float fx = x - x0, fy = y - y0;
+    int x1 = x0 + 1, y1 = y0 + 1;
+    x0 = x0 < 0 ? 0 : (x0 >= img.w ? img.w - 1 : x0);
+    x1 = x1 < 0 ? 0 : (x1 >= img.w ? img.w - 1 : x1);
+    y0 = y0 < 0 ? 0 : (y0 >= img.h ? img.h - 1 : y0);
+    y1 = y1 < 0 ? 0 : (y1 >= img.h ? img.h - 1 : y1);
+    const u8* a = img.at(x0, y0);
+    const u8* b = img.at(x1, y0);
+    const u8* c = img.at(x0, y1);
+    const u8* d = img.at(x1, y1);
+    for (int k = 0; k < 4; ++k) {
+        float top = a[k] + (b[k] - a[k]) * fx;
+        float bot = c[k] + (d[k] - c[k]) * fx;
+        out[k] = (top + (bot - top) * fy) * (1.0f / 255.0f);
+    }
+}
+
+void blur_mip_level(const Image& src, Image& dst) {
+    static const float k[4] = { 0.214607f, 0.189879f, 0.131514f, 0.071303f };
+    int w = src.w > 1 ? src.w >> 1 : 1, h = src.h > 1 ? src.h >> 1 : 1;
+    std::vector<float> a((size_t)w * h * 4), b((size_t)w * h * 4);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) image_bilinear(src, (x + 0.5f) / w, (y + 0.5f) / h, &a[((size_t)y * w + x) * 4]);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int c = 0; c < 4; ++c) {
+                float sum = a[((size_t)y * w + x) * 4 + c] * k[0];
+                for (int t = 1; t < 4; ++t) {
+                    int l = x - t < 0 ? 0 : x - t, r = x + t >= w ? w - 1 : x + t;
+                    sum += (a[((size_t)y * w + l) * 4 + c] + a[((size_t)y * w + r) * 4 + c]) * k[t];
+                }
+                b[((size_t)y * w + x) * 4 + c] = sum;
+            }
+    dst.resize(w, h);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int c = 0; c < 4; ++c) {
+                float sum = b[((size_t)y * w + x) * 4 + c] * k[0];
+                for (int t = 1; t < 4; ++t) {
+                    int up = y - t < 0 ? 0 : y - t, dn = y + t >= h ? h - 1 : y + t;
+                    sum += (b[((size_t)up * w + x) * 4 + c] + b[((size_t)dn * w + x) * 4 + c]) * k[t];
+                }
+                sum = sum < 0 ? 0 : (sum > 1 ? 1 : sum);
+                dst.at(x, y)[c] = (u8)(sum * 255 + 0.5f);
+            }
+}
+
+void image_lod(const Image* levels, int count, float u, float v, float lod, float out[4]) {
+    float top = (float)(count - 1);
+    if (lod > top) lod = top;
+    if (lod < 0) lod = 0;
+    int l0 = (int)floorf(lod);
+    float f = lod - l0;
+    image_bilinear(levels[l0], u, v, out);
+    if (f > 0 && l0 + 1 < count) {
+        float o[4];
+        image_bilinear(levels[l0 + 1], u, v, o);
+        for (int c = 0; c < 4; ++c) out[c] += (o[c] - out[c]) * f;
+    }
+}
 
 static u32 crc32_update(u32 c, const u8* p, size_t n) {
     if (!crc_ready) {

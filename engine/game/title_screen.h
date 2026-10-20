@@ -18,6 +18,7 @@
 
 namespace spire {
 
+class CanvasItem;
 class Control;
 class SceneLibrary;
 
@@ -62,6 +63,7 @@ private:
     Control* profile_;
     Node* buttons_box_;
     Node* logo_;
+    CanvasItem* blur_; /* BlurBackstop (dark_blur) */
     bool menu_known_;
     bool submenu_;
     bool has_profile_;

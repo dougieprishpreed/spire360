@@ -25,7 +25,15 @@ namespace spire {
 D3D9Renderer::D3D9Renderer()
     : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
       cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
-      group_failed_(false), group_debug_(0), group_log_(0), width_(0), height_(0), draws_(0) {
+      group_failed_(false), group_debug_(0), group_log_(0), screen_on_(false), screen_levels_(0),
+      screen_failed_(false), width_(0), height_(0), draws_(0) {
+    memset(&screen_, 0, sizeof(screen_));
+    for (int i = 0; i < SCREEN_LEVELS; ++i) {
+        screen_lv_[i] = NULL;
+#if defined(_XBOX)
+        screen_rt_[i] = NULL;
+#endif
+    }
     msdf_[0] = 16;
     msdf_[1] = 0;
     memset(cm_, 0, sizeof(cm_));
@@ -44,6 +52,7 @@ D3D9Renderer::~D3D9Renderer() { shutdown(); }
 
 void D3D9Renderer::shutdown() {
     release_group_target();
+    release_screen();
     RELEASE(vs_);
     RELEASE(ps_);
     RELEASE(decl_);
@@ -220,6 +229,7 @@ void D3D9Renderer::destroy_texture(Texture* t) {
     if (tex_ == d) tex_ = NULL;
     if (gm_ == d) gm_ = NULL;
     if (vfx_on_ && vfx_.lut == t) { vfx_.lut = NULL; vfx_on_ = false; }
+    if (screen_on_ && (screen_.noise == t || screen_.mask == t)) screen_on_ = false;
     if (fire_on_ && (fire_.noise1 == t || fire_.noise2 == t || fire_.noise_mask == t ||
         fire_.dist1 == t || fire_.dist2 == t || fire_.dist_mask == t)) fire_on_ = false;
     if (dev_) for (int stage = 0; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
@@ -231,7 +241,11 @@ void D3D9Renderer::destroy_texture(Texture* t) {
 /* ---- frame ---- */
 
 void D3D9Renderer::begin(int width, int height, const Color& c) {
-    if (width != width_ || height != height_) release_group_target();
+    if (width != width_ || height != height_) {
+        release_group_target();
+        release_screen();
+    }
+    screen_levels_ = 0;
     width_ = width;
     height_ = height;
     draws_ = 0;
@@ -384,6 +398,183 @@ void D3D9Renderer::end_group() {
     dev_->SetRenderTarget(0, main_rt_);
     RELEASE(main_rt_);
     dirty_ = true;
+}
+
+/* ---- the screen copy ---- */
+
+void D3D9Renderer::release_screen() {
+    for (int i = 0; i < SCREEN_LEVELS; ++i) {
+        RELEASE(screen_lv_[i]);
+#if defined(_XBOX)
+        RELEASE(screen_rt_[i]);
+#endif
+    }
+    screen_levels_ = 0;
+    screen_on_ = false;
+    screen_failed_ = false;
+}
+
+/* Godot's back buffer mipmaps: each level half the one above, at least 1. */
+void D3D9Renderer::level_size(int level, int* w, int* h) const {
+    int x = width_, y = height_;
+    for (int i = 0; i < level; ++i) {
+        x = x > 1 ? x >> 1 : 1;
+        y = y > 1 ? y >> 1 : 1;
+    }
+    *w = x;
+    *h = y;
+}
+
+/* Level 0: the render target as drawn so far. */
+bool D3D9Renderer::copy_screen() {
+#if defined(_XBOX)
+    if (!screen_lv_[0] && FAILED(dev_->CreateTexture(width_, height_, 1, 0, D3DFMT_A8R8G8B8, 0, &screen_lv_[0], NULL)))
+        return false;
+    /* The current target (EDRAM) into the texture; EDRAM is kept. */
+    if (FAILED(dev_->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, screen_lv_[0], NULL, 0, 0, NULL, 1.0f, 0, NULL)))
+        return false;
+#else
+    if (!screen_lv_[0] && FAILED(dev_->CreateTexture(width_, height_, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
+                                                     D3DPOOL_DEFAULT, &screen_lv_[0], NULL)))
+        return false;
+    IDirect3DSurface9 *src = NULL, *dst = NULL;
+    bool ok = SUCCEEDED(dev_->GetRenderTarget(0, &src)) && SUCCEEDED(screen_lv_[0]->GetSurfaceLevel(0, &dst)) &&
+              SUCCEEDED(dev_->StretchRect(src, NULL, dst, NULL, D3DTEXF_NONE));
+    RELEASE(src);
+    RELEASE(dst);
+    if (!ok) return false;
+#endif
+    screen_levels_ = 1;
+    return true;
+}
+
+/* Level `level` from the one above: a full-target quad through the canvas
+ * shader's level pass (the 7x7 Gaussian of the bilinear reads, as
+ * image.cpp's blur_mip_level), blending off. */
+bool D3D9Renderer::screen_pass(int level) {
+    int w, h;
+    level_size(level, &w, &h);
+    IDirect3DSurface9* prev = NULL;
+    if (FAILED(dev_->GetRenderTarget(0, &prev))) return false;
+#if defined(_XBOX)
+    if (!screen_lv_[level] && FAILED(dev_->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, 0, &screen_lv_[level], NULL))) {
+        RELEASE(prev);
+        return false;
+    }
+    if (!screen_rt_[level]) {
+        /* EDRAM after the back buffer and the group surface (2048 tiles of
+         * 5120 bytes in all). */
+        DWORD full = XGSurfaceSize(width_, height_, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE);
+        DWORD mine = XGSurfaceSize(w, h, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE);
+        D3DSURFACE_PARAMETERS sp;
+        memset(&sp, 0, sizeof(sp));
+        sp.Base = full * 2;
+        if (sp.Base + mine > 2048 ||
+            FAILED(dev_->CreateRenderTarget(w, h, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &screen_rt_[level],
+                                            &sp))) {
+            screen_rt_[level] = NULL;
+            RELEASE(prev);
+            return false;
+        }
+    }
+    dev_->SetRenderTarget(0, screen_rt_[level]);
+#else
+    if (!screen_lv_[level] && FAILED(dev_->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8,
+                                                         D3DPOOL_DEFAULT, &screen_lv_[level], NULL))) {
+        RELEASE(prev);
+        return false;
+    }
+    IDirect3DSurface9* dst = NULL;
+    if (FAILED(screen_lv_[level]->GetSurfaceLevel(0, &dst))) {
+        RELEASE(prev);
+        return false;
+    }
+    dev_->SetTexture(10, NULL); /* never sample the target being drawn */
+    dev_->SetRenderTarget(0, dst);
+    RELEASE(dst);
+#endif
+    dev_->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    dev_->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+#if defined(_XBOX)
+    float vp[4] = { 2.0f / w, -2.0f / h, -1.0f, 1.0f };
+#else
+    float vp[4] = { 2.0f / w, -2.0f / h, -1.0f - 1.0f / w, 1.0f + 1.0f / h };
+#endif
+    dev_->SetVertexShaderConstantF(0, vp, 1);
+    float inv[4] = { 1.0f / w, 1.0f / h, 0, 0 };
+    dev_->SetVertexShaderConstantF(1, inv, 1);
+    float pc[8] = { 3.0f, 0, 0, 0, 0, 0, 1.0f / w, 1.0f / h };
+    dev_->SetPixelShaderConstantF(22, pc, 2);
+    dev_->SetTexture(9, screen_lv_[level - 1]);
+    dev_->SetSamplerState(9, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    dev_->SetSamplerState(9, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+    dev_->SetSamplerState(9, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    dev_->SetSamplerState(9, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    dev_->SetSamplerState(9, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    GpuVertex q[6];
+    float px[6] = { 0, (float)w, (float)w, 0, (float)w, 0 }, py[6] = { 0, 0, (float)h, 0, (float)h, (float)h };
+    for (int i = 0; i < 6; ++i) {
+        q[i].x = px[i];
+        q[i].y = py[i];
+        q[i].u = px[i] / w;
+        q[i].v = py[i] / h;
+        q[i].r = q[i].g = q[i].b = q[i].a = 1.0f;
+    }
+    dev_->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, q, sizeof(GpuVertex));
+    ++draws_;
+#if defined(_XBOX)
+    dev_->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, screen_lv_[level], NULL, 0, 0, NULL, 1.0f, 0, NULL);
+#endif
+    dev_->SetRenderTarget(0, prev);
+    RELEASE(prev);
+    dev_->SetTexture(9, NULL);
+    dev_->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+#if defined(_XBOX)
+    float fvp[4] = { 2.0f / width_, -2.0f / height_, -1.0f, 1.0f };
+#else
+    float fvp[4] = { 2.0f / width_, -2.0f / height_, -1.0f - 1.0f / width_, 1.0f + 1.0f / height_ };
+#endif
+    dev_->SetVertexShaderConstantF(0, fvp, 1);
+    float finv[4] = { 1.0f / width_, 1.0f / height_, 0, 0 };
+    dev_->SetVertexShaderConstantF(1, finv, 1);
+    dirty_ = true;
+    screen_levels_ = level + 1;
+    return true;
+}
+
+bool D3D9Renderer::set_screen(const ScreenParams* p) {
+    if (!p) {
+        if (screen_on_) {
+            flush();
+            screen_on_ = false;
+            dirty_ = true;
+        }
+        return true;
+    }
+    if (screen_failed_ || !dev_) return false;
+    int need = p->mode == SCREEN_DARK ? (int)ceilf(p->lod) : 0;
+    if (need > SCREEN_LEVELS - 1) need = SCREEN_LEVELS - 1;
+    if (screen_levels_ <= need) {
+        flush();
+        if (screen_levels_ == 0 && !copy_screen()) {
+            log_warn("d3d9: no screen copy; screen-reading shaders are not drawn");
+            screen_failed_ = true;
+            return false;
+        }
+        while (screen_levels_ <= need)
+            if (!screen_pass(screen_levels_)) {
+                log_warn("d3d9: no screen copy level %d; screen-reading shaders are not drawn", screen_levels_);
+                screen_failed_ = true;
+                return false;
+            }
+    }
+    if (!screen_on_ || memcmp(p, &screen_, sizeof(screen_)) != 0) {
+        flush();
+        screen_on_ = true;
+        screen_ = *p;
+        dirty_ = true;
+    }
+    return true;
 }
 
 void D3D9Renderer::set_clip(const Rect2* r) {
@@ -560,7 +751,7 @@ void D3D9Renderer::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
-    float c[88] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
+    float c[96] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
                     ripple_on_ ? 1.0f : 0.0f,
                     msdf_[0], msdf_[1], tw, th,
                     cm_[0], cm_[1], cm_[2], cm_[3],
@@ -585,7 +776,42 @@ void D3D9Renderer::apply_state() {
         c[80 + j] = vfx_on_ ? vfx_.erosion[j] : 0.0f;
         c[84 + j] = vfx_on_ ? vfx_.distortion[j] : 0.0f;
     }
-    dev_->SetPixelShaderConstantF(0, c, 22);
+    /* c22..c23 and s9..s12: the screen copy (ScreenParams). */
+    if (screen_on_ && screen_levels_ > 0) {
+        int l0 = 0;
+        float f = 0;
+        if (screen_.mode == SCREEN_DARK) {
+            float lod = screen_.lod < 0 ? 0 : screen_.lod;
+            if (lod > (float)(screen_levels_ - 1)) lod = (float)(screen_levels_ - 1);
+            l0 = (int)floorf(lod);
+            f = lod - (float)l0;
+        }
+        int l1 = l0 + 1 < screen_levels_ ? l0 + 1 : l0;
+        IDirect3DTexture9* st[4] = { screen_lv_[l0], screen_lv_[l1], white_, white_ };
+        if (screen_.noise && ((D3D9Texture*)screen_.noise)->tex) st[2] = ((D3D9Texture*)screen_.noise)->tex;
+        if (screen_.mask && ((D3D9Texture*)screen_.mask)->tex) st[3] = ((D3D9Texture*)screen_.mask)->tex;
+        for (int k = 0; k < 4; ++k) {
+            DWORD stage = (DWORD)(9 + k);
+            DWORD a = k == 2 ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
+            dev_->SetTexture(stage, st[k]);
+            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSU, a);
+            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSV, a);
+            dev_->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        }
+        c[88] = (float)screen_.mode;
+        c[89] = f;
+        c[90] = screen_.mix;
+        c[91] = screen_.strength;
+        c[92] = screen_.noise_offset[0];
+        c[93] = screen_.noise_offset[1];
+    } else {
+        for (DWORD stage = 9; stage < 13; ++stage) dev_->SetTexture(stage, NULL);
+        for (int k = 88; k < 94; ++k) c[k] = 0.0f;
+    }
+    c[94] = c[95] = 0.0f;
+    dev_->SetPixelShaderConstantF(0, c, 24);
     dirty_ = false;
 }
 

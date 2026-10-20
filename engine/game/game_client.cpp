@@ -244,7 +244,8 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
-      answers_(0), pause_(NULL), pause_node_(NULL), confirm_(NULL), confirm_node_(NULL), quitting_(false) {}
+      answers_(0), pause_(NULL), pause_node_(NULL), confirm_(NULL), confirm_node_(NULL), quitting_(false),
+      plain_(false) {}
 
 GameClient::~GameClient() {
     close_pause();
@@ -713,6 +714,7 @@ void GameClient::show(const Json& d) {
             combat_->show_start_banner();
         }
     }
+    plain_ = !screen_;
     if (!screen_) screen_ = plain_screen(d);
     /* The top bar over every screen of the run. */
     if (d["player"].is_object() && kind != "game_over") {

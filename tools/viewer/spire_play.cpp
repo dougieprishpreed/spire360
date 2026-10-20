@@ -4,7 +4,7 @@
  *
  *   spire_play <pack.s3p> <out_dir> --logic "dotnet out/logic/jit/Spire.Logic.dll"
  *              [--character Ironclad] [--seed S] [--steps N] [--scale S] [--auto SEED]
- *              [--pad A,RIGHT,A,Y,...]
+ *              [--pad A,RIGHT,A,Y,WAIT,...]
  *
  * --pad presses those buttons one at a time while a decision is shown (the
  * screen half a second after each is saved, NNNN_pad_KK.png), then
@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
                           { "Y", PadState::Y },       { "LEFT", PadState::LEFT },   { "RIGHT", PadState::RIGHT },
                           { "UP", PadState::UP },     { "DOWN", PadState::DOWN },   { "START", PadState::START },
                           { "LB", PadState::LB },     { "RB", PadState::RB },       { "LT", PadState::LT },
-                          { "RT", PadState::RT } };
+                          { "RT", PadState::RT },     { "WAIT", 0 } /* a second with no press */ };
             std::string list = argv[++i];
             size_t at = 0;
             while (at <= list.size()) {

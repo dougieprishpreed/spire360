@@ -24,7 +24,7 @@ if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$CXX $FLAGS" ]; then
     printf '%s\n' "$CXX $FLAGS" > "$stamp"
 fi
 objs=""
-for f in engine/*/*.cpp tools/viewer/spire_view.cpp tools/viewer/spire_play.cpp tools/viewer/spire_check.cpp tools/viewer/spire_audio_check.cpp; do
+for f in engine/*/*.cpp tools/viewer/spire_view.cpp tools/viewer/spire_play.cpp tools/viewer/spire_check.cpp tools/viewer/spire_audio_check.cpp tools/viewer/spire_gaps.cpp; do
     case "$f" in *d3d9_renderer.cpp) continue ;; esac  # Windows / XDK only
     o=out/engine/$(basename "$f" .cpp).o
     objs="$objs $o"
@@ -33,9 +33,10 @@ for f in engine/*/*.cpp tools/viewer/spire_view.cpp tools/viewer/spire_play.cpp 
         $CXX $FLAGS -MMD -MP -MF "$o.d" -c "$f" -o "$o"
     fi
 done
-engine_objs=$(echo $objs | tr ' ' '\n' | grep -v -e spire_view.o -e spire_play.o -e spire_check.o -e spire_audio_check.o | tr '\n' ' ')
+engine_objs=$(echo $objs | tr ' ' '\n' | grep -v -e spire_view.o -e spire_play.o -e spire_check.o -e spire_audio_check.o -e spire_gaps.o | tr '\n' ' ')
 $CXX -o out/engine/spire_view $engine_objs out/engine/spire_view.o $LIBS
 $CXX -o out/engine/spire_play $engine_objs out/engine/spire_play.o $LIBS
 $CXX -o out/engine/spire_check $engine_objs out/engine/spire_check.o $LIBS
 $CXX -o out/engine/spire_audio_check $engine_objs out/engine/spire_audio_check.o $LIBS
+$CXX -o out/engine/spire_gaps $engine_objs out/engine/spire_gaps.o $LIBS
 echo "out/engine/spire_view out/engine/spire_play out/engine/spire_check out/engine/spire_audio_check"

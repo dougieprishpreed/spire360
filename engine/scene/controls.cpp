@@ -624,6 +624,103 @@ bool Sprite2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     return true;
 }
 
+bool AnimatedSprite2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "sprite_frames") {
+        Resource* r = ctx.resource(v);
+        animations.clear();
+        const Json& as = r && r->props ? (*r->props)["animations"] : Json();
+        for (size_t i = 0; i < as.size(); ++i) {
+            Animation a;
+            a.name = as[i]["name"].str();
+            a.speed = as[i]["speed"].f(5.0f);
+            a.loop = as[i]["loop"].b(true);
+            const Json& fs = as[i]["frames"];
+            for (size_t k = 0; k < fs.size(); ++k) {
+                Frame f;
+                f.texture = as_texture(ctx.resource(fs[k]["texture"]));
+                f.duration = fs[k]["duration"].f(1.0f);
+                a.frames.push_back(f);
+            }
+            animations.push_back(a);
+        }
+    } else if (key == "animation") animation = v.str();
+    else if (key == "autoplay") {
+        if (!v.str().empty()) {
+            animation = v.str();
+            playing = true;
+        }
+    } else if (key == "frame") frame = v.i();
+    else if (key == "frame_progress") progress = v.f();
+    else if (key == "speed_scale") speed_scale = v.f(1.0f);
+    else if (key == "centered") centered = v.b(true);
+    else if (key == "offset") jv_vec2(v, offset);
+    else if (key == "flip_h") flip_h = v.b();
+    else if (key == "flip_v") flip_v = v.b();
+    else return Node2D::set(key, v, ctx);
+    return true;
+}
+
+const AnimatedSprite2D::Animation* AnimatedSprite2D::current() const {
+    std::string name = animation.empty() ? std::string("default") : animation;
+    for (size_t i = 0; i < animations.size(); ++i)
+        if (animations[i].name == name) return &animations[i];
+    return NULL;
+}
+
+void AnimatedSprite2D::play(const std::string& name) {
+    if (name != animation) {
+        frame = 0;
+        progress = 0;
+    }
+    animation = name;
+    playing = true;
+}
+
+/* AnimatedSprite2D::_notification(INTERNAL_PROCESS). */
+void AnimatedSprite2D::process(double dt) {
+    const Animation* a = current();
+    if (!playing || !a || a->frames.empty()) return;
+    double speed = a->speed * speed_scale;
+    if (speed == 0) return;
+    double remaining = dt;
+    int guard = 0;
+    while (remaining > 0 && ++guard < 1000) {
+        if (frame < 0 || frame >= (int)a->frames.size()) frame = 0;
+        double frame_len = a->frames[(size_t)frame].duration / (speed < 0 ? -speed : speed);
+        if (frame_len <= 0) frame_len = 1e-6;
+        double left = (1.0 - progress) * frame_len;
+        if (remaining < left) {
+            progress += (float)(remaining / frame_len);
+            break;
+        }
+        remaining -= left;
+        progress = 0;
+        if (frame + 1 < (int)a->frames.size()) {
+            ++frame;
+        } else if (a->loop) {
+            frame = 0;
+        } else {
+            progress = 1;
+            playing = false;
+            break;
+        }
+    }
+}
+
+void AnimatedSprite2D::draw(Canvas& c) {
+    const Animation* a = current();
+    if (!a || frame < 0 || frame >= (int)a->frames.size()) return;
+    Texture2DRes* t = a->frames[(size_t)frame].texture;
+    if (!t) return;
+    Vec2 fs = t->size();
+    Vec2 d = offset;
+    if (centered) d = d - fs * 0.5f;
+    Rect2 dst(d, fs);
+    if (flip_h) dst.size.x = -dst.size.x;
+    if (flip_v) dst.size.y = -dst.size.y;
+    c.draw_texture_rect_region(t, dst, Rect2(Vec2(0, 0), fs));
+}
+
 void Sprite2D::draw(Canvas& c) {
     if (!texture) return;
     Rect2 base = region_enabled ? region_rect : Rect2(Vec2(0, 0), texture->size());

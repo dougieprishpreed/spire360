@@ -192,21 +192,39 @@ class Runner:
         (its target the first enemy), its prompts answered; then upgraded."""
         cards = self.limited(content["cards"])
         batch = 25
-        for start in range(0, len(cards), batch):
-            chunk = cards[start:start + batch]
+        # A character's cards are tried with that character (the Regent's
+        # stars, the Necrobinder's Osty); the others with the Ironclad.
+        chunks = []
+        for pool in sorted({c["pool"] for c in cards}):
+            owner = pool.split("_")[0]
+            ch = owner.capitalize() if owner in content["characters"] else "Ironclad"
+            mine = [c for c in cards if c["pool"] == pool]
+            for start in range(0, len(mine), batch):
+                chunks.append((f"{pool.lower().replace('_card_pool', '')}_{start:03d}", ch, mine[start:start + batch]))
+        for tag, ch, chunk in chunks:
             for upgraded in (False, True):
-                name = f"cards_{start:04d}{'_plus' if upgraded else ''}"
+                name = f"cards_{tag}{'_plus' if upgraded else ''}"
                 case = Case("cards", name)
                 lg = self.logic("cards", name)
                 try:
-                    self.new_run(case, lg, seed=f"cards-{start}")
+                    self.new_run(case, lg, character=ch, seed=f"cards-{tag}")
                     state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
                     for card in chunk:
                         if card.get("upgradable") is False and upgraded:
                             continue
                         if state.get("decision") != "combat_play":
+                            # The fight is over: through its rewards to the map, then a new one.
+                            state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 60)
                             state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
                             self.step(case, lg, {"cmd": "set_player", "hp": 9999})
+                        if len(state.get("hand") or []) >= 9:
+                            # A full hand takes no more cards: a new turn discards it.
+                            state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                            state = self.play_until(case, lg, state, lambda s: s.get("decision") == "combat_play", 60)
+                            if state.get("decision") != "combat_play":
+                                state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 60)
+                                state = self.step(case, lg, {"cmd": "enter_room", "type": "elite",
+                                                             "encounter": self.a.fight})
                         state = self.step(case, lg, {"cmd": "add_to_hand", "cards": [card["id"]], "energy": 9,
                                                      "upgraded": upgraded})
                         hand = state.get("hand") or []
@@ -263,6 +281,9 @@ class Runner:
             try:
                 self.new_run(case, lg, seed=f"relic-{r['id']}")
                 state = self.step(case, lg, {"cmd": "obtain", "relics": [r["id"]]})
+                if state.get("not_allowed"):
+                    case.notes.append("multiplayer only: not in solo runs")
+                    continue
                 state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
                 for room in ({"type": "monster", "encounter": self.a.fight}, {"type": "rest_site"}, {"type": "shop"},
                              {"type": "treasure"}):

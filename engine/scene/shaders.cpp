@@ -179,8 +179,7 @@ static void inverse(const M3 m, M3 out) {
 
 /* shaders/hsv.gdshader: rgb' = YIQ^-1 * v * S(s) * H(h)^T * YIQ * rgb
  * (GLSL "col.rgb *= hue_shift" multiplies by the transpose). */
-static void hsv_matrix(const MaterialRes* m, float out[12]) {
-    float h = param(m, "h", 1.0f), s = param(m, "s", 1.0f), v = param(m, "v", 1.0f);
+void Canvas::hsv_matrix(float h, float s, float v, float out[12]) {
     const M3 yiq = { { 0.2989f, 0.5870f, 0.1140f }, { 0.5959f, -0.2774f, -0.3216f }, { 0.2115f, -0.5229f, 0.3114f } };
     float hue = (1.0f - h) * 6.283185f;
     float sh = sinf(hue), ch = cosf(hue);
@@ -204,9 +203,61 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
     g_item = item;
     if (m->shader == "shaders/hsv.gdshader") {
         float cm[12];
-        hsv_matrix(m, cm);
+        Canvas::hsv_matrix(param(m, "h", 1.0f), param(m, "s", 1.0f), param(m, "v", 1.0f), cm);
         c.set_color_matrix(cm);
         return true;
+    }
+    if (m->shader == "shaders/vfx/wind_sway.gdshader") {
+        /* getWind in the vertex shader: time = TIME * speed + offset; the
+         * strength eases between minStrength and maxStrength (GLSL clamp:
+         * min(max(x, lo), hi), so maxStrength wins when it is the lower),
+         * times strengthScale; (sin(time) + cos(time * detail)) of it. */
+        float time = (float)g_shader_time * param(m, "speed", 1.0f) + param(m, "offset", 0.0f);
+        float lo = param(m, "minStrength", 0.05f), hi = param(m, "maxStrength", 0.01f);
+        float diff = (hi - lo) * (hi - lo);
+        float x = lo + diff + sinf(time / param(m, "interval", 3.5f)) * diff;
+        float strength = (x < lo ? lo : x);
+        strength = (strength > hi ? hi : strength) * param(m, "strengthScale", 100.0f);
+        float wind = (sinf(time) + cosf(time * param(m, "detail", 1.0f))) * strength;
+        c.set_wind(true, wind, param(m, "heightOffset", 0.0f));
+        return true;
+    }
+    if (m->shader == "shaders/power_flash_vfx.gdshader") {
+        /* COLOR *= texel with its rgb times strength (render_mode
+         * blend_add: shader_blend). */
+        float k = param(m, "strength", 3.0f);
+        float cm[12] = { k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0 };
+        c.set_color_matrix(cm);
+        return true;
+    }
+    if (m->shader == "shaders/dark_blur.gdshader") {
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_DARK;
+        p.lod = param(m, "lod", 5.0f);
+        p.mix = param(m, "mix_percentage", 0.3f);
+        return c.renderer()->set_screen(&p);
+    }
+    if (m->shader == "shaders/vfx/vfx_water_reflection_post.gdshader" ||
+        m->shader == "shaders/vfx/the_insatiable_sand_fall_2.gdshader") {
+        /* noise(UV + -TIME * speed (* direction)): the offset, kept within
+         * 0..1 (the noise repeats). */
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_NOISE;
+        p.noise = param_texture(c, m, "noise");
+        p.mask = param_texture(c, m, "mask");
+        p.strength = param(m, "strength", 0.1f);
+        float t = (float)g_shader_time * param(m, "speed", 0.1f);
+        float dx = 1, dy = 1;
+        if (m->shader == "shaders/vfx/the_insatiable_sand_fall_2.gdshader") {
+            float a = param(m, "angle_degrees", 45.0f) * 3.14159265f / 180.0f;
+            dx = cosf(a);
+            dy = sinf(a);
+        }
+        p.noise_offset[0] = -fmodf(t * dx, 1.0f);
+        p.noise_offset[1] = -fmodf(t * dy, 1.0f);
+        return c.renderer()->set_screen(&p);
     }
     if (m->shader == "shaders/button_pulse.gdshader") {
         /* COLOR.rgb += |sin(2 TIME)| * 0.2 * pulse_strength (added to the
@@ -367,16 +418,23 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
         *out = BLEND_ADD;
         return true;
     }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/power_flash_vfx.gdshader") {
+        *out = BLEND_ADD;
+        return true;
+    }
     return false;
 }
 
 void shader_end(Canvas& c, const MaterialRes* m) {
+    g_item = NULL; /* shader_param outside a draw reads the material only */
     if (m && m->kind == Resource::RES_SHADER_MATERIAL) {
         c.set_color_matrix(NULL);
         c.set_ripple(NULL);
+        c.set_wind(false, 0, 0);
         c.renderer()->set_gradient_map(NULL, false);
         c.renderer()->set_fire(NULL);
         c.renderer()->set_vfx(NULL);
+        c.renderer()->set_screen(NULL);
         g_vfx_on = false;
     }
 }
