@@ -26,6 +26,10 @@ Vec2 shader_param_vec2(const MaterialRes* m, const char* name, const Vec2& fallb
 /* The erosion particle shader applied now (NULL: none): particles draw each
  * one with its own erosion threshold. */
 const VfxParams* shader_vfx();
+/* An effect shader that changes per particle (vfx_panning_shader: the
+ * erosion at the particle's life, the offset by its CUSTOM.z): the
+ * particle's parameters in out; false: none applied. */
+bool shader_effect_particle(float life, float custom_z, EffectParams* out);
 /* The blend a ported shader's render_mode asks for (blend_add, ...). */
 bool shader_blend(const MaterialRes* m, BlendMode* out);
 

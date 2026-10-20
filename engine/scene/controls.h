@@ -131,6 +131,24 @@ public:
     virtual void draw(Canvas& c);
 };
 
+/* Godot's MeshInstance2D with an ArrayMesh (the decimillipede's suction
+ * strips): the first surface's triangles (lists or strips), its uvs and
+ * vertex colours, with the texture (white when none) and the material. */
+class MeshInstance2D : public Node2D {
+public:
+    MeshInstance2D() : texture(NULL), loaded(false) {}
+    Texture2DRes* texture;
+    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+    virtual void draw(Canvas& c);
+
+private:
+    bool loaded;
+    std::vector<Vec2> verts, uvs;
+    std::vector<Color> colors;
+    std::vector<int> idx;
+    void load(const Resource* mesh);
+};
+
 /* Godot's CanvasGroup: its children drawn as one picture, through its
  * material. Ported for the cards' PortraitCanvasGroup with the game's
  * canvas_group_mask_blur in mask mode (Ancient cards: the portrait through

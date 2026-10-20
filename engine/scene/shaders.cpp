@@ -104,6 +104,299 @@ static Texture* param_texture(Canvas& c, const MaterialRes* m, const char* name)
     return img ? c.gpu_texture(img) : NULL;
 }
 
+/* A vec4 parameter (fallback when unset). */
+static void param_vec4(const MaterialRes* m, const char* name, const float fallback[4], float out[4]) {
+    for (int i = 0; i < 4; ++i) out[i] = fallback[i];
+    if (!m || !m->props) return;
+    std::string k = std::string("shader_parameter/") + name;
+    if (!m->props->has(k.c_str())) return;
+    const Json& v = (*m->props)[k.c_str()]["v"];
+    for (size_t i = 0; i < 4 && i < v.size(); ++i) out[i] = (float)v[i].num();
+}
+
+/* A GradientTexture2D as Godot fills it (GradientTexture2D::
+ * _get_gradient_offset_at), once per resource. */
+static Texture* gradient_2d(Canvas& c, Resource* r) {
+    std::string key = "gradient2d:" + r->path + format("%p", (void*)r);
+    Texture* cached = c.cached_texture(key);
+    if (cached) return cached;
+    GradientData g;
+    bool ok = GradientData::from(r, g) && g.valid();
+    const Json& p = *r->props;
+    int w = p.has("width") ? p["width"].i(64) : 64, h = p.has("height") ? p["height"].i(64) : 64;
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    if (w > 1024) w = 1024;
+    if (h > 1024) h = 1024;
+    int fill = p["fill"].i(0), repeat = p["repeat"].i(0);
+    Vec2 from(0, 0), to(1, 0);
+    jv_vec2(p["fill_from"], from);
+    jv_vec2(p["fill_to"], to);
+    TextureData td;
+    td.format = TEX_ARGB8;
+    td.flags = TEXF_DATA; /* straight alpha */
+    td.width = td.orig_width = w;
+    td.height = td.orig_height = h;
+    td.levels.resize(1);
+    td.levels[0].resize((size_t)w * h * 4);
+    Vec2 d = to - from;
+    float len = sqrtf(d.x * d.x + d.y * d.y);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            Vec2 pos(w > 1 ? (float)x / (w - 1) : 0.0f, h > 1 ? (float)y / (h - 1) : 0.0f);
+            float ofs = 0;
+            if (len > 0) {
+                Vec2 q = pos - from;
+                if (fill == 1) {
+                    ofs = sqrtf(q.x * q.x + q.y * q.y) / len;
+                } else if (fill == 2) {
+                    float mx = maxf(fabsf(d.x), fabsf(d.y));
+                    ofs = mx > 0 ? maxf(fabsf(q.x), fabsf(q.y)) / mx : 0.0f;
+                } else {
+                    ofs = (q.x * d.x + q.y * d.y) / (len * len);
+                }
+            }
+            if (repeat == 1) {
+                ofs = fmodf(ofs, 1.0f);
+                if (ofs < 0) ofs += 1;
+            } else if (repeat == 2) {
+                ofs = fmodf(fabsf(ofs), 2.0f);
+                if (ofs > 1) ofs = 2 - ofs;
+            } else {
+                ofs = clampf(ofs, 0, 1);
+            }
+            Color col = ok ? g.at(ofs) : Color(ofs, ofs, ofs, 1);
+            u8* px = &td.levels[0][((size_t)y * w + x) * 4]; /* B G R A */
+            px[0] = (u8)(clampf(col.b, 0, 1) * 255 + 0.5f);
+            px[1] = (u8)(clampf(col.g, 0, 1) * 255 + 0.5f);
+            px[2] = (u8)(clampf(col.r, 0, 1) * 255 + 0.5f);
+            px[3] = (u8)(clampf(col.a, 0, 1) * 255 + 0.5f);
+        }
+    return c.cache_texture(key, td);
+}
+
+/* A CurveTexture (texture_mode RGB: the value in every channel, RED: in
+ * red), 256 wide, values clamped to 0..1, once per resource. */
+static Texture* curve_texture(Canvas& c, Resource* r) {
+    std::string key = "curvetex:" + r->path + format("%p", (void*)r);
+    Texture* cached = c.cached_texture(key);
+    if (cached) return cached;
+    CurveData curve;
+    CurveData::from(r, curve);
+    bool red = r->props && (*r->props)["texture_mode"].i(0) == 1;
+    TextureData td;
+    td.format = TEX_ARGB8;
+    td.flags = TEXF_DATA;
+    td.width = td.orig_width = 256;
+    td.height = td.orig_height = 1;
+    td.levels.resize(1);
+    td.levels[0].resize(256 * 4);
+    for (int i = 0; i < 256; ++i) {
+        float v = curve.valid() ? clampf(curve.sample((float)i / 255.0f), 0, 1) : 0.0f;
+        u8 b = (u8)(v * 255 + 0.5f);
+        u8* px = &td.levels[0][(size_t)i * 4];
+        px[0] = red ? 0 : b;
+        px[1] = red ? 0 : b;
+        px[2] = b;
+        px[3] = 255;
+    }
+    return c.cache_texture(key, td);
+}
+
+/* A sampler2D parameter for an effect shader: an image, a gradient (1D:
+ * its lut; 2D: its fill), a curve's values. NULL: unset (white). */
+static Texture* effect_texture(Canvas& c, const MaterialRes* m, const char* name) {
+    Resource* r = shader_param_resource(m, name);
+    if (!r) return NULL;
+    if (r->is_texture()) return param_texture(c, m, name);
+    if (r->type == "GradientTexture1D") return gradient_lut(c, r);
+    if (r->type == "GradientTexture2D" && r->props) return gradient_2d(c, r);
+    if (r->type == "CurveTexture") return curve_texture(c, r);
+    return NULL;
+}
+
+/* The effect applied now and how it changes per particle. */
+static EffectParams g_effect;
+static int g_effect_particle = 0; /* EFFECT_PANNING: per particle */
+static CurveData g_effect_curve;
+static Vec2 g_effect_offset_k;
+
+bool shader_effect_particle(float life, float custom_z, EffectParams* out) {
+    if (!g_effect_particle) return false;
+    *out = g_effect;
+    /* erosion_over_lifetime (hint_default_black) at the life; the
+     * offset: CUSTOM.z * initial_offset_multiplier / main_st.xy. */
+    out->p[4] = g_effect_curve.valid() ? g_effect_curve.sample(life) : 0.0f;
+    out->p[2] += custom_z * g_effect_offset_k.x;
+    out->p[3] += custom_z * g_effect_offset_k.y;
+    return true;
+}
+
+static bool set_effect(Canvas& c, const EffectParams& e) {
+    g_effect = e;
+    return c.renderer()->set_effect(&e);
+}
+
+/* The time panning of a uv (kept within 0..1: the textures repeat). */
+static float pan(float speed) { return fmodf(speed * (float)g_shader_time, 1.0f); }
+
+/* The effect shaders (engine/gfx/effects.h); false: not one of them. */
+static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
+    const std::string& s = m->shader;
+    EffectParams e;
+    memset(&e, 0, sizeof(e));
+    g_effect_particle = 0;
+    if (s == "shaders/scrolling_smoke.tres") {
+        e.id = EFFECT_SCROLLING_SMOKE;
+        e.p[0] = fmodf(param(m, "ScrollSpeed", 0.2f) * (float)g_shader_time + param(m, "timeOffset", 0.0f), 1.0f);
+        Vec2 st = shader_param_vec2(m, "AlphaStep", Vec2(0, 1));
+        e.p[1] = st.x;
+        e.p[2] = st.y;
+        e.p[3] = param(m, "Ovarall_Alpha", 1.0f);
+        Color k = param_color(m, "Color", Color(1, 1, 1, 1));
+        e.p[4] = k.r;
+        e.p[5] = k.g;
+        e.p[6] = k.b;
+        e.tex[0] = effect_texture(c, m, "smokeTex");
+        e.tex[1] = effect_texture(c, m, "alphaGradient");
+        e.repeat = 3;
+    } else if (s == "shaders/vfx/common/vfx_noise_scale_shader.gdshader") {
+        /* The vertex() scaling by the noise is not ported. */
+        e.id = EFFECT_LUT_COLOR;
+        e.p[0] = param(m, "use_r_as_alpha", 0.0f);
+        e.tex[0] = effect_texture(c, m, "lut");
+    } else if (s == "images/vfx/simple_noise_flat_shader.tres" || s == "images/vfx/simple_noise_add_shader.tres") {
+        bool two = s == "images/vfx/simple_noise_flat_shader.tres";
+        e.id = EFFECT_SIMPLE_NOISE;
+        Vec2 st = shader_param_vec2(m, "Step", Vec2(0, 0));
+        Vec2 s1 = shader_param_vec2(m, "mask_scale", Vec2(1, 1)), p1 = shader_param_vec2(m, "mask_panning", Vec2(2, 3));
+        e.p[0] = st.x;
+        e.p[1] = st.y;
+        e.p[2] = s1.x;
+        e.p[3] = s1.y;
+        e.p[4] = pan(p1.x);
+        e.p[5] = pan(p1.y);
+        e.tex[0] = effect_texture(c, m, "noise_tex");
+        e.p[6] = e.p[7] = 1;
+        if (two) {
+            Vec2 s2 = shader_param_vec2(m, "mask2_scale", Vec2(1, 1)), p2 = shader_param_vec2(m, "mask2_panning", Vec2(0.2f, 0.3f));
+            e.p[6] = s2.x;
+            e.p[7] = s2.y;
+            e.p[8] = pan(p2.x);
+            e.p[9] = pan(p2.y);
+            e.tex[1] = effect_texture(c, m, "noise_tex2");
+        }
+        e.repeat = 3;
+    } else if (s == "shaders/vfx/monsters/decimillipede_suck_shader.tres") {
+        float dir = param(m, "direction", 1.0f);
+        e.id = EFFECT_DECIMILLIPEDE_SUCK;
+        e.p[0] = pan(-0.5f);
+        e.p[1] = pan(4.0f * dir);
+        e.p[2] = pan(1.0f);
+        e.p[3] = pan(3.0f * dir);
+        e.p[4] = param(m, "opacity", 1.0f);
+        e.tex[0] = effect_texture(c, m, "suckPattern");
+        e.tex[1] = effect_texture(c, m, "suckGradient");
+        e.tex[2] = effect_texture(c, m, "suckShape");
+        e.repeat = 1;
+    } else if (s == "images/vfx/vfx_molten_fist/vfx_molten_fist.tres") {
+        e.id = EFFECT_MOLTEN_FIST;
+        Vec2 st = shader_param_vec2(m, "NoiseStep", Vec2(0.1f, 0.2f));
+        e.p[0] = st.x;
+        e.p[1] = st.y;
+        e.p[2] = param(m, "Noise2Strength", 1.0f);
+        e.p[3] = fabsf(param(m, "Noise1Strength", 1.0f));
+        if (param(m, "InvertNoiseMask", 1.0f) != 0.0f) e.p[3] = -maxf(e.p[3], 1e-6f);
+        Vec2 s1 = shader_param_vec2(m, "Noise1Scaling", Vec2(1, 1)), p1 = shader_param_vec2(m, "Noise1Panning", Vec2(1, 1));
+        Vec2 s2 = shader_param_vec2(m, "Noise2Scaling", Vec2(1, 1)), p2 = shader_param_vec2(m, "Noise2Panning", Vec2(1, 1));
+        Vec2 ms = shader_param_vec2(m, "NoiseMaskScale", Vec2(1, 1)), mo = shader_param_vec2(m, "NoiseMaskOffset", Vec2(0, 0));
+        e.p[4] = s1.x;
+        e.p[5] = s1.y;
+        e.p[6] = pan(p1.x);
+        e.p[7] = pan(p1.y);
+        e.p[8] = s2.x;
+        e.p[9] = s2.y;
+        e.p[10] = pan(p2.x);
+        e.p[11] = pan(p2.y);
+        e.p[12] = ms.x;
+        e.p[13] = ms.y;
+        e.p[14] = mo.x;
+        e.p[15] = mo.y;
+        e.tex[0] = effect_texture(c, m, "Noise1Texture");
+        e.tex[1] = effect_texture(c, m, "Noise2Texture");
+        e.tex[2] = effect_texture(c, m, "NoiseMask");
+        e.tex[3] = effect_texture(c, m, "tex_frg_40");
+        e.repeat = 3;
+    } else if (s == "images/vfx/slash_shader_flat.tres") {
+        e.id = EFFECT_SLASH_FLAT;
+        Vec2 st = shader_param_vec2(m, "step", Vec2(0, 0));
+        float ms = param(m, "master_step", 1.0f);
+        e.p[0] = st.x * ms;
+        e.p[1] = st.y * ms;
+        e.p[2] = param(m, "noise_1_strength", 1.0f);
+        e.p[3] = param(m, "noise_2_strength", 1.0f);
+        e.p[4] = param(m, "opacity", 1.0f);
+        Vec2 s1 = shader_param_vec2(m, "noise_1_scale", Vec2(1, 1)), p1 = shader_param_vec2(m, "noise_1_panning", Vec2(2, 3));
+        Vec2 s2 = shader_param_vec2(m, "noise_2_scale", Vec2(1, 1)), p2 = shader_param_vec2(m, "noise_2_panning", Vec2(0.2f, 0.3f));
+        e.p[5] = s1.x;
+        e.p[6] = s1.y;
+        e.p[7] = pan(p1.x);
+        e.p[8] = pan(p1.y);
+        e.p[9] = s2.x;
+        e.p[10] = s2.y;
+        e.p[15] = pan(p2.x);
+        e.p[11] = pan(p2.y);
+        Color k = param_color(m, "ColorParameter", Color(0, 0, 0, 1));
+        e.p[12] = k.r;
+        e.p[13] = k.g;
+        e.p[14] = k.b;
+        e.tex[0] = effect_texture(c, m, "shape_mask_tex");
+        e.tex[1] = effect_texture(c, m, "noise_1_tex");
+        e.tex[2] = effect_texture(c, m, "noise_2_tex");
+        e.repeat = 6;
+    } else if (s == "shaders/texture_transition.gdshader" || s == "inline:14a82729491d6b89") {
+        /* inline:14a8...: the character transitions' copy, without
+         * additionalFade and alpha. */
+        bool full = s == "shaders/texture_transition.gdshader";
+        e.id = EFFECT_TEXTURE_TRANSITION;
+        e.p[0] = param(m, "threshold", 0.0f);
+        e.p[1] = full ? param(m, "additionalFade", 0.0f) : 0.0f;
+        e.p[2] = full ? param(m, "alpha", 0.0f) : 1.0f;
+        e.tex[0] = effect_texture(c, m, "transitionTex");
+    } else if (s == "shaders/vfx/common/vfx_panning_shader.gdshader") {
+        e.id = EFFECT_PANNING;
+        static const float st0[4] = { 1, 1, 0, 0 };
+        float st[4];
+        param_vec4(m, "main_st", st0, st);
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[2] = pan(st[2]);
+        e.p[3] = pan(st[3]);
+        CurveData::from(shader_param_resource(m, "erosion_over_lifetime"), g_effect_curve);
+        e.p[4] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[5] = param(m, "erosion_offset", 1.0f);
+        e.p[6] = param(m, "energy", 1.0f);
+        e.p[7] = param(m, "use_red_channel_as_alpha", 0.0f);
+        Vec2 k = shader_param_vec2(m, "initial_offset_multiplier", Vec2(0, 0));
+        g_effect_offset_k = Vec2(st[0] != 0 ? k.x / st[0] : 0.0f, st[1] != 0 ? k.y / st[1] : 0.0f);
+        e.tex[0] = effect_texture(c, m, "lut");
+        e.tex[1] = effect_texture(c, m, "mask");
+        g_effect_particle = EFFECT_PANNING;
+    } else if (s == "shaders/vfx/common/vfx_ray_shader.gdshader") {
+        /* VERTEX.x *= CUSTOM.z: Particles2D::draw. */
+        e.id = EFFECT_RAY;
+        e.tex[0] = effect_texture(c, m, "lut");
+        e.tex[1] = effect_texture(c, m, "vertical_alpha");
+    } else if (s == "shaders/vfx/dagger/vfx_dagger_spray_single_shader.gdshader") {
+        e.id = EFFECT_LUT_ALPHA;
+        e.tex[0] = effect_texture(c, m, "lut");
+    } else {
+        return false;
+    }
+    *ok = set_effect(c, e);
+    return true;
+}
+
 /* A texture's uv: scale, and the offset its panning has moved it by now
  * (kept within 0..1: the textures repeat). */
 static void scroll_uv(const MaterialRes* m, const char* scale, const char* pan, const char* offset, Vec2 global,
@@ -253,7 +546,8 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         e.tex[0] = param_texture(c, m, "noise");
         e.tex[1] = param_texture(c, m, "mask");
         e.repeat = 1;
-        return c.renderer()->set_effect(&e);
+        g_effect_particle = 0;
+        return set_effect(c, e);
     }
     if (m->shader == "shaders/doom_overlay.gdshader") {
         /* The pulse: 0.7 * smoothstep(-10, 1, sin(TIME * 20) + sin(TIME * 10)). */
@@ -458,6 +752,8 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         return true;
     }
     if (vfx_shader(c, m)) return true;
+    bool ok = true;
+    if (effect_shader(c, m, &ok)) return ok;
     if (m->shader == "shaders/card_ripple.gdshader") {
         /* render_mode blend_add: shader_blend. */
         float p[4] = { (float)g_shader_time * param(m, "ripple_speed", 0.0f), param(m, "modulo_width", 0.02f),
@@ -483,6 +779,10 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
         *out = BLEND_ADD;
         return true;
     }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "images/vfx/simple_noise_add_shader.tres") {
+        *out = BLEND_ADD;
+        return true;
+    }
     return false;
 }
 
@@ -498,6 +798,7 @@ void shader_end(Canvas& c, const MaterialRes* m) {
         c.renderer()->set_screen(NULL);
         c.renderer()->set_effect(NULL);
         g_vfx_on = false;
+        g_effect_particle = 0;
     }
 }
 

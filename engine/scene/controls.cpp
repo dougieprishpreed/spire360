@@ -5,6 +5,7 @@
 #include "value.h"
 
 #include <math.h>
+#include <string.h>
 
 namespace spire {
 
@@ -785,6 +786,146 @@ void CanvasGroup::draw(Canvas& c) {
     Rect2 src((float)region[(size_t)0].num() - offset.x, (float)region[1].num() - offset.y,
               (float)region[2].num() + offset.x, (float)region[3].num() + offset.y);
     c.draw_texture_rect_region(atlas, item_rect(), src);
+}
+
+/* ---- MeshInstance2D ---- */
+
+static int b64_value(char ch) {
+    if (ch >= 'A' && ch <= 'Z') return ch - 'A';
+    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
+    if (ch >= '0' && ch <= '9') return ch - '0' + 52;
+    if (ch == '+') return 62;
+    if (ch == '/') return 63;
+    return -1;
+}
+
+/* A PackedByteArray as the converter writes it: {"v": ["<base64>"]}. */
+static void packed_bytes(const Json& v, std::vector<u8>& out) {
+    out.clear();
+    const Json& a = v["v"];
+    std::string s = a.size() > 0 && a[(size_t)0].is_string() ? a[(size_t)0].str() : std::string();
+    u32 acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        int x = b64_value(s[i]);
+        if (x < 0) continue;
+        acc = (acc << 6) | (u32)x;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back((u8)((acc >> bits) & 0xFF));
+        }
+    }
+}
+
+static float read_f32(const u8* p) {
+    float f;
+    memcpy(&f, p, 4);
+    return f;
+}
+
+bool MeshInstance2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "texture") {
+        texture = as_texture(ctx.resource(v));
+        return true;
+    }
+    if (key == "mesh") {
+        load(ctx.resource(v));
+        return true;
+    }
+    return Node2D::set(key, v, ctx);
+}
+
+/* Godot 4's surface arrays (format version 2): the vertex stream holds
+ * positions (vec2 with ARRAY_FLAG_USE_2D_VERTICES, else vec3) and the
+ * packed normal and tangent; the attribute stream colour (RGBA8), uv,
+ * uv2 and customs; indices are 16 bit below 65536 vertices. */
+void MeshInstance2D::load(const Resource* mesh) {
+    loaded = false;
+    verts.clear();
+    uvs.clear();
+    colors.clear();
+    idx.clear();
+    if (!mesh || !mesh->props || mesh->type != "ArrayMesh") return;
+    const Json& surfaces = (*mesh->props)["_surfaces"];
+    if (surfaces.size() == 0) return;
+    const Json& s = surfaces[(size_t)0];
+    u64 format = (u64)s["format"].num();
+    int primitive = s["primitive"].i(3);
+    int count = s["vertex_count"].i();
+    const u64 F_VERTEX = 1, F_NORMAL = 2, F_TANGENT = 4, F_COLOR = 8, F_UV = 16, F_UV2 = 32, F_INDEX = 1u << 12;
+    const u64 F_2D = 1u << 25, F_COMPRESS = 1u << 29, F_V2 = (u64)1 << 35;
+    if (!(format & F_VERTEX) || (format & F_COMPRESS) || !(format & F_V2) || count <= 0) {
+        log_warn("MeshInstance2D: surface format %llx not ported", (unsigned long long)format);
+        return;
+    }
+    std::vector<u8> vd, ad, id;
+    packed_bytes(s["vertex_data"], vd);
+    packed_bytes(s["attribute_data"], ad);
+    int pos_size = (format & F_2D) ? 8 : 12;
+    int vstride = pos_size + ((format & F_NORMAL) ? 4 : 0) + ((format & F_TANGENT) ? 4 : 0);
+    int astride = ((format & F_COLOR) ? 4 : 0) + ((format & F_UV) ? 8 : 0) + ((format & F_UV2) ? 8 : 0);
+    if ((int)vd.size() < vstride * count || (int)ad.size() < astride * count) {
+        log_warn("MeshInstance2D: short surface data");
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        const u8* p = &vd[(size_t)i * vstride];
+        verts.push_back(Vec2(read_f32(p), read_f32(p + 4)));
+        const u8* a = astride ? &ad[(size_t)i * astride] : NULL;
+        Color col(1, 1, 1, 1);
+        if (format & F_COLOR) {
+            col = Color(a[0] / 255.0f, a[1] / 255.0f, a[2] / 255.0f, a[3] / 255.0f);
+            a += 4;
+        }
+        colors.push_back(col);
+        uvs.push_back((format & F_UV) ? Vec2(read_f32(a), read_f32(a + 4)) : Vec2(0, 0));
+    }
+    std::vector<int> order;
+    if (format & F_INDEX) {
+        packed_bytes(s["index_data"], id);
+        bool wide = count > 65535;
+        size_t n = wide ? id.size() / 4 : id.size() / 2;
+        for (size_t i = 0; i < n; ++i) {
+            int k = wide ? (int)(id[i * 4] | (id[i * 4 + 1] << 8) | (id[i * 4 + 2] << 16) | ((u32)id[i * 4 + 3] << 24))
+                         : (int)(id[i * 2] | (id[i * 2 + 1] << 8));
+            order.push_back(k < count ? k : 0);
+        }
+    } else {
+        for (int i = 0; i < count; ++i) order.push_back(i);
+    }
+    if (primitive == 3) {
+        idx.assign(order.begin(), order.begin() + (order.size() / 3) * 3);
+    } else if (primitive == 4) {
+        for (size_t i = 2; i < order.size(); ++i) {
+            /* strips alternate their winding; the canvas does not cull */
+            idx.push_back(order[i - 2]);
+            idx.push_back(order[i - 1]);
+            idx.push_back(order[i]);
+        }
+    } else {
+        log_warn("MeshInstance2D: primitive %d not ported", primitive);
+        return;
+    }
+    loaded = true;
+}
+
+void MeshInstance2D::draw(Canvas& c) {
+    if (!loaded || idx.empty()) return;
+    ImageTextureRes* img = NULL;
+    if (texture) {
+        Vec2 ts = texture->size();
+        Rect2 dst, src;
+        texture->get_rect_region(Rect2(Vec2(), ts), Rect2(Vec2(), ts), dst, src, &img);
+        if (!img) return;
+        Vec2 is = img->size();
+        std::vector<Vec2> uv(uvs.size());
+        for (size_t i = 0; i < uvs.size(); ++i)
+            uv[i] = Vec2((src.pos.x + uvs[i].x * src.size.x) / is.x, (src.pos.y + uvs[i].y * src.size.y) / is.y);
+        c.draw_triangles(img, verts, uv, colors, idx);
+        return;
+    }
+    c.draw_triangles(NULL, verts, uvs, colors, idx);
 }
 
 void Sprite2D::draw(Canvas& c) {

@@ -557,6 +557,9 @@ void Particles2D::draw(Canvas& c) {
     /* The erosion shaders: each particle drawn on its own, eroded by the
      * curve at its life. */
     const VfxParams* vfx = shader_vfx();
+    EffectParams effect;
+    bool per_effect = shader_effect_particle(0, 0, &effect);
+    bool ray = sm && sm->shader == "shaders/vfx/common/vfx_ray_shader.gdshader";
     CurveData erosion;
     if (vfx && sm) CurveData::from(shader_param_resource(sm, "erosion_curve"), erosion);
     std::vector<Vec2> v, uv;
@@ -598,6 +601,8 @@ void Particles2D::draw(Canvas& c) {
         }
         Vec2 po(pivot.x * ts.x, pivot.y * ts.y);
         Vec2 corners[4] = { Vec2(-h.x, -h.y) + po, Vec2(h.x, -h.y) + po, Vec2(h.x, h.y) + po, Vec2(-h.x, h.y) + po };
+        if (ray) /* vfx_ray_shader: VERTEX.x *= CUSTOM.z */
+            for (int k = 0; k < 4; ++k) corners[k].x *= p.custom[2];
         float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
         int base = (int)v.size();
         for (int k = 0; k < 4; ++k) {
@@ -609,7 +614,16 @@ void Particles2D::draw(Canvas& c) {
         }
         int q[6] = { 0, 1, 2, 2, 3, 0 };
         for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
-        if (vfx && img) {
+        if (per_effect && img) {
+            float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
+            shader_effect_particle(life, p.custom[2], &effect);
+            c.renderer()->set_effect(&effect);
+            c.draw_triangles(img, v, uv, col, idx);
+            v.clear();
+            uv.clear();
+            col.clear();
+            idx.clear();
+        } else if (vfx && img) {
             VfxParams one = *vfx;
             float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
             if (erosion.valid()) one.erosion[0] = erosion.sample(life);
@@ -623,6 +637,11 @@ void Particles2D::draw(Canvas& c) {
     }
     if (vfx && img) {
         c.renderer()->set_vfx(vfx);
+        return;
+    }
+    if (per_effect && img) {
+        shader_effect_particle(0, 0, &effect);
+        c.renderer()->set_effect(&effect);
         return;
     }
     if (img) c.draw_triangles(img, v, uv, col, idx);

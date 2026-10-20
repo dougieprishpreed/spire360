@@ -14,6 +14,28 @@
 
 namespace spire {
 
+/* An inline shader's name: "inline:" and a hash of its code without
+ * comments and whitespace, so the copies of one shader in several files
+ * (the character transitions, ...) are one shader to the ports
+ * (shaders.cpp); "<file>::<sub id>" when it has no code. */
+static std::string inline_shader_name(const SceneFile* ctx, const std::string& sub) {
+    std::string fallback = (ctx ? ctx->name : std::string()) + "::" + sub;
+    if (!ctx) return fallback;
+    const Json& code = ctx->doc["sub"][sub.c_str()]["props"]["code"];
+    if (!code.is_string() || code.str().empty()) return fallback;
+    const std::string& src = code.str();
+    std::string norm;
+    norm.reserve(src.size());
+    for (size_t i = 0; i < src.size(); ++i) {
+        if (src[i] == '/' && i + 1 < src.size() && src[i + 1] == '/') {
+            while (i < src.size() && src[i] != '\n') ++i;
+            continue;
+        }
+        if (src[i] != ' ' && src[i] != '\t' && src[i] != '\n' && src[i] != '\r') norm += src[i];
+    }
+    return format("inline:%016llx", (unsigned long long)fnv1a64(norm.c_str()));
+}
+
 /* The scene being instantiated, for script factories (script_resource). */
 static const PropCtx* g_script_ctx = NULL;
 
@@ -335,7 +357,7 @@ Resource* SceneLibrary::build(const std::string& cls, const Json& p, const Scene
         MaterialRes* m = new MaterialRes(Resource::RES_SHADER_MATERIAL, cls);
         const Json& sh = p["shader"];
         if (jv_is_ext(sh) && sh["ext"].is_string()) m->shader = sh["ext"].str();
-        else if (jv_is_sub(sh)) m->shader = (ctx ? ctx->name : std::string()) + "::" + sh["sub"].str();
+        else if (jv_is_sub(sh)) m->shader = inline_shader_name(ctx, sh["sub"].str());
         r = m;
     } else {
         r = new Resource(Resource::RES_GENERIC, cls);
@@ -392,6 +414,7 @@ static Node* new_node(const std::string& type) {
     if (type == "Label") return new Label();
     if (type == "RichTextLabel") return new RichTextLabel();
     if (type == "Sprite2D") return new Sprite2D();
+    if (type == "MeshInstance2D") return new MeshInstance2D();
     if (type == "CanvasGroup") return new CanvasGroup();
     if (type == "AnimatedSprite2D") return new AnimatedSprite2D();
     if (type == "Line2D") return new Line2D();
@@ -434,7 +457,7 @@ static bool is_native(const std::string& type) {
            type == "Panel" || type == "PanelContainer" || type == "VBoxContainer" || type == "HBoxContainer" ||
            type == "MarginContainer" || type == "CenterContainer" || type == "GridContainer" ||
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
-           type == "RichTextLabel" || type == "Sprite2D" || type == "AnimatedSprite2D" || type == "CanvasGroup" || type == "Line2D" ||
+           type == "RichTextLabel" || type == "Sprite2D" || type == "MeshInstance2D" || type == "AnimatedSprite2D" || type == "CanvasGroup" || type == "Line2D" ||
            type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
            type == "GPUParticles2D" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||

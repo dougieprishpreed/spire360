@@ -75,6 +75,7 @@ private:
     std::vector<Color> col_;
     std::vector<int> idx_;
     SpClipper clipper_;
+    std::vector<SpineFollowNode*> slot_nodes_; /* draw(): the slot nodes with materials, by slot */
     std::vector<float> cpos_, cuv_;
     std::vector<int> ctris_;
 };
@@ -86,11 +87,18 @@ private:
  * draw order. */
 class SpineFollowNode : public Node2D {
 public:
-    explicit SpineFollowNode(bool slot) : is_slot(slot), drive(false), enabled(true), index(-2) {}
+    explicit SpineFollowNode(bool slot) : is_slot(slot), drive(false), enabled(true), index(-2), slot_index(-2) {
+        for (int i = 0; i < 4; ++i) slot_material[i] = NULL;
+    }
     bool is_slot;
     std::string target; /* bone_name / slot_name */
     bool drive, enabled;
     int index;          /* resolved bone index (-1: none, -2: not yet) */
+    int slot_index;     /* a slot node's slot (-1: none, -2: not yet) */
+    /* A slot node's normal / additive / multiply / screen_material: its
+     * slot draws with them before the sprite's (spine-godot's
+     * SpineSprite::update_meshes). */
+    MaterialRes* slot_material[4];
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
 };
 

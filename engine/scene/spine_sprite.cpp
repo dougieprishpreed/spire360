@@ -3,12 +3,29 @@
 #include "../core/pack.h"
 #include "canvas.h"
 #include "scene.h"
+#include "shaders.h"
 
 #include <math.h>
 
 namespace spire {
 
 SpineDataRes::~SpineDataRes() { delete data_; }
+
+/* The material properties a SpineSprite or SpineSlotNode has, per blend
+ * mode: true when key is one of them (out[i] set, NULL unless a material). */
+static bool slot_material_prop(const std::string& key, const Json& v, const PropCtx& ctx, MaterialRes* out[4]) {
+    static const char* const MATERIALS[4] = { "normal_material", "additive_material", "multiply_material",
+                                              "screen_material" };
+    for (int i = 0; i < 4; ++i)
+        if (key == MATERIALS[i]) {
+            Resource* r = ctx.resource(v);
+            out[i] = r && (r->kind == Resource::RES_CANVAS_ITEM_MATERIAL || r->kind == Resource::RES_SHADER_MATERIAL)
+                         ? (MaterialRes*)r
+                         : NULL;
+            return true;
+        }
+    return false;
+}
 
 static bool read_json(const Pack* pack, const std::string& name, Json& out, std::string* err) {
     std::vector<u8> raw;
@@ -70,17 +87,7 @@ bool SpineSprite::set(const std::string& key, const Json& v, const PropCtx& ctx)
         time_scale = (float)v.num(1);
         return true;
     }
-    static const char* const MATERIALS[4] = { "normal_material", "additive_material", "multiply_material",
-                                              "screen_material" };
-    for (int i = 0; i < 4; ++i)
-        if (key == MATERIALS[i]) {
-            Resource* r = ctx.resource(v);
-            slot_material[i] = r && (r->kind == Resource::RES_CANVAS_ITEM_MATERIAL ||
-                                     r->kind == Resource::RES_SHADER_MATERIAL)
-                                   ? (MaterialRes*)r
-                                   : NULL;
-            return true;
-        }
+    if (slot_material_prop(key, v, ctx, slot_material)) return true;
     /* Editor preview settings. */
     if (key == "preview_skin" || key == "preview_animation" || key == "preview_frame" || key == "preview_time")
         return true;
@@ -156,8 +163,10 @@ bool SpineFollowNode::set(const std::string& key, const Json& v, const PropCtx& 
     if (key == "bone_name" || key == "slot_name") {
         target = v.str();
         index = -2;
+        slot_index = -2;
         return true;
     }
+    if (is_slot && slot_material_prop(key, v, ctx, slot_material)) return true;
     if (key == "bone_mode") {
         drive = v.i() == 1;
         return true;
@@ -241,6 +250,18 @@ void SpineSprite::draw(Canvas& c) {
     if (!ensure()) return;
     BlendMode item_blend = c.blend();
     const SpSkeleton& s = *skel_;
+    /* The slot nodes with materials of their own, by slot. */
+    slot_nodes_.clear();
+    for (size_t i = 0; i < children.size(); ++i) {
+        Node* n = children[i];
+        if (n->type != "SpineSlotNode") continue;
+        SpineFollowNode* f = (SpineFollowNode*)n;
+        if (!f->slot_material[0] && !f->slot_material[1] && !f->slot_material[2] && !f->slot_material[3]) continue;
+        if (f->slot_index == -2) f->slot_index = s.data()->find_slot(f->target);
+        if (f->slot_index < 0) continue;
+        if ((int)slot_nodes_.size() <= f->slot_index) slot_nodes_.resize((size_t)f->slot_index + 1, NULL);
+        if (!slot_nodes_[(size_t)f->slot_index]) slot_nodes_[(size_t)f->slot_index] = f;
+    }
     static const int QUAD[6] = { 0, 1, 2, 2, 3, 0 };
     for (size_t n = 0; n < s.draw_order.size(); ++n) {
         int si = s.draw_order[n];
@@ -295,7 +316,25 @@ void SpineSprite::draw(Canvas& c) {
          * blend mode when it has one (the scene's choice: Neow's room draws
          * its multiply and screen slots as normal ones), else the mode's. */
         int bm = slot.data->blend >= 0 && slot.data->blend < 4 ? slot.data->blend : 0;
-        const MaterialRes* m = slot_material[bm];
+        const MaterialRes* m = si < (int)slot_nodes_.size() && slot_nodes_[(size_t)si]
+                                   ? slot_nodes_[(size_t)si]->slot_material[bm]
+                                   : NULL;
+        if (!m) m = slot_material[bm];
+        if (m && m->kind == Resource::RES_SHADER_MATERIAL) {
+            /* A shader: drawn with it (its render_mode's blend), or not at
+             * all when it is not ported (as the tree does). */
+            if (!shader_begin(c, m, this)) {
+                clipper_.end_slot(si);
+                continue;
+            }
+            BlendMode sb = BLEND_MIX;
+            shader_blend(m, &sb);
+            c.set_blend(sb);
+            if (!idx_.empty()) c.draw_triangles(img, v_, uv_, col_, idx_);
+            shader_end(c, m);
+            clipper_.end_slot(si);
+            continue;
+        }
         if (m && m->kind == Resource::RES_CANVAS_ITEM_MATERIAL) {
             static const BlendMode modes[] = { BLEND_MIX, BLEND_ADD, BLEND_SUB, BLEND_MUL, BLEND_PREMULT_ALPHA };
             c.set_blend(m->blend_mode >= 0 && m->blend_mode < 5 ? modes[m->blend_mode] : BLEND_MIX);
