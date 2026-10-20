@@ -186,8 +186,10 @@ struct SpTimeline {
     int values;               /* values per key (curve timelines) */
     std::vector<float> keys;  /* curve timelines: time, values... per key; others: times */
     SpCurves curves;
-    std::vector<std::string> names;              /* attachment */
-    std::vector<int> ints;                        /* inherit modes; IK: bend per key */
+    std::vector<std::string> names;              /* attachment; event: the event per key */
+    std::vector<int> ints;                        /* inherit modes; IK: bend per key; event: int */
+    std::vector<float> fvals;                     /* event: float per key */
+    std::vector<std::string> strs;                /* event: string per key */
     std::vector<int> flags;                       /* IK: 1 compress, 2 stretch per key */
     std::vector<std::vector<int> > orders;        /* draw order (empty = setup) */
     std::vector<std::vector<float> > deforms;     /* deform */
@@ -347,9 +349,23 @@ private:
 /* AnimationState, for what the game does with it: tracks that play an
  * animation (looping or not), queued entries, and crossfades between
  * animations on a track (mix duration). */
+/* What an AnimationState did that its listeners hear (spine-godot's
+ * animation_started / animation_event signals). */
+struct SpFired {
+    bool start;             /* an entry started (else an event key passed) */
+    int track;
+    const SpAnimation* anim;
+    std::string name;       /* the event's */
+    int ival;
+    float fval;
+    std::string sval;
+};
+
 class SpAnimationState {
 public:
     SpAnimationState();
+    /* Entries started and event keys passed since the owner last cleared it. */
+    std::vector<SpFired> fired;
     void set_animation(int track, const SpAnimation* anim, bool loop);
     void add_animation(int track, const SpAnimation* anim, bool loop, float delay);
     void set_empty_animation(int track);
@@ -371,8 +387,9 @@ private:
         const SpAnimation* anim;
         bool loop;
         float time, last_time, delay, mix_time, mix_duration, time_scale;
+        bool events_from_start; /* its event keys from the start fire on the next update */
         Entry() : anim(NULL), loop(false), time(0), last_time(-1), delay(0), mix_time(0), mix_duration(0),
-                  time_scale(1) {}
+                  time_scale(1), events_from_start(true) {}
     };
     struct Track {
         Entry cur, from;

@@ -67,6 +67,9 @@ public:
     bool add_animation(const std::string& name, bool loop, float delay, int track);
     void add_empty_animation(int track);
     void set_state_time_scale(float scale);
+    /* animation_started / animation_event since the last frame (its process
+     * fills it; the scripts on its children read it in theirs). */
+    const std::vector<SpFired>& fired() const { return fired_; }
 
 private:
     bool ensure();
@@ -77,6 +80,7 @@ private:
     SpSkeleton* skel_;
     SpSkin* custom_skin_; /* set_skins' (its attachments are the data's) */
     SpAnimationState state_;
+    std::vector<SpFired> fired_;
     bool failed_;
     std::vector<float> world_;
     std::vector<Vec2> v_, uv_;

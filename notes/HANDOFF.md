@@ -10,6 +10,36 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 5 (2026-10-20): spine events
+
+Paused here at the user's request. Validation: `spire_check` on new16
+with the new pack 0 failures (1,421 / 995 / 366 / 181 / 26), D3D9 check
+rc=0, strict C++98 PC build clean, converter tests 31 OK. No logic change
+since part 4 (traces new16: differences 0).
+
+- Spine animation events: the converter keeps the animations' event
+  timelines (engine skeleton binary version 2; the engine reads 1 and 2);
+  SpAnimationState records entry starts and event keys passed
+  (`fired`, loops and queued entries included); SpineSprite::fired() holds
+  a frame's, read by the scripts on its children in their process.
+- `convert.py respine <pck> <pack-in> <pack-out>`: a copy of a built pack
+  with only its skeletons converted again (6 s). work/pack-sound-effects/
+  pack.s3p is that copy now; the previous one is pack.v1.s3p (1 GB, can be
+  deleted once nothing needs it).
+- Slot nodes' own shader materials take their parameters from the slot
+  node (shader_begin's item), so scripts can drive one slot's material
+  (`shader_params`, vec2 as "<name>.x/.y").
+- `creature_vfx.cpp`: SpineScript (the common part: on_ready / on_event /
+  on_start / tick, particles helpers, slot parameters) and the characters'
+  NIroncladVfx (slash swept, eye fire), NDefectVfx (sparks),
+  NNecrobinderVfx (scythe flames, slash, hurt / low-health particles, head
+  flame), NRegentVfx (death particles, explosion, the two weapons).
+
+Next: the 48 monster N*Vfx scripts driven by spine events (none run yet;
+work/vfx_scripts.txt has them all, stripped, smallest first; the list is
+work/vfx_list.txt). Then the special-node stand-ins (part 4's plan), which
+several of them need (SetTarget, Fire, Regenerate, AttackShake).
+
 ## Alpha push, part 4 (2026-10-20)
 
 Validation: traces `differences: 0` (base5 vs new16), `spire_check` on

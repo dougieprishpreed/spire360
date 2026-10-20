@@ -208,6 +208,8 @@ void SpineSprite::process(double dt) {
     if (!ensure()) return;
     float d = (float)dt * time_scale;
     state_.update(d);
+    fired_.swap(state_.fired);
+    state_.fired.clear();
     state_.apply(*skel_);
     drive_bones();
     skel_->update(d);
@@ -375,11 +377,14 @@ void SpineSprite::draw(Canvas& c) {
         const MaterialRes* m = si < (int)slot_nodes_.size() && slot_nodes_[(size_t)si]
                                    ? slot_nodes_[(size_t)si]->slot_material[bm]
                                    : NULL;
+        /* a slot node's own material takes its parameters from the slot
+         * node (a script's SetShaderParameter on MegaSlotNode's material) */
+        const CanvasItem* owner = m ? (const CanvasItem*)slot_nodes_[(size_t)si] : (const CanvasItem*)this;
         if (!m) m = slot_material[bm];
         if (m && m->kind == Resource::RES_SHADER_MATERIAL) {
             /* A shader: drawn with it (its render_mode's blend), or not at
              * all when it is not ported (as the tree does). */
-            if (!shader_begin(c, m, this)) {
+            if (!shader_begin(c, m, owner)) {
                 clipper_.end_slot(si);
                 continue;
             }

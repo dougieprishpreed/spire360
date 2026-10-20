@@ -357,6 +357,18 @@ static bool read_timeline(SpReader& r, SpTimeline& tl, std::vector<std::string>&
         tl.target = r.i32();
         r.floats(tl.keys);
         break;
+    case SPT_EVENT: {
+        r.i32();
+        r.floats(tl.keys);
+        u32 n = r.count(13);
+        for (u32 i = 0; i < n && !r.bad(); ++i) {
+            tl.names.push_back(r.str());
+            tl.ints.push_back(r.i32());
+            tl.fvals.push_back(r.f32());
+            tl.strs.push_back(r.str());
+        }
+        break;
+    }
     default:
         return false;
     }
@@ -380,7 +392,8 @@ bool SpSkeletonData::load(const u8* data, size_t size, const SpAtlas* atl, std::
         return false;
     }
     SpReader r(data + 4, size - 4);
-    if (r.u32v() != 1) {
+    u32 version = r.u32v(); /* 2: the animations' event timelines kept */
+    if (version != 1 && version != 2) {
         if (error) *error = "spine skeleton: unknown version";
         return false;
     }

@@ -704,6 +704,28 @@ def cmd_audio(a):
                 writer.add(p, s3p.TYPE_AUDIO, bank_audio.stream_payload(main))
 
 
+def cmd_respine(a):
+    """A copy of a built pack with its Spine skeletons converted again from
+    the game (after a change to the skeleton form): every other entry is
+    copied as it is."""
+    src = open_source(a.pack)
+    res = resources.Resources(src)
+    old = s3p.Reader(a.pack_in)
+    names = sorted(old.entries, key=lambda n: old.entries[n][1])  # payload order
+    redone = 0
+    with s3p.Writer(a.pack_out, old.game_version, old.flags) as w:
+        for n in names:
+            h, off, size, t, fl, crc = old.entries[n]
+            data = old.read(n)
+            if t == s3p.TYPE_SPINE and not n.endswith(".atlas"):
+                doc = spinefmt.engine_skeleton(spinefmt.read_skeleton(src.read(res.resolve(n))))
+                data = spinefmt.engine_binary(doc)
+                redone += 1
+            w.add(n, t, data, fl)
+    old.close()
+    print(f"{len(names)} entries, {redone} skeletons converted again -> {a.pack_out}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -738,10 +760,15 @@ def main():
     audio_parser.add_argument('pack')
     audio_parser.add_argument('out')
     audio_parser.add_argument('--vgmstream')
+    rs = sub.add_parser("respine", help="copy a built pack with its Spine skeletons converted again")
+    rs.add_argument("pack")
+    rs.add_argument("pack_in")
+    rs.add_argument("pack_out")
     sub.add_parser("fetch-godot")
     a = ap.parse_args()
     try:
         {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build, "audio": cmd_audio,
+         "respine": cmd_respine,
          "fetch-godot": lambda _a: print(f"godot: {fontconv.fetch_godot()}")}[a.cmd](a)
     except KeyboardInterrupt:
         sys.exit(1)

@@ -375,6 +375,42 @@ SpAnimationState::Track& SpAnimationState::track(int i) {
     return tracks_[i];
 }
 
+/* The event keys of anim in (from, to], seconds into it; from < 0: from the
+ * start, keys at 0 included. Looping: across the wraps. */
+static void fire_events(std::vector<SpFired>& out, int track, const SpAnimation* anim, float from, float to, bool loop) {
+    if (!anim || to <= from) return;
+    float d = anim->duration;
+    for (size_t i = 0; i < anim->timelines.size(); ++i) {
+        const SpTimeline& tl = anim->timelines[i];
+        if (tl.type != SPT_EVENT) continue;
+        for (int k = 0; k < tl.key_count(); ++k) {
+            float kt = tl.time(k);
+            bool hit = false;
+            if (!loop || d <= 0) {
+                hit = kt > from && kt <= to && kt <= d;
+                if (from < 0 && kt == 0) hit = true;
+            } else {
+                /* every pass of the loop between from and to */
+                float base = from < 0 ? 0 : floorf(from / d) * d;
+                for (float c = base; c <= to && !hit; c += d) {
+                    float at = c + kt;
+                    if ((at > from || (from < 0 && at == 0)) && at <= to) hit = true;
+                }
+            }
+            if (!hit) continue;
+            SpFired f;
+            f.start = false;
+            f.track = track;
+            f.anim = anim;
+            f.name = k < (int)tl.names.size() ? tl.names[(size_t)k] : std::string();
+            f.ival = k < (int)tl.ints.size() ? tl.ints[(size_t)k] : 0;
+            f.fval = k < (int)tl.fvals.size() ? tl.fvals[(size_t)k] : 0;
+            f.sval = k < (int)tl.strs.size() ? tl.strs[(size_t)k] : std::string();
+            out.push_back(f);
+        }
+    }
+}
+
 void SpAnimationState::start(Track& t, const Entry& e) {
     if (t.has_cur && t.cur.anim && default_mix > 0) {
         t.from = t.cur;
@@ -383,6 +419,15 @@ void SpAnimationState::start(Track& t, const Entry& e) {
         t.has_from = false;
     }
     t.cur = e;
+    if (e.anim) {
+        SpFired f;
+        f.start = true;
+        f.track = (int)(&t - &tracks_[0]);
+        f.anim = e.anim;
+        f.ival = 0;
+        f.fval = 0;
+        fired.push_back(f);
+    }
     t.cur.mix_time = 0;
     t.cur.mix_duration = t.has_from ? default_mix : 0;
     t.has_cur = true;
@@ -445,7 +490,10 @@ void SpAnimationState::update(float dt) {
             d = -t.cur.delay;
             t.cur.delay = 0;
         }
+        float before = t.cur.events_from_start ? -1.0f : t.cur.time;
+        t.cur.events_from_start = false;
         t.cur.time += d * t.cur.time_scale;
+        fire_events(fired, (int)i, t.cur.anim, before, t.cur.time, t.cur.loop);
         if (t.has_from) {
             t.from.time += d * t.from.time_scale;
             t.cur.mix_time += d;
@@ -463,6 +511,9 @@ void SpAnimationState::update(float dt) {
                 continue;
             }
             start(t, next);
+            /* its keys from the start to where it begins */
+            fire_events(fired, (int)i, t.cur.anim, -1.0f, t.cur.time, t.cur.loop);
+            t.cur.events_from_start = false;
         }
     }
 }

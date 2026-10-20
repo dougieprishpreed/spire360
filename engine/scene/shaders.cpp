@@ -55,6 +55,12 @@ Resource* shader_param_resource(const MaterialRes* m, const char* name) {
 float shader_param(const MaterialRes* m, const char* name, float fallback) { return param(m, name, fallback); }
 
 Vec2 shader_param_vec2(const MaterialRes* m, const char* name, const Vec2& fallback) {
+    /* the item's "<name>.x" / "<name>.y" (a script's SetShaderParameter) */
+    if (g_item) {
+        std::map<std::string, float>::const_iterator x = g_item->shader_params.find(std::string(name) + ".x");
+        std::map<std::string, float>::const_iterator y = g_item->shader_params.find(std::string(name) + ".y");
+        if (x != g_item->shader_params.end() && y != g_item->shader_params.end()) return Vec2(x->second, y->second);
+    }
     if (!m || !m->props) return fallback;
     std::string k = std::string("shader_parameter/") + name;
     if (!m->props->has(k.c_str())) return fallback;

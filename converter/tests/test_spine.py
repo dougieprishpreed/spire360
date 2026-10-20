@@ -152,7 +152,7 @@ class SpineReader(unittest.TestCase):
         self.assertEqual(b[:4], b"SPB1")
         self.assertEqual(b[-4:], b"END1")
         # header: version, x, y, width, height, reference scale, bone count
-        self.assertEqual(struct.unpack_from(">I5fI", b, 4), (1, 0.0, 0.0, 100.0, 200.0, 100.0, 3))
+        self.assertEqual(struct.unpack_from(">I5fI", b, 4), (2, 0.0, 0.0, 100.0, 200.0, 100.0, 3))
 
     def test_atlas(self):
         text = ("page.png\nsize:64,32\nfilter:Linear,Linear\nscale:0.5\n"

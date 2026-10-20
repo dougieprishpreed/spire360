@@ -762,7 +762,9 @@ def engine_skeleton(sk):
         if an["events"]:
             times = [f["time"] for f in an["events"]]
             last(times)
-            tls.append({"type": "event", "times": times, "events": an["events"]})
+            # each key's event by name, with its int / float / string values
+            tls.append({"type": "event", "times": times,
+                        "events": [dict(f, name=sk["events"][f["event"]]["name"]) for f in an["events"]]})
         for t in an["ik"]:
             last([f["time"] for f in t["frames"]])
             tls.append(dict(t, type="ik"))
@@ -947,6 +949,11 @@ def _timeline(w, t):
             flags.append((1 if f["compress"] else 0) | (2 if f["stretch"] else 0))
         w.floats(flat); w.ints(bend); w.ints(flags)
         w.curves([1 if f.get("curve") == "stepped" else (f.get("curve") or 0) for f in fr[:-1]], 2)
+    elif typ == "event":
+        w.i32(0); w.floats(t["times"])
+        w.u32(len(t["events"]))
+        for f in t["events"]:
+            w.str(f["name"]); w.i32(f["int"]); w.f32(f["float"]); w.str(f["string"] or "")
     elif typ.startswith("physics_"):
         w.i32(t["constraint"])
         if typ == "physics_reset":
@@ -961,7 +968,7 @@ def engine_binary(e):
     """The engine form (engine_skeleton()) as the pack's binary skeleton."""
     w = _W()
     w.b += BIN_MAGIC
-    w.u32(1)
+    w.u32(2)  # 2: animations keep their event timelines
     w.f32(e["x"], e["y"], e["width"], e["height"], e.get("reference_scale", 100.0))
     w.u32(len(e["bones"]))
     for b in e["bones"]:
@@ -1015,7 +1022,7 @@ def engine_binary(e):
             _attachment(w, a)
     w.u32(len(e["animations"]))
     for an in e["animations"]:
-        tls = [t for t in an["timelines"] if t["type"] != "event"]
+        tls = an["timelines"]
         w.str(an["name"]); w.f32(an["duration"]); w.u32(len(tls))
         for t in tls:
             _timeline(w, t)
