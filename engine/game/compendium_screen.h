@@ -15,6 +15,8 @@
 namespace spire {
 
 class CardLibraryScreen;
+class CollectionScreen;
+class StatsScreen;
 class Control;
 class SceneLibrary;
 
@@ -44,6 +46,8 @@ private:
     std::vector<Button> buttons_;
     int focus_;
     CardLibraryScreen* library_;
+    CollectionScreen* collection_;
+    StatsScreen* stats_;
     Node* sub_node_;
     TweenSet tweens_;
 };

@@ -126,7 +126,11 @@ public partial class RunDriver
             if (r is RelicReward rr && rr.ClaimedRelic == null)
             {
                 var relic = RewardRelic(rr);
-                if (relic != null) d["relic_id"] = relic.Id.Entry;
+                if (relic != null)
+                {
+                    d["relic_id"] = relic.Id.Entry;
+                    d["relic_icon_base"] = RelicIconBase(relic);
+                }
             }
             return d;
         }).ToList();

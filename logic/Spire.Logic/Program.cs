@@ -69,6 +69,7 @@ internal static class Program
             }
             catch (Exception ex)
             {
+                Console.Error.WriteLine("[ERROR] " + ex);
                 result = new Dictionary<string, object?> { ["type"] = "error", ["message"] = $"{ex.GetType().Name}: {ex.Message}" };
             }
 
@@ -124,6 +125,11 @@ internal static class Program
                 "view_pile" => driver.ViewPile(Protocol.Str(cmd.Value, "pile", "deck")!),
                 "view_map" => driver.ViewMap(),
                 "settings" => driver.Settings(),
+                "library" => driver.Library(Protocol.Str(cmd.Value, "pool", "ironclad")!),
+                "relic_collection" => driver.RelicCollection(),
+                "potion_lab" => driver.PotionLab(),
+                "statistics" => driver.Statistics(),
+                "run_history" => driver.RunHistoryView(cmd.Value.TryGetProperty("index", out var nestedRunIndex) ? nestedRunIndex.GetInt32() : 0),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
                 {
@@ -237,6 +243,18 @@ internal static class Program
 
             case "library":
                 return sim.Library(Protocol.Str(cmd, "pool", "ironclad")!);
+
+            case "relic_collection":
+                return sim.RelicCollection();
+
+            case "potion_lab":
+                return sim.PotionLab();
+
+            case "statistics":
+                return sim.Statistics();
+
+            case "run_history":
+                return sim.RunHistoryView(cmd.TryGetProperty("index", out var runIndex) ? runIndex.GetInt32() : 0);
 
             case "set_setting":
                 return cmd.TryGetProperty("value", out var settingValue)

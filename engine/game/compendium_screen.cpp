@@ -3,6 +3,8 @@
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "card_library_screen.h"
+#include "collection_screen.h"
+#include "stats_screen.h"
 #include "loc.h"
 
 #include <string.h>
@@ -12,11 +14,13 @@ namespace spire {
 static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
 CompendiumScreen::CompendiumScreen(SceneLibrary* lib)
-    : lib_(lib), root_(NULL), focus_(0), library_(NULL), sub_node_(NULL) {}
+    : lib_(lib), root_(NULL), focus_(0), library_(NULL), collection_(NULL), stats_(NULL), sub_node_(NULL) {}
 
 CompendiumScreen::~CompendiumScreen() { close_sub(); }
 
-bool CompendiumScreen::is_answer(const std::string& type) { return type == "library"; }
+bool CompendiumScreen::is_answer(const std::string& type) {
+    return type == "library" || CollectionScreen::is_answer(type) || StatsScreen::is_answer(type);
+}
 
 Node* CompendiumScreen::build(const std::string& character, std::string* error) {
     Node* screen = instance(lib_, "scenes/screens/compendium_submenu.tscn");
@@ -41,12 +45,12 @@ Node* CompendiumScreen::build(const std::string& character, std::string* error) 
         const char* key;
         bool shown;
     } all[] = { { "CardLibraryButton", "COMPENDIUM_CARD_LIBRARY", "library", true },
-                { "RelicCollectionButton", "COMPENDIUM_RELIC_COLLECTION", "relics", false },
-                { "PotionLabButton", "COMPENDIUM_POTION_LAB", "potions", false },
+                { "RelicCollectionButton", "COMPENDIUM_RELIC_COLLECTION", "relics", true },
+                { "PotionLabButton", "COMPENDIUM_POTION_LAB", "potions", true },
                 { "BestiaryButton", "COMPENDIUM_BESTIARY", "bestiary", false },
                 { "LeaderboardsButton", "LEADERBOARDS", "", false },
                 { "AchievementsButton", "ACHIEVEMENTS", "", false },
-                { "StatisticsButton", "STATISTICS", "stats", false },
+                { "StatisticsButton", "STATISTICS", "stats", true },
                 { "RunHistoryButton", "RUN_HISTORY", "history", false } };
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
         Control* b = control_of(screen->find_unique(all[i].node));
@@ -94,16 +98,30 @@ void CompendiumScreen::close_sub() {
     }
     delete library_;
     library_ = NULL;
+    delete collection_;
+    collection_ = NULL;
+    delete stats_;
+    stats_ = NULL;
 }
 
 void CompendiumScreen::set_answer(const Json& msg) {
     if (library_ && msg["type"].str() == "library") library_->set_cards(msg);
+    if (collection_ && CollectionScreen::is_answer(msg["type"].str())) collection_->set_data(msg);
+    if (stats_ && StatsScreen::is_answer(msg["type"].str())) stats_->set_data(msg);
 }
 
 CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::string* cmd) {
     cmd->clear();
     if (library_) {
         if (library_->input(pad, cmd) == CardLibraryScreen::BACK) close_sub();
+        return NONE;
+    }
+    if (collection_) {
+        if (collection_->input(pad, cmd) == CollectionScreen::BACK) close_sub();
+        return NONE;
+    }
+    if (stats_) {
+        if (stats_->input(pad, cmd) == StatsScreen::BACK) close_sub();
         return NONE;
     }
     if (pad.pressed & PadState::B) return BACK;
@@ -121,6 +139,26 @@ CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::strin
             } else {
                 delete library_;
                 library_ = NULL;
+            }
+        } else if (strcmp(key, "relics") == 0 || strcmp(key, "potions") == 0) {
+            collection_ = new CollectionScreen(lib_, strcmp(key, "relics") == 0 ? CollectionScreen::RELICS : CollectionScreen::POTIONS);
+            sub_node_ = collection_->build(&err);
+            if (sub_node_) {
+                root_->add_child(sub_node_);
+                *cmd = collection_->query();
+            } else {
+                delete collection_;
+                collection_ = NULL;
+            }
+        } else if (strcmp(key, "stats") == 0) {
+            stats_ = new StatsScreen(lib_);
+            sub_node_ = stats_->build(&err);
+            if (sub_node_) {
+                root_->add_child(sub_node_);
+                *cmd = StatsScreen::query();
+            } else {
+                delete stats_;
+                stats_ = NULL;
             }
         }
     }

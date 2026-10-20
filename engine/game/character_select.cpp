@@ -1,4 +1,5 @@
 #include "character_select.h"
+#include "top_bar.h"
 #include "../audio/game_audio.h"
 #include "loc.h"
 
@@ -208,7 +209,7 @@ void CharacterSelectScreen::refresh_info() {
     Control* outline = as_control(icon ? icon->get_node("Outline") : NULL);
     const Json& r = d ? (*d)["relic"] : Json();
     if (!random && r.is_object()) {
-        std::string rid = lower(r["id"].str());
+        std::string rid = lower(relic_icon_base(r));
         set_texture(lib_, icon, "images/atlases/relic_atlas.sprites/" + rid + ".tres");
         set_texture(lib_, outline, "images/atlases/relic_outline_atlas.sprites/" + rid + ".tres");
         if (icon) icon->self_modulate = Color(1, 1, 1, 1);

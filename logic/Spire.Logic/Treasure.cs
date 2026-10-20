@@ -45,6 +45,7 @@ public partial class RunDriver
                     {
                         ["index"] = i,
                         ["id"] = r.Id.Entry,
+                        ["icon_base"] = RelicIconBase(r),
                         ["title"] = SafeText(() => r.Title.GetFormattedText()),
                         ["description"] = SafeText(() => r.DynamicDescription.GetFormattedText()),
                         ["rarity"] = r.Rarity.ToString(),

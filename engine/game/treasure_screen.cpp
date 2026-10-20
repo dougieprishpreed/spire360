@@ -54,7 +54,7 @@ void TreasureScreen::show_relic(const Json& relic, bool animate) {
     holder_->visible = true;
     relic_ = as_control(holder_->find_unique("Relic"));
     if (!relic_) return;
-    set_relic_icon(lib_, relic_->find_unique("Icon"), relic["id"].str());
+    set_relic_icon(lib_, relic_->find_unique("Icon"), relic_icon_base(relic));
     const std::string& rarity = relic["rarity"].str();
     Node* glow = NULL;
     if (rarity == "Rare") glow = holder_->find_unique("RareGlow");

@@ -2795,6 +2795,7 @@ public partial class RunDriver
                     ["vars"] = optVars?.Count > 0 ? optVars : null,
                     ["text_bbcode"] = textBbcode,
                     ["relic"] = opt.Relic?.Id.Entry.ToLowerInvariant(),
+                    ["relic_icon_base"] = RelicIconBase(opt.Relic),
                     ["will_kill"] = willKill,
                 };
             }).ToList();
@@ -3024,6 +3025,7 @@ public partial class RunDriver
         {
             ["index"] = i,
             ["id"] = e.Model?.Id.Entry,
+            ["icon_base"] = RelicIconBase(e.Model),
             ["name"] = _loc.Relic(e.Model?.Id.Entry ?? "?"),
             ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
@@ -3235,6 +3237,7 @@ public partial class RunDriver
                 return new Dictionary<string, object?>
                 {
                     ["id"] = r.Id.Entry,
+                    ["icon_base"] = RelicIconBase(r),
                     ["name"] = _loc.Relic(r.Id.Entry),
                     ["description"] = _loc.Bilingual("relics", r.Id.Entry + ".description"),
                     ["vars"] = vars.Count > 0 ? vars : null,

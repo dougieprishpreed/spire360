@@ -107,7 +107,7 @@ void ShopScreen::fill_slots(Node* inv, const Json& d) {
             if (k == 0) {
                 /* NRelic.Create (the small icon), in the 2x holder. */
                 icon = instance(lib_, "scenes/relics/relic.tscn");
-                if (icon) set_relic_icon(lib_, icon->find_unique("Icon"), id);
+                if (icon) set_relic_icon(lib_, icon->find_unique("Icon"), relic_icon_base(items[i]));
             } else {
                 icon = make_potion(lib_, id);
             }

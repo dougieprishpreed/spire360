@@ -59,6 +59,7 @@ public partial class RunDriver
                 screen["relics"] = args.OfType<IEnumerable<RelicModel>>().FirstOrDefault()?.Select(r => new Dictionary<string, object?>
                 {
                     ["id"] = r.Id.Entry,
+                    ["icon_base"] = RelicIconBase(r),
                     ["name"] = Text(() => r.Title.GetFormattedText()),
                     ["description"] = Text(() => r.DynamicDescription.GetFormattedText()),
                     ["rarity"] = r.Rarity.ToString(),

@@ -26,6 +26,9 @@ Node* make_potion(SceneLibrary* lib, const std::string& potion_id);
 /* A relic's atlas icon and outline on relic.tscn's %Icon (or any
  * TextureRect with an %Outline child). */
 void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id);
+/* A relic's icon name from the logic's relic: its icon_key ("icon_base":
+ * RelicModel.IconBaseName), else its id. */
+std::string relic_icon_base(const Json& relic, const char* icon_key = "icon_base", const char* id_key = "id");
 
 } /* namespace spire */
 

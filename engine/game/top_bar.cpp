@@ -125,6 +125,10 @@ Node* make_potion(SceneLibrary* lib, const std::string& potion_id) {
     return p;
 }
 
+std::string relic_icon_base(const Json& relic, const char* icon_key, const char* id_key) {
+    return relic[icon_key].is_string() ? relic[icon_key].str() : relic[id_key].str();
+}
+
 void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id) {
     std::string id = lower(relic_id);
     set_texture(lib, icon, "images/atlases/relic_atlas.sprites/" + id + ".tres");
@@ -217,7 +221,7 @@ static Node* make_relics(SceneLibrary* lib, const Json& player) {
             break;
         }
         ((Control*)r)->custom_minimum_size = Vec2(68, 68);
-        set_relic_icon(lib, r->find_unique("Icon"), relics[i]["id"].str());
+        set_relic_icon(lib, r->find_unique("Icon"), relic_icon_base(relics[i]));
         row->add_child(r);
     }
     return row;

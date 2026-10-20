@@ -65,8 +65,12 @@ Control* full_rect_control(const char* name);
  * card's centre). The tips are nodes of the screen's tree. */
 class TipFollower {
 public:
-    TipFollower() : tips_(NULL), owner_(NULL) {}
+    TipFollower() : tips_(NULL), owner_(NULL), card_(true), extra_(0) {}
     void show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips);
+    /* NHoverTipSet.CreateAndShow(owner, tips, GetHoverTipAlignment(owner))
+     * with SetFollowOwner: right of the owner, or left of it past 3/4 of
+     * the screen; extra_x: SetExtraFollowOffset's x. */
+    void show_for_control(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips, float extra_x = 0);
     void hide();
     /* Each frame (after the layout). */
     void frame();
@@ -74,6 +78,8 @@ public:
 private:
     Control* tips_;
     Control* owner_;
+    bool card_;
+    float extra_;
 };
 
 /* Something run each frame by the scene tree (a screen's animations). */

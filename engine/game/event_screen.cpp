@@ -1,4 +1,5 @@
 #include "event_screen.h"
+#include "top_bar.h"
 #include "combat_screen.h"
 
 #include "../scene/controls.h"
@@ -194,7 +195,7 @@ void EventScreen::add_option(Node* box, const Json& o, int i, bool ancient) {
     if (ancient && o["relic"].is_string()) {
         /* The relic an ancient's option gives. */
         Node* icon = n->find_unique("RelicIcon");
-        std::string id = o["relic"].str();
+        std::string id = lower(relic_icon_base(o, "relic_icon_base", "relic"));
         set_texture(lib_, icon, "images/atlases/relic_atlas.sprites/" + id + ".tres");
         if (icon) set_texture(lib_, icon->find_unique("Outline"), "images/atlases/relic_outline_atlas.sprites/" + id + ".tres");
         set_visible(icon, true);

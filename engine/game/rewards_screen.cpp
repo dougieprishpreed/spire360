@@ -36,9 +36,11 @@ Node* RewardsScreen::make_icon(const Json& r) {
     t->expand_mode = TextureRect::EXPAND_IGNORE_SIZE;
     t->mouse_filter = 2;
     if (type == "relic" && r["relic_id"].is_string()) {
-        /* RelicModel.BigIcon; the atlas sprite if the pack lacks it. */
-        std::string id = lower(r["relic_id"].str());
+        /* RelicModel.BigIcon (ResolvedBigIconPath: the image, else its
+         * beta image); the atlas sprite if the pack lacks both. */
+        std::string id = lower(relic_icon_base(r, "relic_icon_base", "relic_id"));
         Resource* big = lib_->ext("images/relics/" + id + ".png");
+        if (!big || !big->is_texture()) big = lib_->ext("images/relics/beta/" + id + ".png");
         if (big && big->is_texture()) t->texture = (Texture2DRes*)big;
         else set_texture(lib_, t, "images/atlases/relic_atlas.sprites/" + id + ".tres");
     } else if (r["icon"].is_string()) {

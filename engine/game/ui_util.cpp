@@ -80,6 +80,20 @@ void TipFollower::show_for_card(SceneLibrary* lib, Node* parent, Control* holder
     tips_ = make_tip_set(lib, tips);
     if (!tips_) return;
     owner_ = holder;
+    card_ = true;
+    tips_->z_index = 10;
+    tips_->modulate.a = 0; /* placed on the next frame, after the layout */
+    parent->add_child(tips_);
+}
+
+void TipFollower::show_for_control(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips, float extra_x) {
+    hide();
+    if (!parent || !owner) return;
+    tips_ = make_tip_set(lib, tips);
+    if (!tips_) return;
+    owner_ = owner;
+    card_ = false;
+    extra_ = extra_x;
     tips_->z_index = 10;
     tips_->modulate.a = 0; /* placed on the next frame, after the layout */
     parent->add_child(tips_);
@@ -100,6 +114,16 @@ void TipFollower::frame() {
     float s = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
     Vec2 c = xf.origin;
     float w = tips_->size.x, h = tips_->size.y;
+    if (!card_) {
+        /* SetAlignment, then CorrectVerticalOverflow */
+        float x = c.x > 1920.0f * 0.75f ? c.x - w : c.x + owner_->size.x * s;
+        float y = c.y;
+        if (y + h > 1080.0f) y = 1080.0f - h;
+        if (y < 0) y = 0;
+        tips_->set_position(Vec2(x + extra_, y));
+        tips_->modulate.a = 1;
+        return;
+    }
     /* The card: 300 x 422 about the holder's origin. */
     float x = c.x + 150.0f * s + 10.0f;
     if (c.x > 1920.0f * 0.75f || x + w > 1920.0f) x = c.x - 150.0f * s - 10.0f - w;

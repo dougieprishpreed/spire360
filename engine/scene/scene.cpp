@@ -469,7 +469,7 @@ static bool is_native(const std::string& type) {
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
            type == "RichTextLabel" || type == "Sprite2D" || type == "MeshInstance2D" || type == "SubViewport" || type == "SubViewportContainer" || type == "AnimatedSprite2D" || type == "CanvasGroup" || type == "Line2D" ||
            type == "Node" || type == "Node2D" ||
-           type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
+           type == "Container" || type == "BoxContainer" || type == "Range" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
            type == "GPUParticles2D" || type == "AnimationPlayer" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||
            type == "Control";
 }

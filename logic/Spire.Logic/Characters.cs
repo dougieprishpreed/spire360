@@ -31,6 +31,7 @@ public partial class RunDriver
                     d["relic"] = new Dictionary<string, object?>
                     {
                         ["id"] = relic.Id.Entry,
+                        ["icon_base"] = RelicIconBase(relic),
                         ["title"] = Text(() => relic.Title.GetFormattedText()),
                         ["description"] = Text(() => relic.DynamicDescription.GetFormattedText()),
                     };

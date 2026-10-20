@@ -1,4 +1,5 @@
 #include "timeline_screen.h"
+#include "top_bar.h"
 #include "../audio/game_audio.h"
 #include "card_view.h"
 #include "loc.h"
@@ -573,7 +574,7 @@ void TimelineScreen::next_unlock() {
             } else {
                 TextureRect* t = new TextureRect();
                 t->name = "Icon";
-                std::string id = lower(items[i]["id"].str());
+                std::string id = lower(kind == "relics" ? relic_icon_base(items[i]) : items[i]["id"].str());
                 set_texture(lib_, t, kind == "relics" ? "images/atlases/relic_atlas.sprites/" + id + ".tres"
                                                      : "images/atlases/potion_atlas.sprites/" + id + ".tres");
                 place(t, -64, -64, 128, 128);

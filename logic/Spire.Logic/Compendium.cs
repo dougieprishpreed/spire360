@@ -2,7 +2,13 @@
 // change nothing. The card library's cards come one pool at a time, as the
 // screen shows them (NCardLibrary selects one pool filter at a time).
 
+using System.Globalization;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Potions;
+using MegaCrit.Sts2.Core.Entities.Relics;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Localization;
+using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.Characters;
@@ -98,5 +104,174 @@ public partial class RunDriver
             ["characters"] = characters,
             ["character"] = _runState?.Players[0]?.Character?.Id.Entry.ToLowerInvariant(),
         };
+    }
+
+    // LocManager.StringComparer when the game's localisation is up.
+    private static StringComparer TitleComparer()
+    {
+        try { if (LocManager.Instance?.StringComparer != null) return LocManager.Instance.StringComparer; } catch { }
+        return StringComparer.Create(CultureInfo.GetCultureInfo("en-US"), false);
+    }
+
+    private static float[] OutlineColor(Godot.Color c) => new[] { c.R, c.G, c.B, 0.66f };
+
+    /// <summary>A relic's icon name (RelicModel.IconBaseName, which some
+    /// relics change: LoomingFruit, YummyCookie): its atlas sprite's.</summary>
+    internal static string? RelicIconBase(RelicModel? r)
+    {
+        if (r == null) return null;
+        try { return System.IO.Path.GetFileNameWithoutExtension(r.PackedIconPath); }
+        catch { return r.Id.Entry.ToLowerInvariant(); }
+    }
+
+    private Dictionary<string, object?> CollectionEntry(string id, string visibility, float[]? outline, string table,
+        Func<IEnumerable<MegaCrit.Sts2.Core.HoverTips.IHoverTip>> tips) => new Dictionary<string, object?>
+    {
+        ["id"] = id,
+        ["visibility"] = visibility,
+        ["outline"] = visibility == "visible" ? outline : null,
+        ["tips"] = visibility == "visible" ? Tips(tips) : new List<Dictionary<string, object?>>
+        {
+            new Dictionary<string, object?>
+            {
+                ["title"] = _loc.Bilingual("main_menu_ui", table + "." + (visibility == "locked" ? "locked" : "unknown") + ".title"),
+                ["description"] = _loc.Bilingual("main_menu_ui", table + "." + (visibility == "locked" ? "locked" : "unknown") + ".description"),
+            },
+        },
+    };
+
+    private Dictionary<string, object?> RelicEntry(RelicModel relic, HashSet<RelicModel> seen, HashSet<RelicModel> unlocked)
+    {
+        // NRelicCollectionCategory.LoadRelicNodes, NRelicCollectionEntry._Ready
+        string visibility = !unlocked.Contains(relic) ? "locked" : seen.Contains(relic) ? "visible" : "not_seen";
+        float[]? outline = null;
+        foreach (var pool in ModelDb.AllCharacterRelicPools)
+            if (pool.AllRelicIds.Contains(relic.Id)) { outline = OutlineColor(pool.LabOutlineColor); break; }
+        var d = CollectionEntry(relic.Id.Entry, visibility, outline, "COMPENDIUM_RELIC_COLLECTION", () => relic.ToMutable().HoverTips);
+        d["icon_base"] = RelicIconBase(relic);
+        return d;
+    }
+
+    private static Dictionary<string, object?> CollectionGroup(string? header, string? icon, bool showHeader, bool spacer,
+        List<Dictionary<string, object?>> items) => new Dictionary<string, object?>
+    {
+        ["header"] = header,
+        ["icon"] = icon,
+        ["show_header"] = showHeader,
+        ["spacer"] = spacer,
+        ["items"] = items,
+    };
+
+    /// <summary>NRelicCollection.LoadRelics: each category's header and its
+    /// relics (or, for Starter and Ancient, its subcategories).</summary>
+    public Dictionary<string, object?> RelicCollection()
+    {
+        EnsureModelDbInitialized();
+        var progress = SaveManager.Instance.Progress;
+        var seen = (progress?.DiscoveredRelics ?? Enumerable.Empty<ModelId>()).Select(ModelDb.GetByIdOrNull<RelicModel>).OfType<RelicModel>().ToHashSet();
+        var unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
+        var unlocked = unlockState.Relics.ToHashSet();
+        var cmp = TitleComparer();
+        var categories = new List<Dictionary<string, object?>>();
+        var rarities = new[] { (RelicRarity.Starter, "Starter", "STARTER"), (RelicRarity.Common, "Common", "COMMON"),
+            (RelicRarity.Uncommon, "Uncommon", "UNCOMMON"), (RelicRarity.Rare, "Rare", "RARE"), (RelicRarity.Shop, "Shop", "SHOP"),
+            (RelicRarity.Ancient, "Ancient", "ANCIENT"), (RelicRarity.Event, "Event", "EVENT") };
+        foreach (var (rarity, node, key) in rarities)
+        {
+            var ofRarity = ModelDb.AllRelics.Where(r => r.Rarity == rarity).ToList();
+            var groups = new List<Dictionary<string, object?>>();
+            List<Dictionary<string, object?>>? items = null;
+            if (rarity == RelicRarity.Starter)
+            {
+                var starters = ModelDb.AllCharacters.SelectMany(c => c.StartingRelics).ToList();
+                groups.Add(CollectionGroup(null, null, false, false, starters.Select(r => RelicEntry(r, seen, unlocked)).ToList()));
+                var orobas = ModelDb.Relic<TouchOfOrobas>();
+                groups.Add(CollectionGroup(null, null, false, true,
+                    starters.Select(r => RelicEntry(orobas.GetUpgradedStarterRelic(r), seen, unlocked)).ToList()));
+            }
+            else if (rarity == RelicRarity.Ancient)
+            {
+                var acts = ModelDb.Acts.ToList();
+                var all = acts.SelectMany(a => a.AllAncients).Concat(ModelDb.AllSharedAncients).Distinct().ToList();
+                var unlockedAncients = acts.SelectMany(a => a.GetUnlockedAncients(unlockState)).Concat(unlockState.SharedAncients).Distinct().ToHashSet();
+                var stats = progress?.AncientStats;
+                foreach (var ancient in all)
+                {
+                    if (!unlockedAncients.Contains(ancient)) continue;
+                    var relics = ancient.AllPossibleOptions.Select(o => o.Relic?.CanonicalInstance).OfType<RelicModel>()
+                        .Intersect(ofRarity).OrderBy(r => _loc.Relic(r.Id.Entry), cmp).ToList();
+                    bool known = (stats?.ContainsKey(ancient.Id) ?? false) || relics.Any(seen.Contains);
+                    string name = known ? _loc.Event(ancient.Id.Entry) : _loc.Bilingual("relic_collection", "UNKNOWN_ANCIENT");
+                    string header = (_loc.Rich("relic_collection", "ANCIENT_SUBCATEGORY") ?? "{Ancient}").Replace("{Ancient}", name);
+                    string? icon = ImageHelper.GetRoomIconPath(MegaCrit.Sts2.Core.Map.MapPointType.Ancient,
+                        MegaCrit.Sts2.Core.Rooms.RoomType.Event, ancient.Id);
+                    if (icon != null && icon.StartsWith("res://")) icon = icon.Substring(6);
+                    groups.Add(CollectionGroup(header, icon, true, true, relics.Select(r => RelicEntry(r, seen, unlocked)).ToList()));
+                }
+            }
+            else
+            {
+                var pooled = new List<RelicModel>();
+                foreach (var pool in ModelDb.AllCharacterRelicPools)
+                    foreach (var r in ofRarity)
+                        if (pool.AllRelicIds.Contains(r.Id)) pooled.Add(r);
+                var shared = ofRarity.Where(r => !pooled.Contains(r)).ToList();
+                shared.Sort((a, b) => cmp.Compare(_loc.Relic(a.Id.Entry), _loc.Relic(b.Id.Entry)));
+                items = shared.Concat(pooled).Select(r => RelicEntry(r, seen, unlocked)).ToList();
+            }
+            categories.Add(new Dictionary<string, object?>
+            {
+                ["node"] = node,
+                ["header"] = _loc.Rich("relic_collection", key) ?? key,
+                ["items"] = items,
+                ["groups"] = groups.Count > 0 ? groups : null,
+            });
+        }
+        return new Dictionary<string, object?> { ["type"] = "relic_collection", ["categories"] = categories };
+    }
+
+    /// <summary>NPotionLab.LoadPotions: Common, Uncommon, Rare and Special
+    /// (Event and Token) potions, each category's shared potions by title,
+    /// then the characters'.</summary>
+    public Dictionary<string, object?> PotionLab()
+    {
+        EnsureModelDbInitialized();
+        var unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
+        var unlocked = unlockState.Potions.ToHashSet();
+        var seen = (SaveManager.Instance.Progress?.DiscoveredPotions ?? Enumerable.Empty<ModelId>())
+            .Select(ModelDb.GetByIdOrNull<PotionModel>).OfType<PotionModel>().ToHashSet();
+        var cmp = TitleComparer();
+        var categories = new List<Dictionary<string, object?>>();
+        var rarities = new[] { (PotionRarity.Common, (PotionRarity?)null, "Common", "COMMON"),
+            (PotionRarity.Uncommon, (PotionRarity?)null, "Uncommon", "UNCOMMON"), (PotionRarity.Rare, (PotionRarity?)null, "Rare", "RARE"),
+            (PotionRarity.Event, (PotionRarity?)PotionRarity.Token, "Special", "SPECIAL") };
+        foreach (var (rarity, second, node, key) in rarities)
+        {
+            var ofRarity = ModelDb.AllPotions.Where(p => p.Rarity == rarity || p.Rarity == second).ToList();
+            var pooled = new List<PotionModel>();
+            float[]? Outline(PotionModel p)
+            {
+                foreach (var pool in ModelDb.AllCharacterPotionPools)
+                    if (pool.AllPotions.Any(x => x.Id == p.Id)) return OutlineColor(pool.LabOutlineColor);
+                return null;
+            }
+            foreach (var pool in ModelDb.AllCharacterPotionPools)
+                foreach (var p in ofRarity)
+                    if (pool.AllPotionIds.Contains(p.Id)) pooled.Add(p);
+            var shared = ofRarity.Where(p => !pooled.Contains(p)).ToList();
+            shared.Sort((a, b) => cmp.Compare(_loc.Potion(a.Id.Entry), _loc.Potion(b.Id.Entry)));
+            var items = shared.Concat(pooled).Select(p =>
+            {
+                string visibility = !unlocked.Contains(p) ? "locked" : seen.Contains(p) ? "visible" : "not_seen";
+                return CollectionEntry(p.Id.Entry, visibility, Outline(p), "POTION_LAB_COLLECTION", () => p.ToMutable().HoverTips);
+            }).ToList();
+            categories.Add(new Dictionary<string, object?>
+            {
+                ["node"] = node,
+                ["header"] = _loc.Rich("potion_lab", key) ?? key,
+                ["items"] = items,
+            });
+        }
+        return new Dictionary<string, object?> { ["type"] = "potion_lab", ["categories"] = categories };
     }
 }
