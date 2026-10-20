@@ -806,6 +806,14 @@ void D3D9Renderer::apply_state() {
         c[91] = screen_.strength;
         c[92] = screen_.noise_offset[0];
         c[93] = screen_.noise_offset[1];
+        if (screen_.mode == SCREEN_RADIAL) {
+            /* c22.yzw: count, power; c23.xy: centre */
+            c[89] = (float)(screen_.count < 1 ? 1 : (screen_.count > 16 ? 16 : screen_.count));
+            c[90] = screen_.power;
+            c[91] = 0;
+            c[92] = screen_.center[0];
+            c[93] = screen_.center[1];
+        }
     } else {
         for (DWORD stage = 9; stage < 13; ++stage) dev_->SetTexture(stage, NULL);
         for (int k = 88; k < 94; ++k) c[k] = 0.0f;

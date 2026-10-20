@@ -68,7 +68,8 @@ sampler2D g_scrA : register(s9);      // the screen copy: the level at floor(lod
 sampler2D g_scrB : register(s10);     // and the next (level passes: the level above in s9)
 sampler2D g_scrNoise : register(s11); // noise (repeats), mask (clamped); unset: white
 sampler2D g_scrMask : register(s12);
-float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass;
+float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass, 4 radial blur
+                                      // (y: count, z: power, c23.xy: centre);
                                       // y: lod fraction, z: mix, w: strength
 float4 g_scr2 : register(c23);        // xy: noise offset, zw: the level pass's texel size
 
@@ -79,6 +80,14 @@ float median3(float r, float g, float b) {
 float4 ps_main(VsOut i) : COLOR {
     [branch] if (g_scr.x > 0.5) {
         // Screen-reading shaders (ScreenParams); the vertex colour is not applied.
+        [branch] if (g_scr.x > 3.5) {
+            // radial_blur: the mean of count reads toward the centre.
+            float2 dir = i.screen - g_scr2.xy;
+            float3 acc = 0;
+            for (int r = 0; r < 16; ++r)
+                if (r < g_scr.y) acc += tex2Dlod(g_scrA, float4(i.screen - g_scr.z * dir * r, 0.0, 0.0)).rgb;
+            return float4(acc / g_scr.y, 1.0);
+        }
         [branch] if (g_scr.x > 2.5) {
             // A level of the screen copy: the 7-tap Gaussian across and down
             // of the bilinear reads of the level above (Godot's back buffer

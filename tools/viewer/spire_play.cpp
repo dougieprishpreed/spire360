@@ -4,7 +4,7 @@
  *
  *   spire_play <pack.s3p> <out_dir> --logic "dotnet out/logic/jit/Spire.Logic.dll"
  *              [--character Ironclad] [--seed S] [--steps N] [--scale S] [--auto SEED]
- *              [--pad A,RIGHT,A,Y,WAIT,...]
+ *              [--pad A,RIGHT,A,Y,WAIT,...] [--settle FRAMES]
  *
  * --pad presses those buttons one at a time while a decision is shown (the
  * screen half a second after each is saved, NNNN_pad_KK.png), then
@@ -16,6 +16,9 @@
  * time the screen has been idle a second, saving menu_KK.png after each;
  * --menu-hold N waits N extra seconds before the first press. Once the
  * buttons are used up, a run that has started plays by itself.
+ *
+ * --settle: frames each new screen runs before its shot (default 60: a
+ * second; fewer catch the effects the decision's cues start).
  *
  * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision's
  * line) per screen, and logic.log (the logic's stderr). The logic's working
@@ -172,6 +175,7 @@ int main(int argc, char** argv) {
     double menu_hold = 0;
     const char* replay = NULL;
     int steps = 40;
+    int settle = 60; /* frames before a decision's shot */
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
     std::vector<unsigned> pad_script;
@@ -188,6 +192,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--settle") == 0 && i + 1 < argc) settle = atoi(argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
@@ -358,7 +363,7 @@ int main(int argc, char** argv) {
             /* A new screen: let it settle (Godot's reference: 5th frame;
              * a second for the intro animations), then save it. */
             tree.layout();
-            for (int f = 0; f < 60; ++f) {
+            for (int f = 0; f < settle; ++f) {
                 tree.process(1.0 / 60.0);
                 audio.update(1.0 / 60.0);
                 tree.layout(1);

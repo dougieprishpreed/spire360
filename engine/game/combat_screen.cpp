@@ -45,6 +45,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     next_cue_ = 0;
     cue_t_ = 0;
     life_t_ = 0;
+    radial_off_at_ = 0;
     busy_until_ = 0;
     root_ = NULL;
     vfx_box_ = NULL;
@@ -1124,6 +1125,10 @@ void CombatScreen::process(double dt) {
      * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
     cue_t_ += dt;
     life_t_ += dt;
+    if (radial_off_at_ > 0 && life_t_ >= radial_off_at_) {
+        radial_off_at_ = 0;
+        hide(root_ ? find_named(root_, "RadialBlur") : NULL);
+    }
     for (size_t i = 0; i < orbs_.size(); ++i) {
         OrbSlot& o = orbs_[i];
         o.t += dt;
@@ -1927,6 +1932,48 @@ static Vec2 global_origin(Node* n) {
     return n && n->is_canvas_item() ? ((CanvasItem*)n)->global_transform().origin : Vec2(0, 0);
 }
 
+/* NCreature's points for the scripted effects: VfxSpawnPosition, and
+ * GetTopOfHitbox / GetBottomOfHitbox (the hitbox's top and bottom middle). */
+bool CombatScreen::creature(const std::string& who, VfxCreature* out) {
+    Creature* cr = creature_for(who);
+    if (!cr || !cr->node) return false;
+    Xform2D xf = cr->node->global_transform();
+    Rect2 h = cr->hitbox;
+    out->center = cr->center ? global_origin(cr->center) : xf.xform(h.pos + Vec2(h.size.x * 0.5f, h.size.y * 0.5f));
+    out->top = xf.xform(h.pos + Vec2(h.size.x * 0.5f, 0));
+    out->bottom = xf.xform(h.pos + Vec2(h.size.x * 0.5f, h.size.y));
+    out->enemy = !cr->player;
+    out->interactable = cr->player || cr->data["hp"].i(1) > 0;
+    out->defect = cr == &player_ && lower(player_.data["character"].str()) == "defect";
+    return true;
+}
+
+bool CombatScreen::side_center(bool enemies, Vec2* out) {
+    Cue c;
+    c.where = "side";
+    c.who = enemies ? "enemy" : "player";
+    return vfx_position(c, out);
+}
+
+/* NRadialBlurVfx.Activate: the room's RadialBlur (a BackBufferCopy whose
+ * Rect reads the screen through radial_blur) shows, its centre's x by the
+ * position (Left 0.3, Right 0.6, else 0.45), its power up to 0.005 in 0.1 s
+ * then down to 0 in 0.9 s (Cubic In); then it hides. Not while showing. */
+void CombatScreen::radial_blur(const std::string& position) {
+    Node* rb = root_ ? find_named(root_, "RadialBlur") : NULL;
+    Node* rect = rb ? rb->get_node("Rect") : NULL;
+    if (!rb || !rect || !rect->is_canvas_item() || radial_off_at_ > 0) return;
+    set_visible(rb, true);
+    CanvasItem* r = (CanvasItem*)rect;
+    r->shader_params["blur_center.x"] = position == "Left" ? 0.3f : position == "Right" ? 0.6f : 0.45f;
+    float* power = &r->shader_params["blur_power"];
+    tweens_.tween(power, 0.005f, 0.1f);
+    tweens_.tween(power, 0.0f, 0.9f, TRANS_CUBIC, EASE_IN, 0.1f);
+    radial_off_at_ = life_t_ + 1.0;
+}
+
+Node* CombatScreen::back_box() { return root_ ? find_named(root_, "BackCombatVfxContainer") : NULL; }
+
 /* Where VfxCmd puts an effect: a creature's VfxSpawnPosition (%CenterPos)
  * or its position (its feet), the middle of a side's creatures, the
  * screen's centre. */
@@ -1998,6 +2045,14 @@ void CombatScreen::fire(const Cue& c) {
         SpSkeleton* sk = s->skeleton();
         const SpAnimation* idle = sk && anim != "die" ? sk->data()->find_animation("idle_loop") : NULL;
         if (idle && s->animation_state()) s->animation_state()->add_animation(0, idle, true, 0);
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.RadialBlur") {
+        radial_blur(c.data["args"][(size_t)0].str());
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED) {
+        spawn_combat_vfx(lib_, vfx_box_, c.data["call"].str(), c.data["args"], *this);
         return;
     }
     if (!vfx_box_) return;
@@ -2197,6 +2252,11 @@ void CombatScreen::play_steps(const Json& steps) {
                     c.who = ch["who"].str();
                     c.where = ch["at"].str();
                 }
+                cues_.push_back(c);
+            } else if (type == "ui" && (is_combat_vfx_call(ch["call"].str()) || ch["call"].str() == "NCombatRoom.RadialBlur")) {
+                /* The game's scripted effects (combat_vfx). */
+                c.kind = CUE_SCRIPTED;
+                c.data = ch;
                 cues_.push_back(c);
             } else if (type == "ui" && ch["call"].str() == "NDamageNumVfx.Create" && ch["args"].size() >= 2 &&
                        ch["args"][1].is_number() && ch["args"][1].i() > 0) {

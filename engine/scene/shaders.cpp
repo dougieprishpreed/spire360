@@ -238,6 +238,17 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         p.mix = param(m, "mix_percentage", 0.3f);
         return c.renderer()->set_screen(&p);
     }
+    if (m->shader == "shaders/radial_blur.gdshader") {
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_RADIAL;
+        Vec2 bc = shader_param_vec2(m, "blur_center", Vec2(0.45f, 0.55f));
+        p.center[0] = param(m, "blur_center.x", bc.x);
+        p.center[1] = param(m, "blur_center.y", bc.y);
+        p.power = param(m, "blur_power", 0.005f);
+        p.count = (int)param(m, "sampling_count", 12.0f);
+        return c.renderer()->set_screen(&p);
+    }
     if (m->shader == "shaders/vfx/vfx_water_reflection_post.gdshader" ||
         m->shader == "shaders/vfx/the_insatiable_sand_fall_2.gdshader") {
         /* noise(UV + -TIME * speed (* direction)): the offset, kept within

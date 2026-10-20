@@ -36,8 +36,8 @@ EnableBackstop/DisableBackstop), vfx_water_reflection_post (Neow),
 the_insatiable_sand_fall_2. The NotObtained epoch slot shows its
 SubViewport's blurred portrait through a canvas-made texture
 (`DerivedImage`: source stretched to 162x100 over the clear colour, hsv,
-dark_blur lod 2). Still to port: radial_blur (NRadialBlurVfx, a
-BackBufferCopy; the logic now emits `NCombatRoom.RadialBlur`), doom_overlay,
+dark_blur lod 2), radial_blur (`NCombatRoom.RadialBlur` cue: the room's
+RadialBlur node as NRadialBlurVfx.Activate). Still to port: doom_overlay,
 chromatic aberration (glass orb), scream distortion.
 
 Logic: the `ui` patch has `stand_in_singletons`: a UI singleton getter
@@ -50,13 +50,27 @@ result outside the UI (`IsStatementUiChain`). Godot colours in cue args
 are `#rrggbbaa`. Seeded traces: differences 0. The console logic (wasm)
 needs the patch stage rebuilt to pick this up.
 
-Next: combat_screen draws only damage numbers of the ~55 scripted VFX
-classes the logic creates (`NThinSliceVfx`, `NGroundFireVfx`,
-`NSplashVfx`/`NLiquidOverlayVfx` from PlaySplashVfx, `NHyperbeamVfx`, ...;
-scene paths and Create signatures listed by the decomp). Port them as a
-table (scene, anchor, tint, flip) plus the per-class motion their C# adds;
-then radial blur; then the rest of the gaps list (`out/engine/spire_gaps`
-over `work/coverage*/` traces: `work/gaps-full.sh`).
+Scripted combat VFX (`engine/game/combat_vfx.*`): `NXxxVfx.Create` ui
+cues spawn the game's effect scenes as their Create/_Ready do. A spec
+table (anchor, tint mode, flip, restart lists on a timetable, free time)
+covers Gaseous/Wormy/Poison/Goopy/Spore/SweepingBeam/GrandFinale/
+Hyperbeam impacts, FireBurst, FireBurning, Scratch, (Fire)SmokePuff,
+LineBurst, DaggerSpray impact/flurry, ShivThrow; bespoke scripts:
+ThinSlice, Stab, GroundFire, Stunned, PowerUp, Bolas; BigSlash(Impact)
+and HitSpark placed for the existing scripts; PlaySplashVfx -> NSplashVfx.
+`spire_play --settle FRAMES` takes decision shots earlier/later to see
+them (cues run in the tree's process). Not yet: NHyperbeamVfx,
+NSweepingBeamVfx, NGrandFinaleVfx, NHellraiser(Sword)Vfx,
+NSpikeSplashVfx (Fg/Bg spikes), NHorizontalLinesVfx, form auras
+(NDemon/Echo/Reaper/Serpent/VoidFormVfx via Visuals.AddFormVfx),
+NLiquidOverlayVfx (creature overlay), NMonsterDeathVfx, screen shake
+(NGame.ScreenShake / ScreenShakeTrauma: no shake in the port yet), and
+effects whose Create takes positions from creature nodes (magic missiles,
+NItemThrowVfx potion throws, NSleepingVfx): headless those positions are
+zero or the code is skipped behind `if (nCreature != null)`; a creature
+node stand-in that carries its creature and anchor is the class-level fix.
+The full `spire_gaps` sweep over every coverage trace is too slow (minutes
+per long trace): sample traces instead.
 
 ## Profiles, saves and progression checkpoint (2026-10-19)
 

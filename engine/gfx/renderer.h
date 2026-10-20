@@ -73,8 +73,11 @@ struct VfxParams {
  *  SCREEN_NOISE (vfx_water_reflection_post, the_insatiable_sand_fall_2):
  *      at SCREEN_UV - strength / 2 + noise(UV + noise_offset).r * strength
  *      (noise repeats; NULL: white), its alpha times mask(UV).a (NULL:
- *      white). */
-enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2 };
+ *      white).
+ *  SCREEN_RADIAL (radial_blur): the mean of count reads at SCREEN_UV -
+ *      power * (SCREEN_UV - center) * i, i = 0..count-1 (at most 16),
+ *      opaque. */
+enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4 };
 
 struct ScreenParams {
     int mode;
@@ -83,6 +86,9 @@ struct ScreenParams {
     Texture* mask;
     float noise_offset[2];
     float strength;
+    float center[2];
+    float power;
+    int count;
 };
 
 class Renderer {

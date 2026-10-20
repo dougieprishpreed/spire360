@@ -13,6 +13,7 @@
 #include "../core/base.h"
 #include "../core/json.h"
 #include "../scene/tween.h"
+#include "combat_vfx.h"
 
 #include <map>
 
@@ -23,7 +24,7 @@ class Node2D;
 class Control;
 class SceneLibrary;
 
-class CombatScreen {
+class CombatScreen : private VfxAnchors {
 public:
     explicit CombatScreen(SceneLibrary* lib);
     /* The room after the fight (behind the rewards): the background and
@@ -180,7 +181,11 @@ private:
     Node2D* arrow_head_;
     Vec2 arrow_pos_, arrow_to_;
     /* Step playback. */
-    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER, CUE_STATE, CUE_SYNC, CUE_AUDIO };
+    enum CueKind { CUE_ANIM, CUE_VFX, CUE_DAMAGE, CUE_BANNER, CUE_STATE, CUE_SYNC, CUE_AUDIO, CUE_SCRIPTED };
+    /* VfxAnchors (the scripted effects' creature points). */
+    virtual bool creature(const std::string& who, VfxCreature* out);
+    virtual bool side_center(bool enemies, Vec2* out);
+    virtual Node* back_box();
     struct Cue {
         double at;
         int kind;
@@ -202,6 +207,8 @@ private:
     size_t next_cue_;
     double cue_t_, busy_until_;
     double life_t_; /* keeps running when a new response resets the playhead */
+    double radial_off_at_; /* when the radial blur hides (life_t_), 0: off */
+    void radial_blur(const std::string& position);
     Node* root_;
     std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */
     struct Ghost {

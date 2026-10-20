@@ -352,7 +352,21 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 /* ScreenParams: COLOR is the screen copy (the vertex colour
                  * is not applied). */
                 float su = ((float)x + 0.5f) / (float)fb_.w, sv = ((float)y + 0.5f) / (float)fb_.h;
-                if (screen_.mode == SCREEN_DARK) {
+                if (screen_.mode == SCREEN_RADIAL) {
+                    int n = screen_.count < 1 ? 1 : (screen_.count > 16 ? 16 : screen_.count);
+                    float dx = su - screen_.center[0], dy = sv - screen_.center[1], acc[3] = { 0, 0, 0 };
+                    for (int i = 0; i < n; ++i) {
+                        float t[4];
+                        sample_screen(su - screen_.power * dx * i, sv - screen_.power * dy * i, 0, t);
+                        acc[0] += t[0];
+                        acc[1] += t[1];
+                        acc[2] += t[2];
+                    }
+                    s[0] = acc[0] / n;
+                    s[1] = acc[1] / n;
+                    s[2] = acc[2] / n;
+                    s[3] = 1;
+                } else if (screen_.mode == SCREEN_DARK) {
                     sample_screen(su, sv, screen_.lod, s);
                     /* mix(color, vec4(0, 0, 0, 1), k) on the straight colour */
                     float a = s[3], k = screen_.mix, na = a * (1 - k) + k;
