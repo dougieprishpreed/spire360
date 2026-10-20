@@ -235,6 +235,9 @@ internal static class Program
             case "settings":
                 return sim.Settings();
 
+            case "library":
+                return sim.Library(Protocol.Str(cmd, "pool", "ironclad")!);
+
             case "set_setting":
                 return cmd.TryGetProperty("value", out var settingValue)
                     ? sim.SetSetting(Protocol.Str(cmd, "name") ?? "", settingValue)

@@ -269,6 +269,23 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
         }
     }
 
+    /* NCard.Visibility (the card library): an unseen or locked card keeps
+     * its frame, its title and description say so, its portrait blurred
+     * (card_portrait_blur_material), the lock on a locked one. */
+    const std::string& vis = c["visibility"].str();
+    if (vis == "not_seen" || vis == "locked") {
+        bool locked = vis == "locked";
+        set_text(title, Loc::get("card_library", locked ? "LOCKED.title" : "UNKNOWN.title"));
+        colors(title, CREAM, title_outline);
+        set_text(item(card, "DescriptionLabel"), "[center][font_size=40]" +
+                                                     Loc::get("card_library", locked ? "LOCKED.description" : "UNKNOWN.description") +
+                                                     "[/font_size][/center]");
+        CanvasItem* lock = item(card, "Lock");
+        if (lock) lock->visible = locked;
+        set_material(lib, item(card, "Portrait"), "scenes/cards/card_portrait_blur_material.tres");
+        set_material(lib, item(card, "AncientPortrait"), "scenes/cards/card_portrait_blur_material.tres");
+    }
+
     /* The hand's glow (NCardHighlight): playable cyan, gold, red. */
     CanvasItem* glow = item(card, "Highlight");
     if (glow) {

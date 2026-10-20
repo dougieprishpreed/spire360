@@ -27,6 +27,7 @@ class LogicLink;
 class PauseMenu;
 class PileScreen;
 class SettingsScreen;
+class CompendiumScreen;
 class MapScreen;
 class Node;
 class SceneLibrary;
@@ -181,6 +182,8 @@ private:
     int settings_version_;
     SettingsScreen* settings_screen_;
     Node* settings_node_;
+    CompendiumScreen* compendium_;
+    Node* compendium_node_;
     unsigned piles_button_; /* the button that opened it (closes it too) */
     bool piles_asked_;
     ConfirmPopup* confirm_;

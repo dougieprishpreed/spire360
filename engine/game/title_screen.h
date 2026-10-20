@@ -24,7 +24,7 @@ class SceneLibrary;
 
 class TitleScreen : public FrameListener {
 public:
-    enum Action { NONE, CONTINUE, ABANDON, SINGLEPLAYER, TIMELINE, QUIT, PROFILES, SETTINGS };
+    enum Action { NONE, CONTINUE, ABANDON, SINGLEPLAYER, TIMELINE, QUIT, PROFILES, SETTINGS, COMPENDIUM };
     explicit TitleScreen(SceneLibrary* lib);
     /* A new menu tree (the caller owns it); NULL without main_menu.tscn. */
     Node* build(const std::string& version, std::string* error);

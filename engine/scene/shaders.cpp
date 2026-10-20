@@ -495,6 +495,15 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "lut");
         effect_particles(e.id);
         g_life_param[0] = 0;
+    } else if (s == "shaders/blur/Blur.gdshader") {
+        /* textureSize(TEXTURE): the drawn TextureRect's */
+        Vec2 ts(512, 512);
+        if (g_item && g_item->type == "TextureRect" && ((const TextureRect*)g_item)->texture)
+            ts = ((const TextureRect*)g_item)->texture->size();
+        e.id = EFFECT_PORTRAIT_BLUR;
+        e.p[0] = param(m, "radius", 32.0f) / 32.0f;
+        e.p[1] = ts.x > 0 ? 1.0f / ts.x : 0.0f;
+        e.p[2] = ts.y > 0 ? 1.0f / ts.y : 0.0f;
     } else if (s == "shaders/dissolve.gdshader") {
         /* TEXTURE_PIXEL_SIZE: the drawn texture's (a Sprite2D's viewport) */
         Vec2 ts(1, 1);
@@ -615,6 +624,8 @@ void Canvas::hsv_matrix(float h, float s, float v, float out[12]) {
 
 bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
     if (!m || m->kind != Resource::RES_SHADER_MATERIAL) return true;
+    /* a ShaderMaterial without a shader draws as the default canvas item */
+    if (m->shader.empty()) return true;
     g_item = item;
     if (m->shader == "shaders/hsv.gdshader" || m->shader == "inline:aa241422154f3376") {
         /* inline:aa24...: the FTUE screens' (and the card library's) copy */

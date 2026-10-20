@@ -18,7 +18,7 @@ class SceneLibrary;
 
 class PauseMenu : public FrameListener {
 public:
-    enum Action { NONE, RESUME, GIVE_UP, SAVE_AND_QUIT, SETTINGS };
+    enum Action { NONE, RESUME, GIVE_UP, SAVE_AND_QUIT, SETTINGS, COMPENDIUM };
     explicit PauseMenu(SceneLibrary* lib);
     /* A new tree (the caller owns it); give_up: the button is enabled
      * (NPauseMenu.Initialize: not once the run is over). */

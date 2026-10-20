@@ -446,6 +446,26 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_PORTRAIT_BLUR: {
+        static const float w[7] = { 0.0702f, 0.1311f, 0.1907f, 0.2160f, 0.1907f, 0.1311f, 0.0702f };
+        float tx = e.p[1], ty = e.p[2];
+        if (tex && tex->img.w > 0) {
+            tx = 1.0f / (float)tex->img.w;
+            ty = 1.0f / (float)tex->img.h;
+        }
+        float r = e.p[0] * 32.0f / 3.0f;
+        float acc[3] = { 0, 0, 0 };
+        for (int j = 0; j < 7; ++j)
+            for (int i = 0; i < 7; ++i) {
+                float t[4] = { 1, 1, 1, 1 };
+                if (tex) sample(tex->img, u + (float)(i - 3) * r * tx, v + (float)(j - 3) * r * ty, flags, t);
+                float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+                for (int k = 0; k < 3; ++k) acc[k] += w[i] * w[j] * t[k] * ia;
+            }
+        for (int k = 0; k < 3; ++k) out[k] = clampf(acc[k] * col[k], 0, 1) * col[3];
+        out[3] = col[3];
+        return;
+    }
     case EFFECT_DISSOLVE: {
         float thr = e.p[0];
         float wx = -200.0f * e.p[2], wy = 1024.0f * e.p[3];

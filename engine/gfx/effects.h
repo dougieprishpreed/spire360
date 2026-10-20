@@ -113,6 +113,12 @@ enum EffectId {
      * texel t at UV + TEXTURE(UV + p2p3).b * p4; rgb lut(tex0 at t.r) *
      * vertex rgb, alpha vertex a * smoothstep(p0, p0 + p1, t.a). */
     EFFECT_POTION_SPLASH = 20,
+    /* shaders/blur/Blur.gdshader on a card's portrait (an unseen or locked
+     * card): the game's 33-tap Gaussian along step, then its canvas group's
+     * pass across it; here both passes at once, 7 x 7 taps over the same
+     * radius (p0 * 32 texels; p1p2 the texel size). Opaque, as the game's
+     * (COLOR.a = 1). */
+    EFFECT_PORTRAIT_BLUR = 21,
     EFFECT_COUNT
 };
 

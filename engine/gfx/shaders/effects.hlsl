@@ -246,3 +246,14 @@ float4 ps_e20(VsOut i) : COLOR {
     float a = saturate(i.color.a * smoothstep(g_p0.x, g_p0.x + g_p0.y, t.a));
     return float4(saturate(l.rgb * i.color.rgb) * a, a);
 }
+
+// 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
+float4 ps_e21(VsOut i) : COLOR {
+    float w[7] = { 0.0702, 0.1311, 0.1907, 0.2160, 0.1907, 0.1311, 0.0702 };
+    float2 r = g_p0.x * 32.0 / 3.0 * g_p0.yz;
+    float3 acc = float3(0.0, 0.0, 0.0);
+    for (int y = 0; y < 7; ++y)
+        for (int x = 0; x < 7; ++x)
+            acc += w[x] * w[y] * tex2D(g_tex, i.uv + float2(x - 3, y - 3) * r).rgb;
+    return float4(saturate(acc * i.color.rgb) * i.color.a, i.color.a);
+}

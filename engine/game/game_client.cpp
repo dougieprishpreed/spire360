@@ -16,6 +16,7 @@
 #include "pile_screen.h"
 #include "screen_shake.h"
 #include "settings_screen.h"
+#include "compendium_screen.h"
 #include "../scene/rich_text.h"
 #include "card_select_screen.h"
 #include "event_screen.h"
@@ -249,10 +250,16 @@ GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
-      settings_version_(0), settings_screen_(NULL), settings_node_(NULL), piles_button_(0), piles_asked_(false),
+      settings_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
+      piles_button_(0), piles_asked_(false),
       confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {}
 
 GameClient::~GameClient() {
+    if (compendium_node_) {
+        if (compendium_node_->parent) compendium_node_->parent->remove_child(compendium_node_);
+        delete compendium_node_;
+    }
+    delete compendium_;
     if (settings_node_) {
         if (settings_node_->parent) settings_node_->parent->remove_child(settings_node_);
         delete settings_node_;
@@ -375,6 +382,8 @@ void GameClient::update(const PadState& pad) {
             else show(msg);
         } else if (type == "settings") {
             apply_settings(msg);
+        } else if (compendium_ && CompendiumScreen::is_answer(type)) {
+            compendium_->set_answer(msg);
         } else if (type == "map_view") {
             waiting_ = false;
             if (piles_asked_) open_map_view(msg);
@@ -976,6 +985,16 @@ bool GameClient::pause_input(const PadState& pad) {
             delete settings_screen_;
             settings_screen_ = NULL;
         }
+    } else if (a == PauseMenu::COMPENDIUM) {
+        std::string err;
+        compendium_ = new CompendiumScreen(lib_);
+        compendium_node_ = compendium_->build(lower(decision_["player"]["character"].str()), &err);
+        if (compendium_node_) tree_->root()->add_child(compendium_node_);
+        else {
+            log_warn("compendium: %s", err.c_str());
+            delete compendium_;
+            compendium_ = NULL;
+        }
     } else if (a == PauseMenu::SAVE_AND_QUIT) {
         /* NPauseMenu.CloseToMenu: the run was saved as its room was
          * entered; the logic lets it go and answers with the menu. */
@@ -1021,6 +1040,20 @@ void GameClient::apply_settings(const Json& s) {
 /* NSettingsScreen over the run (the pause menu's Settings); true when it
  * took the pad. */
 bool GameClient::settings_input(const PadState& pad) {
+    if (compendium_) {
+        /* the pause menu's Compendium */
+        std::string cmd;
+        CompendiumScreen::Action a = compendium_->input(pad, &cmd);
+        if (!cmd.empty()) send_query(cmd);
+        if (a == CompendiumScreen::BACK) {
+            if (compendium_node_->parent) compendium_node_->parent->remove_child(compendium_node_);
+            delete compendium_node_;
+            compendium_node_ = NULL;
+            delete compendium_;
+            compendium_ = NULL;
+        }
+        return true;
+    }
     if (!settings_screen_) return false;
     std::string cmd;
     SettingsScreen::Action a = settings_screen_->input(pad, &cmd);
@@ -1134,7 +1167,7 @@ bool GameClient::piles_input(const PadState& pad) {
 }
 
 void GameClient::handle_input(const PadState& pad) {
-    set_capstone_open(pause_ || piles_ || map_view_ || settings_screen_);
+    set_capstone_open(pause_ || piles_ || map_view_ || settings_screen_ || compendium_);
     if (pause_input(pad)) return;
     if (piles_input(pad)) return;
     /* The last command's effects play out first (the game takes no input

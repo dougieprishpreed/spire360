@@ -111,7 +111,7 @@ void TitleScreen::set_menu(const Json& m) {
     } all[] = { { "ContinueButton", "CONTINUE", CONTINUE },     { "AbandonRunButton", "ABANDON_RUN", ABANDON },
                 { "SingleplayerButton", "SINGLE_PLAYER", SINGLEPLAYER }, { "MultiplayerButton", "MULTIPLAYER", NONE },
                 { "TimelineButton", "TIMELINE", TIMELINE },     { "SettingsButton", "SETTINGS", SETTINGS },
-                { "CompendiumButton", "COMPENDIUM", NONE },     { "QuitButton", "QUIT", QUIT } };
+                { "CompendiumButton", "COMPENDIUM", COMPENDIUM },     { "QuitButton", "QUIT", QUIT } };
     Action focused = focus_ >= 0 && focus_ < (int)buttons_.size() ? buttons_[(size_t)focus_].action : NONE;
     if (focus_ >= 0 && focus_ < (int)buttons_.size() && buttons_[(size_t)focus_].label) {
         buttons_[(size_t)focus_].label->self_modulate = hex(CREAM);
