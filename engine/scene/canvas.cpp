@@ -37,6 +37,7 @@ void Canvas::end_frame() {
     r_->set_fire(NULL);
     r_->set_vfx(NULL);
     r_->set_screen(NULL);
+    r_->set_effect(NULL);
     if (!decoded_path_.empty()) {
         decoded_path_.clear();
         std::vector<u8>().swap(decoded_.px);

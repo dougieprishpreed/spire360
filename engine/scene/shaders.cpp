@@ -1,6 +1,7 @@
 #include "shaders.h"
 
 #include "canvas.h"
+#include "../gfx/effects.h"
 #include "node.h"
 #include "particles.h"
 #include "scene.h"
@@ -243,6 +244,17 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         p.mix = param(m, "mix_percentage", 0.3f);
         return c.renderer()->set_screen(&p);
     }
+    if (m->shader == "shaders/vfx/vfx_water_reflection.gdshader") {
+        EffectParams e;
+        memset(&e, 0, sizeof(e));
+        e.id = EFFECT_WATER_REFLECTION;
+        e.p[0] = -fmodf((float)g_shader_time * param(m, "speed", 0.1f), 1.0f);
+        e.p[1] = param(m, "strength", 0.1f);
+        e.tex[0] = param_texture(c, m, "noise");
+        e.tex[1] = param_texture(c, m, "mask");
+        e.repeat = 1;
+        return c.renderer()->set_effect(&e);
+    }
     if (m->shader == "shaders/doom_overlay.gdshader") {
         /* The pulse: 0.7 * smoothstep(-10, 1, sin(TIME * 20) + sin(TIME * 10)). */
         ScreenParams p;
@@ -484,6 +496,7 @@ void shader_end(Canvas& c, const MaterialRes* m) {
         c.renderer()->set_fire(NULL);
         c.renderer()->set_vfx(NULL);
         c.renderer()->set_screen(NULL);
+        c.renderer()->set_effect(NULL);
         g_vfx_on = false;
     }
 }

@@ -41,6 +41,15 @@ if errorlevel 1 exit /b 1
 "$(XEDK)\bin\win32\fxc.exe" /nologo /T ps_3_0 /E ps_main /Vn g_ps_main /Fh "$(IntDir)canvas_ps.h" "%(FullPath)"</Command>
       <Outputs>$(IntDir)canvas_vs.h;$(IntDir)canvas_ps.h;%(Outputs)</Outputs>
     </CustomBuild>
+    <!-- Effect shaders (engine/gfx/effects.h): one pixel shader per entry
+         point; effects_build.cmd (tools/gen_shader_inc.py) writes
+         $(IntDir)effects_ps.h with their table. -->
+    <CustomBuild Include="$(SpireRoot)engine\gfx\shaders\effects.hlsl">
+      <Message>fxc effects.hlsl</Message>
+      <Command>call "$(SpireRoot)engine\gfx\shaders\effects_build.cmd" "$(XEDK)\bin\win32\fxc.exe" "%(FullPath)" "$(IntDir)"</Command>
+      <AdditionalInputs>$(SpireRoot)engine\gfx\shaders\effects_build.cmd;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs>$(IntDir)effects_ps.h;%(Outputs)</Outputs>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />

@@ -100,6 +100,15 @@ struct ScreenParams {
     float color[4];
 };
 
+/* An effect shader (effects.h): its id, parameters and textures (NULL:
+ * white; bit i of `repeat`: texture i repeats, else clamps). */
+struct EffectParams {
+    int id;
+    float p[16];
+    Texture* tex[4];
+    unsigned repeat;
+};
+
 class Renderer {
 public:
     virtual ~Renderer() {}
@@ -148,6 +157,12 @@ public:
     }
     /* A new canvas: the next screen-reading draw copies the screen again. */
     virtual void screen_barrier() {}
+    /* An effect shader on the next draws (EffectParams); NULL: off. false:
+     * not available (the caller does not draw the item). */
+    virtual bool set_effect(const EffectParams* e) {
+        (void)e;
+        return false;
+    }
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;
     virtual void end() = 0;

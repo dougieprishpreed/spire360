@@ -21,6 +21,7 @@
 #ifndef SPIRE_D3D9_RENDERER_H
 #define SPIRE_D3D9_RENDERER_H
 
+#include "effects.h"
 #include "renderer.h"
 
 #if defined(_XBOX)
@@ -57,6 +58,7 @@ public:
     virtual void set_fire(const FireParams* p);
     virtual void set_vfx(const VfxParams* p);
     virtual bool set_screen(const ScreenParams* p);
+    virtual bool set_effect(const EffectParams* e);
     virtual void screen_barrier() { screen_levels_ = 0; }
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
@@ -131,6 +133,10 @@ private:
 #endif
     int screen_levels_; /* levels made this canvas (0: no copy yet) */
     bool screen_failed_;
+    /* Effect shaders (effects.h): one pixel shader each. */
+    IDirect3DPixelShader9* effect_ps_[EFFECT_COUNT];
+    bool effect_on_;
+    EffectParams effect_;
     int width_, height_;
     long draws_;
 };

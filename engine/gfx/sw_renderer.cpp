@@ -1,4 +1,5 @@
 #include "sw_renderer.h"
+#include "effects.h"
 
 #include <math.h>
 #include <string.h>
@@ -6,7 +7,8 @@
 namespace spire {
 
 SwRenderer::SwRenderer()
-    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), screen_on_(false), screen_levels_(0) {
+    : target_(&fb_), gx0_(0), gy0_(0), gx1_(0), gy1_(0), clip_on_(false), cx0_(0), cy0_(0), cx1_(0), cy1_(0), tris_(0), msdf_range_(16), msdf_outline_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), screen_on_(false), effect_on_(false),
+      screen_levels_(0) {
     for (int i = 0; i < 4; ++i) ripple_[i] = 0;
 }
 
@@ -158,6 +160,39 @@ bool SwRenderer::set_screen(const ScreenParams* p) {
 
 void SwRenderer::sample_screen(float u, float v, float lod, float out[4]) const {
     image_lod(&screen_mips_[0], screen_levels_, u, v, lod, out);
+}
+
+/* An effect's texture i at uv (NULL: white). */
+static void effect_texel(const EffectParams& e, int i, float u, float v, float out[4]) {
+    fire_texel(e.tex[i], u, v, (e.repeat >> i) & 1, out);
+}
+
+/* The effect shaders (effects.h), in the software renderer: s is the
+ * premultiplied result. */
+void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags, float su, float sv,
+                              const float col[4], float out[4]) const {
+    (void)su;
+    (void)sv;
+    (void)col;
+    const EffectParams& e = effect_;
+    switch (e.id) {
+    case EFFECT_WATER_REFLECTION: {
+        float n[4], m[4];
+        effect_texel(e, 0, u + e.p[0], v + e.p[0], n);
+        effect_texel(e, 1, u, v, m);
+        if (m[3] <= 0.1f || !tex) {
+            if (tex) sample(tex->img, u, v, flags, out);
+            else out[0] = out[1] = out[2] = out[3] = 1;
+        } else {
+            float d = -e.p[1] * 0.5f + n[0] * e.p[1] * 0.5f;
+            sample(tex->img, u + d, v + d, flags, out);
+        }
+        return;
+    }
+    default:
+        out[0] = out[1] = out[2] = out[3] = 0;
+        return;
+    }
 }
 
 static float smoothstepf(float e0, float e1, float x) {
@@ -347,6 +382,12 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 s[1] = lut[1] * na;
                 s[2] = lut[2] * na;
                 s[3] = na;
+            }
+            if (effect_on_) {
+                float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                effect_pixel(tex, u, v, flags, ((float)x + 0.5f) / (float)fb_.w, ((float)y + 0.5f) / (float)fb_.h, col, s);
+                col[0] = col[1] = col[2] = col[3] = 1.0f;
             }
             if (screen_on_ && screen_levels_ > 0) {
                 /* ScreenParams: COLOR is the screen copy (the vertex colour

@@ -51,6 +51,11 @@ public:
     }
 
     virtual bool set_screen(const ScreenParams* p);
+    virtual bool set_effect(const EffectParams* e) {
+        effect_on_ = e != NULL;
+        if (e) effect_ = *e;
+        return true;
+    }
     virtual void screen_barrier() { screen_levels_ = 0; }
 
     virtual bool begin_group(const Rect2& bounds);
@@ -81,6 +86,10 @@ private:
     VfxParams vfx_;
     bool screen_on_;
     ScreenParams screen_;
+    bool effect_on_;
+    EffectParams effect_;
+    void effect_pixel(const SwTexture* tex, float u, float v, int flags, float su, float sv, const float col[4],
+                      float out[4]) const;
     std::vector<Image> screen_mips_; /* the screen copy and its levels */
     int screen_levels_;              /* levels made this canvas (0: no copy yet) */
     void screen_level(int level);

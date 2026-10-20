@@ -12,10 +12,15 @@
 #endif
 #include "canvas_ps.h" /* g_ps_main, from fxc /Fh /Vn g_ps_main */
 #include "canvas_vs.h" /* g_vs_main */
+#include "effects_ps.h" /* g_effect_ps[id], from effects_build.cmd */
 #else
 #include <d3dcompiler.h>
 static const char* const CANVAS_HLSL[] = {
 #include "shaders/canvas_hlsl.inc"
+    NULL
+};
+static const char* const EFFECTS_HLSL[] = {
+#include "shaders/effects_hlsl.inc"
     NULL
 };
 #endif
@@ -28,6 +33,9 @@ D3D9Renderer::D3D9Renderer()
       group_failed_(false), group_debug_(0), group_log_(0), screen_on_(false), screen_levels_(0),
       screen_failed_(false), width_(0), height_(0), draws_(0) {
     memset(&screen_, 0, sizeof(screen_));
+    memset(&effect_, 0, sizeof(effect_));
+    effect_on_ = false;
+    for (int i = 0; i < EFFECT_COUNT; ++i) effect_ps_[i] = NULL;
     for (int i = 0; i < SCREEN_LEVELS; ++i) {
         screen_lv_[i] = NULL;
 #if defined(_XBOX)
@@ -53,6 +61,7 @@ D3D9Renderer::~D3D9Renderer() { shutdown(); }
 void D3D9Renderer::shutdown() {
     release_group_target();
     release_screen();
+    for (int i = 0; i < EFFECT_COUNT; ++i) RELEASE(effect_ps_[i]);
     RELEASE(vs_);
     RELEASE(ps_);
     RELEASE(decl_);
@@ -116,6 +125,26 @@ bool D3D9Renderer::init(IDirect3DDevice9* device, std::string* error) {
     if (FAILED(h1) || FAILED(h2)) {
         if (error) *error = "CreateVertexShader/CreatePixelShader failed";
         return false;
+    }
+#endif
+    /* The effect shaders; one that does not load leaves its effect off
+     * (set_effect: false, the item is not drawn). */
+#if defined(_XBOX)
+    for (int i = 1; i < EFFECT_COUNT && i < g_effect_ps_count; ++i)
+        if (g_effect_ps[i] && FAILED(dev_->CreatePixelShader((const DWORD*)g_effect_ps[i], &effect_ps_[i])))
+            effect_ps_[i] = NULL;
+#else
+    std::string esrc;
+    for (int i = 0; EFFECTS_HLSL[i]; ++i) esrc += EFFECTS_HLSL[i];
+    for (int i = 1; i < EFFECT_COUNT; ++i) {
+        ID3DBlob* b = NULL;
+        std::string err, entry = format("ps_e%d", i);
+        if (!compile(esrc, entry.c_str(), "ps_3_0", &b, &err)) {
+            log_warn("d3d9: effect %d: %s", i, err.c_str());
+            continue;
+        }
+        if (FAILED(dev_->CreatePixelShader((const DWORD*)b->GetBufferPointer(), &effect_ps_[i]))) effect_ps_[i] = NULL;
+        b->Release();
     }
 #endif
     /* 1x1 white for untextured draws */
@@ -230,6 +259,8 @@ void D3D9Renderer::destroy_texture(Texture* t) {
     if (gm_ == d) gm_ = NULL;
     if (vfx_on_ && vfx_.lut == t) { vfx_.lut = NULL; vfx_on_ = false; }
     if (screen_on_ && (screen_.noise == t || screen_.mask == t)) screen_on_ = false;
+    for (int k = 0; effect_on_ && k < 4; ++k)
+        if (effect_.tex[k] == t) effect_on_ = false;
     if (fire_on_ && (fire_.noise1 == t || fire_.noise2 == t || fire_.noise_mask == t ||
         fire_.dist1 == t || fire_.dist2 == t || fire_.dist_mask == t)) fire_on_ = false;
     if (dev_) for (int stage = 0; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
@@ -495,6 +526,7 @@ bool D3D9Renderer::screen_pass(int level) {
 #endif
     dev_->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
     dev_->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    dev_->SetPixelShader(ps_); /* the canvas shader's level pass, whatever the draws use */
 #if defined(_XBOX)
     float vp[4] = { 2.0f / w, -2.0f / h, -1.0f, 1.0f };
 #else
@@ -539,6 +571,25 @@ bool D3D9Renderer::screen_pass(int level) {
     dev_->SetVertexShaderConstantF(1, finv, 1);
     dirty_ = true;
     screen_levels_ = level + 1;
+    return true;
+}
+
+bool D3D9Renderer::set_effect(const EffectParams* e) {
+    if (!e) {
+        if (effect_on_) {
+            flush();
+            effect_on_ = false;
+            dirty_ = true;
+        }
+        return true;
+    }
+    if (e->id <= 0 || e->id >= EFFECT_COUNT || !effect_ps_[e->id]) return false;
+    if (!effect_on_ || memcmp(e, &effect_, sizeof(effect_)) != 0) {
+        flush();
+        effect_on_ = true;
+        effect_ = *e;
+        dirty_ = true;
+    }
     return true;
 }
 
@@ -693,6 +744,7 @@ void D3D9Renderer::apply_state() {
         /* never sample the target being drawn */
         dev_->SetTexture(1, NULL);
     }
+    dev_->SetPixelShader(effect_on_ && effect_ps_[effect_.id] ? effect_ps_[effect_.id] : ps_);
     /* The stepped fire's textures (s3..s8): noises and distortions
      * repeat, the masks clamp; unset ones are white. */
     if (fire_on_) {
@@ -708,6 +760,20 @@ void D3D9Renderer::apply_state() {
             dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
             dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         }
+    } else if (effect_on_) {
+        /* the effect's textures (s3..s6), white where unset */
+        for (int k = 0; k < 4; ++k) {
+            D3D9Texture* t = (D3D9Texture*)effect_.tex[k];
+            DWORD stage = (DWORD)(3 + k);
+            dev_->SetTexture(stage, t && t->tex ? t->tex : white_);
+            DWORD a = (effect_.repeat >> k) & 1 ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
+            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSU, a);
+            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSV, a);
+            dev_->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        }
+        for (DWORD stage = 7; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
     } else {
         for (DWORD stage = 3; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
     }
@@ -840,6 +906,7 @@ void D3D9Renderer::apply_state() {
     if (!(screen_on_ && screen_levels_ > 0 && (screen_.mode == SCREEN_GLASS || screen_.mode == SCREEN_DOOM)))
         c[94] = c[95] = 0.0f;
     dev_->SetPixelShaderConstantF(0, c, 24);
+    if (effect_on_) dev_->SetPixelShaderConstantF(24, effect_.p, 4);
     dirty_ = false;
 }
 
