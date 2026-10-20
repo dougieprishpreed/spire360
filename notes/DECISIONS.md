@@ -185,3 +185,30 @@ layer; only those two would be rewritten.
 
 Would change if: xsdk publishes a license and stabilises, or the XDK path
 hits a wall.
+
+## D14. Profiles and saves in the game's own format; two run flows
+
+The logic keeps the PC game's save layout and files under `<data>/user`
+(`profile.save`, `profileN/saves/{progress,prefs,current_run}.save`,
+`history/*.run`), read and written by the game's own SaveManager. A PC
+account folder copied there (`tools/import_save.py`) plays on, a run saved
+on the PC continues, and a profile played here can go back to the PC.
+Nothing is converted, so nothing can drift from the game's format.
+
+Runs started from the menus (`start_game_run`, `continue_run`) follow the
+game's flow: unlocks from the progress save (or everything, with the
+profile's Spire360 "Unlock Everything" option), the acts from
+`ActModel.GetRandomList` (so Underdocks appears), the ascension within the
+character's maximum, autosaves, The Architect after the last boss,
+`RunManager.OnEnded` and what the game over screen saves (badges, the
+score bar's epoch). The rules the game gates on `TestMode` at exactly
+those sites read "off" for these runs (`testmode.game_flow.*` patches).
+
+`start_run` keeps the old test flow (default acts, no saves, victory at the
+last boss, adapter healing between acts) so the seeded traces stay
+comparable (`differences: 0`). The console uses only the game's flow.
+Would change if: the old flow is no longer needed as a baseline; then the
+trace tools move to the game's flow with a new baseline.
+
+Spire360 sends no metrics, leaderboard or achievement uploads
+(`metrics.*`, `daily.UploadScore` patches).

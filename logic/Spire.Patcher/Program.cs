@@ -53,6 +53,9 @@ internal sealed class PatchSpec
     public string? Note;
     public List<string>? NamespacePrefixes;
     public bool GodotSubclasses;
+    /// <summary>replace_calls: only call sites in these types (and the types nested in them),
+    /// or in "Type::Method" (and that method's compiler-generated state machine or closures).</summary>
+    public List<string>? InTypes;
 
     public static PatchSpec From(JsonElement e)
     {
@@ -73,6 +76,8 @@ internal sealed class PatchSpec
         if (e.TryGetProperty("godot_subclasses", out var gs)) p.GodotSubclasses = gs.GetBoolean();
         if (e.TryGetProperty("namespaces", out var ns) && ns.ValueKind == JsonValueKind.Array)
             p.NamespacePrefixes = ns.EnumerateArray().Select(x => x.GetString()!).ToList();
+        if (e.TryGetProperty("in_types", out var it) && it.ValueKind == JsonValueKind.Array)
+            p.InTypes = it.EnumerateArray().Select(x => x.GetString()!.Replace('+', '/')).ToList();
         return p;
     }
 }
@@ -535,8 +540,12 @@ internal sealed class Patcher
         int count = 0;
         foreach (var type in _module.GetTypes())
         {
+            if (spec.InTypes != null && !spec.InTypes.Any(t => TypeInScope(type, t)))
+                continue;
             foreach (var method in type.Methods.Where(mm => mm.HasBody))
             {
+                if (spec.InTypes != null && !spec.InTypes.Any(t => MethodInScope(type, method, t)))
+                    continue;
                 var body = method.Body;
                 bool changed = false;
                 for (int idx = 0; idx < body.Instructions.Count; idx++)
@@ -568,6 +577,27 @@ internal sealed class Patcher
         result.Status = count > 0 ? "applied" : "missing";
         if (count == 0) result.Message = $"no calls to {spec.Type}::{spec.Method}";
         return result;
+    }
+
+    // Compiler-generated state machines and closures are nested in the type
+    // that declares the method (<Method>d__N, <>c__DisplayClass...), so they
+    // belong to its scope; a "Type::Method" scope takes only that method's.
+    private static bool TypeInScope(TypeDefinition type, string scope)
+    {
+        var sep = scope.IndexOf("::", StringComparison.Ordinal);
+        var t = sep < 0 ? scope : scope[..sep];
+        return type.FullName == t || type.FullName.StartsWith(t + "/", StringComparison.Ordinal);
+    }
+
+    private static bool MethodInScope(TypeDefinition type, MethodDefinition method, string scope)
+    {
+        if (!TypeInScope(type, scope)) return false;
+        var sep = scope.IndexOf("::", StringComparison.Ordinal);
+        if (sep < 0) return true;
+        var t = scope[..sep];
+        var m = scope[(sep + 2)..];
+        if (type.FullName == t) return method.Name == m;
+        return type.FullName.StartsWith(t + "/<" + m + ">", StringComparison.Ordinal);
     }
 
     private void ReplaceCallSite(MethodDefinition caller, Instruction call, MethodReference target, string id)

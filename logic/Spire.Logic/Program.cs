@@ -144,6 +144,58 @@ internal static class Program
                     Protocol.Str(cmd, "seed"),
                     Protocol.Str(cmd, "lang", "en")!);
 
+            case "start_game_run":
+                return sim.StartGameRun(
+                    Protocol.Str(cmd, "character", "Ironclad")!,
+                    Protocol.Int(cmd, "ascension", 0),
+                    Protocol.Str(cmd, "seed"),
+                    Protocol.Str(cmd, "lang", "en")!);
+
+            case "profiles":
+                return sim.Profiles();
+
+            case "select_profile":
+                return sim.SelectProfile(Protocol.Int(cmd, "profile", 0), Protocol.Str(cmd, "lang", "en")!);
+
+            case "main_menu":
+                return sim.MainMenu();
+
+            case "set_unlock_all":
+                return sim.SetUnlockAll(cmd.TryGetProperty("on", out var on) && on.ValueKind == JsonValueKind.True);
+
+            case "continue_run":
+                return sim.ContinueRun(Protocol.Str(cmd, "lang", "en")!);
+
+            case "abandon_run":
+                return sim.AbandonSavedRun();
+
+            case "give_up":
+                return sim.GiveUp();
+
+            case "return_to_menu":
+                return sim.ReturnToMenu();
+
+            case "content":
+                return sim.Content();
+
+            case "obtain":
+                return sim.Obtain(cmd);
+
+            case "add_to_hand":
+                return sim.AddToHand(cmd);
+
+            case "clear_pending_unlock":
+                return sim.ClearPendingUnlock();
+
+            case "timeline":
+                return sim.Timeline();
+
+            case "timeline_first_time_done":
+                return sim.TimelineFirstTimeDone();
+
+            case "reveal_epoch":
+                return sim.RevealEpoch(Protocol.Str(cmd, "epoch") ?? "");
+
             case "characters":
                 return sim.Characters(Protocol.Str(cmd, "lang", "en")!);
 

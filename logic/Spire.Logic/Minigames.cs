@@ -15,6 +15,7 @@ public partial class RunDriver
     /// <summary>Called for every UI cue; picks up minigame models being shown.</summary>
     internal void OnUiCall(string id, object?[] args)
     {
+        TimelineUiCall(id, args);
         if (id.EndsWith("NCrystalSphereScreen::ShowScreen", StringComparison.Ordinal))
         {
             foreach (var a in args)

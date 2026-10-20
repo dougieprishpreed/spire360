@@ -168,8 +168,17 @@ def act(rng, state):
     return a("proceed")
 
 
-def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None):
+def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None, game=False):
     rng = random.Random(seed)
+    tmp = None
+    if game:
+        # The game's flow writes saves: each run gets a new profile in its
+        # own copy of the data folder, with everything unlocked.
+        import shutil
+        import tempfile
+        tmp = tempfile.mkdtemp(prefix="spire360-")
+        shutil.copytree(env["SPIRE_DATA"], os.path.join(tmp, "data"), ignore=shutil.ignore_patterns("user"))
+        env = dict(env, SPIRE_DATA=os.path.join(tmp, "data"))
     s = Session(cmd, env, trace_path, verbose, timing_path)
     started = time.time()
     result = {"character": character, "seed": seed}
@@ -178,7 +187,12 @@ def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, 
         if ready.get("type") != "ready":
             result.update(status="bad_init", detail=ready)
             return result
-        state = s.send({"cmd": "start_run", "character": character, "seed": seed})
+        if game:
+            s.send({"cmd": "select_profile", "profile": 1})
+            s.send({"cmd": "set_unlock_all", "on": True})
+            state = s.send({"cmd": "start_game_run", "character": character, "seed": seed})
+        else:
+            state = s.send({"cmd": "start_run", "character": character, "seed": seed})
         if tank:
             # Test aid: survive to see every act. Not a game feature.
             s.send({"cmd": "set_player", "max_hp": 999, "hp": 999})
@@ -223,6 +237,9 @@ def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, 
     finally:
         result["seconds"] = round(time.time() - started, 1)
         s.close()
+        if tmp:
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main():
@@ -237,6 +254,8 @@ def main():
     ap.add_argument("--data-dir", help="SPIRE_DATA for the logic process")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--tank", action="store_true", help="999 HP so random play reaches the later acts")
+    ap.add_argument("--game", action="store_true",
+                    help="the game's flow (start_game_run on a new profile with everything unlocked); needs --data-dir")
     a = ap.parse_args()
 
     env = dict(os.environ)
@@ -253,7 +272,7 @@ def main():
             seed = f"{a.seed_prefix}-{character.lower()}-{i}"
             trace = os.path.join(a.trace_dir, seed + ".jsonl") if a.trace_dir else None
             timing = os.path.join(a.timing_dir, seed + ".jsonl") if a.timing_dir else None
-            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing)
+            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing, a.game)
             results.append(r)
             print(json.dumps(r)[:600], flush=True)
     ok = [r for r in results if r["status"] in ("victory", "defeat")]

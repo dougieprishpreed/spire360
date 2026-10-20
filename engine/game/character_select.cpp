@@ -1,4 +1,5 @@
 #include "character_select.h"
+#include "../audio/game_audio.h"
 #include "loc.h"
 
 #include "../scene/controls.h"
@@ -17,7 +18,15 @@ static const char* RANDOM_ID = "RANDOM_CHARACTER";
 static Control* as_control(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
 CharacterSelectScreen::CharacterSelectScreen(SceneLibrary* lib)
-    : lib_(lib), info_(NULL), bg_box_(NULL), focus_(-1), starting_(false), t_(0), info_left_(0), info_right_(0) {}
+    : lib_(lib), info_(NULL), panel_(NULL), tip_(NULL), ascension_(0), max_ascension_(0), bg_box_(NULL), focus_(-1),
+      starting_(false), t_(0), info_left_(0), info_right_(0) {}
+
+const Json* CharacterSelectScreen::progress_for(const std::string& id) const {
+    const Json& cs = progress_["characters"];
+    for (size_t i = 0; i < cs.size(); ++i)
+        if (cs[i]["id"].str() == id) return &cs[i];
+    return NULL;
+}
 
 const Json* CharacterSelectScreen::data_for(const std::string& id) const {
     const Json& cs = data_["characters"];
@@ -46,7 +55,14 @@ Node* CharacterSelectScreen::build(const Json& characters, const std::string& se
     hide(screen->get_node("RemotePlayerContainer"));
     hide(screen->get_node("ActLabel"));
     hide(screen->find_unique("ActDropdown"));
-    hide(screen->find_unique("AscensionPanel"));
+    panel_ = ctl(screen, "AscensionPanel");
+    hide(panel_);
+    tip_ = NULL;
+    ascension_ = max_ascension_ = 0;
+    if (panel_) {
+        show_glyph(lib_, ctl(panel_, "LeftTabIcon"), "lb");
+        show_glyph(lib_, ctl(panel_, "RightTabIcon"), "rb");
+    }
     hide(screen->get_node("ReadyAndWaitingPanel"));
     hide(screen->get_node("UnreadyButton"));
     hide(screen->find_unique("CharacterUnlockAnimationBackstop"));
@@ -78,6 +94,8 @@ Node* CharacterSelectScreen::build(const Json& characters, const std::string& se
         bt.id = ids[i];
         bt.icon = ctl(b, "Icon");
         bt.outline = ctl(b, "OutlineLocal");
+        bt.lock = ctl(b, "Lock");
+        bt.locked = false;
         /* Init: CharacterModel.CharacterSelectIcon. */
         set_texture(lib_, bt.icon, "images/packed/character_select/char_select_" +
                                        (bt.id == RANDOM_ID ? std::string("random") : lower(bt.id)) + ".png");
@@ -91,11 +109,69 @@ Node* CharacterSelectScreen::build(const Json& characters, const std::string& se
         buttons_.push_back(bt);
     }
     screen->add_child(frame_driver(this));
+    refresh_locks();
     int first = 0;
     for (size_t i = 0; i < buttons_.size(); ++i)
-        if (buttons_[i].id == selected) first = (int)i;
+        if (buttons_[i].id == selected && !buttons_[i].locked) first = (int)i;
     select(first, false);
     return screen;
+}
+
+void CharacterSelectScreen::detach() {
+    buttons_.clear();
+    info_ = panel_ = tip_ = NULL;
+    bg_box_ = NULL;
+    focus_ = -1;
+    tweens_.clear();
+}
+
+void CharacterSelectScreen::set_progress(const Json& menu) {
+    progress_ = menu;
+    refresh_locks();
+    int i = focus_;
+    focus_ = -1;
+    if (i >= 0) select(i, false);
+}
+
+/* NCharacterSelectButton.Init: locked buttons (Random: while any is). */
+void CharacterSelectScreen::refresh_locks() {
+    if (progress_.is_null()) return;
+    bool any_locked = false;
+    for (size_t i = 0; i < buttons_.size(); ++i) {
+        Button& b = buttons_[i];
+        if (b.id == RANDOM_ID) continue;
+        const Json* p = progress_for(b.id);
+        b.locked = p && !(*p)["unlocked"].b(true);
+        any_locked = any_locked || b.locked;
+    }
+    for (size_t i = 0; i < buttons_.size(); ++i) {
+        Button& b = buttons_[i];
+        if (b.id == RANDOM_ID) b.locked = any_locked;
+        set_texture(lib_, b.icon, "images/packed/character_select/char_select_" +
+                                      (b.id == RANDOM_ID ? std::string("random") : lower(b.id)) +
+                                      (b.locked ? "_locked.png" : ".png"));
+        set_visible(b.lock, b.locked);
+    }
+}
+
+/* NAscensionPanel.SetMaxAscension / SetAscensionLevel. */
+void CharacterSelectScreen::set_ascension_range(int max, int level) {
+    max_ascension_ = max;
+    set_visible(panel_, max > 0);
+    set_ascension(level < 0 ? 0 : level > max ? max : level);
+}
+
+void CharacterSelectScreen::set_ascension(int level) {
+    ascension_ = level;
+    if (!panel_) return;
+    /* RefreshAscensionText, RefreshArrowVisibility. */
+    Node* icon = ctl(panel_, "AscensionIcon");
+    set_label(icon ? icon->get_node("AscensionLevel") : NULL, format("%d", level));
+    const Json& a = progress_["ascensions"][(size_t)level];
+    set_label(panel_->get_node("HBoxContainer/AscensionDescription/Description"),
+              "[b][gold]" + a["title"].str() + "[/gold][/b]\n" + a["description"].str());
+    set_visible(panel_->get_node("HBoxContainer/LeftArrowContainer/LeftArrow"), level != 0);
+    set_visible(panel_->get_node("HBoxContainer/RightArrowContainer/RightArrow"), level != max_ascension_);
 }
 
 void CharacterSelectScreen::set_data(const Json& characters) {
@@ -152,6 +228,11 @@ void CharacterSelectScreen::refresh_info() {
  * info panel sliding in from 300 px left); the others deselect. */
 void CharacterSelectScreen::select(int i, bool animate) {
     if (i < 0 || i >= (int)buttons_.size() || i == focus_) return;
+    if (tip_) {
+        if (tip_->parent) tip_->parent->remove_child(tip_);
+        delete tip_;
+        tip_ = NULL;
+    }
     if (focus_ >= 0) {
         Button& o = buttons_[(size_t)focus_];
         if (o.icon) {
@@ -178,6 +259,36 @@ void CharacterSelectScreen::select(int i, bool animate) {
     /* OnFocus: the hover scale (1.1) while focused. */
     tweens_.kill(&b.node->scale);
     b.node->scale = Vec2(1.1f, 1.1f);
+    if (b.locked) {
+        /* OnFocus while locked: "Locked" and how to unlock it, above the
+         * button; the screen keeps the last character. */
+        const Json* p = progress_for(b.id);
+        tip_ = make_hover_tip(lib_, Loc::get("main_menu_ui", "CHARACTER_SELECT.locked.title"),
+                              p ? (*p)["unlock_text"].str() : std::string());
+        if (tip_) {
+            Vec2 at = b.node->global_transform().xform(Vec2(0, 0));
+            tip_->set_position(at + Vec2(-90.0f, -180.0f));
+            Node* root = b.node;
+            while (root->parent) root = root->parent;
+            root->add_child(tip_);
+        }
+        return;
+    }
+    /* SetSingleplayerAscensionAfterCharacterChanged: the character's
+     * maximum and preferred level (Random: the highest of any). */
+    if (!progress_.is_null()) {
+        int max = 0, level = 0;
+        if (b.id == RANDOM_ID) {
+            const Json& cs = progress_["characters"];
+            for (size_t k = 0; k < cs.size(); ++k)
+                if (cs[k]["max_ascension"].i() > max) max = cs[k]["max_ascension"].i();
+            level = ascension_;
+        } else if (const Json* p = progress_for(b.id)) {
+            max = (*p)["max_ascension"].i();
+            level = (*p)["ascension"].i();
+        }
+        set_ascension_range(max, level);
+    }
     /* The background: CharacterModel.CharacterSelectBg. */
     if (bg_box_) {
         while (!bg_box_->children.empty()) {
@@ -202,12 +313,25 @@ CharacterSelectScreen::Action CharacterSelectScreen::input(const PadState& pad) 
     if (pad.pressed & PadState::LEFT) select((focus_ + n - 1) % n, true);
     if (pad.pressed & PadState::RIGHT) select((focus_ + 1) % n, true);
     if (pad.pressed & PadState::B) return BACK;
+    /* The ascension panel's tab hotkeys. */
+    if (max_ascension_ > 0 && (pad.pressed & (PadState::LB | PadState::RB))) {
+        int level = ascension_ + ((pad.pressed & PadState::RB) ? 1 : -1);
+        if (level >= 0 && level <= max_ascension_) {
+            set_ascension(level);
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        }
+    }
+    if ((pad.pressed & (PadState::A | PadState::START)) && buttons_[(size_t)focus_].locked) return NONE;
     if (pad.pressed & (PadState::A | PadState::START)) {
         embark_id_ = buttons_[(size_t)focus_].id;
         if (embark_id_ == RANDOM_ID) {
             /* RandomCharacter: one of the others, chosen now. */
             int k = n > 1 ? (int)(chaotic_rand() % (unsigned)(n - 1)) : 0;
             embark_id_ = buttons_[(size_t)k].id;
+            /* StartRunLobby.BeginRunLocally: within that character's
+             * maximum. */
+            if (const Json* p = progress_for(embark_id_))
+                if (ascension_ > (*p)["max_ascension"].i()) ascension_ = (*p)["max_ascension"].i();
         }
         return EMBARK;
     }

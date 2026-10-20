@@ -33,7 +33,8 @@ static std::string random_loc(const char* table, const char* prefix, bool two_di
 GameOverScreen::GameOverScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), backstop_(NULL), ui_(NULL), banner_(NULL), quote_(NULL), victory_(NULL),
       summary_backstop_(NULL), summary_(NULL), continue_(NULL), main_menu_(NULL), phase_(INTRO), t_(0), step_(0), lines_started_(0),
-      continue_on_(false), menu_on_(false), done_(false) {}
+      continue_on_(false), menu_on_(false), done_(false), bar_(NULL), bar_fg_(NULL), bar_score_(0), bar_threshold_(0),
+      bar_t_(0), bar_step_(0) {}
 
 Node* GameOverScreen::build(const Json& d, std::string* error) {
     decision_ = d;
@@ -55,7 +56,14 @@ Node* GameOverScreen::build(const Json& d, std::string* error) {
     hide(screen->find_unique("LeaderboardButton"));
     hide(screen->find_unique("ViewRunButton"));
     hide(screen->find_unique("BadgeContainer"));
-    hide(screen->find_unique("ScoreBar"));
+    bar_ = ctl(screen, "ScoreBar");
+    bar_fg_ = ctl(screen, "ScoreFg");
+    bar_step_ = 0;
+    /* No progress (the test flow) or nothing left to unlock: no bar. */
+    if (!d["progress"]["score_bar"].is_object() || d["progress"]["score_bar"]["unlocks_remaining"].i() <= 0) {
+        hide(bar_);
+        bar_ = NULL;
+    }
     hide(find_named(screen, "DiscoveryContainer"));
 
     /* The backstop's wipe (texture_transition.gdshader) as a fade. */
@@ -180,6 +188,25 @@ Node* GameOverScreen::score_line(const Json& line) {
     return row;
 }
 
+void GameOverScreen::set_score_text(float value) {
+    bar_score_ = value;
+    if (!bar_) return;
+    set_label(bar_->find_unique("ScoreProgress"), format("[%d/%d]", (int)(value + 0.5f), bar_threshold_));
+}
+
+/* AnimateScoreBar's start: the unlocks left, the score so far. */
+void GameOverScreen::start_score_bar() {
+    const Json& b = decision_["progress"]["score_bar"];
+    bar_threshold_ = b["threshold"].i();
+    set_label(bar_->find_unique("UnlocksRemaining"),
+              Loc::format("game_over_screen", "SCORE.unlocksRemaining", "UnlockCount", format("%d", b["unlocks_remaining"].i())));
+    set_score_text((float)b["current"].i());
+    if (bar_fg_) bar_fg_->scale.x = bar_threshold_ > 0 ? (float)b["current"].i() / (float)bar_threshold_ : 0;
+    tweens_.tween(&bar_->modulate.a, 1.0f, 0.3f);
+    bar_t_ = 0;
+    bar_step_ = 1;
+}
+
 std::string GameOverScreen::input(const PadState& pad) {
     if (!(pad.pressed & PadState::A)) return std::string();
     if (phase_ == TITLE && continue_on_) {
@@ -267,7 +294,67 @@ void GameOverScreen::frame(double dt) {
             tweens_.tween(&lines_[lines_started_]->modulate.a, 1.0f, 0.3f);
             ++lines_started_;
         }
-        if (step_ == 1 && t_ >= line_t * (float)lines_.size() + 0.5f + 0.75f) {
+        float lines_end = line_t * (float)lines_.size() + 0.5f;
+        if (step_ == 1 && bar_ && t_ >= lines_end && bar_step_ == 0) start_score_bar();
+        if (bar_step_ > 0 && bar_step_ < 4) {
+            bar_t_ += dt;
+            const Json& b = decision_["progress"]["score_bar"];
+            float score = (float)decision_["progress"]["score"].i();
+            float cur = (float)b["current"].i();
+            float threshold = (float)(bar_threshold_ > 0 ? bar_threshold_ : 1);
+            if (bar_step_ == 1 && bar_t_ >= 0.3) {
+                bar_step_ = 2;
+                bar_t_ = 0;
+                if (!b["unlocked"].b()) {
+                    /* Not enough for an unlock: the score counts up (1 s
+                     * after 0.5 s). */
+                    if (bar_fg_) tweens_.tween(&bar_fg_->scale.x, (cur + score) / threshold, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
+                } else {
+                    /* The bar fills (1 s after a second, Cubic Out). */
+                    if (bar_fg_) tweens_.tween(&bar_fg_->scale.x, 1.0f, 1.0f, TRANS_CUBIC, EASE_OUT, 1.0f);
+                    set_label(bar_->find_unique("UnlockText"),
+                              Loc::get("game_over_screen", b["next_threshold"].i() == 0 ? "SCORE.unlockedAllMessage"
+                                                                                        : "SCORE.unlockedEpochMessage"));
+                }
+            } else if (bar_step_ == 2 && !b["unlocked"].b()) {
+                float k = bar_t_ < 0.5 ? 0.0f : bar_t_ > 1.5 ? 1.0f : (float)(bar_t_ - 0.5);
+                set_score_text(cur + score * k);
+                if (bar_t_ >= 1.5) bar_step_ = 4;
+            } else if (bar_step_ == 2) {
+                float k = bar_t_ < 1.0 ? 0.0f : bar_t_ > 2.0 ? 1.0f : (float)(bar_t_ - 1.0);
+                k = 1.0f - (1.0f - k) * (1.0f - k) * (1.0f - k);
+                set_score_text(cur + score + ((float)bar_threshold_ - cur - score) * k);
+                if (bar_t_ >= 2.0) {
+                    /* The unlock: the text springs up (0.25 s), the bar
+                     * starts over towards the next unlock. */
+                    bar_step_ = 3;
+                    bar_t_ = 0;
+                    Control* text = as_control(bar_->find_unique("UnlockText"));
+                    if (text) {
+                        tweens_.tween(&text->modulate.a, 1.0f, 0.25f);
+                        float h = text->offset[SIDE_BOTTOM] - text->offset[SIDE_TOP];
+                        tweens_.tween(&text->offset[SIDE_TOP], -60.0f - h * 0.5f, 0.25f, TRANS_SPRING, EASE_OUT);
+                        tweens_.tween(&text->offset[SIDE_BOTTOM], -60.0f + h * 0.5f, 0.25f, TRANS_SPRING, EASE_OUT);
+                    }
+                    set_label(bar_->find_unique("UnlocksRemaining"),
+                              Loc::format("game_over_screen", "SCORE.unlocksRemaining", "UnlockCount",
+                                          format("%d", b["unlocks_remaining"].i() - 1)));
+                    bar_threshold_ = b["next_threshold"].i();
+                    if (bar_threshold_ > 0 && bar_fg_) {
+                        bar_fg_->scale.x = 0;
+                        tweens_.tween(&bar_fg_->scale.x, (float)b["after"].i() / (float)bar_threshold_, 1.0f, TRANS_CUBIC,
+                                      EASE_OUT, 0.5f);
+                    }
+                    set_score_text(0);
+                }
+            } else if (bar_step_ == 3) {
+                float k = bar_t_ < 0.5 ? 0.0f : bar_t_ > 1.5 ? 1.0f : (float)(bar_t_ - 0.5);
+                k = 1.0f - (1.0f - k) * (1.0f - k) * (1.0f - k);
+                if (bar_threshold_ > 0) set_score_text((float)b["after"].i() * k);
+                if (bar_t_ >= 1.5) bar_step_ = 4;
+            }
+        }
+        if (step_ == 1 && (bar_ ? bar_step_ == 4 : t_ >= lines_end + 0.75f)) {
             step_ = 2;
             enable_button(main_menu_, false);
             menu_on_ = true;

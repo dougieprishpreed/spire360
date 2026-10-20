@@ -118,6 +118,16 @@ internal static partial class Hooks
                 });
         });
 
+        // TestMode at the rules that depend on it (testmode.game_flow.*): off
+        // for runs that follow the game's own flow, the real value otherwise.
+        Bridge.Register("testmode.game_flow.is_off", _ => Driver?.GameFlow == true || TestMode.IsOff);
+        Bridge.Register("testmode.game_flow.is_on", _ => Driver?.GameFlow != true && TestMode.IsOn);
+        // RunManager.OnEnded(isVictory): how the run ended.
+        Spire.HookBridge.Hooks.RegisterAfter("run.ended", (a, r) =>
+        {
+            if (a.Length > 1 && a[1] is bool victory) Driver?.OnRunEnded(victory, r);
+        });
+
         // CardSelectCmd.FromChooseABundleScreen(player, bundles): a bundle_select decision.
         Bridge.Register("cardselect.choose_bundle", a =>
         {

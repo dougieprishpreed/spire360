@@ -6,7 +6,68 @@ Why things are the way they are: [DECISIONS.md](DECISIONS.md). Dialect rules:
 
 Last rewrite: 2026-10-18, when the work moved from a cloud session (game
 data reached it as zip "bundles") to a local desktop session on the user's
-PC, with the game installed.
+PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below).
+
+## Profiles, saves and progression checkpoint (2026-10-19)
+
+The user asked for: real PC save import, save and quit / continue, the
+game's own progression for new players (or an unlock-everything option
+with a chosen ascension), and a rigorous final test of all content with
+everything unlocked. Design: DECISIONS D14.
+
+Logic (`logic/Spire.Logic/Profiles.cs`, `Timeline.cs`, `Coverage.cs`):
+- Saves stay in the PC game's format and layout under `<data>/user`
+  (= `%APPDATA%/SlayTheSpire2/steam/<account>`), via the game's
+  SaveManager. `tools/import_save.py --from <PC account> --to out/data`
+  copies a PC account in (and back with `--force`, backing up first).
+  The user's account is `...\steam\76561198730798228` (profile 1: 544
+  runs, A10 on all five characters, a saved Ironclad A10 run at the Act 1
+  boss). There is a second account folder `76561199685111768`.
+- Commands: `profiles`, `select_profile` (0: the last), `main_menu`,
+  `set_unlock_all`, `start_game_run`, `continue_run`, `abandon_run`,
+  `give_up`, `return_to_menu` (save and quit), `timeline`,
+  `timeline_first_time_done`, `reveal_epoch`, `clear_pending_unlock`;
+  coverage aids `content`, `obtain`, `add_to_hand`.
+- Game-flow runs: unlocks from progress (or all), acts from
+  GetRandomList (Underdocks now appears; old runs never reached it),
+  ascension clamp/preferred, autosave, The Architect after the last boss
+  (old flow declared victory at the boss), OnEnded progress/history, the
+  game over screen's badges and score-bar epoch grant, TestMode-gated
+  rules switched on for these runs only (`testmode.game_flow.*`: alt-act
+  discovery, potion price variance, discovery order, first-run tutorial
+  rooms, per-floor history, reload count). No metrics/leaderboard upload.
+- `start_run` (old flow) unchanged: 15/15 seeded runs, **differences: 0**
+  (`traces/profiles` vs `traces/base`).
+- `tools/profile_check.py` cases (menu, continue, new_runs, fresh,
+  unlock_all, progression) all pass on a copy of the imported saves: the
+  user's run continues at Vantom with HP 69/80; new runs at A10 for all
+  five; a new profile has only the Ironclad, earns Neow, reveals Neow ->
+  Silent -> Regent -> Necrobinder over three runs.
+
+Presentation (`engine/game/menu_flow.*` shared by the console and
+`spire_play --menu`): main menu with Continue (run info), Abandon Run
+(confirm popup), Singleplayer, Timeline (notification dot, gating), Quit,
+profile button (Start) -> profile screen (switch profile; Y toggles
+Unlock Everything); character select with locked characters and their
+unlock tips, ascension panel on LB/RB; pause menu on Start (Resume, Give
+Up with confirmation, Save and Quit, capstone backstop); game over score
+bar with the epoch unlock, then the Timeline when epochs were discovered;
+Timeline screen (eras, slot states, tips, tutorial, reveal -> inspect ->
+unlock screens for cards/relics/potions/character/text -> expansion).
+Checked with spire_play menu drives on the imported profile and a new
+one (screens under ignored `work/menu-test/`).
+
+Open in this area: dark_blur (menu backstop blur, locked slot blur) needs
+a screen-texture path in both renderers; the epoch chains' shard VFX,
+stars particles and some timeline tweens; badges/discoveries on the game
+over screen; profile deletion; Settings/Compendium/run history screens;
+NCharacterSelectScreen's character unlock animation (pending_unlock is
+exported). The content coverage harness (`tools/content_coverage.py`) is
+written; its full run and the fixes it finds are the next step.
+
+PC tool runs from this shell: PowerShell 5.1 mangles embedded quotes, so
+MSYS2 commands go through `work/msys_run.sh <script>` (scripts under
+`work/`), e.g. `work/pcbuild.sh` for the PC build.
 
 ## Resumed Sound checkpoint (2026-10-18)
 

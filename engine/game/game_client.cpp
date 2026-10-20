@@ -11,6 +11,8 @@
 #include "../scene/value.h"
 #include "combat_screen.h"
 #include "bundle_select_screen.h"
+#include "confirm_popup.h"
+#include "pause_menu.h"
 #include "card_select_screen.h"
 #include "event_screen.h"
 #include "game_over_screen.h"
@@ -23,6 +25,8 @@
 #include "top_bar.h"
 #include "treasure_screen.h"
 #include "logic_link.h"
+
+#include <stdio.h>
 
 namespace spire {
 
@@ -239,9 +243,11 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL) {}
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
+      answers_(0), pause_(NULL), pause_node_(NULL), confirm_(NULL), confirm_node_(NULL), quitting_(false) {}
 
 GameClient::~GameClient() {
+    close_pause();
     if (transition_) {
         if (transition_->parent) transition_->parent->remove_child(transition_);
         delete transition_;
@@ -260,6 +266,28 @@ void GameClient::start_run(const std::string& character, const std::string& seed
     std::string cmd = "{\"cmd\":\"start_run\",\"character\":" + quoted(character) + ",\"seed\":" + quoted(seed) + "}";
     if (ready_) send(cmd);
     else pending_start_ = cmd; /* sent after the logic's "ready" */
+}
+
+void GameClient::start_game_run(const std::string& character, int ascension, const std::string& seed) {
+    std::string cmd = "{\"cmd\":\"start_game_run\",\"character\":" + quoted(character) + format(",\"ascension\":%d", ascension);
+    if (!seed.empty()) cmd += ",\"seed\":" + quoted(seed);
+    queue_or_send(cmd + "}");
+}
+
+void GameClient::continue_run() { queue_or_send("{\"cmd\":\"continue_run\"}"); }
+
+void GameClient::request(const std::string& command) { queue_or_send(command); }
+
+bool GameClient::take_answer(Json* out) {
+    if (unread_.empty()) return false;
+    *out = unread_.front();
+    unread_.erase(unread_.begin());
+    return true;
+}
+
+void GameClient::queue_or_send(const std::string& command) {
+    if (ready_) send(command);
+    else queued_.push_back(command);
 }
 
 void GameClient::request_characters() {
@@ -319,6 +347,8 @@ void GameClient::update(const PadState& pad) {
                 send(pending_start_);
                 pending_start_.clear();
             }
+            for (size_t i = 0; i < queued_.size(); ++i) send(queued_[i]);
+            queued_.clear();
         } else if (type == "characters") {
             waiting_ = false;
             characters_ = msg;
@@ -333,11 +363,28 @@ void GameClient::update(const PadState& pad) {
         } else if (type == "error") {
             error_ = msg["message"].str();
             log_warn("logic: %s", error_.c_str());
-            /* Ask for the current decision again (as random_runs does). */
-            if (++errors_ < 25) send("{\"cmd\":\"get_state\"}");
-            else waiting_ = false;
+            if (decision_.is_null()) {
+                /* A menu command failed: its answer. */
+                waiting_ = false;
+                answer_ = msg;
+                ++answers_;
+                unread_.push_back(msg);
+            } else if (++errors_ < 25) {
+                /* Ask for the current decision again (as random_runs does). */
+                send("{\"cmd\":\"get_state\"}");
+            } else {
+                waiting_ = false;
+            }
         } else {
+            /* main_menu, profiles, timeline, ...: a menu command's answer. */
             waiting_ = false;
+            answer_ = msg;
+            ++answers_;
+            unread_.push_back(msg);
+            if (quitting_ && type == "main_menu") {
+                quitting_ = false;
+                menu_requested_ = true;
+            }
         }
     }
     if (transition_ && transition_->phase == 1 && !transition_pending_.is_null() && transition_->ready()) {
@@ -682,6 +729,8 @@ void GameClient::show(const Json& d) {
 
 void GameClient::clear_screen() {
     if (lib_->audio()) lib_->audio()->menu();
+    close_pause();
+    quitting_ = false;
     if (transition_) { transition_->phase = 0; transition_->visible = false; }
     transition_pending_ = Json();
     potions_.detach();
@@ -732,6 +781,13 @@ void GameClient::choose_automatically() {
             indices.erase(indices.begin() + (long)pick);
         }
         send(action("select_cards", "\"indices\":" + quoted(selected)));
+        return;
+    }
+    if (game_over()) {
+        /* The game over screen's buttons as soon as each is enabled. */
+        PadState a;
+        a.pressed = a.held = PadState::A;
+        handle_input(a);
         return;
     }
     if (choices_.empty()) return;
@@ -814,10 +870,94 @@ void GameClient::combat_input(const PadState& pad) {
     }
 }
 
+/* NTopBarPauseButton (the pause hotkey): the pause menu over the run, in
+ * NCapstoneContainer. Screens where Start means back keep it. */
+void GameClient::open_pause() {
+    std::string err;
+    pause_ = new PauseMenu(lib_);
+    pause_node_ = pause_->build(!game_over(), &err);
+    if (!pause_node_) {
+        log_warn("pause menu: %s", err.c_str());
+        delete pause_;
+        pause_ = NULL;
+        return;
+    }
+    /* NCapstoneSubmenuStack.ShowScreen. */
+    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/pause_open");
+    tree_->root()->add_child(pause_node_);
+}
+
+void GameClient::close_pause() {
+    if (confirm_node_) {
+        if (confirm_node_->parent) confirm_node_->parent->remove_child(confirm_node_);
+        delete confirm_node_;
+        confirm_node_ = NULL;
+    }
+    delete confirm_;
+    confirm_ = NULL;
+    if (pause_node_) {
+        if (pause_node_->parent) pause_node_->parent->remove_child(pause_node_);
+        delete pause_node_;
+        pause_node_ = NULL;
+    }
+    delete pause_;
+    pause_ = NULL;
+}
+
+/* The pause menu's input while it is open; true when it took the pad. */
+bool GameClient::pause_input(const PadState& pad) {
+    if (!pause_) return false;
+    if (confirm_) {
+        /* NAbandonRunConfirmPopup: Confirm gives up (RunManager.Abandon). */
+        ConfirmPopup::Action a = confirm_->input(pad);
+        if (a == ConfirmPopup::YES) {
+            close_pause();
+            send("{\"cmd\":\"give_up\"}");
+        } else if (a == ConfirmPopup::NO) {
+            if (confirm_node_->parent) confirm_node_->parent->remove_child(confirm_node_);
+            delete confirm_node_;
+            confirm_node_ = NULL;
+            delete confirm_;
+            confirm_ = NULL;
+        }
+        return true;
+    }
+    PauseMenu::Action a = pause_->input(pad);
+    if (a == PauseMenu::RESUME) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/pause_close");
+        close_pause();
+    } else if (a == PauseMenu::GIVE_UP) {
+        std::string err;
+        confirm_ = new ConfirmPopup(lib_);
+        confirm_node_ = confirm_->build(&err);
+        if (confirm_node_) tree_->root()->add_child(confirm_node_);
+        else {
+            log_warn("abandon popup: %s", err.c_str());
+            delete confirm_;
+            confirm_ = NULL;
+        }
+    } else if (a == PauseMenu::SAVE_AND_QUIT) {
+        /* NPauseMenu.CloseToMenu: the run was saved as its room was
+         * entered; the logic lets it go and answers with the menu. */
+        close_pause();
+        if (lib_->audio()) lib_->audio()->menu();
+        quitting_ = true;
+        send("{\"cmd\":\"return_to_menu\"}");
+    }
+    return true;
+}
+
 void GameClient::handle_input(const PadState& pad) {
+    if (pause_input(pad)) return;
     /* The last command's effects play out first (the game takes no input
      * while its actions run). */
     if (combat_ && combat_->busy()) return;
+    const std::string& kind = decision_["decision"].str();
+    if ((pad.pressed & PadState::START) && !game_over() && kind != "card_select" && kind != "card_reward" &&
+        !potions_.active() && !(combat_ && target_ >= 0)) {
+        open_pause();
+        return;
+    }
     /* NButton's default click/hover sounds; hand cards have their own cues. */
     if (!combat_ && lib_->audio()) {
         if (pad.pressed & (PadState::UP | PadState::DOWN | PadState::LEFT | PadState::RIGHT)) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");

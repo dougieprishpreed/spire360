@@ -85,6 +85,7 @@ public partial class RunDriver
                 return Error($"Unknown character: {character}");
 
             var seedStr = seed ?? "headless_" + DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            GameFlow = false;
             Log($"Creating RunState with seed={seedStr}");
 
             // Use CreateForTest which properly handles mutable copies internally
@@ -150,6 +151,10 @@ public partial class RunDriver
         try { RunManager.Instance.CleanUp(); }
         catch (Exception ex) { Log($"EndRun: {ex.Message}"); }
         _runState = null;
+        GameFlow = false;
+        _endedVictory = null;
+        _endedRun = null;
+        _gameOverProgress = null;
         _turnStarted = _combatEnded = _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         ClearRewards();
@@ -1490,14 +1495,15 @@ public partial class RunDriver
             if (combatRoom.IsPreFinished || !CombatManager.Instance.IsInProgress)
             {
                 // Final act boss → victory (same rule as DetectPostCombatState, #81).
-                if (_runState != null && _runState.CurrentActIndex >= 2)
+                // The game's flow goes on to The Architect (EnterNextAct).
+                if (!GameFlow && _runState != null && _runState.CurrentActIndex >= 2)
                 {
                     Log($"Final boss defeated via Proceed (Act {_runState.CurrentActIndex + 1}), reporting victory");
                     return GameOverState(true);
                 }
                 Sched.Run(() => RunManager.Instance.EnterNextAct());
                 WaitForActionExecutor();
-                HealBetweenActs();
+                if (!GameFlow) HealBetweenActs(); // the game heals at the act's Ancient
                 return DetectDecisionPoint();
             }
         }
@@ -1526,6 +1532,11 @@ public partial class RunDriver
             return Error("No run in progress");
 
         var player = _runState.Players[0];
+
+        // The game's flow ended the run (WinRun at The Architect, then the
+        // player is killed): its outcome.
+        if (_endedVictory != null && player.Creature != null && player.Creature.IsDead)
+            return GameOverState(_endedVictory.Value);
 
         // Check game over (death)
         if (player.Creature != null && player.Creature.IsDead)
@@ -2503,7 +2514,7 @@ public partial class RunDriver
         // map_select. Report victory directly in that case.
         if (combatRoom.RoomType == RoomType.Boss)
         {
-            if (_runState != null && _runState.CurrentActIndex >= 2)
+            if (!GameFlow && _runState != null && _runState.CurrentActIndex >= 2)
             {
                 Log($"Final boss defeated (Act {_runState.CurrentActIndex + 1}), reporting victory");
                 return GameOverState(true);
@@ -2514,7 +2525,7 @@ public partial class RunDriver
                 Sched.Run(() => RunManager.Instance.EnterNextAct());
                 Sched.Pump();
                 WaitForActionExecutor();
-                HealBetweenActs();
+                if (!GameFlow) HealBetweenActs();
             }
             catch (Exception ex) { Log($"EnterNextAct: {ex.Message}"); }
             return DetectDecisionPoint();
@@ -3025,7 +3036,9 @@ public partial class RunDriver
             ["act"] = _runState.CurrentActIndex + 1,
             ["floor"] = _runState.ActFloor,
         };
+        var progress = GameOverProgress(isVictory);
         AddGameOverDetails(d, isVictory);
+        if (progress != null) d["progress"] = progress;
         return d;
     }
 
@@ -3414,6 +3427,7 @@ public partial class RunDriver
         try
         {
             var store = new FileStore(Path.Combine(DataDir.Root, "user"));
+            _saveStore = store;
             SaveManager.MockInstanceForTesting(new SaveManager(store, forceSynchronous: true));
             Log($"Saves in {store.Root}");
         }

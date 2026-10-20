@@ -22,7 +22,9 @@
 namespace spire {
 
 class CombatScreen;
+class ConfirmPopup;
 class LogicLink;
+class PauseMenu;
 class Node;
 class SceneLibrary;
 class SceneTree;
@@ -43,6 +45,20 @@ public:
     ~GameClient();
 
     void start_run(const std::string& character, const std::string& seed);
+    /* A run of the current profile, as the game starts one (unlocks,
+     * ascension, saves): start_game_run; seed "" for the game's own. */
+    void start_game_run(const std::string& character, int ascension, const std::string& seed = std::string());
+    /* The profile's saved run (the main menu's Continue). */
+    void continue_run();
+    /* A main menu command (select_profile, main_menu, timeline, ...);
+     * answer() is the logic's reply to the last one once answers() has
+     * counted it (an error reply included). */
+    void request(const std::string& command);
+    const Json& answer() const { return answer_; }
+    int answers() const { return answers_; }
+    /* The answers not taken yet, oldest first (several may arrive in one
+     * frame); false when there are none. */
+    bool take_answer(Json* out);
     /* Asks the logic for the character select screen's data (it also loads
      * the game data, so the run starts sooner); characters() has it once
      * the answer is in (characters_version() counts answers). */
@@ -65,8 +81,11 @@ public:
     /* Waiting for the logic's answer. */
     bool busy() const;
     bool game_over() const { return decision_["decision"].str() == "game_over"; }
-    /* The game over screen's Main Menu was pressed (A on the plain one). */
+    /* Back to the main menu: the game over screen's Main Menu, or Save
+     * and Quit from the pause menu once the logic has let the run go. */
     bool menu_requested() const { return menu_requested_; }
+    /* The pause menu or its Give Up confirmation is open. */
+    bool paused() const { return pause_ != NULL; }
     /* The last error the logic reported ("" if none). */
     const std::string& last_error() const { return error_; }
 
@@ -84,6 +103,10 @@ private:
     Node* plain_screen(const Json& d);
     void refresh_plain_screen();
     void start_room_transition();
+    void queue_or_send(const std::string& command);
+    void open_pause();
+    void close_pause();
+    bool pause_input(const PadState& pad);
 
     SceneLibrary* lib_;
     SceneTree* tree_;
@@ -119,6 +142,15 @@ private:
     int characters_version_;
     RoomTransition* transition_;
     Json transition_pending_;
+    std::vector<std::string> queued_; /* sent after the logic's "ready" */
+    Json answer_;
+    int answers_;
+    std::vector<Json> unread_;
+    PauseMenu* pause_;
+    Node* pause_node_;
+    ConfirmPopup* confirm_;
+    Node* confirm_node_;
+    bool quitting_; /* Save and Quit sent, waiting for the menu */
 };
 
 } /* namespace spire */

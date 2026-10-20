@@ -1,0 +1,276 @@
+#include "menu_flow.h"
+#include "../audio/game_audio.h"
+
+#include "../scene/node.h"
+#include "../scene/scene.h"
+#include "../scene/tree.h"
+#include "character_select.h"
+#include "confirm_popup.h"
+#include "game_client.h"
+#include "profile_screen.h"
+#include "timeline_screen.h"
+#include "title_screen.h"
+#include "ui_util.h"
+
+namespace spire {
+
+MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
+    : lib_(lib), tree_(tree), game_(game), version_(version), title_(new TitleScreen(lib)), title_node_(NULL),
+      chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), screen_node_(NULL),
+      screen_(TITLE), chars_version_(0), decisions_seen_(0), starting_(false), in_run_(false),
+      quit_(false), leaving_run_(false) {
+    show_title();
+    /* The game data loads while the menu shows; the last profile is read
+     * as the game does at start-up. */
+    game_->request_characters();
+    game_->request("{\"cmd\":\"select_profile\",\"profile\":0}");
+}
+
+MenuFlow::~MenuFlow() {
+    close_screen();
+    if (title_node_) {
+        if (title_node_->parent) title_node_->parent->remove_child(title_node_);
+        delete title_node_;
+    }
+    title_->detach();
+    delete title_;
+    delete chars_;
+}
+
+void MenuFlow::note(const std::string& e) { event_ = event_.empty() ? e : event_ + "; " + e; }
+
+std::string MenuFlow::take_event() {
+    std::string e = event_;
+    event_.clear();
+    return e;
+}
+
+void MenuFlow::show_title() {
+    std::string err;
+    if (!title_node_) {
+        title_node_ = title_->build(version_, &err);
+        if (title_node_) tree_->root()->add_child(title_node_);
+        else event_ = "main menu: " + err;
+    }
+    title_->set_menu(menu_);
+    title_->set_covered(false);
+    if (lib_->audio()) lib_->audio()->menu();
+    tree_->layout();
+}
+
+/* The submenu over the title goes; the title takes the pad again. */
+void MenuFlow::close_screen() {
+    if (screen_node_) {
+        if (screen_node_->parent) screen_node_->parent->remove_child(screen_node_);
+        delete screen_node_;
+        screen_node_ = NULL;
+        if (screen_ == CHARACTERS) chars_->detach();
+    }
+    delete confirm_;
+    confirm_ = NULL;
+    delete timeline_;
+    timeline_ = NULL;
+    delete profiles_;
+    profiles_ = NULL;
+    screen_ = TITLE;
+    title_->set_covered(false);
+    title_->set_submenu(false);
+}
+
+void MenuFlow::begin_run() {
+    starting_ = true;
+    if (screen_ == CHARACTERS) chars_->set_starting();
+    title_->set_covered(true);
+    decisions_seen_ = game_->decision_count();
+}
+
+void MenuFlow::open_timeline() {
+    std::string err;
+    timeline_ = new TimelineScreen(lib_);
+    screen_node_ = timeline_->build(&err);
+    if (!screen_node_) {
+        event_ = "timeline: " + err;
+        delete timeline_;
+        timeline_ = NULL;
+        return;
+    }
+    screen_ = TIMELINE;
+    title_->set_covered(true);
+    title_->set_submenu(true);
+    tree_->root()->add_child(screen_node_);
+    game_->request("{\"cmd\":\"timeline\"}");
+}
+
+void MenuFlow::handle_answer(const Json& a) {
+    const std::string& type = a["type"].str();
+    note("answer: " + type);
+    if (type == "main_menu") {
+        menu_ = a;
+        title_->set_menu(menu_);
+        chars_->set_progress(menu_);
+        if (screen_ == ABANDON) close_screen();
+        if (profiles_) profiles_->set_menu(menu_);
+    } else if (type == "timeline") {
+        if (timeline_) timeline_->set_data(a);
+    } else if (type == "profiles") {
+        if (profiles_) profiles_->set_profiles(a);
+    } else if (type == "error") {
+        note("logic: " + a["message"].str());
+        /* No profile could be read: the menu without one. */
+        if (menu_.is_null()) title_->set_menu(menu_);
+        if (starting_) {
+            /* The run could not start (a bad save): back to the menu. */
+            starting_ = false;
+            if (screen_ == CHARACTERS) close_screen();
+            title_->set_covered(false);
+            game_->request("{\"cmd\":\"main_menu\"}");
+        }
+    }
+}
+
+bool MenuFlow::update(const PadState& in) {
+    PadState pad = in;
+    /* The logic's answers to the menus. */
+    Json answer;
+    while (game_->take_answer(&answer)) handle_answer(answer);
+    if (game_->characters_version() != chars_version_) {
+        chars_version_ = game_->characters_version();
+        chars_->set_data(game_->characters());
+    }
+
+    if (in_run_) {
+        game_->update(pad);
+        if (game_->menu_requested()) {
+            /* Back to the main menu: after a game over the run is let go
+             * here (Save and Quit has done it already). */
+            bool over = game_->game_over();
+            /* NGameOverScreen.OnMainMenuButtonPressed: to the timeline
+             * when the run discovered an epoch. */
+            bool timeline = over && game_->decision()["progress"]["discovered_epochs"].size() > 0;
+            game_->clear_screen();
+            in_run_ = false;
+            if (over) game_->request("{\"cmd\":\"return_to_menu\"}");
+            close_screen();
+            show_title();
+            note("main menu");
+            if (timeline) open_timeline();
+        }
+        return !quit_;
+    }
+
+    if (!starting_) {
+        std::string err;
+        switch (screen_) {
+        case TITLE: {
+            TitleScreen::Action a = title_->input(pad);
+            if (a == TitleScreen::QUIT) quit_ = true;
+            else if (a == TitleScreen::CONTINUE) {
+                note("continue");
+                game_->continue_run();
+                begin_run();
+            } else if (a == TitleScreen::ABANDON) {
+                confirm_ = new ConfirmPopup(lib_);
+                screen_node_ = confirm_->build(&err);
+                if (screen_node_) {
+                    screen_ = ABANDON;
+                    title_->set_covered(true);
+                    tree_->root()->add_child(screen_node_);
+                } else {
+                    delete confirm_;
+                    confirm_ = NULL;
+                }
+            } else if (a == TitleScreen::SINGLEPLAYER) {
+                screen_node_ = chars_->build(game_->characters(), last_character_, &err);
+                if (screen_node_) {
+                    screen_ = CHARACTERS;
+                    chars_->set_progress(menu_);
+                    title_->set_covered(true);
+                    title_->set_submenu(true);
+                    tree_->root()->add_child(screen_node_);
+                } else {
+                    event_ = "character select: " + err;
+                }
+            } else if (a == TitleScreen::TIMELINE) {
+                open_timeline();
+            } else if (a == TitleScreen::PROFILES) {
+                profiles_ = new ProfileScreen(lib_);
+                screen_node_ = profiles_->build(&err);
+                if (screen_node_) {
+                    screen_ = PROFILES;
+                    profiles_->set_menu(menu_);
+                    title_->set_covered(true);
+                    title_->set_submenu(true);
+                    tree_->root()->add_child(screen_node_);
+                    game_->request("{\"cmd\":\"profiles\"}");
+                } else {
+                    event_ = "profiles: " + err;
+                    delete profiles_;
+                    profiles_ = NULL;
+                }
+            }
+            break;
+        }
+        case CHARACTERS: {
+            CharacterSelectScreen::Action a = chars_->input(pad);
+            if (a == CharacterSelectScreen::BACK) {
+                last_character_ = chars_->selected();
+                close_screen();
+            } else if (a == CharacterSelectScreen::EMBARK) {
+                last_character_ = chars_->selected();
+                note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
+                if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));
+                else game_->start_game_run(chars_->character(), chars_->ascension());
+                begin_run();
+            }
+            break;
+        }
+        case ABANDON: {
+            ConfirmPopup::Action a = confirm_->input(pad);
+            if (a == ConfirmPopup::YES) {
+                /* NMainMenu.AbandonRun: the menu refreshes on the answer. */
+                note("abandon run");
+                game_->request("{\"cmd\":\"abandon_run\"}");
+                set_visible(screen_node_, false);
+            } else if (a == ConfirmPopup::NO) {
+                close_screen();
+            }
+            break;
+        }
+        case TIMELINE: {
+            std::string cmd;
+            TimelineScreen::Action a = timeline_->input(pad, &cmd);
+            if (!cmd.empty()) game_->request(cmd);
+            if (a == TimelineScreen::BACK) {
+                /* OnSubmenuHidden: the menu's buttons refresh. */
+                close_screen();
+                game_->request("{\"cmd\":\"main_menu\"}");
+            }
+            break;
+        }
+        case PROFILES: {
+            std::string cmd;
+            ProfileScreen::Action a = profiles_->input(pad, &cmd);
+            if (!cmd.empty()) game_->request(cmd);
+            if (a == ProfileScreen::BACK) close_screen();
+            break;
+        }
+        }
+    }
+
+    game_->update(PadState());
+    if (starting_ && game_->decision_count() != decisions_seen_) {
+        /* The run's first screen: the menus go. */
+        close_screen();
+        if (title_node_) {
+            if (title_node_->parent) title_node_->parent->remove_child(title_node_);
+            delete title_node_;
+            title_node_ = NULL;
+            title_->detach();
+        }
+        starting_ = false;
+        in_run_ = true;
+    }
+    return !quit_;
+}
+
+} /* namespace spire */

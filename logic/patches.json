@@ -414,6 +414,88 @@
       "all_overloads": true,
       "optional": true,
       "note": "Mods are not loaded on the console. These are the only game methods that use Harmony (0Harmony); without them the AOT builds do not compile Harmony and its embedded Mono.Cecil (~1.3 MB of code)."
+    },
+    {
+      "id": "testmode.game_flow.is_off",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
+      "method": "get_IsOff",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.ActModel::GetRandomList",
+        "MegaCrit.Sts2.Core.Entities.Merchant.MerchantPotionEntry",
+        "MegaCrit.Sts2.Core.Saves.SaveManager::IncrementNumReloads",
+        "MegaCrit.Sts2.Core.Runs.RunManager::ShouldApplyTutorialModifications",
+        "MegaCrit.Sts2.Core.Runs.RunManager::TryGetRoomTypeForTutorial",
+        "MegaCrit.Sts2.Core.Runs.RunManager::UpdatePlayerStatsInMapPointHistory"
+      ],
+      "note": "The adapter runs the game with TestMode on, and some rules depend on it: a new profile's first act is an undiscovered alternate act (ActModel.GetRandomList), shop potion prices vary by +/-5% (MerchantPotionEntry, a Shops RNG draw), bosses and encounters follow the discovery order and a first run's unknown rooms are events (RunManager's tutorial rules), the run history records HP and gold per floor and reloads are counted. Runs that follow the game's own flow (start_game_run) see TestMode off at exactly these sites; other runs see the real value, unchanged."
+    },
+    {
+      "id": "testmode.game_flow.is_on",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
+      "method": "get_IsOn",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.ActModel::GetRandomList",
+        "MegaCrit.Sts2.Core.Entities.Merchant.MerchantPotionEntry",
+        "MegaCrit.Sts2.Core.Saves.SaveManager::IncrementNumReloads",
+        "MegaCrit.Sts2.Core.Runs.RunManager::ShouldApplyTutorialModifications",
+        "MegaCrit.Sts2.Core.Runs.RunManager::TryGetRoomTypeForTutorial",
+        "MegaCrit.Sts2.Core.Runs.RunManager::UpdatePlayerStatsInMapPointHistory"
+      ],
+      "note": "See testmode.game_flow.is_off."
+    },
+    {
+      "id": "run.ended",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Runs.RunManager",
+      "method": "OnEnded",
+      "note": "Records how the run ended (RunManager.OnEnded: progress, history, epochs). WinRun calls it at the end of The Architect and then kills the player, so the adapter needs the outcome to report a victory."
+    },
+    {
+      "id": "metrics.UploadRunMetrics",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Runs.Metrics.MetricUtilities",
+      "method": "UploadRunMetrics",
+      "all_overloads": true,
+      "optional": true,
+      "note": "Run metrics go to Mega Crit's server from the PC game only; nothing is sent from here."
+    },
+    {
+      "id": "metrics.UploadAchievementMetric",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Runs.Metrics.MetricUtilities",
+      "method": "UploadAchievementMetric",
+      "all_overloads": true,
+      "optional": true,
+      "note": "No metrics upload."
+    },
+    {
+      "id": "metrics.UploadEpochMetric",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Runs.Metrics.MetricUtilities",
+      "method": "UploadEpochMetric",
+      "all_overloads": true,
+      "optional": true,
+      "note": "No metrics upload (SaveManager.RevealEpoch calls it)."
+    },
+    {
+      "id": "metrics.UploadSettingsMetric",
+      "action": "return_default",
+      "type": "MegaCrit.Sts2.Core.Runs.Metrics.MetricUtilities",
+      "method": "UploadSettingsMetric",
+      "all_overloads": true,
+      "optional": true,
+      "note": "No metrics upload."
+    },
+    {
+      "id": "daily.UploadScore",
+      "action": "return_completed_task",
+      "type": "MegaCrit.Sts2.Core.Daily.DailyRunUtility",
+      "method": "UploadScore",
+      "all_overloads": true,
+      "optional": true,
+      "note": "No leaderboard upload."
     }
   ]
 }

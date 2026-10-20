@@ -10,6 +10,13 @@
  * screen half a second after each is saved, NNNN_pad_KK.png), then
  * auto-play takes over.
  *
+ * --menu starts at the main menu of the logic's last profile instead
+ * (MenuFlow, as the console): the --pad buttons drive the menus (title,
+ * profiles, timeline, character select, the run's pause menu), one each
+ * time the screen has been idle a second, saving menu_KK.png after each;
+ * --menu-hold N waits N extra seconds before the first press. Once the
+ * buttons are used up, a run that has started plays by itself.
+ *
  * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision's
  * line) per screen, and logic.log (the logic's stderr). The logic's working
  * directory is ours: give it SPIRE_DATA in the environment for localization. */
@@ -18,6 +25,7 @@
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
 #include "../../engine/game/game_client.h"
+#include "../../engine/game/menu_flow.h"
 #include "../../engine/game/logic_link.h"
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
@@ -25,9 +33,13 @@
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
 
+#include <deque>
+#include <fstream>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 using namespace spire;
@@ -35,10 +47,21 @@ using namespace spire;
 /* The pipe link, keeping the last decision line (saved with its screen). */
 class RecordingLink : public LogicLink {
 public:
-    explicit RecordingLink(PipeLink* inner) : inner_(inner) {}
-    virtual bool send(const std::string& line) { return inner_->send(line); }
+    explicit RecordingLink(PipeLink* inner) : echo(false), trace(NULL), inner_(inner) {}
+    virtual bool send(const std::string& line) {
+        if (echo) printf("> %s\n", line.c_str());
+        if (trace) {
+            fprintf(trace, ">%s\n", line.c_str());
+            fflush(trace);
+        }
+        return inner_->send(line);
+    }
     virtual bool poll(std::string& line) {
         if (!inner_->poll(line)) return false;
+        if (trace && !line.empty() && line[0] == '{') {
+            fprintf(trace, "%s\n", line.c_str());
+            fflush(trace);
+        }
         if (line.find("\"type\": \"decision\"") != std::string::npos ||
             line.find("\"type\":\"decision\"") != std::string::npos)
             last_decision = line;
@@ -46,10 +69,89 @@ public:
     }
     virtual bool finished() { return inner_->finished(); }
     std::string last_decision;
+    bool echo;   /* --menu: the commands sent, on stdout */
+    FILE* trace; /* --menu: every line both ways (spire_check replays it) */
 
 private:
     PipeLink* inner_;
 };
+
+/* --replay: the responses of a recorded menu trace, each group handed out
+ * when the client sends the command it answered (a debugging aid: the run
+ * repeats exactly, without the logic). */
+class ReplayLink : public LogicLink {
+public:
+    bool load(const char* path) {
+        std::ifstream in(path);
+        if (!in) return false;
+        std::string line;
+        groups_.push_back(Group());
+        while (std::getline(in, line)) {
+            if (line.empty()) continue;
+            if (line[0] == '>') {
+                groups_.push_back(Group());
+                groups_.back().sent = line.substr(1);
+            } else {
+                groups_.back().replies.push_back(line);
+            }
+        }
+        next_ = 0;
+        release();
+        return true;
+    }
+    virtual bool send(const std::string& line) {
+        if (next_ < groups_.size() && groups_[next_].sent != line)
+            fprintf(stderr, "replay: sent %s, recorded %s\n", line.c_str(), groups_[next_].sent.c_str());
+        printf("> %s\n", line.c_str());
+        release();
+        return true;
+    }
+    virtual bool poll(std::string& line) {
+        if (incoming_.empty()) return false;
+        line = incoming_.front();
+        incoming_.pop_front();
+        return true;
+    }
+    virtual bool finished() { return false; }
+    bool done() const { return next_ >= groups_.size() && incoming_.empty(); }
+
+private:
+    struct Group {
+        std::string sent;
+        std::vector<std::string> replies;
+    };
+    void release() {
+        if (next_ >= groups_.size()) return;
+        for (size_t i = 0; i < groups_[next_].replies.size(); ++i) incoming_.push_back(groups_[next_].replies[i]);
+        ++next_;
+    }
+    std::vector<Group> groups_;
+    size_t next_;
+    std::deque<std::string> incoming_;
+};
+
+/* A crash's code addresses (PC, then the frame-pointer chain) for
+ * addr2line, with a build that keeps frame pointers. */
+static void on_crash(int sig, siginfo_t* info, void* ctx) {
+    ucontext_t* uc = (ucontext_t*)ctx;
+    fprintf(stderr, "spire_play: signal %d at address %p\n", sig, info ? info->si_addr : NULL);
+#if defined(__x86_64__)
+    unsigned long long pc = (unsigned long long)uc->uc_mcontext.rip;
+    unsigned long long* fp = (unsigned long long*)uc->uc_mcontext.rbp;
+    fprintf(stderr, "  pc 0x%llx\n", pc);
+    for (int i = 0; i < 24 && fp; ++i) {
+        unsigned long long ret = fp[1];
+        fprintf(stderr, "  ret 0x%llx\n", ret);
+        unsigned long long* next = (unsigned long long*)fp[0];
+        if (next <= fp) break;
+        fp = next;
+    }
+#else
+    (void)uc;
+#endif
+    fflush(stderr);
+    _exit(139);
+}
 
 static bool save_text(const std::string& path, const std::string& text) {
     FILE* f = fopen(path.c_str(), "wb");
@@ -66,7 +168,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::string logic_cmd, character = "Ironclad", seed = "spire360", audio_wav;
-    bool audio_device = false;
+    bool audio_device = false, menu = false;
+    double menu_hold = 0;
+    const char* replay = NULL;
     int steps = 40;
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
@@ -74,6 +178,12 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
+        else if (strcmp(argv[i], "--menu") == 0) menu = true;
+        else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
+            replay = argv[++i];
+            menu = true;
+        }
+        else if (strcmp(argv[i], "--menu-hold") == 0 && i + 1 < argc) menu_hold = atof(argv[++i]);
         else if (strcmp(argv[i], "--audio-wav") == 0 && i + 1 < argc) audio_wav = argv[++i];
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
@@ -101,7 +211,12 @@ int main(int argc, char** argv) {
             }
         }
     }
-    if (logic_cmd.empty()) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = on_crash;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+    if (logic_cmd.empty() && !replay) {
         fprintf(stderr, "spire_play: --logic is required\n");
         return 2;
     }
@@ -125,19 +240,95 @@ int main(int argc, char** argv) {
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     PipeLink pipe;
-    if (!pipe.start(logic_cmd, (out_dir + "/logic.log").c_str(), &err)) {
+    ReplayLink replayed;
+    if (replay) {
+        if (!replayed.load(replay)) {
+            fprintf(stderr, "spire_play: cannot read %s\n", replay);
+            return 1;
+        }
+    } else if (!pipe.start(logic_cmd, (out_dir + "/logic.log").c_str(), &err)) {
         fprintf(stderr, "%s\n", err.c_str());
         return 1;
     }
     RecordingLink link(&pipe);
     SceneTree tree;
     tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
-    GameClient game(&lib, &tree, &link);
+    GameClient game(&lib, &tree, replay ? (LogicLink*)&replayed : (LogicLink*)&link);
+    SwRenderer sw;
+    Canvas canvas(&sw, &pack);
+    if (menu) {
+        /* The menus, driven by the pad script; then the run plays itself. */
+        MenuFlow flow(&lib, &tree, &game, pack.game_version());
+        if (!replay) {
+            link.echo = true;
+            link.trace = fopen((out_dir + "/trace.jsonl").c_str(), "wb");
+        }
+        size_t at = 0;
+        int idle = 0, quiet = 0, shots = 0, decisions = 0;
+        double hold = menu_hold;
+        bool autoplay = false;
+        for (int frame = 0; frame < 60 * 60 * 30; ++frame) {
+            PadState pad;
+            bool settled = !game.busy() && idle >= 60;
+            if (hold > 0 && settled) {
+                hold -= 1.0 / 60.0;
+                settled = false;
+            }
+            if (settled && at < pad_script.size()) {
+                pad.pressed = pad.held = pad_script[at++];
+                idle = 0;
+            } else if (at >= pad_script.size() && flow.in_run() && !autoplay) {
+                game.set_auto_play(auto_seed);
+                autoplay = true;
+            } else if (at >= pad_script.size() && quiet >= 300) {
+                /* The buttons are used up and no run is on: the last
+                 * screen, then stop. */
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                tree.render(canvas);
+                sw.end();
+                write_png(format("%s/menu_final.png", out_dir.c_str()).c_str(), sw.framebuffer());
+                break;
+            }
+            if (!flow.update(pad)) break;
+            std::string ev = flow.take_event();
+            if (!ev.empty()) printf("menu: %s\n", ev.c_str());
+            tree.layout();
+            tree.process(1.0 / 60.0);
+            audio.update(1.0 / 60.0);
+            tree.layout(1);
+            ++idle;
+            if (flow.in_run() || flow.starting() || game.busy()) quiet = 0;
+            else ++quiet;
+            /* A shot of the first settled menu, then 45 frames after each
+             * press. */
+            bool shot = (idle == 45 && shots < (int)at + 1 && (at > 0 || !game.busy()));
+            if (shot) {
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                tree.render(canvas);
+                sw.end();
+                write_png(format("%s/menu_%02d.png", out_dir.c_str(), shots).c_str(), sw.framebuffer());
+                printf("menu_%02d after %d presses%s\n", shots, (int)at, flow.in_run() ? " (in a run)" : "");
+                fflush(stdout);
+                ++shots;
+            }
+            if (game.decision_count() != decisions) {
+                decisions = game.decision_count();
+                printf("%04d %s\n", decisions, game.decision()["decision"].str().c_str());
+                fflush(stdout);
+                if (decisions >= steps) break;
+            }
+            if (!replay && link.finished()) {
+                fprintf(stderr, "spire_play: the logic exited (see %s/logic.log)\n", out_dir.c_str());
+                return 1;
+            }
+            if (!replay) usleep(500);
+        }
+        printf("%d menu shots, %d decisions\n", shots, decisions);
+        return 0;
+    }
     if (pad_script.empty()) game.set_auto_play(auto_seed);
     size_t pad_at = 0;
     game.start_run(character, seed);
-    SwRenderer sw;
-    Canvas canvas(&sw, &pack);
     int shown = 0, idle = 0;
     while (shown < steps) {
         PadState pad;
