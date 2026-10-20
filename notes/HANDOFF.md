@@ -9,6 +9,48 @@ data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below).
 
+## Alpha push, part 2 (2026-10-20; commits 9c95c67..11a1afd)
+
+Validation at 11a1afd: traces `differences: 0` (base5 vs new13),
+`spire_check` on new13 0 failures (1,421 / 995 / 366 / 181 / 26), D3D9
+syntax check rc=0, all 38 ps_e<id> and the canvas shader compile.
+
+- AnimationPlayer (`engine/scene/animation.*`): value (continuous /
+  discrete), bezier and method (queue_free) tracks on paths from the
+  player's parent, autoplay, loops, `finished()`. Block broken
+  (NBlockBrokenVfx on the health bar), lightning hit frames, the shop's
+  used card removal, the infection overlay and dive bomb run on it.
+- Shaders: `SCREEN_DISTORT` (outward / scream polar distortions); effects
+  22-38 (goopy bits, Bound / Entangled / Tainted / Hexed / Ringing / Smog /
+  Galvanized afflictions and the leaf, scream rings, queen fire, knowledge
+  demon distortion, 2D sphere, missile core, noisy dissolve, Vantom oil);
+  effects take 5 textures; particles pass CUSTOM.x (= rotation);
+  CurveXYZTexture samplers; amalgam glare additive; four inline copies
+  mapped to their originals. The game's `shaders/vfx/_util/*.gdshaderinc`
+  are in the pck (read with converter/spire_convert/pck.py): polar
+  coordinates are `mod(r*2*zoom, angle/2pi)`, `rotate` uses the
+  sin/-cos matrix (PI/2 is the identity).
+- Compendium: Relic Collection + Potion Lab (`collection_screen`),
+  Statistics (`stats_screen`), Run History (`run_history_screen`),
+  inspect relic / card (`inspect_screens`, A on entries), ScrollArea
+  (NScrollableContainer + NScrollbar). Logic queries (presentation only):
+  `relic_collection`, `potion_lab`, `statistics`, `run_history {index}`,
+  `compendium` (which buttons show). Run files need `select_profile`.
+- Relics carry `icon_base` (RelicModel.IconBaseName: LoomingFruit,
+  YummyCookie differ from the id) everywhere the client draws one;
+  trace_compare DROPs `icon_base` / `relic_icon_base`.
+- The logic prints command exceptions with their stack to stderr.
+
+Open: Bestiary (NBestiary: monster layouts with their animations, move
+buttons, stats mode; shown once a fight was won), badges on the game
+over screen (BadgeView in RunHistoryView.cs is ready), chromatic
+aberration and sweeping beam flipbook shaders, inspect from the pile /
+card-select screens, the Crystal Sphere, Spine dark colour,
+LightOccluder2D / SpineMesh2D, phobia mode, long-press confirmation,
+intro logo, language setting, soak runs. A fresh `spire_gaps` sweep was
+interrupted (the app quit); rerun on a sample (two act runs +
+encounters, `--dt 0.2`) when the binaries are free.
+
 ## Alpha push checkpoint (2026-10-20, later; commits ddc2c14..633b2cb)
 
 Validation at 633b2cb: seeded traces `differences: 0` (traces/base5 vs
