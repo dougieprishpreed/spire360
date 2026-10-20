@@ -121,6 +121,7 @@ internal static class Program
             Dictionary<string, object?> reply = cmdType switch
             {
                 "get_map" => driver.GetFullMap(),
+                "view_pile" => driver.ViewPile(Protocol.Str(cmd.Value, "pile", "deck")!),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
                 {
@@ -222,6 +223,9 @@ internal static class Program
 
             case "get_map":
                 return sim.GetFullMap();
+
+            case "view_pile":
+                return sim.ViewPile(Protocol.Str(cmd, "pile", "deck")!);
 
             case "set_player":
             {

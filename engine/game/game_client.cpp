@@ -13,6 +13,7 @@
 #include "bundle_select_screen.h"
 #include "confirm_popup.h"
 #include "pause_menu.h"
+#include "pile_screen.h"
 #include "card_select_screen.h"
 #include "event_screen.h"
 #include "game_over_screen.h"
@@ -244,11 +245,12 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
-      answers_(0), pause_(NULL), pause_node_(NULL), confirm_(NULL), confirm_node_(NULL), quitting_(false),
-      plain_(false) {}
+      answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), piles_button_(0), piles_asked_(false),
+      confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {}
 
 GameClient::~GameClient() {
     close_pause();
+    close_piles();
     if (transition_) {
         if (transition_->parent) transition_->parent->remove_child(transition_);
         delete transition_;
@@ -361,6 +363,11 @@ void GameClient::update(const PadState& pad) {
             if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
             else show(msg);
+        } else if (type == "pile") {
+            /* view_pile's answer: the pile screen (a query, not a step) */
+            waiting_ = false;
+            if (piles_asked_) open_piles(msg);
+            piles_asked_ = false;
         } else if (type == "error") {
             error_ = msg["message"].str();
             log_warn("logic: %s", error_.c_str());
@@ -949,8 +956,73 @@ bool GameClient::pause_input(const PadState& pad) {
     return true;
 }
 
+/* ---- the deck and pile screens ---- */
+
+void GameClient::open_piles(const Json& msg) {
+    close_piles();
+    std::string err;
+    piles_ = new PileScreen(lib_);
+    piles_node_ = piles_->build(msg, &err);
+    if (!piles_node_) {
+        log_warn("pile screen: %s", err.c_str());
+        delete piles_;
+        piles_ = NULL;
+        return;
+    }
+    tree_->root()->add_child(piles_node_);
+}
+
+void GameClient::close_piles() {
+    if (piles_node_) {
+        if (piles_node_->parent) piles_node_->parent->remove_child(piles_node_);
+        delete piles_node_;
+        piles_node_ = NULL;
+    }
+    delete piles_;
+    piles_ = NULL;
+}
+
+/* The pile screens' input while one is open, or the buttons that open
+ * them: LB the deck (NTopBarDeckButton) on any run screen with the top
+ * bar; LT, RT, RB the draw, discard and exhaust piles in combat
+ * (NCombatPileButton). True when it took the pad. */
+bool GameClient::piles_input(const PadState& pad) {
+    if (piles_) {
+        if (!piles_->input(pad, piles_button_)) {
+            close_piles();
+        }
+        return true;
+    }
+    if (piles_asked_ || waiting_ || decision_.is_null() || game_over() || potions_.active()) return false;
+    if (combat_ && (combat_->busy() || target_ >= 0)) return false;
+    const std::string& kind = decision_["decision"].str();
+    if (kind == "card_select" || kind == "card_reward") return false;
+    const char* pile = NULL;
+    unsigned button = 0;
+    if (pad.pressed & PadState::LB) {
+        pile = "deck";
+        button = PadState::LB;
+    } else if (combat_ && (pad.pressed & PadState::LT)) {
+        pile = "draw";
+        button = PadState::LT;
+    } else if (combat_ && (pad.pressed & PadState::RT)) {
+        pile = "discard";
+        button = PadState::RT;
+    } else if (combat_ && (pad.pressed & PadState::RB) && decision_["exhaust_pile_count"].i() > 0) {
+        pile = "exhaust";
+        button = PadState::RB;
+    }
+    if (!pile) return false;
+    if (lib_->audio()) lib_->audio()->ui("map_open.mp3");
+    piles_button_ = button;
+    piles_asked_ = true;
+    send(format("{\"cmd\":\"view_pile\",\"pile\":\"%s\"}", pile));
+    return true;
+}
+
 void GameClient::handle_input(const PadState& pad) {
     if (pause_input(pad)) return;
+    if (piles_input(pad)) return;
     /* The last command's effects play out first (the game takes no input
      * while its actions run). */
     if (combat_ && combat_->busy()) return;

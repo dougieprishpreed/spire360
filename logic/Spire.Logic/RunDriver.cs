@@ -3567,6 +3567,66 @@ public partial class RunDriver
         };
     }
 
+    // The cards a pile screen shows (NDeckViewScreen, NCardPileScreen): a
+    // query that changes nothing. The draw pile in NCardPileScreen's order
+    // (rarity, then id), so its order stays hidden.
+    public Dictionary<string, object?> ViewPile(string pile)
+    {
+        if (_runState == null) return Error("No run in progress");
+        var player = _runState.Players[0];
+        var pcs = player.PlayerCombatState;
+        IEnumerable<CardModel>? source;
+        PileType type;
+        switch (pile)
+        {
+            case "deck": source = player.Deck?.Cards; type = PileType.Deck; break;
+            case "draw": source = pcs?.DrawPile?.Cards; type = PileType.Draw; break;
+            case "discard": source = pcs?.DiscardPile?.Cards; type = PileType.Discard; break;
+            case "exhaust": source = pcs?.ExhaustPile?.Cards; type = PileType.Exhaust; break;
+            default: return Error("Unknown pile " + pile);
+        }
+        var list = source?.Where(c => c != null).ToList() ?? new List<CardModel>();
+        if (type == PileType.Draw)
+            list.Sort((a, b) => a.Rarity != b.Rarity ? a.Rarity.CompareTo(b.Rarity) : string.Compare(a.Id.Entry, b.Id.Entry, StringComparison.Ordinal));
+        var cards = list.Select((card, i) =>
+        {
+            var stats = new Dictionary<string, object?>();
+            try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+            var kws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
+            return WithCardView(card, type, new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["id"] = card.Id.ToString(),
+                ["name"] = _loc.Card(card.Id.Entry),
+                ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
+                ["type"] = card.Type.ToString(),
+                ["rarity"] = card.Rarity.ToString(),
+                ["upgraded"] = card.IsUpgraded,
+                ["stats"] = stats.Count > 0 ? stats : null,
+                ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+                ["keywords"] = kws?.Count > 0 ? kws : null,
+                // NDeckViewScreen's View Upgrades
+                ["upgrade_preview"] = type == PileType.Deck ? UpgradePreviewView(card) : null,
+            });
+        }).ToList();
+        string? info = type switch
+        {
+            PileType.Deck => "DECK_PILE_INFO",
+            PileType.Draw => "DRAW_PILE_INFO",
+            PileType.Discard => "DISCARD_PILE_INFO",
+            PileType.Exhaust => "EXHAUST_PILE_INFO",
+            _ => null,
+        };
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "pile",
+            ["pile"] = pile,
+            ["cards"] = cards,
+            ["info"] = info != null ? new LocString("gameplay_ui", info).GetFormattedText() : null,
+            ["character"] = player.Character?.Id.Entry,
+        };
+    }
+
     public Dictionary<string, object?> GetFullMap()
     {
         if (_runState?.Map == null)

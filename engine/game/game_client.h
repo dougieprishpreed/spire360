@@ -25,6 +25,7 @@ class CombatScreen;
 class ConfirmPopup;
 class LogicLink;
 class PauseMenu;
+class PileScreen;
 class Node;
 class SceneLibrary;
 class SceneTree;
@@ -109,6 +110,11 @@ private:
     void open_pause();
     void close_pause();
     bool pause_input(const PadState& pad);
+    /* NDeckViewScreen / NCardPileScreen: asked of the logic (view_pile),
+     * shown over the run until closed. */
+    bool piles_input(const PadState& pad);
+    void open_piles(const Json& msg);
+    void close_piles();
 
     SceneLibrary* lib_;
     SceneTree* tree_;
@@ -150,6 +156,10 @@ private:
     std::vector<Json> unread_;
     PauseMenu* pause_;
     Node* pause_node_;
+    PileScreen* piles_;
+    Node* piles_node_;
+    unsigned piles_button_; /* the button that opened it (closes it too) */
+    bool piles_asked_;
     ConfirmPopup* confirm_;
     Node* confirm_node_;
     bool quitting_; /* Save and Quit sent, waiting for the menu */
