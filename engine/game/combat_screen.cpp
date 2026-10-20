@@ -231,6 +231,16 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
 
     /* RefreshBlockUi */
     if (blk <= 0) {
+        if (block && block->visible) {
+            /* NBlockBrokenVfx at the block icon's centre. */
+            Node* fx = instance(lib_, "scenes/vfx/vfx_block_broken.tscn");
+            if (fx && fx->is_node2d()) {
+                ((Node2D*)fx)->position = block->position + block->size * 0.5f;
+                hb->add_child(fx);
+            } else {
+                delete fx;
+            }
+        }
         if (block) block->visible = false;
         if (outline) outline->visible = false;
         fg->self_modulate = hex(0xF1373E);

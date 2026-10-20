@@ -1,6 +1,7 @@
 #include "combat_vfx.h"
 
 #include "../audio/game_audio.h"
+#include "../scene/animation.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
@@ -1649,6 +1650,18 @@ ScriptBehavior* make_sequence(Node* n) {
     return s ? new Sequence(s) : NULL;
 }
 ScriptBehavior* make_thin_slice(Node*) { return new ThinSlice(); }
+
+/* NBlockBrokenVfx: freed when its AnimationPlayer's animation ends. */
+class BlockBroken : public ScriptBehavior {
+public:
+    virtual void process(Node* n, double) {
+        Node* ap = n->get_node("AnimationPlayer");
+        if (ap && ap->type == "AnimationPlayer" && !((AnimationPlayer*)ap)->finished().empty() &&
+            !n->queued_for_deletion())
+            n->queue_free();
+    }
+};
+ScriptBehavior* make_block_broken(Node*) { return new BlockBroken(); }
 ScriptBehavior* make_stab(Node*) { return new Stab(); }
 ScriptBehavior* make_ground_fire(Node*) { return new GroundFire(); }
 ScriptBehavior* make_stunned(Node*) { return new Stunned(); }
@@ -2112,6 +2125,7 @@ void install_combat_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/NDoomVfx.cs", make_doom_vfx);
     register_script("res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs", make_doom_overlay);
     register_script("res://src/Core/Nodes/Vfx/NMonsterDeathVfx.cs", make_monster_death);
+    register_script("res://src/Core/Nodes/Vfx/NBlockBrokenVfx.cs", make_block_broken);
     register_script("res://src/Core/Nodes/Vfx/Ui/NLowHpBorderVfx.cs", make_low_hp_border);
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustVfx.cs", make_card_exhaust);
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustQuickVfx.cs", make_card_exhaust_quick);

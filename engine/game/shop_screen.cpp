@@ -3,6 +3,7 @@
 #include "loc.h"
 #include "top_bar.h"
 
+#include "../scene/animation.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
@@ -124,7 +125,9 @@ void ShopScreen::fill_slots(Node* inv, const Json& d) {
         if (d["card_removal_used"].b(d["card_removal_cost"].is_null())) {
             hide(removal->find_unique("CostLabel"));
             hide(removal->get_node("Cost"));
-            removal->modulate = Color(0.5f, 0.5f, 0.5f, 1);
+            /* NMerchantCardRemoval.UpdateVisual: the Used animation. */
+            Node* anim = removal->find_unique("Animation");
+            if (anim && anim->type == "AnimationPlayer") ((AnimationPlayer*)anim)->play("Used");
         } else {
             int cost = d["card_removal_cost"].i();
             set_cost(removal, cost, cost <= gold, false);
