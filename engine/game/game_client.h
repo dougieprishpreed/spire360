@@ -26,6 +26,7 @@ class ConfirmPopup;
 class LogicLink;
 class PauseMenu;
 class PileScreen;
+class SettingsScreen;
 class MapScreen;
 class Node;
 class SceneLibrary;
@@ -119,6 +120,19 @@ private:
     /* NTopBarMapButton (Back): the map over the room, to look at (view_map);
      * Back or B closes it. */
     void open_map_view(const Json& msg);
+public:
+    /* NSettingsScreen's values (the logic's settings answer; null until
+     * it came), applied as they arrive: the bus volumes
+     * (NAudioManager.Set*Vol: the value squared), the screen shake. */
+    const Json& settings() const { return settings_; }
+    int settings_version() const { return settings_version_; }
+    void request_settings();
+    /* A query for the logic outside the decisions (settings): no answer
+     * is waited for. */
+    void send_query(const std::string& command);
+    void apply_settings(const Json& s);
+private:
+    bool settings_input(const PadState& pad);
 
     SceneLibrary* lib_;
     SceneTree* tree_;
@@ -163,6 +177,10 @@ private:
     PileScreen* piles_;
     Node* piles_node_;
     MapScreen* map_view_;
+    Json settings_;
+    int settings_version_;
+    SettingsScreen* settings_screen_;
+    Node* settings_node_;
     unsigned piles_button_; /* the button that opened it (closes it too) */
     bool piles_asked_;
     ConfirmPopup* confirm_;

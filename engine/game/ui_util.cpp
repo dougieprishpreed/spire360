@@ -13,6 +13,15 @@
 
 namespace spire {
 
+static Json g_client_settings;
+
+const Json& client_settings() { return g_client_settings; }
+
+static bool g_capstone_open = false;
+bool capstone_open() { return g_capstone_open; }
+void set_capstone_open(bool open) { g_capstone_open = open; }
+void set_client_settings(const Json& s) { g_client_settings = s; }
+
 std::string lower(std::string s) {
     for (size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
     return s;

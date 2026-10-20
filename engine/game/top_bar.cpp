@@ -1,11 +1,15 @@
 #include "top_bar.h"
 #include "ui_util.h"
+#include "loc.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/tween.h"
+
+#include <math.h>
+#include <string.h>
 
 namespace spire {
 
@@ -54,6 +58,39 @@ static void set_room_icon(SceneLibrary* lib, Node* icon, const std::string& path
     set_texture(lib, icon, path);
     set_texture(lib, icon->get_node("Outline"), path.substr(0, path.size() - 4) + "_outline.png");
 }
+
+/* NRunTimer: shown with PrefsSave.ShowRunTimer, or while the map or a
+ * capstone screen is open; RunManager.RunTime (from the decision) counted
+ * on, TimeFormatting.Format each second. On the timer's parent (a hidden
+ * node does not process). */
+class RunTimer : public ScriptBehavior {
+public:
+    RunTimer(Node* timer, double base, bool map) : timer_(timer), base_(base), t_(0), next_(0), map_(map) {}
+    virtual void process(Node*, double dt) {
+        Node* n = timer_;
+        t_ += dt;
+        bool on = client_settings()["run_timer"].b() || capstone_open() || map_;
+        set_visible(n, on);
+        if (t_ < next_) return;
+        next_ = floor(t_) + 1.0;
+        long s = (long)(base_ + t_);
+        long h = s / 3600, m = (s / 60) % 60, sec = s % 60;
+        std::string text = Loc::get("main_menu_ui", h > 0 ? "RUN_TIME_FORMAT_HOURS" : "RUN_TIME_FORMAT");
+        replace_var(text, "{Hours}", format("%ld", h));
+        replace_var(text, "{Minutes}", format("%02ld", m));
+        replace_var(text, "{Seconds}", format("%02ld", sec));
+        set_label(n->find_unique("TimerLabel"), text);
+    }
+
+private:
+    static void replace_var(std::string& s, const char* var, const std::string& value) {
+        size_t at = s.find(var);
+        if (at != std::string::npos) s.replace(at, strlen(var), value);
+    }
+    Node* timer_;
+    double base_, t_, next_;
+    bool map_;
+};
 
 /* NTopBarButton glyphs: Map = Back, Deck = LB, Pause = Start; a disabled
  * button is greyed (StsColors.disabledTopBarButton) without its glyph. */
@@ -241,7 +278,11 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
      * hidden (shown only with the map or a capstone screen open). */
     Node* save = find_named(bar, "SaveIndicator");
     if (save && save->is_canvas_item()) ((CanvasItem*)save)->modulate.a = 0;
-    hide(find_named(bar, "TimerContainer"));
+    Node* timer = find_named(bar, "TimerContainer");
+    hide(timer);
+    if (timer && timer->parent && !timer->parent->behavior && ctx["run_time"].is_number())
+        timer->parent->behavior = new RunTimer(timer, ctx["run_time"].num(),
+                                               ctx["room_type"].str() == "Map" || d["decision"].str() == "map_select");
     top_button(lib, find_named(bar, "Map"), "back", !in_map_room);
     top_button(lib, find_named(bar, "Deck"), "lb", true);
     top_button(lib, find_named(bar, "PauseButton"), "start", true);

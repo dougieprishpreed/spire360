@@ -24,11 +24,15 @@ public:
     explicit ConfirmPopup(SceneLibrary* lib);
     /* A new tree (the caller owns it): the backstop and the popup. */
     Node* build(std::string* error);
+    /* NGenericPopup.WaitForConfirmation (scenes/ui/generic_popup.tscn):
+     * header and body, Cancel and Confirm. */
+    Node* build_generic(const std::string& header, const std::string& body, std::string* error);
     Action input(const PadState& pad);
     virtual void frame(double dt);
 
 private:
     void press(Control* visuals);
+    Node* make(const char* scene, const std::string& header, const std::string& body, std::string* error);
     SceneLibrary* lib_;
     ColorRect* backstop_;
     Control* popup_;

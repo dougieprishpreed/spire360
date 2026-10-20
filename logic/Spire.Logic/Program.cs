@@ -123,6 +123,7 @@ internal static class Program
                 "get_map" => driver.GetFullMap(),
                 "view_pile" => driver.ViewPile(Protocol.Str(cmd.Value, "pile", "deck")!),
                 "view_map" => driver.ViewMap(),
+                "settings" => driver.Settings(),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
                 {
@@ -230,6 +231,17 @@ internal static class Program
 
             case "view_map":
                 return sim.ViewMap();
+
+            case "settings":
+                return sim.Settings();
+
+            case "set_setting":
+                return cmd.TryGetProperty("value", out var settingValue)
+                    ? sim.SetSetting(Protocol.Str(cmd, "name") ?? "", settingValue)
+                    : new Dictionary<string, object?> { ["type"] = "error", ["message"] = "set_setting needs a value" };
+
+            case "reset_gameplay_settings":
+                return sim.ResetGameplaySettings();
 
             case "set_player":
             {

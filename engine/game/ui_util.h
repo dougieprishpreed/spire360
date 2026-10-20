@@ -47,6 +47,15 @@ Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::
 /* NHoverTipSet's text tips for a model (a decision's "tips": title,
  * description), stacked 5 px apart; NULL when there are none. */
 Control* make_tip_set(SceneLibrary* lib, const Json& tips);
+/* The settings the logic last answered (NSettingsScreen's values: PrefsSave
+ * and SettingsSave), for the screens that follow them; null before. */
+const Json& client_settings();
+void set_client_settings(const Json& s);
+/* A capstone screen (pause, settings, deck or piles) or the map is open
+ * over the run: NRunTimer shows then. */
+bool capstone_open();
+void set_capstone_open(bool open);
+
 /* A full-screen Control (anchors 0..1), named. */
 Control* full_rect_control(const char* name);
 

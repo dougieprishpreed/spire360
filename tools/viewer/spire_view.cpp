@@ -14,6 +14,7 @@
 #include "../../engine/game/combat_screen.h"
 #include "../../engine/game/card_select_screen.h"
 #include "../../engine/game/pile_screen.h"
+#include "../../engine/game/settings_screen.h"
 #include "../../engine/game/event_screen.h"
 #include "../../engine/game/title_screen.h"
 #include "../../engine/game/map_screen.h"
@@ -141,6 +142,7 @@ int main(int argc, char** argv) {
     RunScreen* ported = NULL;
     CharacterSelectScreen* charsel = NULL;
     PileScreen* piles = NULL;
+    SettingsScreen* settings = NULL;
     size_t alen = strlen(argv[2]);
     if (!scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
         FILE* jf = fopen(argv[2], "rb");
@@ -152,7 +154,11 @@ int main(int argc, char** argv) {
             fclose(jf);
         }
         Json d = Json::parse(text.c_str(), text.size(), &err);
-        if (d["type"].str() == "pile") {
+        if (d["type"].str() == "settings") {
+            /* the logic's settings answer: NSettingsScreen (--pad drives it). */
+            settings = new SettingsScreen(&lib); /* lives as long as the scene */
+            scene = settings->build(d, &err);
+        } else if (d["type"].str() == "pile") {
             /* view_pile's answer: the deck / pile screen (--pad drives it). */
             piles = new PileScreen(&lib); /* lives as long as the scene */
             scene = piles->build(d, &err);
@@ -259,11 +265,12 @@ int main(int argc, char** argv) {
     }
     /* --pad A,RIGHT,...: each press after half a second, then --time again
      * before the picture; the screen's commands are printed. */
-    for (size_t k = 0; (ported || title || charsel || piles) && k < pad_script.size(); ++k) {
+    for (size_t k = 0; (ported || title || charsel || piles || settings) && k < pad_script.size(); ++k) {
         PadState pad;
         pad.pressed = pad.held = pad_script[k];
         std::string cmd = ported ? ported->input(pad) : std::string();
         if (piles && !piles->input(pad, 0)) cmd = "close";
+        if (settings && settings->input(pad, &cmd) == SettingsScreen::BACK) cmd = "back";
         if (title) {
             TitleScreen::Action a = title->input(pad);
             if (a != TitleScreen::NONE) cmd = a == TitleScreen::SINGLEPLAYER ? "singleplayer" : "quit";

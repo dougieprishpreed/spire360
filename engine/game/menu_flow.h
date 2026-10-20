@@ -17,6 +17,7 @@ class ConfirmPopup;
 class GameClient;
 class Node;
 class ProfileScreen;
+class SettingsScreen;
 class SceneLibrary;
 class SceneTree;
 class TimelineScreen;
@@ -39,7 +40,7 @@ public:
     std::string take_event();
 
 private:
-    enum Screen { TITLE, CHARACTERS, ABANDON, TIMELINE, PROFILES };
+    enum Screen { TITLE, CHARACTERS, ABANDON, TIMELINE, PROFILES, SETTINGS };
     void handle_answer(const Json& a);
     void show_title();
     void close_screen();
@@ -56,6 +57,8 @@ private:
     ConfirmPopup* confirm_;
     TimelineScreen* timeline_;
     ProfileScreen* profiles_;
+    SettingsScreen* settings_;
+    int settings_seen_;
     Node* screen_node_; /* the submenu over the title */
     Screen screen_;
     Json menu_;

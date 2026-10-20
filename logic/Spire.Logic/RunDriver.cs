@@ -3306,6 +3306,8 @@ public partial class RunDriver
             ["floor"] = _runState.ActFloor,
             ["room_type"] = _runState.CurrentRoom?.RoomType.ToString(),
         };
+        // NRunTimer's time (RunManager.RunTime, seconds)
+        try { ctx["run_time"] = MegaCrit.Sts2.Core.Runs.RunManager.Instance.RunTime; } catch { }
 
         // Boss encounter info — use BossEncounter?.Id?.Entry
         try

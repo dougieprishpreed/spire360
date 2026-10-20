@@ -12,11 +12,20 @@ ConfirmPopup::ConfirmPopup(SceneLibrary* lib)
     : lib_(lib), backstop_(NULL), popup_(NULL), yes_(NULL), no_(NULL), rest_y_(0) {}
 
 Node* ConfirmPopup::build(std::string* error) {
+    return make("scenes/ui/abandon_run_confirm_popup.tscn", Loc::get("main_menu_ui", "ABANDON_RUN_CONFIRMATION.header"),
+                Loc::get("main_menu_ui", "ABANDON_RUN_CONFIRMATION.body"), error);
+}
+
+Node* ConfirmPopup::build_generic(const std::string& header, const std::string& body, std::string* error) {
+    return make("scenes/ui/generic_popup.tscn", header, body, error);
+}
+
+Node* ConfirmPopup::make(const char* scene, const std::string& header, const std::string& body, std::string* error) {
     tweens_.clear();
-    Node* p = instance(lib_, "scenes/ui/abandon_run_confirm_popup.tscn");
+    Node* p = instance(lib_, scene);
     if (!p || !p->is_control()) {
         delete p;
-        if (error) *error = "no abandon_run_confirm_popup.tscn";
+        if (error) *error = std::string("no ") + scene;
         return NULL;
     }
     Control* root = full_rect_control("ModalContainer");
@@ -31,8 +40,8 @@ Node* ConfirmPopup::build(std::string* error) {
     root->add_child(popup_);
     /* SetText, InitYesButton, InitNoButton. */
     Node* v = popup_->get_node("VerticalPopup");
-    set_label(v ? v->get_node("Header") : NULL, Loc::get("main_menu_ui", "ABANDON_RUN_CONFIRMATION.header"));
-    set_label(ctl(v, "Description"), Loc::get("main_menu_ui", "ABANDON_RUN_CONFIRMATION.body"));
+    set_label(v ? v->get_node("Header") : NULL, header);
+    set_label(ctl(v, "Description"), body);
     Control* yes = ctl(v, "YesButton");
     Control* no = ctl(v, "NoButton");
     set_label(ctl(yes, "Label"), Loc::get("main_menu_ui", "GENERIC_POPUP.confirm"));

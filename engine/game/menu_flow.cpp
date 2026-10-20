@@ -9,6 +9,7 @@
 #include "game_client.h"
 #include "profile_screen.h"
 #include "timeline_screen.h"
+#include "settings_screen.h"
 #include "title_screen.h"
 #include "ui_util.h"
 
@@ -16,7 +17,7 @@ namespace spire {
 
 MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
     : lib_(lib), tree_(tree), game_(game), version_(version), title_(new TitleScreen(lib)), title_node_(NULL),
-      chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), screen_node_(NULL),
+      chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), screen_node_(NULL),
       screen_(TITLE), chars_version_(0), decisions_seen_(0), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false) {
     show_title();
@@ -72,6 +73,8 @@ void MenuFlow::close_screen() {
     timeline_ = NULL;
     delete profiles_;
     profiles_ = NULL;
+    delete settings_;
+    settings_ = NULL;
     screen_ = TITLE;
     title_->set_covered(false);
     title_->set_submenu(false);
@@ -192,6 +195,20 @@ bool MenuFlow::update(const PadState& in) {
                 }
             } else if (a == TitleScreen::TIMELINE) {
                 open_timeline();
+            } else if (a == TitleScreen::SETTINGS) {
+                settings_ = new SettingsScreen(lib_);
+                screen_node_ = settings_->build(game_->settings(), &err);
+                if (screen_node_) {
+                    screen_ = SETTINGS;
+                    settings_seen_ = game_->settings_version();
+                    title_->set_covered(true);
+                    title_->set_submenu(true);
+                    tree_->root()->add_child(screen_node_);
+                } else {
+                    event_ = "settings: " + err;
+                    delete settings_;
+                    settings_ = NULL;
+                }
             } else if (a == TitleScreen::PROFILES) {
                 profiles_ = new ProfileScreen(lib_);
                 screen_node_ = profiles_->build(&err);
@@ -252,6 +269,17 @@ bool MenuFlow::update(const PadState& in) {
             ProfileScreen::Action a = profiles_->input(pad, &cmd);
             if (!cmd.empty()) game_->request(cmd);
             if (a == ProfileScreen::BACK) close_screen();
+            break;
+        }
+        case SETTINGS: {
+            std::string cmd;
+            if (game_->settings_version() != settings_seen_) {
+                settings_seen_ = game_->settings_version();
+                settings_->set_settings(game_->settings());
+            }
+            SettingsScreen::Action a = settings_->input(pad, &cmd);
+            if (!cmd.empty()) game_->send_query(cmd);
+            if (a == SettingsScreen::BACK) close_screen();
             break;
         }
         }

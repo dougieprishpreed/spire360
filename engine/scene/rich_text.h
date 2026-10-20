@@ -29,6 +29,10 @@ struct RtlCharFx {
 };
 typedef void (*RtlEffectFn)(RtlCharFx& fx);
 void register_rtl_effect(const char* name, RtlEffectFn fn);
+/* PrefsSave.TextEffectsEnabled: off, the effects that ask
+ * AbstractMegaRichTextEffect.ShouldTransformText (sine, fly_in, scramble,
+ * thinky_dots, ancient_banner) leave the text as it is. */
+void set_rtl_text_effects(bool on);
 /* Color::from_string: #rgb[a], #rrggbb[aa] or a name. */
 bool rtl_parse_color(const std::string& s, Color& out);
 

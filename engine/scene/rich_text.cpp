@@ -33,7 +33,16 @@ void register_rtl_effect(const char* name, RtlEffectFn fn) {
     effects().push_back(e);
 }
 
+static bool g_text_effects = true;
+
+void set_rtl_text_effects(bool on) { g_text_effects = on; }
+
+static bool transforms_text(const std::string& name) {
+    return name == "sine" || name == "fly_in" || name == "scramble" || name == "thinky_dots" || name == "ancient_banner";
+}
+
 static RtlEffectFn find_effect(const std::string& name) {
+    if (!g_text_effects && transforms_text(name)) return NULL;
     for (size_t i = 0; i < effects().size(); ++i)
         if (effects()[i].name == name) return effects()[i].fn;
     return NULL;

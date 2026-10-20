@@ -14,6 +14,9 @@
 #include "confirm_popup.h"
 #include "pause_menu.h"
 #include "pile_screen.h"
+#include "screen_shake.h"
+#include "settings_screen.h"
+#include "../scene/rich_text.h"
 #include "card_select_screen.h"
 #include "event_screen.h"
 #include "game_over_screen.h"
@@ -245,11 +248,16 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
-      answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL), piles_button_(0),
-      piles_asked_(false),
+      answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
+      settings_version_(0), settings_screen_(NULL), settings_node_(NULL), piles_button_(0), piles_asked_(false),
       confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {}
 
 GameClient::~GameClient() {
+    if (settings_node_) {
+        if (settings_node_->parent) settings_node_->parent->remove_child(settings_node_);
+        delete settings_node_;
+    }
+    delete settings_screen_;
     close_pause();
     close_piles();
     if (transition_) {
@@ -353,6 +361,7 @@ void GameClient::update(const PadState& pad) {
             }
             for (size_t i = 0; i < queued_.size(); ++i) send(queued_[i]);
             queued_.clear();
+            request_settings();
         } else if (type == "characters") {
             waiting_ = false;
             characters_ = msg;
@@ -364,6 +373,8 @@ void GameClient::update(const PadState& pad) {
             if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
             else show(msg);
+        } else if (type == "settings") {
+            apply_settings(msg);
         } else if (type == "map_view") {
             waiting_ = false;
             if (piles_asked_) open_map_view(msg);
@@ -394,6 +405,8 @@ void GameClient::update(const PadState& pad) {
             answer_ = msg;
             ++answers_;
             unread_.push_back(msg);
+            /* a profile's prefs came with its menu */
+            if (type == "main_menu") request_settings();
             if (quitting_ && type == "main_menu") {
                 quitting_ = false;
                 menu_requested_ = true;
@@ -920,6 +933,7 @@ void GameClient::close_pause() {
 
 /* The pause menu's input while it is open; true when it took the pad. */
 bool GameClient::pause_input(const PadState& pad) {
+    if (settings_input(pad)) return true;
     if (!pause_) return false;
     if (confirm_) {
         /* NAbandonRunConfirmPopup: Confirm gives up (RunManager.Abandon). */
@@ -950,6 +964,18 @@ bool GameClient::pause_input(const PadState& pad) {
             delete confirm_;
             confirm_ = NULL;
         }
+    } else if (a == PauseMenu::SETTINGS) {
+        std::string err;
+        settings_screen_ = new SettingsScreen(lib_);
+        Json s = settings_;
+        s.set("in_run", Json::make_bool(true));
+        settings_node_ = settings_screen_->build(s, &err);
+        if (settings_node_) tree_->root()->add_child(settings_node_);
+        else {
+            log_warn("settings: %s", err.c_str());
+            delete settings_screen_;
+            settings_screen_ = NULL;
+        }
     } else if (a == PauseMenu::SAVE_AND_QUIT) {
         /* NPauseMenu.CloseToMenu: the run was saved as its room was
          * entered; the logic lets it go and answers with the menu. */
@@ -957,6 +983,56 @@ bool GameClient::pause_input(const PadState& pad) {
         if (lib_->audio()) lib_->audio()->menu();
         quitting_ = true;
         send("{\"cmd\":\"return_to_menu\"}");
+    }
+    return true;
+}
+
+/* ---- the settings ---- */
+
+/* Asked of the logic past the command queue (an answer of its own type,
+ * no decision waits on it). */
+void GameClient::request_settings() { send_query("{\"cmd\":\"settings\"}"); }
+
+void GameClient::send_query(const std::string& command) {
+    if (link_) link_->send(command);
+}
+
+void GameClient::apply_settings(const Json& s) {
+    settings_ = s;
+    set_client_settings(s);
+    set_rtl_text_effects(s["text_effects"].b(true));
+    if (combat_) combat_->refresh_hand_indices();
+    ++settings_version_;
+    if (lib_->audio()) {
+        AudioEvents& e = lib_->audio()->events();
+        float m = s["master"].f(0.5f), b = s["bgm"].f(0.5f), x = s["sfx"].f(0.5f), a = s["ambience"].f(0.5f);
+        e.bus_volume("bus:/", m * m);
+        e.bus_volume("bus:/Music", b * b);
+        e.bus_volume("bus:/SFX", x * x);
+        e.bus_volume("bus:/Ambience", a * a);
+    }
+    /* NScreenshakePaginator.GetShakeMultiplier */
+    static const float shake[5] = { 0, 0.5f, 1, 2, 4 };
+    int k = s["screenshake"].i(2);
+    ScreenShake::get().set_multiplier(k >= 0 && k < 5 ? shake[k] : (float)k);
+    if (settings_screen_) settings_screen_->set_settings(s);
+}
+
+/* NSettingsScreen over the run (the pause menu's Settings); true when it
+ * took the pad. */
+bool GameClient::settings_input(const PadState& pad) {
+    if (!settings_screen_) return false;
+    std::string cmd;
+    SettingsScreen::Action a = settings_screen_->input(pad, &cmd);
+    if (!cmd.empty() && link_) link_->send(cmd);
+    if (a == SettingsScreen::BACK) {
+        if (settings_node_) {
+            if (settings_node_->parent) settings_node_->parent->remove_child(settings_node_);
+            delete settings_node_;
+            settings_node_ = NULL;
+        }
+        delete settings_screen_;
+        settings_screen_ = NULL;
     }
     return true;
 }
@@ -1058,6 +1134,7 @@ bool GameClient::piles_input(const PadState& pad) {
 }
 
 void GameClient::handle_input(const PadState& pad) {
+    set_capstone_open(pause_ || piles_ || map_view_ || settings_screen_);
     if (pause_input(pad)) return;
     if (piles_input(pad)) return;
     /* The last command's effects play out first (the game takes no input

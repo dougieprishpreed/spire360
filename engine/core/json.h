@@ -40,6 +40,7 @@ public:
     /* Building (for the protocol). */
     static Json make_string(const std::string& s) { Json j; j.type_ = STRING; j.str_ = s; return j; }
     static Json make_number(double v) { Json j; j.type_ = NUMBER; j.num_ = v; return j; }
+    static Json make_bool(bool v) { Json j; j.type_ = BOOL; j.bool_ = v; return j; }
     static Json make_array() { Json j; j.type_ = ARRAY; return j; }
     void set(const std::string& key, const Json& value);
     void append(const Json& value);

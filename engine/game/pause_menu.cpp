@@ -31,7 +31,7 @@ Node* PauseMenu::build(bool give_up, std::string* error) {
         const char* key;
         Action action;
     } all[] = { { "Resume", "PAUSE_MENU.RESUME", RESUME },
-                { "Settings", "PAUSE_MENU.SETTINGS", NONE },
+                { "Settings", "PAUSE_MENU.SETTINGS", SETTINGS },
                 { "Compendium", "PAUSE_MENU.COMPENDIUM", NONE },
                 { "GiveUp", "PAUSE_MENU.GIVE_UP", GIVE_UP },
                 { "Disconnect", "PAUSE_MENU.DISCONNECT", NONE },

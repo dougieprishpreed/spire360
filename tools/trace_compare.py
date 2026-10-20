@@ -35,6 +35,7 @@ DROP = {
     "pets",  # the pets beside the player (their own state stays in the steps)
     "ancient_border", "ancient_text_bg", "enchantment_view", "overlay",  # a card's look (NCard)
     "death_fade", "death_padding", "death_anim_length",  # a monster's death (NCreature.AnimDie)
+    "run_time",  # NRunTimer (wall clock)
 }
 
 

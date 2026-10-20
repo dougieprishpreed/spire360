@@ -852,7 +852,19 @@ static float hitbox_height(Control* holder) {
 }
 
 /* The holders' targets; snap: there at once (a new screen). */
+/* NHandCardHolder.SetIndexLabel: each card's place in the hand above it
+ * when the settings show them (PrefsSave.ShowCardIndices). */
+void CombatScreen::refresh_hand_indices() {
+    bool show = client_settings()["card_indices"].b();
+    for (size_t i = 0; i < holders_.size(); ++i) {
+        Node* label = holders_[i].node ? holders_[i].node->find_unique("HandIndex") : NULL;
+        set_label(label, format("%d", (int)i + 1));
+        set_visible(label, show);
+    }
+}
+
 void CombatScreen::layout_hand(bool snap) {
+    refresh_hand_indices();
     int n = (int)holders_.size();
     if (n == 0) return;
     int focus = hand_focus_ < 0 ? n / 2 : (hand_focus_ >= n ? n - 1 : hand_focus_);
