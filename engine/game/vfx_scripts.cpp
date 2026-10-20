@@ -12,6 +12,7 @@
 #include "../scene/tween.h"
 #include "../scene/value.h"
 #include "game.h"
+#include "screen_shake.h"
 #include "ui_util.h"
 
 #include <math.h>
@@ -150,6 +151,7 @@ public:
         t_ += dt;
         if (impact_ && !fired_ && t_ >= 0.1) {
             fired_ = true;
+            ScreenShake::get().shake("Strong", "Short");
             for (size_t i = 0; i < impact_particles_.size(); ++i) impact_particles_[i]->restart();
         }
         if (t_ >= (impact_ ? 2.1 : 1.0)) n->queue_free();

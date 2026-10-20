@@ -58,13 +58,17 @@ Hyperbeam impacts, FireBurst, FireBurning, Scratch, (Fire)SmokePuff,
 LineBurst, DaggerSpray impact/flurry, ShivThrow; bespoke scripts:
 ThinSlice, Stab, GroundFire, Stunned, PowerUp, Bolas; BigSlash(Impact)
 and HitSpark placed for the existing scripts; PlaySplashVfx -> NSplashVfx.
+Screen shake (`engine/game/screen_shake.*`, NScreenShake: punch, rumble,
+trauma with FastNoiseLite-like FBM noise) moves the combat room's scene
+container; `NGame.ScreenShake/ScreenRumble/ScreenShakeTrauma` cues and the
+effects' own shakes drive it (other rooms do not set a target yet).
 `spire_play --settle FRAMES` takes decision shots earlier/later to see
 them (cues run in the tree's process). Not yet: NHyperbeamVfx,
 NSweepingBeamVfx, NGrandFinaleVfx, NHellraiser(Sword)Vfx,
 NSpikeSplashVfx (Fg/Bg spikes), NHorizontalLinesVfx, form auras
 (NDemon/Echo/Reaper/Serpent/VoidFormVfx via Visuals.AddFormVfx),
-NLiquidOverlayVfx (creature overlay), NMonsterDeathVfx, screen shake
-(NGame.ScreenShake / ScreenShakeTrauma: no shake in the port yet), and
+NLiquidOverlayVfx (creature overlay), NMonsterDeathVfx, hit stop
+(NGame.DoHitStop), and
 effects whose Create takes positions from creature nodes (magic missiles,
 NItemThrowVfx potion throws, NSleepingVfx): headless those positions are
 zero or the code is skipped behind `if (nCreature != null)`; a creature

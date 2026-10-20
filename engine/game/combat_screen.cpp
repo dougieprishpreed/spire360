@@ -1,4 +1,5 @@
 #include "combat_screen.h"
+#include "screen_shake.h"
 #include "game.h"
 #include "card_view.h"
 #include "loc.h"
@@ -27,14 +28,21 @@ namespace spire {
 static const float PI_F = 3.14159265f;
 
 /* Calls CombatScreen::process from the scene tree's frame (the screen's
- * root holds it; the screen outlives its tree). */
+ * root holds it; the screen outlives its tree), and runs the screen shake
+ * while the room's scene container is its target (NCombatRoom._Ready:
+ * SetScreenShakeTarget(SceneContainer)); the tree going away clears it. */
 class CombatDriver : public ScriptBehavior {
 public:
-    explicit CombatDriver(CombatScreen* s) : screen_(s) {}
-    virtual void process(Node*, double dt) { screen_->process(dt); }
+    CombatDriver(CombatScreen* s, Control* shake) : screen_(s), shake_(shake) {}
+    virtual ~CombatDriver() { ScreenShake::get().clear_target(shake_); }
+    virtual void process(Node*, double dt) {
+        screen_->process(dt);
+        if (shake_ && ScreenShake::get().target() == shake_) ScreenShake::get().update(dt);
+    }
 
 private:
     CombatScreen* screen_;
+    Control* shake_;
 };
 
 CombatScreen::CombatScreen(SceneLibrary* lib)
@@ -1579,7 +1587,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     root->add_child(arrow_);
     Node* driver = SceneLibrary::create_node("Node");
     driver->name = "CombatDriver";
-    driver->behavior = new CombatDriver(this);
+    Control* scene_box = ctl(root, "CombatSceneContainer");
+    ScreenShake::get().set_target(scene_box);
+    driver->behavior = new CombatDriver(this, scene_box);
     root->add_child(driver);
     if (!aftermath_ && !final_) refresh_tips();
     return root;
@@ -2047,6 +2057,7 @@ void CombatScreen::fire(const Cue& c) {
         if (idle && s->animation_state()) s->animation_state()->add_animation(0, idle, true, 0);
         return;
     }
+    if (c.kind == CUE_SCRIPTED && ScreenShake::get().cue(c.data["call"].str(), c.data["args"])) return;
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.RadialBlur") {
         radial_blur(c.data["args"][(size_t)0].str());
         return;
@@ -2253,7 +2264,8 @@ void CombatScreen::play_steps(const Json& steps) {
                     c.where = ch["at"].str();
                 }
                 cues_.push_back(c);
-            } else if (type == "ui" && (is_combat_vfx_call(ch["call"].str()) || ch["call"].str() == "NCombatRoom.RadialBlur")) {
+            } else if (type == "ui" && (is_combat_vfx_call(ch["call"].str()) || ch["call"].str() == "NCombatRoom.RadialBlur" ||
+                                        ch["call"].str().compare(0, 12, "NGame.Screen") == 0)) {
                 /* The game's scripted effects (combat_vfx). */
                 c.kind = CUE_SCRIPTED;
                 c.data = ch;

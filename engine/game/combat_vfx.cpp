@@ -8,6 +8,7 @@
 #include "../scene/tween.h"
 #include "../scene/value.h"
 #include "loc.h"
+#include "screen_shake.h"
 #include "ui_util.h"
 
 #include <ctype.h>
@@ -155,7 +156,7 @@ void nodes_of(Node* root, const char* spec, std::vector<Node*>& out) {
 enum Anchor { AT_CENTER, AT_BOTTOM, AT_TOP, AT_TARGET_CENTER /* the second creature's */ };
 enum TintMode { TINT_NONE, TINT_MODULATE, TINT_SELF, TINT_MATERIAL };
 enum FlipMode { FLIP_NONE, FLIP_RANDOM, FLIP_BOOL, FLIP_BOOL_INVERTED, FLIP_ENEMY };
-enum StepOp { OP_NONE, OP_RESTART, OP_EMIT, OP_STOP, OP_SHOW, OP_HIDE };
+enum StepOp { OP_NONE, OP_RESTART, OP_EMIT, OP_STOP, OP_SHOW, OP_HIDE, OP_SHAKE /* nodes: "Strength/Duration" */ };
 
 struct Step {
     float at;
@@ -175,7 +176,7 @@ struct Spec {
     const char* flip_node; /* export of the node flipped (NULL: the effect) */
     bool scale_arg;        /* the first number scales it */
     bool aim;              /* rotated from the first creature toward the second */
-    Step steps[4];
+    Step steps[5];
     float free_at; /* < 0: when the effect's own particles finish */
 };
 
@@ -187,10 +188,11 @@ const Spec SPECS[] = {
     { "NWormyImpactVfx", "scenes/vfx/vfx_wormy_impact.tscn", "NWormyImpactVfx.cs", AT_BOTTOM, TINT_NONE, NULL, 0,
       FLIP_NONE, NULL, false, false, { { 0, OP_RESTART, "_particles" } }, 2.0f },
     { "NFireBurstVfx", "scenes/vfx/vfx_fire_burst.tscn", "NFireBurstVfx.cs", AT_BOTTOM, TINT_SELF, "_modulateParticles",
-      0xff8b57, FLIP_RANDOM, NULL, true, false, { { 0, OP_RESTART, "_particles" } }, 2.0f },
+      0xff8b57, FLIP_RANDOM, NULL, true, false, { { 0, OP_RESTART, "_particles" }, { 0, OP_SHAKE, "Weak/Normal" } }, 2.0f },
     { "NScratchVfx", "scenes/vfx/vfx_scratch_impact.tscn", "NScratchVfx.cs", AT_CENTER, TINT_NONE, NULL, 0,
       FLIP_BOOL_INVERTED, NULL, false, false,
-      { { 0, OP_RESTART, "_anticipationParticles" }, { 0.1f, OP_RESTART, "_impactParticles" } }, 2.1f },
+      { { 0, OP_RESTART, "_anticipationParticles" }, { 0.1f, OP_RESTART, "_impactParticles" },
+        { 0.1f, OP_SHAKE, "VeryWeak/Short" } }, 2.1f },
     { "NFireSmokePuffVfx", "scenes/vfx/vfx_fire_smoke_puff.tscn", "NFireSmokePuffVfx.cs", AT_CENTER, TINT_NONE, NULL,
       0, FLIP_NONE, NULL, false, false, { { 0, OP_EMIT, "Ember,Clouds" } }, 2.5f },
     { "NSmokePuffVfx", "scenes/vfx/vfx_smoke_puff.tscn", "NSmokePuffVfx.cs", AT_CENTER, TINT_NONE, NULL, 0, FLIP_NONE,
@@ -207,12 +209,14 @@ const Spec SPECS[] = {
       0xff8b57, FLIP_BOOL, NULL, true, false,
       { { 0, OP_RESTART, "_startParticles" }, { 0.3f, OP_RESTART, "_endParticles" } }, 2.3f },
     { "NDaggerSprayImpactVfx", "scenes/vfx/vfx_dagger_spray_impact.tscn", "NDaggerSprayImpactVfx.cs", AT_CENTER,
-      TINT_SELF, "_modulateParticles", 0, FLIP_BOOL, NULL, false, false, { { 0.1f, OP_RESTART, "_particles" } }, 2.1f },
+      TINT_SELF, "_modulateParticles", 0, FLIP_BOOL, NULL, false, false,
+      { { 0.1f, OP_SHAKE, "Weak/Short" }, { 0.1f, OP_RESTART, "_particles" } }, 2.1f },
     { "NDaggerSprayFlurryVfx", "scenes/vfx/vfx_dagger_spray_flurry.tscn", "NDaggerSprayFlurryVfx.cs", AT_CENTER,
       TINT_MATERIAL, "_modulateParticles", 0, FLIP_BOOL, NULL, false, false, { { 0, OP_RESTART, "_particles" } }, 2.0f },
     { "NShivThrowVfx", "scenes/vfx/vfx_shiv_throw.tscn", "NShivThrowVfx.cs", AT_TARGET_CENTER, TINT_MATERIAL,
       "_modulateParticles", 0, FLIP_NONE, NULL, false, true,
-      { { 0, OP_RESTART, "_throwParticles" }, { 0.15f, OP_RESTART, "_impactParticles" } }, 2.15f },
+      { { 0, OP_RESTART, "_throwParticles" }, { 0.15f, OP_RESTART, "_impactParticles" },
+        { 0.15f, OP_SHAKE, "Weak/Short" } }, 2.15f },
     { "NHyperbeamImpactVfx", "scenes/vfx/vfx_hyperbeam_impact.tscn", "NHyperbeamImpactVfx.cs", AT_TARGET_CENTER,
       TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, true,
       { { 0, OP_SHOW, "_impactStartParticles" }, { 0, OP_RESTART, "_impactStartParticles" },
@@ -266,7 +270,7 @@ class Sequence : public Effect {
 public:
     explicit Sequence(const Spec* s) : spec_(s), next_(0), freed_(false) {}
     virtual void tick(Node* n, double) {
-        while (next_ < 4 && spec_->steps[next_].op != OP_NONE && t_ >= spec_->steps[next_].at) run(n, spec_->steps[next_++]);
+        while (next_ < 5 && spec_->steps[next_].op != OP_NONE && t_ >= spec_->steps[next_].at) run(n, spec_->steps[next_++]);
         if (freed_) return;
         if (spec_->free_at >= 0 ? t_ >= spec_->free_at : (t_ > 0.1 && finished(n))) {
             freed_ = true;
@@ -276,6 +280,13 @@ public:
 
 private:
     void run(Node* n, const Step& s) {
+        if (s.op == OP_SHAKE) {
+            /* NGame.Instance?.ScreenShake(strength, duration) */
+            std::string v = s.nodes;
+            size_t slash = v.find('/');
+            ScreenShake::get().shake(v.substr(0, slash), v.substr(slash + 1));
+            return;
+        }
         std::vector<Node*> list;
         nodes_of(n, s.nodes, list);
         for (size_t i = 0; i < list.size(); ++i) {
