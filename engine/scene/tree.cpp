@@ -227,6 +227,7 @@ void SceneTree::render_viewport(Canvas& canvas, SubViewport* vp) {
     Xform2D xf(Vec2(w / units.x, 0), Vec2(0, h / units.y), Vec2(0, 0));
     std::vector<DrawItem> items;
     for (size_t i = 0; i < vp->children.size(); ++i) collect(vp->children[i], xf, Color(), 0, NULL, NULL, false, items);
+    if (!canvas.renderer()->begin_capture(w, h)) return;
     if (!vp->transparent_bg) {
         /* Godot's default clear colour */
         canvas.set_item(Xform2D(), Color(), BLEND_MIX, 0);

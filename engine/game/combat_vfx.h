@@ -49,6 +49,12 @@ bool is_combat_vfx_call(const std::string& call);
  * ExtraDeathVfxPadding. */
 void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::string& who, double delay,
                          const Vec2& padding);
+/* CardPileCmd's exhaust of a card (an NCard, or the hand holder showing
+ * one), which the effect takes and frees. quick (from the hand):
+ * NCardExhaustQuickVfx over the card where it is, then smoke and embers;
+ * else NCardExhaustVfx: the card moved into its viewport at its place and
+ * dissolved as embers rise. ui: NCombatRoom.Ui. */
+void spawn_card_exhaust(SceneLibrary* lib, Node* ui, Node* card, bool quick);
 
 void install_combat_vfx_scripts();
 

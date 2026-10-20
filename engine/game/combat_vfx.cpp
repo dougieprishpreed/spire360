@@ -1420,6 +1420,168 @@ private:
 
 ScriptBehavior* make_monster_death(Node*) { return new MonsterDeath(); }
 
+/* NParticlesContainer.SetEmitting / Restart over its _particles. */
+void particles_emitting(Node* container, bool on) {
+    std::vector<Node*> list;
+    if (container) exported(container, "_particles", list);
+    for (size_t i = 0; i < list.size(); ++i)
+        if (is_particles(list[i])) {
+            if (on) ((Particles2D*)list[i])->restart();
+            ((Particles2D*)list[i])->emitting = on;
+        }
+}
+
+/* NCardExhaustVfx (scenes/vfx/ui/card/vfx_card_exhaust.tscn): the card in
+ * _cardParentContainer (a SubViewport's), the SubViewportContainer its
+ * picture through vfx_card_exhaust_dissolve_shader; over _exhaustDuration
+ * the erosion base and the particles' height follow _exhaustCurve
+ * (SetProgress), then the picture goes and, two seconds later, all. */
+class CardExhaust : public Effect {
+public:
+    explicit CardExhaust(Node* n)
+        : duration_(exported_float(n, "_exhaustDuration", 0.4f)), card_(NULL), material_(NULL), particles_(NULL),
+          done_(false) {
+        const Json* v = n->get_extra("_exhaustCurve");
+        if (v) CurveData::from(script_resource(*v), curve_);
+        erosion_ = exported_vec2(n, "_erosionBaseRange", Vec2(0, 0));
+        height_ = exported_vec2(n, "_particleHeightRange", Vec2(0, 0));
+    }
+    void setup(Node* n, Node* card) {
+        card_ = card;
+        material_ = node_at(n, "_materialContainer");
+        particles_ = node_at(n, "_particlesContainer");
+        Node* holder = node_at(n, "_cardParentContainer");
+        Vec2 at = global_of(card);
+        if (card->parent) card->parent->remove_child(card);
+        if (holder) holder->add_child(card);
+        set_global(n, at);
+        particles_emitting(particles_, false);
+        progress(0);
+        /* PlayAnimation */
+        if (holder && holder->is_control() && card->is_control())
+            ((Control*)card)->set_position(((Control*)holder)->size * 0.5f);
+        else if (holder && holder->is_control() && card->is_node2d())
+            ((Node2D*)card)->position = ((Control*)holder)->size * 0.5f;
+        if (material_ && material_->is_canvas_item()) {
+            ((CanvasItem*)material_)->self_modulate = Color(1, 1, 1, 1);
+            ((CanvasItem*)material_)->shader_params["erosion_texture_x_offset"] = rand_range(0, 1);
+        }
+        particles_emitting(particles_, true);
+    }
+    virtual void tick(Node* n, double) {
+        if (!done_) {
+            if (t_ < duration_) {
+                progress((float)(t_ / duration_));
+                return;
+            }
+            progress(1);
+            particles_emitting(particles_, false);
+            if (material_ && material_->is_canvas_item()) {
+                ((CanvasItem*)material_)->self_modulate = Color(1, 1, 1, 0);
+                /* nothing of it shows any more: no more renders */
+                SubViewportContainer* svc = material_->type == "SubViewportContainer" ? (SubViewportContainer*)material_ : NULL;
+                if (svc && svc->viewport()) svc->viewport()->update_mode = SubViewport::UPDATE_DISABLED;
+            }
+            done_ = true;
+            end_ = t_ + 2.0;
+        } else if (t_ >= end_ && !n->queued_for_deletion()) {
+            n->queue_free();
+        }
+    }
+
+private:
+    static Node* node_at(Node* n, const char* key) {
+        const Json* v = n->get_extra(key);
+        if (!v) return NULL;
+        std::string path = v->is_string() ? v->str() : (*v)["np"].str();
+        return path.empty() ? NULL : n->get_node(path);
+    }
+    static Vec2 exported_vec2(Node* n, const char* key, const Vec2& fallback) {
+        const Json* v = n->get_extra(key);
+        Vec2 out = fallback;
+        if (v) jv_vec2(*v, out);
+        return out;
+    }
+    void progress(float p) {
+        float w = curve_.valid() ? curve_.sample(p) : p;
+        if (material_ && material_->is_canvas_item())
+            ((CanvasItem*)material_)->shader_params["erosion_base"] = erosion_.x + (erosion_.y - erosion_.x) * w;
+        if (particles_ && particles_->is_node2d()) ((Node2D*)particles_)->position = Vec2(0, height_.x + (height_.y - height_.x) * w);
+    }
+    float duration_;
+    CurveData curve_;
+    Vec2 erosion_, height_;
+    Node* card_;
+    Node* material_;
+    Node* particles_;
+    bool done_;
+    double end_;
+};
+
+ScriptBehavior* make_card_exhaust(Node* n) { return new CardExhaust(n); }
+
+/* NCardExhaustQuickVfx (vfx_card_exhaust_quick.tscn): on the card's
+ * CardVfxContainer, the erosion particle over it (masked to the card) for
+ * _anticipationDuration; then the effect stays where it is in the room's
+ * UI, the card goes, and the smoke and embers play for two seconds. */
+class CardExhaustQuick : public Effect {
+public:
+    explicit CardExhaustQuick(Node* n)
+        : anticipation_(exported_float(n, "_anticipationDuration", 0.4f)), card_(NULL), ui_(NULL), phase_(0), end_(0) {}
+    void setup(Node* n, Node* card, Node* ui) {
+        card_ = card;
+        ui_ = ui;
+        Node* box = card->find_unique("CardVfxContainer");
+        Node* where = box ? box : card;
+        where->add_child(n);
+        Node* a = CardExhaust_node(n, "_anticipationParticlesContainer");
+        if (a && a->is_canvas_item()) ((CanvasItem*)a)->modulate = Color(1, 1, 1, 1);
+        restart_list(a, "_particles");
+    }
+    virtual void tick(Node* n, double) {
+        if (phase_ == 0 && t_ >= anticipation_) {
+            phase_ = 1;
+            Node* a = CardExhaust_node(n, "_anticipationParticlesContainer");
+            if (a && a->is_canvas_item()) ((CanvasItem*)a)->modulate = Color(1, 1, 1, 0);
+            Xform2D g = ((CanvasItem*)n)->global_transform();
+            float sx = sqrtf(g.x.x * g.x.x + g.x.y * g.x.y);
+            if (ui_ && n->parent) {
+                n->parent->remove_child(n);
+                ui_->add_child(n);
+                set_global(n, g.origin);
+                if (n->is_control()) {
+                    Control* c = (Control*)n;
+                    c->rotation = atan2f(g.x.y, g.x.x);
+                    c->scale = Vec2(sx, sx);
+                }
+            }
+            /* the card goes */
+            if (card_ && card_->parent) card_->parent->remove_child(card_);
+            delete card_;
+            card_ = NULL;
+            restart_list(CardExhaust_node(n, "_particlesContainer"), "_particles");
+            end_ = t_ + 2.0;
+        } else if (phase_ == 1 && t_ >= end_ && !n->queued_for_deletion()) {
+            n->queue_free();
+        }
+    }
+
+private:
+    static Node* CardExhaust_node(Node* n, const char* key) {
+        const Json* v = n->get_extra(key);
+        if (!v) return NULL;
+        std::string path = v->is_string() ? v->str() : (*v)["np"].str();
+        return path.empty() ? NULL : n->get_node(path);
+    }
+    float anticipation_;
+    Node* card_;
+    Node* ui_;
+    int phase_;
+    double end_;
+};
+
+ScriptBehavior* make_card_exhaust_quick(Node* n) { return new CardExhaustQuick(n); }
+
 ScriptBehavior* make_doom_overlay(Node*) { return new DoomOverlay(); }
 
 ScriptBehavior* make_item_throw(Node* n) { return new ItemThrow(n); }
@@ -1840,6 +2002,26 @@ void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, c
     if (fx->behavior) ((MonsterDeath*)fx->behavior)->setup(&anchors, who, delay, padding);
 }
 
+void spawn_card_exhaust(SceneLibrary* lib, Node* ui, Node* card, bool quick) {
+    if (!card) return;
+    Node* fx = lib && ui ? instance(lib, quick ? "scenes/vfx/ui/card/vfx_card_exhaust_quick.tscn"
+                                               : "scenes/vfx/ui/card/vfx_card_exhaust.tscn")
+                         : NULL;
+    if (!fx || !fx->behavior) {
+        delete fx;
+        if (card->parent) card->parent->remove_child(card);
+        delete card;
+        return;
+    }
+    if (quick) {
+        ((CardExhaustQuick*)fx->behavior)->setup(fx, card, ui);
+    } else {
+        ui->add_child(fx);
+        ((CardExhaust*)fx->behavior)->setup(fx, card);
+    }
+    if (lib->audio()) lib->audio()->ui("card_exhaust.mp3");
+}
+
 void install_combat_vfx_scripts() {
     for (size_t i = 0; i < sizeof(SPECS) / sizeof(SPECS[0]); ++i)
         register_script((std::string("res://src/Core/Nodes/Vfx/") + SPECS[i].script).c_str(), make_sequence);
@@ -1865,6 +2047,8 @@ void install_combat_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/NDoomVfx.cs", make_doom_vfx);
     register_script("res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs", make_doom_overlay);
     register_script("res://src/Core/Nodes/Vfx/NMonsterDeathVfx.cs", make_monster_death);
+    register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustVfx.cs", make_card_exhaust);
+    register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustQuickVfx.cs", make_card_exhaust_quick);
 }
 
 } /* namespace spire */

@@ -539,11 +539,15 @@ void Particles2D::draw(Canvas& c) {
     if (sm) {
         if (sm->shader == "shaders/vfx/common/vfx_flipbook_shader.gdshader") fb = 1;
         if (sm->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader") fb = 2;
-        if (sm->shader == "shaders/vfx/common/vfx_common_particle_shader.gdshader") fb = 3;
+        if (sm->shader == "shaders/vfx/common/vfx_common_particle_shader.gdshader" ||
+            sm->shader == "shaders/vfx/ui/card/exhaust/vfx_card_exhaust_quick_erosion_shader.gdshader")
+            fb = 3;
         pivot = shader_param_vec2(sm, "pivot_offset", Vec2(0, 0));
         if (fb) {
-            fb_frames = shader_param(sm, "frame_count", 9);
-            fb_size = shader_param_vec2(sm, "flipbook_size", Vec2(3, 3));
+            /* the shader's own defaults */
+            bool quick = sm->shader == "shaders/vfx/ui/card/exhaust/vfx_card_exhaust_quick_erosion_shader.gdshader";
+            fb_frames = shader_param(sm, "frame_count", quick ? 4.0f : 9.0f);
+            fb_size = shader_param_vec2(sm, "flipbook_size", quick ? Vec2(2, 2) : Vec2(3, 3));
             if (fb_size.x < 1) fb_size.x = 1;
             if (fb_size.y < 1) fb_size.y = 1;
             CurveData::from(shader_param_resource(sm, "flipbook_curve"), fb_curve);

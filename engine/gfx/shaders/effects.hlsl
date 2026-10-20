@@ -147,3 +147,36 @@ float4 ps_e12(VsOut i) : COLOR {
     c.rgb = lerp(dot(c.rgb, float3(0.299, 0.587, 0.114)).xxx, c.rgb, g_p0.x);
     return c * dissolve_strength(i.uv, 0.0);
 }
+
+// shift_hue (shaders/vfx/_util/hue_shift.gdshaderinc)
+float3 shift_hue(float3 c, float shift) {
+    float3 gray = float3(0.57735, 0.57735, 0.57735);
+    float3 p = gray * dot(gray, c);
+    float3 u = c - p;
+    float3 v = cross(gray, u);
+    return u * cos(shift * 6.2831853) + v * sin(shift * 6.2831853) + p;
+}
+
+// 13: vfx_card_exhaust_dissolve: the card's viewport (as stored) eaten by
+// the erosion texture, its edge through the bright lut.
+float4 ps_e13(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float r = tex2D(g_e0, i.uv + float2(g_p0.y, 0.0)).r;
+    float erosion = r >= g_p0.x ? 1.0 : 0.0;
+    float bright = smoothstep(g_p0.x, g_p0.x + g_p0.z, r);
+    float3 bc = shift_hue(tex2D(g_e1, float2(bright, 0.5)).rgb, g_p0.w);
+    float3 rgb = lerp(t.rgb, bc, 1.0 - bright);
+    float a = saturate(t.a * i.color.a * erosion);
+    return float4(saturate(rgb * i.color.rgb) * a, a);
+}
+
+// 14: vfx_card_exhaust_quick_erosion: the texture's red eroded, coloured by
+// the bright lut.
+float4 ps_e14(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float erosion = smoothstep(g_p0.x, g_p0.x + g_p0.y, t.r);
+    float bright = smoothstep(g_p0.x, g_p0.x + g_p0.z, t.r);
+    float3 bc = shift_hue(tex2D(g_e0, float2(bright, 0.5)).rgb, g_p0.w);
+    float a = saturate(t.a * i.color.a * erosion);
+    return float4(saturate(bc * i.color.rgb) * a, a);
+}

@@ -201,6 +201,19 @@ static float smoothstepf(float e0, float e1, float x) {
     return t * t * (3.0f - 2.0f * t);
 }
 
+/* shift_hue (shaders/vfx/_util/hue_shift.gdshaderinc): rgb rotated about
+ * the grey axis by shift turns. */
+static void shift_hue(float rgb[3], float shift) {
+    if (shift == 0) return;
+    const float g = 0.57735f;
+    float d = (rgb[0] + rgb[1] + rgb[2]) * g;
+    float p[3] = { g * d, g * d, g * d };
+    float uu[3] = { rgb[0] - p[0], rgb[1] - p[1], rgb[2] - p[2] };
+    float vv[3] = { g * uu[2] - g * uu[1], g * uu[0] - g * uu[2], g * uu[1] - g * uu[0] };
+    float c = cosf(shift * 6.2831853f), s = sinf(shift * 6.2831853f);
+    for (int k = 0; k < 3; ++k) rgb[k] = uu[k] * c + vv[k] * s + p[k];
+}
+
 /* An effect's texture i at uv (NULL: white). */
 static void effect_texel(const EffectParams& e, int i, float u, float v, float out[4]) {
     fire_texel(e.tex[i], u, v, (e.repeat >> i) & 1, out);
@@ -307,6 +320,40 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         float x = sh[2] * e.p[2] * n1[0] * n2[0] * e.p[3];
         float a = clampf(smoothstepf(e.p[0], e.p[1], x) * e.p[4], 0, 1);
         for (int k = 0; k < 3; ++k) out[k] = e.p[12 + k] * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_EXHAUST_DISSOLVE:
+    case EFFECT_EXHAUST_QUICK: {
+        float t[4] = { 1, 1, 1, 1 }, l[4];
+        if (tex) sample(tex->img, u, v, flags, t);
+        bool quick = e.id == EFFECT_EXHAUST_QUICK;
+        float r, erosion, bright;
+        if (quick) {
+            r = t[3] > 0 ? t[0] / t[3] : 0.0f;
+            erosion = smoothstepf(e.p[0], e.p[0] + e.p[1], r);
+        } else {
+            float er[4];
+            effect_texel(e, 0, u + e.p[1], v, er);
+            r = er[3] > 0 ? er[0] / er[3] : 0.0f;
+            erosion = r >= e.p[0] ? 1.0f : 0.0f;
+        }
+        bright = smoothstepf(e.p[0], e.p[0] + e.p[2], r);
+        effect_texel(e, quick ? 0 : 1, bright, 0.5f, l);
+        float il = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float bc[3] = { l[0] * il, l[1] * il, l[2] * il };
+        shift_hue(bc, e.p[3]);
+        float a, rgb[3];
+        if (quick) {
+            a = t[3] * col[3] * erosion;
+            for (int k = 0; k < 3; ++k) rgb[k] = bc[k];
+        } else {
+            /* the viewport's texel as stored (premultiplied), as the game */
+            a = t[3] * col[3] * erosion;
+            for (int k = 0; k < 3; ++k) rgb[k] = t[k] + (bc[k] - t[k]) * (1 - bright);
+        }
+        a = clampf(a, 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(rgb[k] * col[k], 0, 1) * a;
         out[3] = a;
         return;
     }

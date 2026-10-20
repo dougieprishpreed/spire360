@@ -72,6 +72,19 @@ enum EffectId {
      * uv.x^3)).r + uv.x) / 2. p0 threshold, p1 -TIME / 4, p2p3
      * TEXTURE_PIXEL_SIZE; tex0, tex1 the noises (repeat). */
     EFFECT_DISSOLVE = 12,
+    /* shaders/vfx/ui/card/exhaust/vfx_card_exhaust_dissolve_shader: a
+     * SubViewport's card (TEXTURE as stored) eaten where the erosion (tex0
+     * at UV + (p1, 0), red) is below p0, its edge (smoothstep(p0, p0 + p2))
+     * through the bright lut (tex1, hue shifted by p3); rgb * vertex rgb,
+     * alpha TEXTURE.a * vertex alpha. */
+    EFFECT_EXHAUST_DISSOLVE = 13,
+    /* shaders/vfx/ui/card/exhaust/vfx_card_exhaust_quick_erosion_shader (a
+     * particle, its flipbook frame from Particles2D::draw): rgb the bright
+     * lut (tex0) at smoothstep(p0, p0 + p2, TEXTURE.r), hue shifted by p3,
+     * times the vertex colour; alpha TEXTURE.a * vertex alpha *
+     * smoothstep(p0, p0 + p1, TEXTURE.r). p0: the erosion curve at the
+     * particle's life. */
+    EFFECT_EXHAUST_QUICK = 14,
     EFFECT_COUNT
 };
 

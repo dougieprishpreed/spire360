@@ -123,6 +123,7 @@ private:
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
     void monster_death(Creature& cr, const std::string& who, class SpineSprite* s);
+    Node* exhaust_ui();
     void setup_combat_ui(Node* root, const Json& d);
     void build_hand(Node* ui, const Json& d);
     Holder make_holder(const Json& card);
@@ -251,6 +252,7 @@ private:
         Vec2 from, to;
         float from_scale, to_scale;
         double t, duration;
+        bool exhaust; /* at the end, NCardExhaustVfx takes it (no fade) */
     };
     std::vector<MovingCard> moving_cards_;
 };

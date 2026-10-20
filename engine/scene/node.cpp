@@ -266,6 +266,11 @@ bool CanvasItem::set(const std::string& key, const Json& v, const PropCtx& ctx) 
     else if (key == "use_parent_material") use_parent_material = v.b();
     else if (key == "texture_filter") texture_filter = v.i();
     else if (key == "texture_repeat") texture_repeat = v.i();
+    else if (key.compare(0, 27, "instance_shader_parameters/") == 0) {
+        /* a number: the item's shader parameter (vectors stay extras) */
+        if (v.is_number()) shader_params[key.substr(27)] = (float)v.num();
+        return Node::set(key, v, ctx);
+    }
     else if (key == "material") {
         Resource* r = ctx.resource(v);
         material = r && (r->kind == Resource::RES_CANVAS_ITEM_MATERIAL || r->kind == Resource::RES_SHADER_MATERIAL)

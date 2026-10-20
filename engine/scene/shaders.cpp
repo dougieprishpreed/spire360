@@ -218,18 +218,21 @@ static Texture* effect_texture(Canvas& c, const MaterialRes* m, const char* name
 
 /* The effect applied now and how it changes per particle. */
 static EffectParams g_effect;
-static int g_effect_particle = 0; /* EFFECT_PANNING: per particle */
+static int g_effect_particle = 0; /* the effect when it changes per particle */
+static int g_effect_life_param;   /* the parameter its curve at the life sets */
 static CurveData g_effect_curve;
 static Vec2 g_effect_offset_k;
 
 bool shader_effect_particle(float life, float custom_z, EffectParams* out) {
     if (!g_effect_particle) return false;
     *out = g_effect;
-    /* erosion_over_lifetime (hint_default_black) at the life; the
-     * offset: CUSTOM.z * initial_offset_multiplier / main_st.xy. */
-    out->p[4] = g_effect_curve.valid() ? g_effect_curve.sample(life) : 0.0f;
-    out->p[2] += custom_z * g_effect_offset_k.x;
-    out->p[3] += custom_z * g_effect_offset_k.y;
+    /* the erosion curve (hint_default_black) at the life */
+    out->p[g_effect_life_param] = g_effect_curve.valid() ? g_effect_curve.sample(life) : 0.0f;
+    if (g_effect_particle == EFFECT_PANNING) {
+        /* the offset: CUSTOM.z * initial_offset_multiplier / main_st.xy */
+        out->p[2] += custom_z * g_effect_offset_k.x;
+        out->p[3] += custom_z * g_effect_offset_k.y;
+    }
     return true;
 }
 
@@ -383,11 +386,31 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "lut");
         e.tex[1] = effect_texture(c, m, "mask");
         g_effect_particle = EFFECT_PANNING;
+        g_effect_life_param = 4;
     } else if (s == "shaders/vfx/common/vfx_ray_shader.gdshader") {
         /* VERTEX.x *= CUSTOM.z: Particles2D::draw. */
         e.id = EFFECT_RAY;
         e.tex[0] = effect_texture(c, m, "lut");
         e.tex[1] = effect_texture(c, m, "vertical_alpha");
+    } else if (s == "shaders/vfx/ui/card/exhaust/vfx_card_exhaust_dissolve_shader.gdshader") {
+        e.id = EFFECT_EXHAUST_DISSOLVE;
+        e.p[0] = param(m, "erosion_base", 0.0f);
+        e.p[1] = param(m, "erosion_texture_x_offset", 0.0f);
+        e.p[2] = param(m, "bright_offset", 0.0f);
+        e.p[3] = param(m, "hue_shift", 0.0f);
+        e.tex[0] = effect_texture(c, m, "erosion_texture");
+        e.tex[1] = effect_texture(c, m, "bright_lut");
+        e.repeat = 1;
+    } else if (s == "shaders/vfx/ui/card/exhaust/vfx_card_exhaust_quick_erosion_shader.gdshader") {
+        e.id = EFFECT_EXHAUST_QUICK;
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[0] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[1] = param(m, "erosion_offset", 0.1f);
+        e.p[2] = param(m, "bright_offset", 0.0f);
+        e.p[3] = param(m, "hue_shift", 0.0f);
+        e.tex[0] = effect_texture(c, m, "bright_lut");
+        g_effect_particle = EFFECT_EXHAUST_QUICK;
+        g_effect_life_param = 0;
     } else if (s == "shaders/dissolve.gdshader") {
         /* TEXTURE_PIXEL_SIZE: the drawn texture's (a Sprite2D's viewport) */
         Vec2 ts(1, 1);

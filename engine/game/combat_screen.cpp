@@ -810,6 +810,7 @@ void CombatScreen::sync_hand(const Json& cards, bool animate) {
             m.to_scale = 0.15f;
             m.t = 0;
             m.duration = 0.4;
+            m.exhaust = false;
             moving_cards_.push_back(m);
         }
     }
@@ -1094,10 +1095,14 @@ void CombatScreen::process(double dt) {
         place(m.holder.node, at.x, at.y, 0, 0);
         float sc = m.from_scale + (m.to_scale - m.from_scale) * k;
         m.holder.node->scale = Vec2(sc, sc);
-        m.holder.node->modulate.a = 1 - u;
+        if (!m.exhaust) m.holder.node->modulate.a = 1 - u;
         if (u >= 1) {
-            if (m.holder.node->parent) m.holder.node->parent->remove_child(m.holder.node);
-            delete m.holder.node;
+            if (m.exhaust) {
+                spawn_card_exhaust(lib_, exhaust_ui(), m.holder.node, false);
+            } else {
+                if (m.holder.node->parent) m.holder.node->parent->remove_child(m.holder.node);
+                delete m.holder.node;
+            }
             moving_cards_.erase(moving_cards_.begin() + (long)i);
         }
     }
@@ -1783,14 +1788,22 @@ void CombatScreen::move_card(const Json& change) {
     if (from == "hand" && to != "hand") {
         for (size_t i = 0; i < holders_.size(); ++i) {
             if (holders_[i].id != id) continue;
+            if (to == "exhaust" && id != played_instance_) {
+                /* CardPileCmd: from the hand, NCardExhaustQuickVfx where it is */
+                spawn_card_exhaust(lib_, exhaust_ui(), holders_[i].node, true);
+                holders_.erase(holders_.begin() + (long)i);
+                break;
+            }
             MovingCard m;
             m.holder = holders_[i];
             m.from = m.holder.pos;
-            m.to = id == played_instance_ ? played_destination_ : Vec2(850, to == "exhaust" ? -250.0f : -70.0f);
+            m.to = id == played_instance_ ? played_destination_ : Vec2(850, -70.0f);
             m.from_scale = m.holder.scale;
             m.to_scale = id == played_instance_ ? 0.5f : 0.15f;
             m.t = 0;
             m.duration = 0.4;
+            /* played and exhausted: NCardExhaustVfx where it ends */
+            m.exhaust = to == "exhaust";
             moving_cards_.push_back(m);
             holders_.erase(holders_.begin() + (long)i);
             break;
@@ -2070,6 +2083,12 @@ void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSpri
         /* freed at once (the end of its animation leaves nothing) */
         tweens_.tween(&((CanvasItem*)cr.visuals)->modulate.a, 0.0f, 0.01f, TRANS_LINEAR, EASE_IN_OUT, (float)wait);
     }
+}
+
+/* NCombatRoom.Ui, where the exhaust effects go. */
+Node* CombatScreen::exhaust_ui() {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    return ui ? ui : (hand_box_ ? hand_box_->parent : NULL);
 }
 
 Node* CombatScreen::take_visuals(const std::string& who) {
