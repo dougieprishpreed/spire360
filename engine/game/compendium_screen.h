@@ -17,6 +17,7 @@ namespace spire {
 class CardLibraryScreen;
 class CollectionScreen;
 class StatsScreen;
+class RunHistoryScreen;
 class Control;
 class SceneLibrary;
 
@@ -28,6 +29,8 @@ public:
     /* character: the run's ("" outside a run). */
     Node* build(const std::string& character, std::string* error);
     Action input(const PadState& pad, std::string* cmd);
+    /* OnSubmenuOpened: which buttons show (NRunHistory.CanBeShown, ...). */
+    static std::string first_query() { return "{\"cmd\":\"compendium\"}"; }
     /* An answer to one of its queries (library, ...). */
     void set_answer(const Json& msg);
     static bool is_answer(const std::string& type);
@@ -37,17 +40,20 @@ private:
     struct Button {
         Control* node;
         const char* key; /* its screen */
+        bool shown;
     };
     void focus(int i);
     void close_sub();
     SceneLibrary* lib_;
     std::string character_;
     Node* root_;
-    std::vector<Button> buttons_;
+    std::vector<Button> all_;     /* every button */
+    std::vector<Button> buttons_; /* the shown ones, in focus order */
     int focus_;
     CardLibraryScreen* library_;
     CollectionScreen* collection_;
     StatsScreen* stats_;
+    RunHistoryScreen* history_;
     Node* sub_node_;
     TweenSet tweens_;
 };

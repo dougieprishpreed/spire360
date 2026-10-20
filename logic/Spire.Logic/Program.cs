@@ -129,6 +129,7 @@ internal static class Program
                 "relic_collection" => driver.RelicCollection(),
                 "potion_lab" => driver.PotionLab(),
                 "statistics" => driver.Statistics(),
+                "compendium" => driver.CompendiumState(),
                 "run_history" => driver.RunHistoryView(cmd.Value.TryGetProperty("index", out var nestedRunIndex) ? nestedRunIndex.GetInt32() : 0),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
@@ -252,6 +253,9 @@ internal static class Program
 
             case "statistics":
                 return sim.Statistics();
+
+            case "compendium":
+                return sim.CompendiumState();
 
             case "run_history":
                 return sim.RunHistoryView(cmd.TryGetProperty("index", out var runIndex) ? runIndex.GetInt32() : 0);

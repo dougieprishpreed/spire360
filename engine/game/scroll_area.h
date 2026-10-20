@@ -25,6 +25,8 @@ public:
     void focus(Control* c);
     /* ProcessControllerEvent: up / down with nothing focused (+400 / -400). */
     void scroll_by(float dy) { target_ += dy; }
+    /* DisableScrollingIfContentFits */
+    void disable_if_fits() { disable_if_fits_ = true; }
     void frame(double dt);
 
 private:
@@ -33,6 +35,7 @@ private:
     Control* bar_;
     Control* handle_;
     float target_, velocity_, value_;
+    bool disable_if_fits_;
 };
 
 } /* namespace spire */

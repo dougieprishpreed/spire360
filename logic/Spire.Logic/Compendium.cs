@@ -149,6 +149,8 @@ public partial class RunDriver
             if (pool.AllRelicIds.Contains(relic.Id)) { outline = OutlineColor(pool.LabOutlineColor); break; }
         var d = CollectionEntry(relic.Id.Entry, visibility, outline, "COMPENDIUM_RELIC_COLLECTION", () => relic.ToMutable().HoverTips);
         d["icon_base"] = RelicIconBase(relic);
+        // NInspectRelicScreen (A on an entry)
+        foreach (var kv in InspectRelicView(relic.ToMutable(), unlocked)) d.TryAdd(kv.Key, kv.Value);
         return d;
     }
 

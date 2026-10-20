@@ -3,6 +3,7 @@
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "../scene/value.h"
+#include "inspect_screens.h"
 #include "top_bar.h"
 
 namespace spire {
@@ -12,7 +13,11 @@ static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n 
 static const char* const LOCKED_ICON = "images/packed/common_ui/locked_model.png";
 
 CollectionScreen::CollectionScreen(SceneLibrary* lib, Kind kind)
-    : lib_(lib), kind_(kind), root_(NULL), screen_(NULL), contents_(NULL), row_(-1), col_(0), loaded_(false) {}
+    : lib_(lib), kind_(kind), root_(NULL), screen_(NULL), contents_(NULL), row_(-1), col_(0), loaded_(false), inspect_(NULL),
+      inspect_node_(NULL) {}
+
+/* The inspect node is under root_, freed with it by the owner. */
+CollectionScreen::~CollectionScreen() { delete inspect_; }
 
 std::string CollectionScreen::query() const {
     return kind_ == RELICS ? "{\"cmd\":\"relic_collection\"}" : "{\"cmd\":\"potion_lab\"}";
@@ -213,7 +218,33 @@ void CollectionScreen::focus(int row, int col) {
 
 CollectionScreen::Action CollectionScreen::input(const PadState& pad, std::string* cmd) {
     cmd->clear();
+    if (inspect_) {
+        if (!inspect_->input(pad)) {
+            if (inspect_node_->parent) inspect_node_->parent->remove_child(inspect_node_);
+            delete inspect_node_;
+            delete inspect_;
+            inspect_node_ = NULL;
+            inspect_ = NULL;
+        }
+        return NONE;
+    }
     if (pad.pressed & PadState::B) return BACK;
+    if ((pad.pressed & PadState::A) && kind_ == RELICS && row_ >= 0) {
+        /* OnRelicEntryPressed: NInspectRelicScreen over the collection's relics */
+        Json list = Json::make_array();
+        for (size_t i = 0; i < items_.size(); ++i) list.append(*items_[i]);
+        inspect_ = new InspectRelicScreen(lib_);
+        std::string err;
+        inspect_node_ = inspect_->build(list, (int)rows_[(size_t)row_][(size_t)col_].item, &err);
+        if (inspect_node_) {
+            tips_.hide();
+            root_->add_child(inspect_node_);
+        } else {
+            delete inspect_;
+            inspect_ = NULL;
+        }
+        return NONE;
+    }
     if (rows_.empty() || row_ < 0) {
         if (pad.pressed & PadState::UP) scroll_.scroll_by(400);
         if (pad.pressed & PadState::DOWN) scroll_.scroll_by(-400);

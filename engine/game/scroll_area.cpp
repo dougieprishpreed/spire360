@@ -19,7 +19,7 @@ static void move_to(Control* c, const Vec2& p) {
     c->position = p;
 }
 
-ScrollArea::ScrollArea() : content_(NULL), bar_(NULL), handle_(NULL), target_(0), velocity_(0), value_(0) {}
+ScrollArea::ScrollArea() : content_(NULL), bar_(NULL), handle_(NULL), target_(0), velocity_(0), value_(0), disable_if_fits_(false) {}
 
 void ScrollArea::attach(Node* screen_contents) {
     content_ = NULL;
@@ -77,7 +77,10 @@ void ScrollArea::frame(double dt) {
     if (!content_) return;
     Control* view = content_->parent && content_->parent->is_control() ? (Control*)content_->parent : NULL;
     float lim = limit_bottom();
-    if (bar_) bar_->visible = view && content_->size.y > view->size.y;
+    bool fits = !(view && content_->size.y > view->size.y);
+    if (bar_) bar_->visible = !fits;
+    /* _Process: no scrolling when the content fits, if so asked */
+    if (disable_if_fits_ && fits) return;
     /* UpdateScrollPosition */
     float y = content_->position.y;
     if (fabsf(y - target_) > 1e-4f) {

@@ -18,6 +18,7 @@
 #include "../../engine/game/card_library_screen.h"
 #include "../../engine/game/collection_screen.h"
 #include "../../engine/game/stats_screen.h"
+#include "../../engine/game/run_history_screen.h"
 #include "../../engine/game/event_screen.h"
 #include "../../engine/game/title_screen.h"
 #include "../../engine/game/map_screen.h"
@@ -149,6 +150,7 @@ int main(int argc, char** argv) {
     CardLibraryScreen* library = NULL;
     CollectionScreen* collection = NULL;
     StatsScreen* stats = NULL;
+    RunHistoryScreen* history = NULL;
     size_t alen = strlen(argv[2]);
     if (!scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
         FILE* jf = fopen(argv[2], "rb");
@@ -171,6 +173,11 @@ int main(int argc, char** argv) {
                                                                                             : CollectionScreen::POTIONS);
             scene = collection->build(&err);
             if (scene) collection->set_data(d);
+        } else if (RunHistoryScreen::is_answer(d["type"].str())) {
+            /* a run_history answer (--pad drives it). */
+            history = new RunHistoryScreen(&lib);
+            scene = history->build(&err);
+            if (scene) history->set_data(d);
         } else if (StatsScreen::is_answer(d["type"].str())) {
             /* the statistics answer (--pad drives it). */
             stats = new StatsScreen(&lib);
@@ -287,7 +294,7 @@ int main(int argc, char** argv) {
     }
     /* --pad A,RIGHT,...: each press after half a second, then --time again
      * before the picture; the screen's commands are printed. */
-    for (size_t k = 0; (ported || title || charsel || piles || settings || library || collection || stats) && k < pad_script.size(); ++k) {
+    for (size_t k = 0; (ported || title || charsel || piles || settings || library || collection || stats || history) && k < pad_script.size(); ++k) {
         PadState pad;
         pad.pressed = pad.held = pad_script[k];
         std::string cmd = ported ? ported->input(pad) : std::string();
@@ -296,6 +303,7 @@ int main(int argc, char** argv) {
         if (library && library->input(pad, &cmd) == CardLibraryScreen::BACK) cmd = "back";
         if (collection && collection->input(pad, &cmd) == CollectionScreen::BACK) cmd = "back";
         if (stats && stats->input(pad, &cmd) == StatsScreen::BACK) cmd = "back";
+        if (history && history->input(pad, &cmd) == RunHistoryScreen::BACK) cmd = "back";
         if (title) {
             TitleScreen::Action a = title->input(pad);
             if (a != TitleScreen::NONE) cmd = a == TitleScreen::SINGLEPLAYER ? "singleplayer" : "quit";

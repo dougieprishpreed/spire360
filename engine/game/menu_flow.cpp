@@ -208,6 +208,7 @@ bool MenuFlow::update(const PadState& in) {
                     title_->set_covered(true);
                     title_->set_submenu(true);
                     tree_->root()->add_child(screen_node_);
+                    game_->send_query(CompendiumScreen::first_query());
                 } else {
                     event_ = "compendium: " + err;
                     delete compendium_;

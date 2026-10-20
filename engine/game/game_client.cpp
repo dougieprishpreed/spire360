@@ -989,8 +989,10 @@ bool GameClient::pause_input(const PadState& pad) {
         std::string err;
         compendium_ = new CompendiumScreen(lib_);
         compendium_node_ = compendium_->build(lower(decision_["player"]["character"].str()), &err);
-        if (compendium_node_) tree_->root()->add_child(compendium_node_);
-        else {
+        if (compendium_node_) {
+            tree_->root()->add_child(compendium_node_);
+            send_query(CompendiumScreen::first_query());
+        } else {
             log_warn("compendium: %s", err.c_str());
             delete compendium_;
             compendium_ = NULL;

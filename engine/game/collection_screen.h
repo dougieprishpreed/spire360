@@ -18,6 +18,7 @@
 namespace spire {
 
 class Control;
+class InspectRelicScreen;
 class SceneLibrary;
 
 class CollectionScreen : public FrameListener {
@@ -25,6 +26,7 @@ public:
     enum Kind { RELICS, POTIONS };
     enum Action { NONE, BACK };
     CollectionScreen(SceneLibrary* lib, Kind kind);
+    ~CollectionScreen();
     Node* build(std::string* error);
     /* The query for its data. */
     std::string query() const;
@@ -56,6 +58,8 @@ private:
     ScrollArea scroll_;
     TipFollower tips_;
     TweenSet tweens_;
+    InspectRelicScreen* inspect_;
+    Node* inspect_node_;
 };
 
 } /* namespace spire */

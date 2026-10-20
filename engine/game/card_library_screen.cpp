@@ -3,6 +3,7 @@
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "card_view.h"
+#include "inspect_screens.h"
 #include "loc.h"
 
 #include <algorithm>
@@ -22,7 +23,11 @@ static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n 
 
 CardLibraryScreen::CardLibraryScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), upgrades_(false), rows_(NULL), focus_(-1), item_focus_(0), columns_(1), scroll_(0),
-      scroll_to_(0), lim_lo_(0), lim_hi_(0), view_h_(1000), count_label_(NULL), no_results_(NULL) {}
+      scroll_to_(0), lim_lo_(0), lim_hi_(0), view_h_(1000), count_label_(NULL), no_results_(NULL), inspect_(NULL),
+      inspect_node_(NULL) {}
+
+/* The inspect node is under root_, freed with it by the owner. */
+CardLibraryScreen::~CardLibraryScreen() { delete inspect_; }
 
 std::string CardLibraryScreen::first_query() const {
     return format("{\"cmd\":\"library\",\"pool\":\"%s\"}", pool_.c_str());
@@ -337,7 +342,40 @@ void CardLibraryScreen::focus_item(int i) {
 
 CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::string* cmd) {
     cmd->clear();
+    if (inspect_) {
+        if (!inspect_->input(pad)) {
+            if (inspect_node_->parent) inspect_node_->parent->remove_child(inspect_node_);
+            delete inspect_node_;
+            delete inspect_;
+            inspect_node_ = NULL;
+            inspect_ = NULL;
+        }
+        return NONE;
+    }
     if (pad.pressed & PadState::B) return BACK;
+    if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < (int)order_.size() &&
+        cards_[(size_t)order_[(size_t)focus_]]["visibility"].str() == "visible") {
+        /* ShowCardDetail: NInspectCardScreen over the shown, discovered cards */
+        Json list = Json::make_array();
+        int at = 0;
+        for (size_t k = 0; k < order_.size(); ++k) {
+            const Json& c = cards_[(size_t)order_[k]];
+            if (c["visibility"].str() != "visible") continue;
+            if ((int)k == focus_) at = (int)list.size();
+            list.append(c);
+        }
+        inspect_ = new InspectCardScreen(lib_);
+        std::string err;
+        inspect_node_ = inspect_->build(list, at, upgrades_, &err);
+        if (inspect_node_) {
+            tips_.hide();
+            root_->add_child(inspect_node_);
+        } else {
+            delete inspect_;
+            inspect_ = NULL;
+        }
+        return NONE;
+    }
     if (pad.pressed & PadState::Y) {
         /* View Upgrades */
         for (size_t k = 0; k < items_.size(); ++k)

@@ -19,12 +19,14 @@
 namespace spire {
 
 class Control;
+class InspectCardScreen;
 class SceneLibrary;
 
 class CardLibraryScreen : public FrameListener {
 public:
     enum Action { NONE, BACK };
     explicit CardLibraryScreen(SceneLibrary* lib);
+    ~CardLibraryScreen();
     /* character: the run's (its pool first), "" outside a run. */
     Node* build(const std::string& character, std::string* error);
     /* The logic's library answer for a pool. */
@@ -71,6 +73,8 @@ private:
     Node* no_results_;
     TipFollower tips_;
     TweenSet tweens_;
+    InspectCardScreen* inspect_;
+    Node* inspect_node_;
 };
 
 } /* namespace spire */

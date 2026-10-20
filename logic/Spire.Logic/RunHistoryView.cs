@@ -26,6 +26,23 @@ public partial class RunDriver
 
     private static string? ResPath(string? p) => p != null && p.StartsWith("res://") ? p.Substring(6) : p;
 
+    /// <summary>NCompendiumSubmenu.OnSubmenuOpened: NRunHistory.CanBeShown
+    /// and NBestiary.CanBeShown.</summary>
+    public Dictionary<string, object?> CompendiumState()
+    {
+        EnsureModelDbInitialized();
+        var save = SaveManager.Instance;
+        bool bestiary = false;
+        try
+        {
+            bestiary = save.Progress.DiscoveredActs.Count > 0 && save.Progress.EnemyStats.Values.Any(e => e.TotalWins > 0);
+        }
+        catch { }
+        int runs = 0;
+        try { runs = save.GetRunHistoryCount(); } catch { }
+        return new Dictionary<string, object?> { ["type"] = "compendium", ["run_history"] = runs > 0, ["bestiary"] = bestiary };
+    }
+
     /// <summary>NRunHistory: the run at index (0 the newest).</summary>
     public Dictionary<string, object?> RunHistoryView(int index)
     {
@@ -211,6 +228,7 @@ public partial class RunDriver
                 ["deck_color"] = new[] { c.R, c.G, c.B, c.A },
                 ["floors"] = group.Where(x => x.FloorAddedToDeck.HasValue).Select(x => x.FloorAddedToDeck!.Value).ToList(),
             });
+            e["inspect"] = InspectCardView(card);
             entries.Add(e);
         }
         d["deck"] = entries;
@@ -255,6 +273,31 @@ public partial class RunDriver
             : new List<string>();
         var key = rng.NextItem(keys);
         return new LocString(table, key ?? prefix);
+    }
+
+    /// <summary>NInspectCardScreen.UpdateCardDisplay's two cards: the card
+    /// downgraded, and its upgrade preview (null when it has none).</summary>
+    internal static Dictionary<string, object?> InspectCardView(CardModel card)
+    {
+        CardModel plain;
+        try
+        {
+            plain = (CardModel)card.MutableClone();
+            for (int i = 0; i < 10 && plain.IsUpgraded; i++) plain.DowngradeInternal();
+        }
+        catch { plain = ModelDb.GetById<CardModel>(card.Id).ToMutable(); }
+        return new Dictionary<string, object?>
+        {
+            ["base"] = WithCardView(plain, PileType.None, new Dictionary<string, object?>
+            {
+                ["id"] = plain.Id.ToString(),
+                ["type"] = plain.Type.ToString(),
+                ["rarity"] = plain.Rarity.ToString(),
+            }),
+            ["upgraded"] = UpgradePreviewView(plain),
+            ["start_upgraded"] = card.IsUpgraded,
+            ["upgradable"] = card.MaxUpgradeLevel > 0,
+        };
     }
 
     /// <summary>NBadge.Create(id, rarity): its base, icon and tip.</summary>
