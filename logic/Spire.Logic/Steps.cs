@@ -67,9 +67,17 @@ internal static class Steps
         foreach (var a in args)
         {
             if (ReferenceEquals(a, Spire.HookBridge.Hooks.StandIn)) continue; // a singleton's stand-in receiver
+            if (StandIns.TryCreature(a, out var standing))
+            {
+                outArgs.Add(Who(standing)); // a creature's stand-in node (the receiver of its calls)
+                continue;
+            }
             switch (a)
             {
                 case null: continue;
+                case Godot.Vector2 v:
+                    outArgs.Add(StandIns.Describe(v) ?? "Vector2");
+                    break;
                 case string str: outArgs.Add(str); break;
                 case bool or int or long or float or double or decimal: outArgs.Add(a); break;
                 case IReadOnlyDictionary<string, float> parameters:

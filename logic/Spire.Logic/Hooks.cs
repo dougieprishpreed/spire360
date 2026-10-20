@@ -157,7 +157,7 @@ internal static partial class Hooks
         {
             Steps.Ui(id, a);
             Driver?.OnUiCall(id, a);
-            return null;
+            return StandIns.Answer(id, a);
         });
 
         // Neutralize.OnPlay(choiceContext, cardPlay): sts2-cli's safe re-implementation

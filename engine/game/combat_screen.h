@@ -97,6 +97,10 @@ private:
         Node* center;            /* the visuals' %CenterPos (VfxSpawnPosition) */
         Json data, powers;       /* state currently shown, before the next cue */
         int shown_hp, shown_max_hp;
+        /* NCreature's scale: Visuals.Scale = base * _tempScale *
+         * Visuals.DefaultScale (* Osty's size by its HP). */
+        Vec2 scale_base;
+        float scale_temp, scale_default, scale_osty;
     };
     /* A hand card's holder and where NHandCardHolder is taking it
      * (SetTargetPosition / Angle / Scale: lerps, not tweens). */
@@ -209,6 +213,9 @@ private:
     double life_t_; /* keeps running when a new response resets the playhead */
     double radial_off_at_; /* when the radial blur hides (life_t_), 0: off */
     void radial_blur(const std::string& position);
+    /* NCreature's own calls the logic made on a creature's node. */
+    void creature_call(const std::string& method, const Json& args);
+    void scale_visuals(Creature& c, float duration);
     Node* root_;
     std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */
     struct Ghost {

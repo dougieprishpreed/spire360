@@ -107,6 +107,8 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.nameplate = NULL;
     out.center = NULL;
     out.shown_hp = out.shown_max_hp = -1;
+    out.scale_temp = out.scale_default = out.scale_osty = 1;
+    out.scale_base = Vec2(0, 0);
     Node* n = instance(lib_, "scenes/combat/creature.tscn");
     if (!n || !n->is_control()) {
         delete n;
@@ -1471,6 +1473,8 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     if (!aftermath_ && osty.is_object() && osty["alive"].b() && make_creature("osty", false, c)) {
         if (c.visuals && c.visuals->is_node2d()) {
             float k = 1.0f + clampf(osty_max_hp / 150.0f, 0.0f, 1.0f);
+            c.scale_base = ((Node2D*)c.visuals)->scale;
+            c.scale_osty = k;
             ((Node2D*)c.visuals)->scale = ((Node2D*)c.visuals)->scale * k;
         }
         allies->add_child(c.node);
@@ -1965,6 +1969,61 @@ bool CombatScreen::side_center(bool enemies, Vec2* out) {
     return vfx_position(c, out);
 }
 
+/* NCreature.ScaleTo / SetDefaultScaleTo / OstyScaleToSize: the visuals'
+ * scale eases (Sine InOut) to base * temp * default (* Osty's size). */
+void CombatScreen::scale_visuals(Creature& c, float duration) {
+    if (!c.visuals || !c.visuals->is_node2d()) return;
+    Node2D* v = (Node2D*)c.visuals;
+    if (c.scale_base.x == 0 && c.scale_base.y == 0)
+        c.scale_base = v->scale * (1.0f / (c.scale_temp * c.scale_default * c.scale_osty));
+    float k = c.scale_temp * c.scale_default * c.scale_osty;
+    tweens_.kill(&v->scale);
+    if (duration <= 0) v->scale = c.scale_base * k;
+    else tweens_.tween(&v->scale, c.scale_base * k, duration, TRANS_SINE, EASE_IN_OUT);
+}
+
+void CombatScreen::creature_call(const std::string& method, const Json& args) {
+    Creature* c = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
+    if (!c || !c->node) return;
+    float a1 = args.size() > 1 ? (float)args[(size_t)1].num(0) : 0, a2 = args.size() > 2 ? (float)args[(size_t)2].num(0) : 0;
+    if (method == "ScaleTo") {
+        c->scale_temp = a1;
+        scale_visuals(*c, a2);
+    } else if (method == "SetDefaultScaleTo") {
+        c->scale_default = a1;
+        scale_visuals(*c, a2);
+    } else if (method == "OstyScaleToSize") {
+        /* Osty.ScaleRange 1..2 over 0..150 HP */
+        c->scale_osty = 1.0f + clampf(a1 / 150.0f, 0.0f, 1.0f);
+        scale_visuals(*c, a2);
+    } else if (method == "StartReviveAnim") {
+        /* the Revive trigger where the creature has one, else (the player)
+         * a blink back to idle; its UI comes back. */
+        c->node->visible = true;
+        tweens_.kill(&c->node->modulate.a);
+        c->node->modulate.a = 1;
+        SpineSprite* s = first_spine(c->visuals);
+        if (!(s && s->set_animation("revive", false, 0))) play_idle(c->node);
+        else if (s->skeleton() && s->animation_state()) {
+            const SpAnimation* idle = s->skeleton()->data()->find_animation("idle_loop");
+            if (idle) s->animation_state()->add_animation(0, idle, true, 0);
+        }
+    } else if (method == "PerformIntent") {
+        /* AnimHideIntent(0.4): the intents fade out over 0.5 s after 0.4 s. */
+        Control* row = ctl(c->node, "Intents");
+        if (row) tweens_.tween(&row->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.4f);
+    } else if (method == "RefreshIntents") {
+        /* RevealIntents: from transparent to opaque over 1 s, after 0-0.3 s. */
+        Control* row = ctl(c->node, "Intents");
+        if (row) {
+            tweens_.kill(&row->modulate.a);
+            row->modulate.a = 0;
+            tweens_.tween(&row->modulate.a, 1.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT,
+                          (float)(chaotic_rand() % 301) / 1000.0f);
+        }
+    }
+}
+
 /* NRadialBlurVfx.Activate: the room's RadialBlur (a BackBufferCopy whose
  * Rect reads the screen through radial_blur) shows, its centre's x by the
  * position (Left 0.3, Right 0.6, else 0.45), its power up to 0.005 in 0.1 s
@@ -2058,6 +2117,10 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_SCRIPTED && ScreenShake::get().cue(c.data["call"].str(), c.data["args"])) return;
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
+        creature_call(c.data["call"].str().substr(10), c.data["args"]);
+        return;
+    }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.RadialBlur") {
         radial_blur(c.data["args"][(size_t)0].str());
         return;
@@ -2265,6 +2328,12 @@ void CombatScreen::play_steps(const Json& steps) {
                 }
                 cues_.push_back(c);
             } else if (type == "ui" && (is_combat_vfx_call(ch["call"].str()) || ch["call"].str() == "NCombatRoom.RadialBlur" ||
+                                        ch["call"].str() == "NCreature.ScaleTo" ||
+                                        ch["call"].str() == "NCreature.SetDefaultScaleTo" ||
+                                        ch["call"].str() == "NCreature.OstyScaleToSize" ||
+                                        ch["call"].str() == "NCreature.StartReviveAnim" ||
+                                        ch["call"].str() == "NCreature.PerformIntent" ||
+                                        ch["call"].str() == "NCreature.RefreshIntents" ||
                                         ch["call"].str().compare(0, 12, "NGame.Screen") == 0)) {
                 /* The game's scripted effects (combat_vfx). */
                 c.kind = CUE_SCRIPTED;

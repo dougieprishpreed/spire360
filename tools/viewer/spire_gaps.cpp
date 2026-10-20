@@ -1,6 +1,9 @@
 /* spire_gaps: what the presentation cannot show yet, over protocol traces.
  *
- *   spire_gaps <pack.s3p> <report.json> <trace.jsonl> [more traces...]
+ *   spire_gaps [--dt SECONDS] <pack.s3p> <report.json> <trace.jsonl> [more traces...]
+ *
+ * --dt: the playback step (default 1/30 s); a coarser one sweeps many
+ * traces faster.
  *
  * Each trace's decisions go through the game client as the logic sent them
  * (the replies the client sends are dropped); each screen is laid out,
@@ -25,6 +28,7 @@
 #include <fstream>
 #include <map>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 using namespace spire;
@@ -77,9 +81,17 @@ static std::string json_escape(const std::string& s) {
     return o;
 }
 
+static double g_dt = 1.0 / 30.0;
+
 int main(int argc, char** argv) {
+    if (argc > 2 && strcmp(argv[1], "--dt") == 0) {
+        g_dt = atof(argv[2]);
+        if (g_dt <= 0) g_dt = 1.0 / 30.0;
+        argv += 2;
+        argc -= 2;
+    }
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_gaps <pack.s3p> <report.json> <trace.jsonl> [more traces...]\n");
+        fprintf(stderr, "usage: spire_gaps [--dt SECONDS] <pack.s3p> <report.json> <trace.jsonl> [more traces...]\n");
         return 2;
     }
     Pack pack;
@@ -134,20 +146,21 @@ int main(int argc, char** argv) {
             link.incoming.push_back(line);
             /* The screen and its playback (up to 20 s), drawn every 0.25 s. */
             lib.unsupported.clear();
-            for (int f = 0; f < 600; ++f) {
+            int frames = (int)(20.0 / g_dt), every = (int)(0.25 / g_dt) > 0 ? (int)(0.25 / g_dt) : 1;
+            for (int f = 0; f < frames; ++f) {
                 game.update(PadState());
                 tree.layout();
-                tree.process(1.0 / 30.0);
-                audio.update(1.0 / 30.0);
+                tree.process(g_dt);
+                audio.update(g_dt);
                 tree.layout(1);
-                if (f % 8 == 0) {
+                if (f % every == 0) {
                     sw.begin(480, 270, Color(0, 0, 0, 1));
                     tree.render(canvas);
                     sw.end();
                     for (std::map<std::string, int>::iterator it = tree.skipped.begin(); it != tree.skipped.end(); ++it)
                         add_gap("not drawn: " + it->first, 1);
                 }
-                if (f > 30 && !game.busy()) break;
+                if (f * g_dt > 1.0 && !game.busy()) break;
             }
             for (std::map<std::string, int>::iterator it = lib.unsupported.begin(); it != lib.unsupported.end(); ++it)
                 add_gap("unsupported: " + it->first, 1);

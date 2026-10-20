@@ -722,7 +722,7 @@ internal sealed class Patcher
                     var name = spec.Id + "|" + target.DeclaringType.GetElementType().FullName + "::" + target.Name;
                     bool standIn = spec.StandInSingletons && !target.HasThis && target.Name == "get_Instance" &&
                                    IsStatementUiChain(body.Instructions, idx, IsUi, spec.NullTolerant);
-                    ReplaceCallWithDefault(method, ins, target, name, standIn);
+                    ReplaceCallWithDefault(method, ins, target, name, standIn, IsUi);
                     if (standIn) standIns++;
                     count++;
                     callers.Add(method.FullName);
@@ -984,7 +984,7 @@ internal sealed class Patcher
     }
 
     private void ReplaceCallWithDefault(MethodDefinition caller, Instruction call, MethodReference target, string id,
-                                        bool standIn = false)
+                                        bool standIn = false, Func<TypeReference, bool>? isUi = null)
     {
         var il = caller.Body.GetILProcessor();
         var locals = new List<VariableDefinition>();
@@ -1016,12 +1016,43 @@ internal sealed class Patcher
             seq.Add(il.Create(OpCodes.Stelem_Ref));
         }
         seq.Add(il.Create(OpCodes.Call, _invoke));
-        seq.Add(il.Create(OpCodes.Pop));
         var ret = _module.ImportReference(Concrete(target.ReturnType, target));
         if (standIn)
+        {
+            seq.Add(il.Create(OpCodes.Pop));
             seq.Add(il.Create(OpCodes.Ldsfld, _standIn)); /* only redirected calls consume it, as object */
+        }
+        else if (PassesHookResult(ret, isUi))
+        {
+            if (ret.IsValueType)
+            {
+                // The hook's boxed value of exactly this type, else the default.
+                var boxed = new VariableDefinition(_module.TypeSystem.Object);
+                caller.Body.Variables.Add(boxed);
+                var useDefault = il.Create(OpCodes.Nop);
+                var end = il.Create(OpCodes.Nop);
+                seq.Add(il.Create(OpCodes.Stloc, boxed));
+                seq.Add(il.Create(OpCodes.Ldloc, boxed));
+                seq.Add(il.Create(OpCodes.Isinst, ret));
+                seq.Add(il.Create(OpCodes.Brfalse, useDefault));
+                seq.Add(il.Create(OpCodes.Ldloc, boxed));
+                seq.Add(il.Create(OpCodes.Unbox_Any, ret));
+                seq.Add(il.Create(OpCodes.Br, end));
+                seq.Add(useDefault);
+                seq.AddRange(SafeDefault(il, caller, ret));
+                seq.Add(end);
+            }
+            else
+            {
+                // A UI object the hook stands in with (StandIns), else null.
+                seq.Add(il.Create(OpCodes.Isinst, ret));
+            }
+        }
         else
+        {
+            seq.Add(il.Create(OpCodes.Pop));
             seq.AddRange(SafeDefault(il, caller, ret));
+        }
 
         var first = seq[0];
         call.OpCode = first.OpCode;
@@ -1032,6 +1063,26 @@ internal sealed class Patcher
             il.InsertAfter(anchor, seq[k]);
             anchor = seq[k];
         }
+    }
+
+    /// <summary>
+    /// Results the hook may supply (StandIns): plain value types (not
+    /// generic ones such as Nullable), and UI classes whose safe default is
+    /// null (not the audio singletons, which always get an instance).
+    /// </summary>
+    private static bool PassesHookResult(TypeReference ret, Func<TypeReference, bool>? isUi)
+    {
+        if (isUi == null || ret.MetadataType == MetadataType.Void || ret.IsGenericParameter || ret.IsByReference ||
+            ret.IsPointer || ret is ArrayType || ret is GenericInstanceType)
+            return false;
+        if (ret.IsValueType) return true;
+        if (ret.MetadataType == MetadataType.String || ret.MetadataType == MetadataType.Object) return false;
+        var name = ret.FullName;
+        if (name is "MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController" or "MegaCrit.Sts2.Core.Nodes.Audio.NAudioManager" or
+            "MegaCrit.Sts2.Core.Audio.Debug.NDebugAudioManager")
+            return false;
+        if (ret.Name.EndsWith("Awaiter", StringComparison.Ordinal)) return false;
+        return isUi(ret);
     }
 
     private static readonly HashSet<string> SequenceInterfaces = new()
