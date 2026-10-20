@@ -219,20 +219,29 @@ static Texture* effect_texture(Canvas& c, const MaterialRes* m, const char* name
 /* The effect applied now and how it changes per particle. */
 static EffectParams g_effect;
 static int g_effect_particle = 0; /* the effect when it changes per particle */
-static int g_effect_life_param;   /* the parameter its curve at the life sets */
-static CurveData g_effect_curve;
-static Vec2 g_effect_offset_k;
+/* Per particle: parameter g_life_param[i] = g_life_scale[i] * curve i at
+ * the particle's life (hint_default_black: 0 without a curve; -1: none);
+ * g_cz_param[i] += g_cz_scale[i] * CUSTOM.z. */
+static int g_life_param[2], g_cz_param[3];
+static float g_life_scale[2], g_cz_scale[3];
+static CurveData g_effect_curve, g_effect_curve2;
+
+static void effect_particles(int id) {
+    g_effect_particle = id;
+    g_life_param[0] = g_life_param[1] = -1;
+    g_cz_param[0] = g_cz_param[1] = g_cz_param[2] = -1;
+    g_life_scale[0] = g_life_scale[1] = 1;
+}
 
 bool shader_effect_particle(float life, float custom_z, EffectParams* out) {
     if (!g_effect_particle) return false;
     *out = g_effect;
-    /* the erosion curve (hint_default_black) at the life */
-    out->p[g_effect_life_param] = g_effect_curve.valid() ? g_effect_curve.sample(life) : 0.0f;
-    if (g_effect_particle == EFFECT_PANNING) {
-        /* the offset: CUSTOM.z * initial_offset_multiplier / main_st.xy */
-        out->p[2] += custom_z * g_effect_offset_k.x;
-        out->p[3] += custom_z * g_effect_offset_k.y;
-    }
+    const CurveData* curves[2] = { &g_effect_curve, &g_effect_curve2 };
+    for (int i = 0; i < 2; ++i)
+        if (g_life_param[i] >= 0)
+            out->p[g_life_param[i]] = g_life_scale[i] * (curves[i]->valid() ? curves[i]->sample(life) : 0.0f);
+    for (int i = 0; i < 3; ++i)
+        if (g_cz_param[i] >= 0) out->p[g_cz_param[i]] += custom_z * g_cz_scale[i];
     return true;
 }
 
@@ -382,11 +391,15 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[6] = param(m, "energy", 1.0f);
         e.p[7] = param(m, "use_red_channel_as_alpha", 0.0f);
         Vec2 k = shader_param_vec2(m, "initial_offset_multiplier", Vec2(0, 0));
-        g_effect_offset_k = Vec2(st[0] != 0 ? k.x / st[0] : 0.0f, st[1] != 0 ? k.y / st[1] : 0.0f);
         e.tex[0] = effect_texture(c, m, "lut");
         e.tex[1] = effect_texture(c, m, "mask");
-        g_effect_particle = EFFECT_PANNING;
-        g_effect_life_param = 4;
+        /* the offset: CUSTOM.z * initial_offset_multiplier / main_st.xy */
+        effect_particles(EFFECT_PANNING);
+        g_life_param[0] = 4;
+        g_cz_param[0] = 2;
+        g_cz_scale[0] = st[0] != 0 ? k.x / st[0] : 0.0f;
+        g_cz_param[1] = 3;
+        g_cz_scale[1] = st[1] != 0 ? k.y / st[1] : 0.0f;
     } else if (s == "shaders/vfx/common/vfx_ray_shader.gdshader") {
         /* VERTEX.x *= CUSTOM.z: Particles2D::draw. */
         e.id = EFFECT_RAY;
@@ -409,8 +422,79 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[2] = param(m, "bright_offset", 0.0f);
         e.p[3] = param(m, "hue_shift", 0.0f);
         e.tex[0] = effect_texture(c, m, "bright_lut");
-        g_effect_particle = EFFECT_EXHAUST_QUICK;
-        g_effect_life_param = 0;
+        effect_particles(EFFECT_EXHAUST_QUICK);
+        g_life_param[0] = 0;
+    } else if (s == "shaders/boss_map_point_placeholder.gdshader") {
+        e.id = EFFECT_TINT_GRAY;
+        Color k = param_color(m, "tint_color", Color(1, 1, 1, 1));
+        e.p[0] = k.r;
+        e.p[1] = k.g;
+        e.p[2] = k.b;
+    } else if (s == "shaders/enchantment_tab_appear.gdshader") {
+        e.id = EFFECT_TAB_APPEAR;
+        e.p[0] = param(m, "progress", 0.0f);
+    } else if (s == "shaders/vfx/ui/vfx_ui_low_hp_border_shader.gdshader") {
+        e.id = EFFECT_LOW_HP_BORDER;
+        e.p[0] = param(m, "alpha", 1.0f);
+        e.p[1] = clampf(param(m, "alpha_multiplier", 1.0f), 0, 1);
+        e.p[2] = param(m, "inner_radius", 0.0f);
+        e.p[3] = param(m, "outer_radius", 1.0f);
+        Vec2 tiling = shader_param_vec2(m, "noise_tiling", Vec2(1, 1)), panning = shader_param_vec2(m, "noise_panning", Vec2(0, 0));
+        e.p[4] = tiling.x;
+        e.p[5] = tiling.y;
+        e.p[6] = pan(panning.x) + param(m, "noise_additional_offset", 0.0f);
+        e.p[7] = pan(panning.y);
+        Vec2 sf = shader_param_vec2(m, "smoothstep_factors", Vec2(0, 1));
+        e.p[8] = clampf(sf.x, 0, 1);
+        e.p[9] = clampf(sf.x + sf.y, 0, 1);
+        Color k = param_color(m, "main_color", Color(0, 0, 0, 1));
+        e.p[10] = k.r;
+        e.p[11] = k.g;
+        e.p[12] = k.b;
+        e.tex[0] = effect_texture(c, m, "noise");
+        e.repeat = 1;
+    } else if (s == "shaders/vfx/sleeping/vfx_sleeping_z_shader.gdshader") {
+        e.id = EFFECT_SLEEPING_Z;
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        CurveData::from(shader_param_resource(m, "distortion_curve"), g_effect_curve2);
+        float strength = param(m, "distortion_strength", 0.0f);
+        e.p[1] = param(m, "erosion_offset", 0.25f);
+        Vec2 speed = shader_param_vec2(m, "distortion_speed", Vec2(0, 0));
+        e.p[3] = pan(speed.x);
+        e.p[4] = pan(speed.y);
+        Color k = param_color(m, "outline_color", Color(0, 0, 0, 1));
+        e.p[6] = k.r;
+        e.p[7] = k.g;
+        e.p[8] = k.b;
+        e.p[9] = k.a;
+        e.tex[0] = effect_texture(c, m, "animation_texture");
+        e.repeat = 1;
+        effect_particles(EFFECT_SLEEPING_Z);
+        g_life_param[0] = 0;
+        g_life_param[1] = 2;
+        g_life_scale[1] = strength;
+        g_cz_param[0] = 3;
+        g_cz_param[1] = 4;
+        g_cz_param[2] = 5;
+        g_cz_scale[0] = g_cz_scale[1] = g_cz_scale[2] = 1;
+        e.p[0] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[2] = strength * (g_effect_curve2.valid() ? g_effect_curve2.sample(0) : 0.0f);
+    } else if (s == "shaders/vfx/heavy_blunt/vfx_heavy_blunt_erosion_shader.gdshader" ||
+               s == "shaders/vfx/potion/vfx_potion_splash_shader.gdshader") {
+        bool splash = s == "shaders/vfx/potion/vfx_potion_splash_shader.gdshader";
+        e.id = splash ? EFFECT_POTION_SPLASH : EFFECT_LUT_EROSION;
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[0] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[1] = param(m, "erosion_offset", splash ? 0.25f : 0.1f);
+        if (splash) {
+            Vec2 speed = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
+            e.p[2] = pan(speed.x);
+            e.p[3] = pan(speed.y);
+            e.p[4] = param(m, "distortion_strength", 0.0f);
+        }
+        e.tex[0] = effect_texture(c, m, "lut");
+        effect_particles(e.id);
+        g_life_param[0] = 0;
     } else if (s == "shaders/dissolve.gdshader") {
         /* TEXTURE_PIXEL_SIZE: the drawn texture's (a Sprite2D's viewport) */
         Vec2 ts(1, 1);
@@ -532,7 +616,8 @@ void Canvas::hsv_matrix(float h, float s, float v, float out[12]) {
 bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
     if (!m || m->kind != Resource::RES_SHADER_MATERIAL) return true;
     g_item = item;
-    if (m->shader == "shaders/hsv.gdshader") {
+    if (m->shader == "shaders/hsv.gdshader" || m->shader == "inline:aa241422154f3376") {
+        /* inline:aa24...: the FTUE screens' (and the card library's) copy */
         float cm[12];
         Canvas::hsv_matrix(param(m, "h", 1.0f), param(m, "s", 1.0f), param(m, "v", 1.0f), cm);
         c.set_color_matrix(cm);
@@ -551,6 +636,18 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         strength = (strength > hi ? hi : strength) * param(m, "strengthScale", 100.0f);
         float wind = (sinf(time) + cosf(time * param(m, "detail", 1.0f))) * strength;
         c.set_wind(true, wind, param(m, "heightOffset", 0.0f));
+        return true;
+    }
+    if (m->shader == "shaders/boss_map_point.gdshader") {
+        /* COLOR's red through map_color, blue through black_layer_color,
+         * green as white: a colour matrix of those columns. */
+        Color mc = param_color(m, "map_color", Color(1, 1, 1, 1)), bl = param_color(m, "black_layer_color", Color(0, 0, 0, 1));
+        float cm[12] = { mc.r, 1, bl.r, 0, mc.g, 1, bl.g, 0, mc.b, 1, bl.b, 0 };
+        c.set_color_matrix(cm);
+        return true;
+    }
+    if (m->shader == "shaders/vfx/common/vfx_common_subtractive.gdshader") {
+        /* COLOR = texel * vertex colour, render_mode blend_sub (shader_blend) */
         return true;
     }
     if (m->shader == "shaders/power_flash_vfx.gdshader") {
@@ -814,6 +911,10 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/power_flash_vfx.gdshader") {
         *out = BLEND_ADD;
+        return true;
+    }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/common/vfx_common_subtractive.gdshader") {
+        *out = BLEND_SUB;
         return true;
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/dissolve.gdshader") {

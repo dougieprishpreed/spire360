@@ -57,11 +57,11 @@ float4 ps_e3(VsOut i) : COLOR {
 // 4: simple_noise_flat / simple_noise_add: the vertex colour, the texture's
 // red through two panning noises, thresholded.
 float4 ps_e4(VsOut i) : COLOR {
-    float t = tex2D(g_tex, i.uv).r;
+    float4 t = tex2D(g_tex, i.uv);
     float n1 = tex2D(g_e0, (i.uv + float2(0.275, 0.0)) * g_p0.zw - float2(0.275, 0.0) + g_p1.xy).r;
     float n2 = tex2D(g_e1, (i.uv + float2(0.275, 0.0)) * g_p1.zw - float2(0.275, 0.0) + g_p2.xy).r;
-    float a = saturate(smoothstep(g_p0.x, g_p0.y, i.color.a * t * n1 * n2));
-    return float4(i.color.rgb * a, a);
+    float a = saturate(smoothstep(g_p0.x, g_p0.y, i.color.a * t.a * t.r * n1 * n2));
+    return float4(saturate(i.color.rgb * t.rgb) * a, a);
 }
 
 // 5: decimillipede_suck_shader: dark blue, its alpha from the pattern
@@ -74,16 +74,17 @@ float4 ps_e5(VsOut i) : COLOR {
     return float4(float3(0.0153, 0.090072, 0.17) * a, a);
 }
 
-// 6: vfx_molten_fist: two noises over a mask, thresholded; the vertex
-// colour (the shader writes only COLOR.a).
+// 6: vfx_molten_fist: two noises over a mask, thresholded; COLOR's rgb
+// (the shader writes only COLOR.a).
 float4 ps_e6(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
     float n1 = tex2D(g_e0, i.uv * g_p1.xy + g_p1.zw).b;
     float n2 = tex2D(g_e1, i.uv * g_p2.xy + g_p2.zw).b;
     float m = tex2D(g_e2, (i.uv - float2(0.0, 0.04)) * g_p3.xy + float2(0.0, 0.04) + g_p3.zw).b;
     if (g_p0.w < 0.0) m = 1.0 - m;
     float x = (g_p0.z * n2 * abs(g_p0.w) * n1 + m) * tex2D(g_e3, i.uv).a;
     float a = saturate(smoothstep(g_p0.x, g_p0.y, x));
-    return float4(i.color.rgb * a, a);
+    return float4(saturate(i.color.rgb * t.rgb) * a, a);
 }
 
 // 7: slash_shader_flat: a flat colour, the shape through two noises.
@@ -95,12 +96,13 @@ float4 ps_e7(VsOut i) : COLOR {
     return float4(g_p3.rgb * a, a);
 }
 
-// 8: texture_transition: the transition texture's step, faded; the
-// vertex colour (the shader writes only COLOR.a).
+// 8: texture_transition: the transition texture's step, faded; COLOR's
+// rgb (the shader writes only COLOR.a).
 float4 ps_e8(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
     float r = tex2D(g_e0, i.uv).r;
     float a = saturate((((1.0 - r) <= lerp(-0.1, 1.1, g_p0.x) ? 1.0 : 0.0) + g_p0.x * g_p0.y) * g_p0.z);
-    return float4(i.color.rgb * a, a);
+    return float4(saturate(i.color.rgb * t.rgb) * a, a);
 }
 
 // 9: vfx_panning_shader: the texture panning, coloured by the lut, eroded
@@ -179,4 +181,68 @@ float4 ps_e14(VsOut i) : COLOR {
     float3 bc = shift_hue(tex2D(g_e0, float2(bright, 0.5)).rgb, g_p0.w);
     float a = saturate(t.a * i.color.a * erosion);
     return float4(saturate(bc * i.color.rgb) * a, a);
+}
+
+// 15: boss_map_point_placeholder: grey, tinted, three quarters opaque.
+float4 ps_e15(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float g = dot(t.rgb, float3(0.299, 0.587, 0.114));
+    float a = saturate(t.a * 0.75);
+    return float4(saturate(g_p0.rgb * (0.7 + 0.3 * g)) * a, a);
+}
+
+// 16: enchantment_tab_appear: drawn in from the left as progress rises.
+float4 ps_e16(VsOut i) : COLOR {
+    float p = g_p0.x;
+    float s1 = smoothstep(p, p + 0.2, i.uv.x), s2 = smoothstep(p + 0.2, p + 0.25, i.uv.x);
+    float2 uv = float2(i.uv.x, lerp(i.uv.y, (i.uv.y - 0.5) * 0.75 + 0.5, s1));
+    float4 t = tex2D(g_tex, uv);
+    float3 add = float3(1.0, 0.75, 0.9);
+    float4 c = lerp(t, float4(t.rgb + add, 1.0), s1);
+    c = lerp(c, float4(add, 0.0), s2);
+    float a = saturate(c.a * t.a);
+    return float4(saturate(c.rgb) * a, a);
+}
+
+// 17: vfx_ui_low_hp_border: a vignette of the main colour through noise.
+float4 ps_e17(VsOut i) : COLOR {
+    float2 d = i.uv - 0.5;
+    float2 polar = frac(float2(length(d) * 2.0, atan2(d.y, d.x) / 6.2832));
+    float n = tex2D(g_e0, polar * g_p1.xy + g_p1.zw).r;
+    float x = abs(i.uv.x - 0.5) * 2.0, y = abs(i.uv.y - 0.5) * 2.0;
+    float q = 1.0 - (1.0 - sqrt(x * x + y * y) / g_p0.w) / (1.0 - g_p0.z);
+    float fa = smoothstep(g_p2.x, g_p2.y, q * g_p0.x + n * 0.25) * g_p0.y;
+    float a = saturate(fa * i.color.a);
+    return float4(saturate(float3(g_p2.z, g_p2.w, g_p3.x) * i.color.rgb) * a, a);
+}
+
+// 18: vfx_sleeping_z: the Z wobbled and eroded through its animation
+// texture, its outline coloured.
+float4 ps_e18(VsOut i) : COLOR {
+    float db = tex2D(g_e0, i.uv + float2(g_p0.w, g_p1.x)).b;
+    float off = (db - 0.5) * 2.0 * g_p0.z;
+    float4 t = tex2D(g_tex, i.uv + off);
+    float eg = tex2D(g_e0, i.uv + g_p1.yy).g;
+    float erosion = smoothstep(g_p0.x, g_p0.x + g_p0.y, eg);
+    float4 c = lerp(float4(g_p1.zw, g_p2.xy), i.color, t.r);
+    float a = saturate(c.a * erosion * t.a);
+    return float4(saturate(c.rgb) * a, a);
+}
+
+// 19: vfx_heavy_blunt_erosion: the lut by the red, eroded over the life.
+float4 ps_e19(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float4 l = tex2D(g_e0, float2(t.r, 0.5));
+    float a = saturate(i.color.a * smoothstep(g_p0.x, g_p0.x + g_p0.y, t.r));
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 20: vfx_potion_splash: the texture wobbled by its own blue, eroded by
+// its alpha over the life, coloured by the lut.
+float4 ps_e20(VsOut i) : COLOR {
+    float db = tex2D(g_tex, i.uv + g_p0.zw).b;
+    float4 t = tex2D(g_tex, i.uv + db * g_p1.x);
+    float4 l = tex2D(g_e0, float2(t.r, 0.5));
+    float a = saturate(i.color.a * smoothstep(g_p0.x, g_p0.x + g_p0.y, t.a));
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
 }

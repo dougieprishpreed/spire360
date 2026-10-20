@@ -1420,6 +1420,53 @@ private:
 
 ScriptBehavior* make_monster_death(Node*) { return new MonsterDeath(); }
 
+/* NLowHpBorderVfx (PlayerHurtVignetteHelper.Play: the local player hurt
+ * at a quarter of their HP or less): over _duration the border's
+ * alpha_multiplier follows _alphaMultiplierCurve and its main_color
+ * _gradient; played again while it lasts, it starts over. */
+class LowHpBorder : public Effect {
+public:
+    explicit LowHpBorder(Node* n) : duration_(exported_float(n, "_duration", 1.0f)), playing_(false), timer_(0) {
+        const Json* v = n->get_extra("_alphaMultiplierCurve");
+        if (v) CurveData::from(script_resource(*v), alpha_);
+        v = n->get_extra("_gradient");
+        if (v) GradientData::from(script_resource(*v), gradient_);
+    }
+    void play() {
+        timer_ = 0;
+        playing_ = true;
+    }
+    virtual void begin(Node* n) { set(n, playing_ ? 0.0f : 1.0f); }
+    virtual void tick(Node* n, double dt) {
+        if (!playing_) return;
+        set(n, (float)minf((float)(timer_ / duration_), 1.0f));
+        timer_ += dt;
+        if (timer_ >= duration_) {
+            set(n, 1);
+            playing_ = false;
+        }
+    }
+
+private:
+    void set(Node* n, float i) {
+        CanvasItem* c = (CanvasItem*)n;
+        c->shader_params["alpha_multiplier"] = alpha_.valid() ? alpha_.sample(i) : 0.0f;
+        if (gradient_.valid()) {
+            Color k = gradient_.at(i);
+            c->shader_params["main_color.r"] = k.r;
+            c->shader_params["main_color.g"] = k.g;
+            c->shader_params["main_color.b"] = k.b;
+        }
+    }
+    float duration_;
+    CurveData alpha_;
+    GradientData gradient_;
+    bool playing_;
+    double timer_;
+};
+
+ScriptBehavior* make_low_hp_border(Node* n) { return new LowHpBorder(n); }
+
 /* NParticlesContainer.SetEmitting / Restart over its _particles. */
 void particles_emitting(Node* container, bool on) {
     std::vector<Node*> list;
@@ -1742,7 +1789,8 @@ static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGround
 bool is_combat_vfx_call(const std::string& call) {
     if (call == "NCombatRoom.PlaySplashVfx") return true;
     std::string cls = class_of(call);
-    if (call == "NSleepingVfx.Stop" || call == "NDoomOverlayVfx.GetOrCreate") return true;
+    if (call == "NSleepingVfx.Stop" || call == "NDoomOverlayVfx.GetOrCreate" || call == "PlayerHurtVignetteHelper.Play")
+        return true;
     if (call.compare(cls.size(), std::string::npos, ".Create") != 0 && call.find(".Create") == std::string::npos)
         return false;
     if (spec_named(cls)) return true;
@@ -1782,6 +1830,23 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     const Spec* s = spec_named(cls);
     if (s) {
         spawn_spec(lib, box, *s, a, anchors);
+        return true;
+    }
+    if (call == "PlayerHurtVignetteHelper.Play") {
+        /* one border over the whole screen, played again: the last child of
+         * the room's root (above its UI; the tree root keeps the room
+         * first) */
+        Node* top = box;
+        while (top->parent && top->parent->parent) top = top->parent;
+        for (size_t i = 0; i < top->children.size(); ++i) {
+            Node* fx = top->children[i];
+            if (fx->script == "res://src/Core/Nodes/Vfx/Ui/NLowHpBorderVfx.cs" && fx->behavior && !fx->queued_for_deletion()) {
+                ((LowHpBorder*)fx->behavior)->play();
+                return true;
+            }
+        }
+        Node* fx = add_effect(lib, top, "scenes/vfx/ui/vfx_low_hp_border.tscn");
+        if (fx && fx->behavior) ((LowHpBorder*)fx->behavior)->play();
         return true;
     }
     if (call == "NDoomOverlayVfx.GetOrCreate") {
@@ -2047,6 +2112,7 @@ void install_combat_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/NDoomVfx.cs", make_doom_vfx);
     register_script("res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs", make_doom_overlay);
     register_script("res://src/Core/Nodes/Vfx/NMonsterDeathVfx.cs", make_monster_death);
+    register_script("res://src/Core/Nodes/Vfx/Ui/NLowHpBorderVfx.cs", make_low_hp_border);
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustVfx.cs", make_card_exhaust);
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustQuickVfx.cs", make_card_exhaust_quick);
 }

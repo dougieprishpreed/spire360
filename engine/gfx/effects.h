@@ -1,5 +1,7 @@
 /* Effect shaders: ports of the game's own canvas shaders that are not one
- * of the canvas shader's modes. Each has an id, up to 16 parameters and up
+ * of the canvas shader's modes. Godot 4's fragment COLOR starts as the
+ * vertex colour times the texel (the shaders keep a vertex_color varying
+ * for the vertex colour alone). Each has an id, up to 16 parameters and up
  * to 4 textures (EffectParams); the software renderer runs a C++ version
  * (sw_effects.cpp), the D3D9 renderer a pixel shader of its own
  * (shaders/effects.hlsl, entry point ps_e<id>). The draw's texture is the
@@ -26,7 +28,7 @@ enum EffectId {
      * mix(TEXTURE.a, TEXTURE.r, p0). */
     EFFECT_LUT_COLOR = 3,
     /* images/vfx/simple_noise_flat_shader.tres and simple_noise_add_shader:
-     * rgb the vertex colour, alpha smoothstep(p0, p1, vertex alpha *
+     * rgb COLOR's (vertex times texel), alpha smoothstep(p0, p1, COLOR.a *
      * TEXTURE.r * n1.r * n2.r); n1 = tex0 at (UV + (0.275, 0)) * p2p3 -
      * (0.275, 0) + p4p5, n2 = tex1 likewise with p6p7, p8p9 (tex1 unset:
      * white). */
@@ -37,8 +39,8 @@ enum EffectId {
      * pattern.r * (0.03, 0)).r) * p4; pattern = tex0(UV * 3 + p0p1) *
      * tex0(UV * 2 + p2p3) (the time offsets); tex1 gradient, tex2 shape. */
     EFFECT_DECIMILLIPEDE_SUCK = 5,
-    /* images/vfx/vfx_molten_fist/vfx_molten_fist.tres: rgb the vertex colour
-     * (only COLOR.a is written), alpha smoothstep(p0, p1, (p2 * n2.b * p3 * n1.b + m) *
+    /* images/vfx/vfx_molten_fist/vfx_molten_fist.tres: rgb COLOR's (only
+     * COLOR.a is written), alpha smoothstep(p0, p1, (p2 * n2.b * p3 * n1.b + m) *
      * tex3(UV).a); n1 = tex0(UV * p4p5 + p6p7), n2 = tex1(UV * p8p9 + p10p11),
      * m = tex2(((UV - (0, 0.04)) * p12p13 + (0, 0.04)) + p14p15).b, inverted
      * when p3 < 0 (p3 = |Noise1Strength|, the sign is InvertNoiseMask). */
@@ -48,8 +50,8 @@ enum EffectId {
      * 0)) * p5p6 - (0.275, 0) + p7p8 (time panned), n2 = tex2 the same with
      * p9p10, p15p11; tex0 shape. */
     EFFECT_SLASH_FLAT = 7,
-    /* shaders/texture_transition.gdshader: rgb the vertex colour (only
-     * COLOR.a is written), alpha (step(1 - tex0(UV).r, mix(-0.1, 1.1, p0)) + p0 * p1) *
+    /* shaders/texture_transition.gdshader: rgb COLOR's (only COLOR.a is
+     * written), alpha (step(1 - tex0(UV).r, mix(-0.1, 1.1, p0)) + p0 * p1) *
      * p2. */
     EFFECT_TEXTURE_TRANSITION = 8,
     /* shaders/vfx/common/vfx_panning_shader.gdshader: TEXTURE at UV * p0p1 +
@@ -85,6 +87,32 @@ enum EffectId {
      * smoothstep(p0, p0 + p1, TEXTURE.r). p0: the erosion curve at the
      * particle's life. */
     EFFECT_EXHAUST_QUICK = 14,
+    /* shaders/boss_map_point_placeholder.gdshader: rgb tint p0..2 * (0.7 +
+     * 0.3 * grey(TEXTURE)), alpha TEXTURE.a * 0.75 (no vertex colour). */
+    EFFECT_TINT_GRAY = 15,
+    /* shaders/enchantment_tab_appear.gdshader: the tab drawn in left to
+     * right as p0 (progress) rises, its leading edge squeezed and whitened
+     * (+ (1, 0.75, 0.9)), fading out ahead of it (no vertex colour). */
+    EFFECT_TAB_APPEAR = 16,
+    /* shaders/vfx/ui/vfx_ui_low_hp_border_shader.gdshader: main colour
+     * p10..12 times the vertex colour, alpha smoothstep(p8, p9, q * p0 +
+     * noise.r / 4) * p1; q = 1 - (1 - |2 UV - 1| / p3) / (1 - p2); noise
+     * (tex0) at the polar uv * p4p5 + p6p7. */
+    EFFECT_LOW_HP_BORDER = 17,
+    /* shaders/vfx/sleeping/vfx_sleeping_z_shader.gdshader (particles): the
+     * texel at UV + distortion, distortion = (anim(UV + p3p4).b - 0.5) * 2 *
+     * p2 (strength * curve at the life); rgb mix(outline p6..8, vertex rgb,
+     * texel.r), alpha (outline p9 or vertex a) * texel.a * smoothstep(p0, p0
+     * + p1, anim(UV + p5).g). tex0 the animation texture (repeat). */
+    EFFECT_SLEEPING_Z = 18,
+    /* shaders/vfx/heavy_blunt/vfx_heavy_blunt_erosion_shader.gdshader
+     * (particles): rgb lut(tex0 at TEXTURE.r) * vertex rgb, alpha vertex a *
+     * smoothstep(p0, p0 + p1, TEXTURE.r); p0 the curve at the life. */
+    EFFECT_LUT_EROSION = 19,
+    /* shaders/vfx/potion/vfx_potion_splash_shader.gdshader (particles): the
+     * texel t at UV + TEXTURE(UV + p2p3).b * p4; rgb lut(tex0 at t.r) *
+     * vertex rgb, alpha vertex a * smoothstep(p0, p0 + p1, t.a). */
+    EFFECT_POTION_SPLASH = 20,
     EFFECT_COUNT
 };
 

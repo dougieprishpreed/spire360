@@ -277,9 +277,9 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         if (tex) sample(tex->img, u, v, flags, t);
         effect_texel(e, 0, (u + 0.275f) * e.p[2] - 0.275f + e.p[4], v * e.p[3] + e.p[5], n1);
         effect_texel(e, 1, (u + 0.275f) * e.p[6] - 0.275f + e.p[8], v * e.p[7] + e.p[9], n2);
-        float tr = t[3] > 0 ? t[0] / t[3] : 0.0f;
-        float a = clampf(smoothstepf(e.p[0], e.p[1], col[3] * tr * n1[0] * n2[0]), 0, 1);
-        for (int k = 0; k < 3; ++k) out[k] = col[k] * a;
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f, tr = t[0] * ia;
+        float a = clampf(smoothstepf(e.p[0], e.p[1], col[3] * t[3] * tr * n1[0] * n2[0]), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * t[k] * ia, 0, 1) * a;
         out[3] = a;
         return;
     }
@@ -299,7 +299,8 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         return;
     }
     case EFFECT_MOLTEN_FIST: {
-        float n1[4], n2[4], m[4], fa[4];
+        float t[4] = { 1, 1, 1, 1 }, n1[4], n2[4], m[4], fa[4];
+        if (tex) sample(tex->img, u, v, flags, t);
         effect_texel(e, 0, u * e.p[4] + e.p[6], v * e.p[5] + e.p[7], n1);
         effect_texel(e, 1, u * e.p[8] + e.p[10], v * e.p[9] + e.p[11], n2);
         effect_texel(e, 2, u * e.p[12] + e.p[14], (v - 0.04f) * e.p[13] + 0.04f + e.p[15], m);
@@ -308,7 +309,8 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         if (e.p[3] < 0) mb = 1 - mb;
         float x = (e.p[2] * n2[2] * fabsf(e.p[3]) * n1[2] + mb) * fa[3];
         float a = clampf(smoothstepf(e.p[0], e.p[1], x), 0, 1);
-        for (int k = 0; k < 3; ++k) out[k] = col[k] * a;
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * t[k] * ia, 0, 1) * a;
         out[3] = a;
         return;
     }
@@ -357,6 +359,93 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_TINT_GRAY: {
+        float t[4] = { 1, 1, 1, 1 };
+        if (tex) sample(tex->img, u, v, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float g = (t[0] * 0.299f + t[1] * 0.587f + t[2] * 0.114f) * ia;
+        float a = clampf(t[3] * 0.75f, 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[k] * (0.7f + 0.3f * g), 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_TAB_APPEAR: {
+        float p = e.p[0];
+        float s1 = smoothstepf(p, p + 0.2f, u), s2 = smoothstepf(p + 0.2f, p + 0.25f, u);
+        float vv = v + ((v - 0.5f) * 0.75f + 0.5f - v) * s1;
+        float t[4] = { 1, 1, 1, 1 };
+        if (tex) sample(tex->img, u, vv, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        static const float add[3] = { 1.0f, 0.75f, 0.9f };
+        float c[4];
+        for (int k = 0; k < 3; ++k) {
+            float tk = t[k] * ia;
+            c[k] = tk + (tk + add[k] - tk) * s1;
+            c[k] = c[k] + (add[k] - c[k]) * s2;
+        }
+        c[3] = t[3] + (1 - t[3]) * s1;
+        c[3] = c[3] * (1 - s2);
+        float a = clampf(c[3] * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(c[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_LOW_HP_BORDER: {
+        float dx = u - 0.5f, dy = v - 0.5f;
+        float pr = sqrtf(dx * dx + dy * dy) * 2.0f, pa = atan2f(dy, dx) / 6.2832f;
+        pr -= floorf(pr);
+        pa -= floorf(pa);
+        float n[4];
+        effect_texel(e, 0, pr * e.p[4] + e.p[6], pa * e.p[5] + e.p[7], n);
+        float x = fabsf(u - 0.5f) * 2, y = fabsf(v - 0.5f) * 2;
+        float q = 1 - (1 - sqrtf(x * x + y * y) / e.p[3]) / (1 - e.p[2]);
+        float fa = q * e.p[0] + n[0] * 0.25f;
+        fa = smoothstepf(e.p[8], e.p[9], fa) * e.p[1];
+        float a = clampf(fa * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[10 + k] * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SLEEPING_Z: {
+        float d[4], er[4], t[4] = { 1, 1, 1, 1 };
+        effect_texel(e, 0, u + e.p[3], v + e.p[4], d);
+        float db = d[3] > 0 ? d[2] / d[3] : 0.0f;
+        float off = (db - 0.5f) * 2.0f * e.p[2];
+        if (tex) sample(tex->img, u + off, v + off, flags, t);
+        effect_texel(e, 0, u + e.p[5], v + e.p[5], er);
+        float eg = er[3] > 0 ? er[1] / er[3] : 0.0f;
+        float erosion = smoothstepf(e.p[0], e.p[0] + e.p[1], eg);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f, r = t[0] * ia;
+        float c[4];
+        for (int k = 0; k < 3; ++k) c[k] = e.p[6 + k] + (col[k] - e.p[6 + k]) * r;
+        c[3] = e.p[9] + (col[3] - e.p[9]) * r;
+        float a = clampf(c[3] * erosion * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(c[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_LUT_EROSION:
+    case EFFECT_POTION_SPLASH: {
+        float t[4] = { 1, 1, 1, 1 }, l[4];
+        float erosion_in;
+        if (e.id == EFFECT_POTION_SPLASH) {
+            float d[4] = { 1, 1, 1, 1 };
+            if (tex) sample(tex->img, u + e.p[2], v + e.p[3], flags, d);
+            float db = d[3] > 0 ? d[2] / d[3] : 0.0f;
+            if (tex) sample(tex->img, u + db * e.p[4], v + db * e.p[4], flags, t);
+            erosion_in = t[3];
+        } else {
+            if (tex) sample(tex->img, u, v, flags, t);
+            erosion_in = t[3] > 0 ? t[0] / t[3] : 0.0f;
+        }
+        float r = t[3] > 0 ? t[0] / t[3] : 0.0f;
+        effect_texel(e, 0, r, 0.5f, l);
+        float il = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(col[3] * smoothstepf(e.p[0], e.p[0] + e.p[1], erosion_in), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * il * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_DISSOLVE: {
         float thr = e.p[0];
         float wx = -200.0f * e.p[2], wy = 1024.0f * e.p[3];
@@ -382,12 +471,14 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         return;
     }
     case EFFECT_TEXTURE_TRANSITION: {
-        float tr[4];
+        float t[4] = { 1, 1, 1, 1 }, tr[4];
+        if (tex) sample(tex->img, u, v, flags, t);
         effect_texel(e, 0, u, v, tr);
         float r = tr[3] > 0 ? tr[0] / tr[3] : 0.0f;
         float a = ((1 - r) <= -0.1f + 1.2f * e.p[0] ? 1.0f : 0.0f) + e.p[0] * e.p[1];
         a = clampf(a * e.p[2], 0, 1);
-        for (int k = 0; k < 3; ++k) out[k] = col[k] * a;
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * t[k] * ia, 0, 1) * a;
         out[3] = a;
         return;
     }
