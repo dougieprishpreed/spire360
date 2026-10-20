@@ -21,7 +21,7 @@ namespace Spire.Logic;
 internal static class StandIns
 {
     private const float Base = 1_000_000f, Step = 10_000f, Slack = 4_000f;
-    private static readonly string[] Anchors = { "center", "bottom", "top", "power" };
+    private static readonly string[] Anchors = { "center", "bottom", "top", "power", "hitbox", "hitbox_size" };
 
     private static NCombatRoom? _room;
     private static readonly ConditionalWeakTable<Creature, NCreature> Nodes = new();
@@ -56,6 +56,8 @@ internal static class StandIns
                     case "GetTopOfHitbox": return Encode(cr, 2);
                     case "get_PowerAppliedVfxSpawnPosition": return Encode(cr, 3);
                     case "get_IsInteractable": return cr.IsAlive;
+                    case "get_Entity": return cr;
+                    case "get_Hitbox": return Hitbox(cr);
                 }
             }
         }
@@ -75,6 +77,22 @@ internal static class StandIns
         Nodes.Add(c, n);
         Creatures.Add(n, c);
         return n;
+    }
+
+    private static readonly ConditionalWeakTable<Creature, Godot.Control> Hitboxes = new();
+
+    /// <summary>NCreature.Hitbox: a control whose GlobalPosition (its top
+    /// left) and Size are encoded ("hitbox", "hitbox_size").</summary>
+    private static Godot.Control Hitbox(Creature c)
+    {
+        if (!Hitboxes.TryGetValue(c, out var h))
+        {
+            h = new Godot.Control();
+            Hitboxes.Add(c, h);
+        }
+        h.GlobalPosition = Encode(c, 4);
+        h.Size = Encode(c, 5);
+        return h;
     }
 
     private static Godot.Vector2 Encode(Creature c, int anchor)

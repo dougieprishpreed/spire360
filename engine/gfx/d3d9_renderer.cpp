@@ -552,7 +552,7 @@ bool D3D9Renderer::set_screen(const ScreenParams* p) {
         return true;
     }
     if (screen_failed_ || !dev_) return false;
-    int need = p->mode == SCREEN_DARK ? (int)ceilf(p->lod) : 0;
+    int need = p->mode == SCREEN_DARK || p->mode == SCREEN_GLASS ? (int)ceilf(p->lod) : 0;
     if (need > SCREEN_LEVELS - 1) need = SCREEN_LEVELS - 1;
     if (screen_levels_ <= need) {
         flush();
@@ -780,7 +780,7 @@ void D3D9Renderer::apply_state() {
     if (screen_on_ && screen_levels_ > 0) {
         int l0 = 0;
         float f = 0;
-        if (screen_.mode == SCREEN_DARK) {
+        if (screen_.mode == SCREEN_DARK || screen_.mode == SCREEN_GLASS) {
             float lod = screen_.lod < 0 ? 0 : screen_.lod;
             if (lod > (float)(screen_levels_ - 1)) lod = (float)(screen_levels_ - 1);
             l0 = (int)floorf(lod);
@@ -806,6 +806,25 @@ void D3D9Renderer::apply_state() {
         c[91] = screen_.strength;
         c[92] = screen_.noise_offset[0];
         c[93] = screen_.noise_offset[1];
+        if (screen_.mode == SCREEN_DOOM) {
+            /* c22.yzw: saturation, value, pulse; c23: the gradient colour */
+            c[89] = screen_.mix;
+            c[90] = screen_.strength;
+            c[91] = screen_.power;
+            c[92] = screen_.color[0];
+            c[93] = screen_.color[1];
+            c[94] = screen_.color[2];
+            c[95] = screen_.color[3];
+        }
+        if (screen_.mode == SCREEN_GLASS) {
+            /* c22.yzw: lod fraction, corner weight, add; c23: the corner colour */
+            c[90] = screen_.mix;
+            c[91] = screen_.strength;
+            c[92] = screen_.color[0];
+            c[93] = screen_.color[1];
+            c[94] = screen_.color[2];
+            c[95] = screen_.color[3];
+        }
         if (screen_.mode == SCREEN_RADIAL) {
             /* c22.yzw: count, power; c23.xy: centre */
             c[89] = (float)(screen_.count < 1 ? 1 : (screen_.count > 16 ? 16 : screen_.count));
@@ -818,7 +837,8 @@ void D3D9Renderer::apply_state() {
         for (DWORD stage = 9; stage < 13; ++stage) dev_->SetTexture(stage, NULL);
         for (int k = 88; k < 94; ++k) c[k] = 0.0f;
     }
-    c[94] = c[95] = 0.0f;
+    if (!(screen_on_ && screen_levels_ > 0 && (screen_.mode == SCREEN_GLASS || screen_.mode == SCREEN_DOOM)))
+        c[94] = c[95] = 0.0f;
     dev_->SetPixelShaderConstantF(0, c, 24);
     dirty_ = false;
 }

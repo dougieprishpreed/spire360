@@ -203,8 +203,71 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
         CanvasItem* unplayable = item(card, "UnplayableStarIcon");
         if (unplayable) unplayable->visible = c["unplayable_icon"].b();
     }
+    /* NCard.UpdateEnchantmentVisuals: the tab with the enchantment's icon
+     * (its art, else the beta art) and amount; dimmed while disabled (hsv
+     * s 0.1 instead of 0.4, alpha 0.9, the icon through the tab's material,
+     * the amount gray); 45 px higher on cards without a star cost. */
     CanvasItem* ench = item(card, "Enchantment");
-    if (ench) ench->visible = false; /* enchantment tabs come later */
+    const Json& e = c["enchantment_view"];
+    if (ench) ench->visible = e.is_object();
+    if (ench && e.is_object()) {
+        Resource* icon_res = lib->ext(e["icon"].str());
+        std::string icon = icon_res ? e["icon"].str() : e["beta_icon"].str();
+        Node* icon_node = ench->get_node("Icon");
+        if (lib->ext(icon) && icon_node && icon_node->is_canvas_item()) set_texture(lib, (CanvasItem*)icon_node, icon);
+        Node* amount = ench->get_node("Label");
+        set_text(amount && amount->is_canvas_item() ? (CanvasItem*)amount : NULL, format("%d", e["amount"].i()));
+        if (amount && amount->is_canvas_item()) ((CanvasItem*)amount)->visible = e["show_amount"].b();
+        bool disabled = e["disabled"].b();
+        ench->modulate = Color(1, 1, 1, disabled ? 0.9f : 1.0f);
+        ench->shader_params["h"] = 0.25f;
+        ench->shader_params["s"] = disabled ? 0.1f : 0.4f;
+        ench->shader_params["v"] = 0.6f;
+        if (icon_node && icon_node->is_canvas_item()) ((CanvasItem*)icon_node)->use_parent_material = disabled;
+        if (amount && amount->is_canvas_item()) ((CanvasItem*)amount)->self_modulate = disabled ? Color(0.5f, 0.5f, 0.5f, 1) : Color(1, 1, 1, 1);
+        const std::string sc = c["star_display"].str();
+        bool star_cost = sc == "X" || (!sc.empty() && sc[0] != '-');
+        if (!star_cost && ench->is_control()) {
+            Control* tab = (Control*)ench;
+            tab->offset[SIDE_TOP] -= 45;
+            tab->offset[SIDE_BOTTOM] -= 45;
+        }
+    }
+
+    /* NCard.ReloadOverlay: the affliction's overlay, else the card's own. */
+    if (c["overlay"].is_string()) {
+        Node* holder = card->get_node("CardContainer/OverlayContainer");
+        std::string oerr;
+        Node* overlay = lib->ext(c["overlay"].str()) ? lib->instantiate(c["overlay"].str(), &oerr) : NULL;
+        if (holder && overlay) holder->add_child(overlay);
+        else delete overlay;
+    }
+
+    /* Ancient cards (NCard.UpdateVisuals / UpdatePortrait): the full-art
+     * portrait through the canvas group's rounded mask, the ancient border,
+     * text background and banner (its fire), no frame, portrait border or
+     * title banner. */
+    if (c["rarity"].str() == "Ancient") {
+        static const char* const off[] = { "Portrait", "PortraitBorder", "Frame", "TitleBanner" };
+        for (size_t i = 0; i < sizeof(off) / sizeof(off[0]); ++i) {
+            CanvasItem* n = item(card, off[i]);
+            if (n) n->visible = false;
+        }
+        static const char* const on[] = { "AncientPortrait", "AncientBorderGlassOverlay", "AncientBorder", "AncientTextBg",
+                                          "AncientBanner" };
+        for (size_t i = 0; i < sizeof(on) / sizeof(on[0]); ++i) {
+            CanvasItem* n = item(card, on[i]);
+            if (n) n->visible = true;
+        }
+        if (c["portrait"].is_string()) set_texture(lib, item(card, "AncientPortrait"), c["portrait"].str());
+        if (c["ancient_border"].is_string()) set_texture(lib, item(card, "AncientBorder"), c["ancient_border"].str());
+        if (c["ancient_text_bg"].is_string()) set_texture(lib, item(card, "AncientTextBg"), c["ancient_text_bg"].str());
+        CanvasItem* group = item(card, "PortraitCanvasGroup");
+        if (group && group->type == "CanvasGroup") {
+            set_material(lib, group, "scenes/cards/card_canvas_group_mask_material.tres");
+            ((CanvasGroup*)group)->refresh();
+        }
+    }
 
     /* The hand's glow (NCardHighlight): playable cyan, gold, red. */
     CanvasItem* glow = item(card, "Highlight");

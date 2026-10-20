@@ -147,7 +147,7 @@ bool SwRenderer::set_screen(const ScreenParams* p) {
         screen_mips_[0] = fb_;
         screen_levels_ = 1;
     }
-    int need = p->mode == SCREEN_DARK ? (int)ceilf(p->lod) : 0;
+    int need = p->mode == SCREEN_DARK || p->mode == SCREEN_GLASS ? (int)ceilf(p->lod) : 0;
     while (screen_levels_ <= need) {
         const Image& top = screen_mips_[(size_t)screen_levels_ - 1];
         if (top.w <= 1 && top.h <= 1) break;
@@ -352,7 +352,39 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 /* ScreenParams: COLOR is the screen copy (the vertex colour
                  * is not applied). */
                 float su = ((float)x + 0.5f) / (float)fb_.w, sv = ((float)y + 0.5f) / (float)fb_.h;
-                if (screen_.mode == SCREEN_RADIAL) {
+                if (screen_.mode == SCREEN_DOOM) {
+                    /* doom_overlay: inverse(YIQ) * diag(v, s*v, s*v) * YIQ */
+                    float a = col[3], sf = 1 + (screen_.mix - 1) * a, vf = 1 + (screen_.strength - 1) * a;
+                    float sc[4];
+                    sample_screen(su, sv, 0, sc);
+                    float y = 0.2989f * sc[0] + 0.5870f * sc[1] + 0.1140f * sc[2];
+                    float i = (0.5959f * sc[0] - 0.2774f * sc[1] - 0.3216f * sc[2]) * sf;
+                    float q = (0.2115f * sc[0] - 0.5229f * sc[1] + 0.3114f * sc[2]) * sf;
+                    y *= vf;
+                    i *= vf;
+                    q *= vf;
+                    float g = powf(sv, 6.0f) * screen_.power * a;
+                    s[0] = clampf(y + 0.956f * i + 0.621f * q + g * screen_.color[0], 0, 1);
+                    s[1] = clampf(y - 0.272f * i - 0.647f * q + g * screen_.color[1], 0, 1);
+                    s[2] = clampf(y - 1.106f * i + 1.703f * q + g * screen_.color[2], 0, 1);
+                    s[3] = clampf(sc[3] + g * screen_.color[3], 0, 1);
+                } else if (screen_.mode == SCREEN_GLASS) {
+                    float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                    float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                    float m[4], sc[4];
+                    fire_texel(screen_.mask, u, v, false, m);
+                    sample_screen(su, sv, screen_.lod, sc);
+                    float ia = sc[3] > 0 ? 1.0f / sc[3] : 0.0f, mg = m[3] > 0 ? m[1] / m[3] : 0.0f;
+                    float k = mg * screen_.mix;
+                    float f[4] = { sc[0] * ia + screen_.strength, sc[1] * ia + screen_.strength, sc[2] * ia + screen_.strength,
+                                   m[3] };
+                    for (int q = 0; q < 4; ++q) f[q] = (f[q] + (screen_.color[q] - f[q]) * k) * col[q];
+                    float a = clampf(f[3] * s[3] * m[3], 0, 1); /* the texel's alpha (premultiplied s) */
+                    s[0] = clampf(f[0], 0, 1) * a;
+                    s[1] = clampf(f[1], 0, 1) * a;
+                    s[2] = clampf(f[2], 0, 1) * a;
+                    s[3] = a;
+                } else if (screen_.mode == SCREEN_RADIAL) {
                     int n = screen_.count < 1 ? 1 : (screen_.count > 16 ? 16 : screen_.count);
                     float dx = su - screen_.center[0], dy = sv - screen_.center[1], acc[3] = { 0, 0, 0 };
                     for (int i = 0; i < n; ++i) {

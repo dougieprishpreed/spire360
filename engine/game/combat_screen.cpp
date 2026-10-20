@@ -1955,6 +1955,8 @@ bool CombatScreen::creature(const std::string& who, VfxCreature* out) {
     Rect2 h = cr->hitbox;
     out->center = cr->center ? global_origin(cr->center) : xf.xform(h.pos + Vec2(h.size.x * 0.5f, h.size.y * 0.5f));
     out->top = xf.xform(h.pos + Vec2(h.size.x * 0.5f, 0));
+    out->hitbox = Rect2(xf.xform(h.pos), Vec2(h.size.x * sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y),
+                                              h.size.y * sqrtf(xf.y.x * xf.y.x + xf.y.y * xf.y.y)));
     out->bottom = xf.xform(h.pos + Vec2(h.size.x * 0.5f, h.size.y));
     out->enemy = !cr->player;
     out->interactable = cr->player || cr->data["hp"].i(1) > 0;
@@ -2039,6 +2041,15 @@ void CombatScreen::radial_blur(const std::string& position) {
     tweens_.tween(power, 0.005f, 0.1f);
     tweens_.tween(power, 0.0f, 0.9f, TRANS_CUBIC, EASE_IN, 0.1f);
     radial_off_at_ = life_t_ + 1.0;
+}
+
+Node* CombatScreen::take_visuals(const std::string& who) {
+    Creature* cr = creature_for(who);
+    if (!cr) return NULL;
+    Node* v = cr->visuals;
+    cr->visuals = NULL;
+    cr->center = NULL; /* inside the visuals */
+    return v;
 }
 
 Node* CombatScreen::back_box() { return root_ ? find_named(root_, "BackCombatVfxContainer") : NULL; }

@@ -1067,8 +1067,9 @@ internal sealed class Patcher
 
     /// <summary>
     /// Results the hook may supply (StandIns): plain value types (not
-    /// generic ones such as Nullable), and UI classes whose safe default is
-    /// null (not the audio singletons, which always get an instance).
+    /// generic ones such as Nullable), and classes whose safe default is null
+    /// (not strings, Tasks, sequences or arrays, awaiters, or the audio
+    /// singletons, which always get an instance).
     /// </summary>
     private static bool PassesHookResult(TypeReference ret, Func<TypeReference, bool>? isUi)
     {
@@ -1082,7 +1083,8 @@ internal sealed class Patcher
             "MegaCrit.Sts2.Core.Audio.Debug.NDebugAudioManager")
             return false;
         if (ret.Name.EndsWith("Awaiter", StringComparison.Ordinal)) return false;
-        return isUi(ret);
+        if (name == "System.Threading.Tasks.Task") return false;
+        return true;
     }
 
     private static readonly HashSet<string> SequenceInterfaces = new()

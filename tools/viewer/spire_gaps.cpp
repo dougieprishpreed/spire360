@@ -1,6 +1,6 @@
 /* spire_gaps: what the presentation cannot show yet, over protocol traces.
  *
- *   spire_gaps [--dt SECONDS] <pack.s3p> <report.json> <trace.jsonl> [more traces...]
+ *   spire_gaps [--dt SECONDS] [--sample N] <pack.s3p> <report.json> <trace.jsonl> [more traces...]
  *
  * --dt: the playback step (default 1/30 s); a coarser one sweeps many
  * traces faster.
@@ -82,16 +82,21 @@ static std::string json_escape(const std::string& s) {
 }
 
 static double g_dt = 1.0 / 30.0;
+static int g_sample = 1;
 
 int main(int argc, char** argv) {
-    if (argc > 2 && strcmp(argv[1], "--dt") == 0) {
-        g_dt = atof(argv[2]);
-        if (g_dt <= 0) g_dt = 1.0 / 30.0;
+    while (argc > 2 && (strcmp(argv[1], "--dt") == 0 || strcmp(argv[1], "--sample") == 0)) {
+        if (strcmp(argv[1], "--dt") == 0) {
+            g_dt = atof(argv[2]);
+            if (g_dt <= 0) g_dt = 1.0 / 30.0;
+        } else {
+            g_sample = atoi(argv[2]) > 0 ? atoi(argv[2]) : 1;
+        }
         argv += 2;
         argc -= 2;
     }
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_gaps [--dt SECONDS] <pack.s3p> <report.json> <trace.jsonl> [more traces...]\n");
+        fprintf(stderr, "usage: spire_gaps [--dt SECONDS] [--sample N] <pack.s3p> <report.json> <trace.jsonl> [more traces...]\n");
         return 2;
     }
     Pack pack;
@@ -138,15 +143,19 @@ int main(int argc, char** argv) {
             ++n;
             ++decisions;
             g_where = format("%s:%d", argv[file], n);
+            int seen;
             {
                 std::string err;
                 Json d = Json::parse(line.c_str(), line.size(), &err);
-                ++kinds[d["decision"].str()];
+                seen = ++kinds[d["decision"].str()];
             }
+            /* --sample N: a kind seen before plays out fully every Nth time
+             * (the client still takes every decision, a few frames each). */
+            bool full = g_sample <= 1 || seen % g_sample == 1;
             link.incoming.push_back(line);
             /* The screen and its playback (up to 20 s), drawn every 0.25 s. */
             lib.unsupported.clear();
-            int frames = (int)(20.0 / g_dt), every = (int)(0.25 / g_dt) > 0 ? (int)(0.25 / g_dt) : 1;
+            int frames = full ? (int)(20.0 / g_dt) : 3, every = (int)(0.25 / g_dt) > 0 ? (int)(0.25 / g_dt) : 1;
             for (int f = 0; f < frames; ++f) {
                 game.update(PadState());
                 tree.layout();

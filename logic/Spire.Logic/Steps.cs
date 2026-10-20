@@ -78,6 +78,10 @@ internal static class Steps
                 case Godot.Vector2 v:
                     outArgs.Add(StandIns.Describe(v) ?? "Vector2");
                     break;
+                case Godot.Resource res when !string.IsNullOrEmpty(res.ResourcePath):
+                    // A texture the stub loader handed out: its pack name.
+                    outArgs.Add(res.ResourcePath.StartsWith("res://", StringComparison.Ordinal) ? res.ResourcePath[6..] : res.ResourcePath);
+                    break;
                 case string str: outArgs.Add(str); break;
                 case bool or int or long or float or double or decimal: outArgs.Add(a); break;
                 case IReadOnlyDictionary<string, float> parameters:
@@ -86,6 +90,7 @@ internal static class Steps
                 case Enum e: outArgs.Add(e.ToString()); break;
                 case MegaCrit.Sts2.Core.Models.AbstractModel m: outArgs.Add(m.Id.ToString()); break;
                 case Creature c: outArgs.Add(Who(c)); break;
+                case IEnumerable<Creature> cs: outArgs.Add(cs.Select(x => (object?)Who(x)).ToList()); break;
                 case MegaCrit.Sts2.Core.Entities.Creatures.DamageResult dr:
                     // NDamageNumVfx.Create(target, result): the number it shows.
                     outArgs.Add(dr.UnblockedDamage + dr.OverkillDamage);

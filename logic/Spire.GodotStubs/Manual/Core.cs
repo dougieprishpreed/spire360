@@ -196,7 +196,15 @@ public static partial class ResourceLoader
         IgnoreDeep = 3,
         ReplaceDeep = 4,
     }
-    public static T? Load<T>(string path, string? typeHint = null, CacheMode cacheMode = CacheMode.Reuse) where T : class => null;
+    /// <summary>Nothing loads headless; a texture comes back as a stand-in
+    /// that keeps its path, so the presentation cues that pass one (a
+    /// potion's image thrown, ...) say which.</summary>
+    public static T? Load<T>(string path, string? typeHint = null, CacheMode cacheMode = CacheMode.Reuse) where T : class
+    {
+        if (typeof(T) == typeof(Texture2D) || typeof(T) == typeof(Texture))
+            return new Texture2D { ResourcePath = path } as T;
+        return null;
+    }
     public static bool Exists(string path) => false;
     public static bool Exists(string path, string typeHint) => false;
 }

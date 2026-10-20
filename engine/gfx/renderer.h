@@ -76,8 +76,16 @@ struct VfxParams {
  *      white).
  *  SCREEN_RADIAL (radial_blur): the mean of count reads at SCREEN_UV -
  *      power * (SCREEN_UV - center) * i, i = 0..count-1 (at most 16),
- *      opaque. */
-enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4 };
+ *      opaque.
+ *  SCREEN_GLASS (debug_ancient_card_border_overlay, the Ancient cards'
+ *      glass border): the copy at lod, its rgb + strength, its alpha
+ *      mask(UV).a, mixed toward color by mask(UV).g * mix; times the
+ *      vertex colour and the texel's alpha times mask(UV).a.
+ *  SCREEN_DOOM (doom_overlay): the copy in YIQ, its chroma times
+ *      mix(1, mix, a) and all of it times mix(1, strength, a) (a: the
+ *      vertex colour's alpha), back to RGB, plus color * SCREEN_UV.y^6 *
+ *      power * a (power: 0.7 * the shader's pulse at this time). */
+enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4, SCREEN_GLASS = 5, SCREEN_DOOM = 6 };
 
 struct ScreenParams {
     int mode;
@@ -89,6 +97,7 @@ struct ScreenParams {
     float center[2];
     float power;
     int count;
+    float color[4];
 };
 
 class Renderer {

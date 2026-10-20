@@ -230,12 +230,50 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.set_color_matrix(cm);
         return true;
     }
+    if (m->shader == "shaders/blur/canvas_group_mask_blur.gdshader") {
+        /* CanvasGroup draws its mask itself (controls.cpp); the blur mode
+         * is not ported. */
+        return true;
+    }
     if (m->shader == "shaders/dark_blur.gdshader") {
         ScreenParams p;
         memset(&p, 0, sizeof(p));
         p.mode = SCREEN_DARK;
         p.lod = param(m, "lod", 5.0f);
         p.mix = param(m, "mix_percentage", 0.3f);
+        return c.renderer()->set_screen(&p);
+    }
+    if (m->shader == "shaders/doom_overlay.gdshader") {
+        /* The pulse: 0.7 * smoothstep(-10, 1, sin(TIME * 20) + sin(TIME * 10)). */
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_DOOM;
+        p.mix = param(m, "s", 1.0f);
+        p.strength = param(m, "v", 1.0f);
+        float t = (float)g_shader_time;
+        float x = sinf(t * 20) + sinf(t * 10);
+        float k = clampf((x + 10) / 11, 0, 1);
+        p.power = 0.7f * k * k * (3 - 2 * k);
+        Color g = param_color(m, "gradient_color", Color(0, 0, 0, 1));
+        p.color[0] = g.r;
+        p.color[1] = g.g;
+        p.color[2] = g.b;
+        p.color[3] = g.a;
+        return c.renderer()->set_screen(&p);
+    }
+    if (m->shader == "shaders/vfx/debug/debug_ancient_card_border_overlay.gdshader") {
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_GLASS;
+        p.lod = param(m, "blur_amount", 0.0f);
+        p.strength = param(m, "add_amount", 0.0f);
+        p.mix = param(m, "corner_weight", 0.0f);
+        p.mask = param_texture(c, m, "mask");
+        Color cc = param_color(m, "corner_color", Color(1, 1, 1, 1));
+        p.color[0] = cc.r;
+        p.color[1] = cc.g;
+        p.color[2] = cc.b;
+        p.color[3] = cc.a;
         return c.renderer()->set_screen(&p);
     }
     if (m->shader == "shaders/radial_blur.gdshader") {

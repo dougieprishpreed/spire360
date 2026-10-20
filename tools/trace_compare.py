@@ -33,6 +33,7 @@ DROP = {
     "title_text", "description_bbcode", "kind", "prompt", "cancelable", "manual_confirm", "upgrade_preview",
     "usage", "usable", "discardable", "use_label",
     "pets",  # the pets beside the player (their own state stays in the steps)
+    "ancient_border", "ancient_text_bg", "enchantment_view", "overlay",  # a card's look (NCard)
 }
 
 

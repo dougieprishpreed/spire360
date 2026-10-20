@@ -1,6 +1,7 @@
 #include "controls.h"
 
 #include "canvas.h"
+#include "shaders.h"
 #include "value.h"
 
 #include <math.h>
@@ -719,6 +720,71 @@ void AnimatedSprite2D::draw(Canvas& c) {
     if (flip_h) dst.size.x = -dst.size.x;
     if (flip_v) dst.size.y = -dst.size.y;
     c.draw_texture_rect_region(t, dst, Rect2(Vec2(0, 0), fs));
+}
+
+bool CanvasGroup::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "fit_margin") fit_margin = v.f(10);
+    else if (key == "clear_margin") {
+    } else {
+        bool ok = Node2D::set(key, v, ctx);
+        if (key == "material") refresh();
+        return ok;
+    }
+    return true;
+}
+
+static bool mask_material(const MaterialRes* m) {
+    if (!m || m->kind != Resource::RES_SHADER_MATERIAL || m->shader != "shaders/blur/canvas_group_mask_blur.gdshader")
+        return false;
+    return m->props && (*m->props)["shader_parameter/mask"].b();
+}
+
+void CanvasGroup::refresh() { clip_children = mask_material(material) ? 1 : 0; }
+
+/* The visible children's rects in its coordinates, grown by fit_margin. */
+Rect2 CanvasGroup::item_rect() const {
+    bool any = false;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    for (size_t i = 0; i < children.size(); ++i) {
+        Node* ch = children[i];
+        if (!ch->is_canvas_item() || !((CanvasItem*)ch)->visible) continue;
+        CanvasItem* ci = (CanvasItem*)ch;
+        Rect2 r = ci->item_rect();
+        if (r.size.x <= 0 || r.size.y <= 0) continue;
+        Xform2D xf = ci->get_transform();
+        Vec2 p[4] = { xf.xform(r.pos), xf.xform(Vec2(r.pos.x + r.size.x, r.pos.y)), xf.xform(r.end()),
+                      xf.xform(Vec2(r.pos.x, r.pos.y + r.size.y)) };
+        for (int k = 0; k < 4; ++k) {
+            if (!any) {
+                x0 = x1 = p[k].x;
+                y0 = y1 = p[k].y;
+                any = true;
+            }
+            x0 = minf(x0, p[k].x);
+            y0 = minf(y0, p[k].y);
+            x1 = maxf(x1, p[k].x);
+            y1 = maxf(y1, p[k].y);
+        }
+    }
+    if (!any) return Rect2();
+    return Rect2(x0 - fit_margin, y0 - fit_margin, x1 - x0 + 2 * fit_margin, y1 - y0 + 2 * fit_margin);
+}
+
+/* canvas_group_mask_blur, mask: the group through mask_texture's alpha,
+ * the group's UV mapped onto mask_region (in the atlas's pixels) widened by
+ * mask_offset; the atlas behind the texture is what the shader samples. */
+void CanvasGroup::draw(Canvas& c) {
+    if (!clip_children || !material || !material->props) return;
+    Resource* r = shader_param_resource(material, "mask_texture");
+    if (!r || !r->is_texture()) return;
+    Texture2DRes* atlas = (Texture2DRes*)r;
+    if (r->kind == Resource::RES_ATLAS_TEXTURE && ((AtlasTextureRes*)r)->atlas) atlas = ((AtlasTextureRes*)r)->atlas;
+    const Json& region = (*material->props)["shader_parameter/mask_region"]["v"];
+    Vec2 offset = shader_param_vec2(material, "mask_offset", Vec2());
+    if (region.size() < 4) return;
+    Rect2 src((float)region[(size_t)0].num() - offset.x, (float)region[1].num() - offset.y,
+              (float)region[2].num() + offset.x, (float)region[3].num() + offset.y);
+    c.draw_texture_rect_region(atlas, item_rect(), src);
 }
 
 void Sprite2D::draw(Canvas& c) {

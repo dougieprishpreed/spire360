@@ -190,6 +190,7 @@ private:
     virtual bool creature(const std::string& who, VfxCreature* out);
     virtual bool side_center(bool enemies, Vec2* out);
     virtual Node* back_box();
+    virtual Node* take_visuals(const std::string& who);
     struct Cue {
         double at;
         int kind;

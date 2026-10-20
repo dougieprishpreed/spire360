@@ -2009,6 +2009,30 @@ public partial class RunDriver
             d["pool"] = c.Pool.Title;
             d["energy_outline"] = Rgba(c.Pool.EnergyOutlineColor);
             d["frame_material"] = c.VisualCardPool.CardFrameMaterialPath;
+            d["rarity"] ??= c.Rarity.ToString();
+            if (c.Rarity == CardRarity.Ancient)
+            {
+                // NCard.UpdatePortrait for Ancient cards (the textures carry their paths headless).
+                d["ancient_border"] = Res(c.AncientBorder?.ResourcePath ?? "");
+                d["ancient_text_bg"] = Res(c.AncientTextBg?.ResourcePath ?? "");
+            }
+            if (c.Enchantment != null)
+            {
+                // NCard.UpdateEnchantmentVisuals: the icon (EnchantmentModel.IconPath picks the
+                // first that exists of these), the amount, disabled or not.
+                var e = c.Enchantment;
+                d["enchantment_view"] = new Dictionary<string, object?>
+                {
+                    ["icon"] = Res(e.IntendedIconPath),
+                    ["beta_icon"] = Res(MegaCrit.Sts2.Core.Helpers.ImageHelper.GetImagePath("enchantments/beta/" + e.Id.Entry.ToLowerInvariant() + ".png")),
+                    ["amount"] = e.DisplayAmount,
+                    ["show_amount"] = e.ShowAmount,
+                    ["disabled"] = e.Status == MegaCrit.Sts2.Core.Entities.Enchantments.EnchantmentStatus.Disabled,
+                };
+            }
+            // NCard.ReloadOverlay: the affliction's overlay scene, else the card's own (if it has one).
+            if (c.Affliction != null) d["overlay"] = Res(c.Affliction.OverlayPath);
+            else if (c.HasBuiltInOverlay) d["overlay"] = Res(c.OverlayPath);
             d["energy_icon"] = c.VisualCardPool.EnergyColorName;
             d["cost_display"] = c.EnergyCost.CostsX ? "X" : c.EnergyCost.GetWithModifiers(CostModifiers.All).ToString();
             d["cost_just_upgraded"] = c.EnergyCost.WasJustUpgraded;

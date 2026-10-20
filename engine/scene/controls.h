@@ -131,6 +131,24 @@ public:
     virtual void draw(Canvas& c);
 };
 
+/* Godot's CanvasGroup: its children drawn as one picture, through its
+ * material. Ported for the cards' PortraitCanvasGroup with the game's
+ * canvas_group_mask_blur in mask mode (Ancient cards: the portrait through
+ * the rounded mask of an atlas region): with such a material it is a canvas
+ * group (clip_children) whose own draw is that mask over the children's
+ * bounds; without one the children draw as usual. The blur mode (locked
+ * cards) is not ported: they draw unblurred. */
+class CanvasGroup : public Node2D {
+public:
+    CanvasGroup() : fit_margin(10) {}
+    float fit_margin;
+    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+    virtual Rect2 item_rect() const;
+    virtual void draw(Canvas& c);
+    /* Follows the material (call after changing it). */
+    void refresh();
+};
+
 /* Godot 4.5's AnimatedSprite2D: an animation of its SpriteFrames, started
  * by autoplay. A frame lasts its relative duration / (the animation's
  * speed * speed_scale) seconds; a looping animation wraps, another holds

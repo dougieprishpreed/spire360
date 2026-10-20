@@ -113,6 +113,10 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
 /* AtlasResourceLoader: sprites absent from a sheet can use unpacked art,
  * including beta card portraits. These are resources, not missing assets. */
 static void atlas_fallbacks(const std::string& name, std::vector<std::string>& out) {
+    /* Sprites the game's code names "x.png.tres" (CardModel.AncientBorder)
+     * are "x.tres" in the game's pck. */
+    if (name.size() > 9 && name.compare(name.size() - 9, 9, ".png.tres") == 0)
+        out.push_back(name.substr(0, name.size() - 9) + ".tres");
     const std::string prefix = "images/atlases/";
     size_t split = name.find(".sprites/");
     if (name.compare(0, prefix.size(), prefix) != 0 || split == std::string::npos ||
@@ -388,6 +392,7 @@ static Node* new_node(const std::string& type) {
     if (type == "Label") return new Label();
     if (type == "RichTextLabel") return new RichTextLabel();
     if (type == "Sprite2D") return new Sprite2D();
+    if (type == "CanvasGroup") return new CanvasGroup();
     if (type == "AnimatedSprite2D") return new AnimatedSprite2D();
     if (type == "Line2D") return new Line2D();
     if (type == "CPUParticles2D") return new Particles2D(false);
@@ -429,7 +434,7 @@ static bool is_native(const std::string& type) {
            type == "Panel" || type == "PanelContainer" || type == "VBoxContainer" || type == "HBoxContainer" ||
            type == "MarginContainer" || type == "CenterContainer" || type == "GridContainer" ||
            type == "FlowContainer" || type == "HFlowContainer" || type == "VFlowContainer" || type == "Label" ||
-           type == "RichTextLabel" || type == "Sprite2D" || type == "AnimatedSprite2D" || type == "Line2D" ||
+           type == "RichTextLabel" || type == "Sprite2D" || type == "AnimatedSprite2D" || type == "CanvasGroup" || type == "Line2D" ||
            type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
            type == "GPUParticles2D" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||

@@ -19,6 +19,7 @@ class SceneLibrary;
  * GetTopOfHitbox / GetBottomOfHitbox (the hitbox's top and bottom middle). */
 struct VfxCreature {
     Vec2 center, top, bottom;
+    Rect2 hitbox; /* on screen */
     bool enemy;
     bool interactable;
     bool defect; /* the Defect's eyeline offset applies to its beams */
@@ -32,6 +33,9 @@ public:
     virtual bool side_center(bool enemies, Vec2* out) = 0;
     /* NCombatRoom.BackCombatVfxContainer (behind the creatures). */
     virtual Node* back_box() = 0;
+    /* The creature's NCreatureVisuals, taken by an effect that keeps its
+     * body (the doom kill): the screen forgets it. */
+    virtual Node* take_visuals(const std::string& who) = 0;
 };
 
 /* True when call is one of the scripted effects (shown or not). box:

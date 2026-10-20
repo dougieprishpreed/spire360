@@ -1,5 +1,6 @@
 #include "combat_vfx.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
@@ -11,7 +12,9 @@
 #include "screen_shake.h"
 #include "ui_util.h"
 
+#include <algorithm>
 #include <ctype.h>
+#include <stdlib.h>
 #include <math.h>
 #include <string.h>
 
@@ -45,12 +48,39 @@ bool parse_color(const std::string& s, Color* out) {
 
 bool is_creature_id(const std::string& s) {
     if (s == "player" || s == "osty") return true;
-    return s.size() > 1 && s[0] == 'e' && isdigit((unsigned char)s[1]);
+    if (s.size() < 2 || s[0] != 'e') return false;
+    for (size_t i = 1; i < s.size(); ++i)
+        if (!isdigit((unsigned char)s[i])) return false;
+    return true;
 }
 
 /* A cue's arguments by kind, in order. */
+/* A creature's point as the logic's stand-in nodes encode it
+ * ("e1@bottom+34,-30": StandIns.Describe). */
+struct Place {
+    std::string who, anchor;
+    Vec2 offset;
+};
+
+bool parse_place(const std::string& s, Place* out) {
+    size_t at = s.find('@');
+    if (at == std::string::npos || !is_creature_id(s.substr(0, at))) return false;
+    out->who = s.substr(0, at);
+    size_t sign = s.find_first_of("+-", at + 1);
+    out->anchor = s.substr(at + 1, sign == std::string::npos ? std::string::npos : sign - at - 1);
+    out->offset = Vec2();
+    if (sign != std::string::npos) {
+        size_t comma = s.find(',', sign);
+        out->offset.x = (float)atof(s.substr(sign, comma - sign).c_str());
+        if (comma != std::string::npos) out->offset.y = (float)atof(s.substr(comma + 1).c_str());
+    }
+    return true;
+}
+
 struct Args {
-    std::vector<std::string> creatures, words;
+    std::vector<std::string> creatures, words, paths;
+    std::vector<std::vector<std::string> > lists; /* creature lists */
+    std::vector<Place> places;
     std::vector<Color> colors;
     std::vector<bool> bools;
     std::vector<float> numbers;
@@ -59,10 +89,18 @@ struct Args {
             const Json& v = a[i];
             if (v.is_bool()) bools.push_back(v.b());
             else if (v.is_number()) numbers.push_back((float)v.num());
-            else if (v.is_string()) {
+            else if (v.is_array()) {
+                std::vector<std::string> l;
+                for (size_t k = 0; k < v.size(); ++k)
+                    if (v[k].is_string()) l.push_back(v[k].str());
+                lists.push_back(l);
+            } else if (v.is_string()) {
                 Color c;
+                Place p;
                 if (parse_color(v.str(), &c)) colors.push_back(c);
                 else if (is_creature_id(v.str())) creatures.push_back(v.str());
+                else if (parse_place(v.str(), &p)) places.push_back(p);
+                else if (v.str().find('/') != std::string::npos) paths.push_back(v.str());
                 else words.push_back(v.str());
             }
         }
@@ -555,6 +593,713 @@ private:
     float speed_, progress_;
 };
 
+/* A creature's encoded point on screen. */
+bool resolve(const Place& p, VfxAnchors& anchors, Vec2* out) {
+    VfxCreature c;
+    if (!anchors.creature(p.who, &c)) return false;
+    if (p.anchor == "hitbox") *out = c.hitbox.pos + p.offset;
+    else if (p.anchor == "hitbox_size") *out = c.hitbox.size + p.offset;
+    else *out = (p.anchor == "bottom" ? c.bottom : p.anchor == "top" ? c.top : c.center) + p.offset;
+    return true;
+}
+
+float exported_float(Node* n, const char* key, float fallback) {
+    const Json* v = n->get_extra(key);
+    return v && v->is_number() ? (float)v->num() : fallback;
+}
+
+void play_sfx(const char* event) {
+    SceneLibrary* lib = SceneLibrary::current();
+    if (!lib || !lib->audio()) return;
+    Json cue; /* set() makes it an object */
+    cue.set("t", Json::make_string("sfx"));
+    cue.set("op", Json::make_string("play"));
+    cue.set("path", Json::make_string(event));
+    cue.set("volume", Json::make_number(1));
+    lib->audio()->cue(cue);
+}
+
+void restart_list(Node* n, const char* key) {
+    std::vector<Node*> list;
+    exported(n, key, list);
+    for (size_t i = 0; i < list.size(); ++i) restart(list[i]);
+}
+
+void emitting_list(Node* n, const char* key, bool on) {
+    std::vector<Node*> list;
+    exported(n, key, list);
+    for (size_t i = 0; i < list.size(); ++i)
+        if (is_particles(list[i])) ((Particles2D*)list[i])->emitting = on;
+}
+
+/* NItemThrowVfx: the item from the source to the target along its curves
+ * (_horizontalCurve lerps, _verticalCurve lifts by _heightMultiplier),
+ * spinning by _rotationInfluenceCurve * _rotationMultiplier deg/s, for
+ * _flightTime; 80 px wide. */
+class ItemThrow : public Effect {
+public:
+    explicit ItemThrow(Node* n) : flight_(exported_float(n, "_flightTime", 0.55f)),
+        height_(exported_float(n, "_heightMultiplier", 350)), spin_(exported_float(n, "_rotationMultiplier", -2880)),
+        sprite_(NULL) {
+        read(n, "_horizontalCurve", horizontal_);
+        read(n, "_verticalCurve", vertical_);
+        read(n, "_rotationInfluenceCurve", rotation_);
+    }
+    void setup(const Vec2& from, const Vec2& to, Texture2DRes* texture) {
+        from_ = from;
+        to_ = to;
+        texture_ = texture;
+    }
+    virtual void begin(Node* n) {
+        Node* s = exported_one(n, "_itemSprite");
+        if (!s || s->type != "Sprite2D") return;
+        sprite_ = (Sprite2D*)s;
+        if (texture_) {
+            sprite_->texture = texture_;
+            Vec2 size = texture_->size();
+            float k = size.x > 0 ? 80.0f / size.x : 1;
+            sprite_->scale = Vec2(k, k);
+        }
+        sprite_->visible = texture_ != NULL;
+        sprite_->rotation = rand_range(0, 2 * PI_F);
+        set_global(sprite_, from_);
+    }
+    virtual void tick(Node* n, double dt) {
+        if (!sprite_) return;
+        float t = flight_ > 0 ? (float)(t_ / flight_) : 1;
+        if (t >= 1) {
+            sprite_->visible = false;
+            if (!n->queued_for_deletion()) n->queue_free();
+            return;
+        }
+        float w = horizontal_.valid() ? horizontal_.sample(t) : t, h = vertical_.valid() ? vertical_.sample(t) : 0;
+        float r = rotation_.valid() ? rotation_.sample(t) : 1;
+        sprite_->rotation += r * spin_ * PI_F / 180 * (float)dt;
+        set_global(sprite_, from_ + (to_ - from_) * w + Vec2(0, -h * height_));
+    }
+
+private:
+    static void read(Node* n, const char* key, CurveData& out) {
+        const Json* v = n->get_extra(key);
+        if (v) CurveData::from(script_resource(*v), out);
+    }
+    float flight_, height_, spin_;
+    CurveData horizontal_, vertical_, rotation_;
+    Sprite2D* sprite_;
+    Vec2 from_, to_;
+    Texture2DRes* texture_;
+};
+
+/* NSmallMagicMissileVfx / NLargeMagicMissileVfx: anticipation at the top of
+ * the screen (y 80) on the line from the target at -30 degrees, then the
+ * projectile from there to the target (over WaitTime), the impact, a shake
+ * (Medium Short / Strong Normal); 2 s more. */
+class Missile : public Effect {
+public:
+    Missile(Node* n, bool large) : large_(large), phase_(0), container_(NULL) {
+        anticipation_ = exported_float(n, "_anticipationDuration", 0.2f);
+        wait_ = exported_float(n, "_projectileWaitTime", 0.2f);
+        offset_ = exported_float(n, "_projectileOffset", 100);
+    }
+    virtual void begin(Node* n) {
+        Vec2 at = global_of(n);
+        Vec2 dir(0.5f, 0.8660254f);
+        float t = (80 - at.y) / dir.y;
+        Vec2 top = at + dir * t;
+        set_global(exported_one(n, "_anticipationContainer"), top);
+        start_ = top + dir * offset_;
+        end_ = at + dir * offset_;
+        Node* c = exported_one(n, "_projectileContainer");
+        container_ = c && c->is_canvas_item() ? (CanvasItem*)c : NULL;
+        if (container_) container_->visible = false;
+        restart_list(n, "_anticipationParticles");
+    }
+    virtual void tick(Node* n, double) {
+        if (phase_ == 0 && t_ >= anticipation_) {
+            phase_ = 1;
+            restart_list(n, "_projectileStartParticles");
+            if (container_) {
+                set_global(container_, start_);
+                container_->visible = true;
+            }
+            restart_list(n, "_projectileParticles");
+        }
+        if (phase_ == 1) {
+            float k = wait_ > 0 ? (float)((t_ - anticipation_) / wait_) : 1;
+            if (k < 1) {
+                if (container_) set_global(container_, start_ + (end_ - start_) * k);
+            } else {
+                phase_ = 2;
+                if (container_) container_->visible = false;
+                restart_list(n, "_impactParticles");
+                ScreenShake::get().shake(large_ ? "Strong" : "Medium", large_ ? "Normal" : "Short");
+            }
+        }
+        if (phase_ == 2 && t_ >= anticipation_ + wait_ + 2 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    bool large_;
+    int phase_;
+    float anticipation_, wait_, offset_;
+    Vec2 start_, end_;
+    CanvasItem* container_;
+};
+
+/* NBgGroundSpikeVfx / NFgGroundSpikeVfx: a spike springs from the ground
+ * near the point (behind: 10-96 px above it; in front: 10-32 px below),
+ * skewed and scaled at random, drifting sideways while it skews further,
+ * shrinks and fades (Expo Out). */
+class GroundSpike : public Effect {
+public:
+    explicit GroundSpike(bool front) : front_(front), right_(true), color_("Red") {}
+    void setup(const Vec2& at, bool right, const std::string& color) {
+        at_ = at;
+        right_ = right;
+        color_ = color;
+    }
+    virtual void begin(Node* n) {
+        if (!n->is_node2d()) return;
+        Node2D* s = (Node2D*)n;
+        s->skew = (right_ ? rand_range(15, 30) : rand_range(-30, -15)) * 0.0174533f;
+        float k = rand_range(0.5f, 1.5f);
+        s->scale = Vec2(rand_range(0.8f, 1.2f), rand_range(0.8f, 2.0f)) * k;
+        Vec2 start = at_ + Vec2(right_ ? rand_range(40, 160) : rand_range(-160, -40),
+                                front_ ? rand_range(10, 32) : rand_range(-96, -10));
+        set_global(n, start);
+        velocity_ = Vec2(right_ ? rand_range(50, 250) : rand_range(-250, -50), rand_range(-5, 5)) * (1.0f / k);
+        if (color_ == "Purple") s->modulate = Color(rand_range(0, 0.2f), rand_range(0.2f, 0.8f), 1, 0.5f);
+        else if (color_ == "White") {
+            float g = rand_range(0.2f, 0.8f);
+            s->modulate = Color(g, g, g, 0.5f);
+        } else if (color_ == "Cyan") {
+            float g = rand_range(0.6f, 1);
+            s->modulate = Color(0.2f, g, g, 0.5f);
+        } else if (color_ == "Gold") {
+            float g = rand_range(0.6f, 1);
+            s->modulate = Color(g, g, 0.2f, 1);
+        } else {
+            s->modulate = Color(1, rand_range(0.2f, 0.8f), rand_range(0, 0.2f), 0.5f);
+        }
+        life_ = rand_range(0.25f, 1);
+        float delay = rand_range(0.01f, 0.2f);
+        tweens_.tween(&s->skew, (right_ ? rand_range(30, 60) : rand_range(-60, -30)) * 0.0174533f, life_, TRANS_EXPO,
+                      EASE_OUT, delay);
+        tweens_.tween(&s->scale, s->scale * rand_range(0.1f, 0.5f), life_, TRANS_EXPO, EASE_OUT, delay);
+        tweens_.tween(&s->modulate.a, 0.0f, life_, TRANS_EXPO, EASE_OUT, delay);
+        life_ += delay;
+    }
+    virtual void tick(Node* n, double dt) {
+        if (n->is_node2d()) ((Node2D*)n)->position = ((Node2D*)n)->position + velocity_ * (float)dt;
+        if (t_ >= life_ && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    bool front_, right_;
+    std::string color_;
+    Vec2 at_, velocity_;
+    float life_;
+};
+
+/* NKinPriestGrenadeVfx: noise and the explosion's base at once, the
+ * crypto particles 0.1 s later; gone after 5.1 s. */
+class KinPriestGrenade : public Effect {
+public:
+    virtual void begin(Node* n) {
+        Node* noise = n->get_node("NoiseParticles");
+        Node* base = n->get_node("ExplosionBaseParticle");
+        if (is_particles(noise)) ((Particles2D*)noise)->restart();
+        if (is_particles(base)) ((Particles2D*)base)->restart();
+        SceneLibrary* lib = SceneLibrary::current();
+        if (lib && lib->audio()) lib->audio()->ui("blunt_attack.mp3");
+    }
+    virtual void tick(Node* n, double) {
+        if (!fired_ && t_ >= 0.1) {
+            fired_ = true;
+            Node* crypto = n->get_node("CryptoParticles");
+            if (is_particles(crypto)) ((Particles2D*)crypto)->restart();
+        }
+        if (t_ >= 5.1 && !n->queued_for_deletion()) n->queue_free();
+    }
+    KinPriestGrenade() : fired_(false) {}
+
+private:
+    bool fired_;
+};
+
+/* NSleepingVfx: a glow burst and the stars and Zs floating (to the right
+ * or left) until the monster wakes (Stop: they stop emitting, gone 5 s
+ * later). */
+class Sleeping : public Effect {
+public:
+    Sleeping() : right_(true), stop_at_(-1) {}
+    void setup(bool right) { right_ = right; }
+    void stop() {
+        if (stop_at_ < 0) stop_at_ = t_;
+    }
+    virtual void begin(Node* n) {
+        restart_list(n, "_burstParticles");
+        restart_list(n, "_continuousParticles");
+        if (!right_) {
+            Node* z = exported_one(n, "_zParticles");
+            if (z && z->is_node2d()) ((Node2D*)z)->scale.x = -((Node2D*)z)->scale.x;
+        }
+    }
+    virtual void tick(Node* n, double) {
+        if (stop_at_ >= 0 && stop_at_ + 1e-6 >= t_ - 0.0001 && stop_at_ <= t_) emitting_list(n, "_continuousParticles", false);
+        if (stop_at_ >= 0 && t_ >= stop_at_ + 5 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    bool right_;
+    double stop_at_;
+};
+
+/* NHyperbeamVfx: from the Defect's eye toward the target: anticipation
+ * (0.525 s), the laser (0.5 s, a Medium Normal shake), its end (a Strong
+ * Short shake); 2 s more. */
+class Hyperbeam : public Effect {
+public:
+    Hyperbeam() : phase_(0) {}
+    virtual void begin(Node* n) {
+        play_sfx("event:/sfx/characters/defect/defect_hyperbeam");
+        show_laser(n, false);
+        restart_list(n, "_anticipationParticles");
+    }
+    virtual void tick(Node* n, double) {
+        if (phase_ == 0 && t_ >= 0.525) {
+            phase_ = 1;
+            show_laser(n, true);
+            ScreenShake::get().shake("Medium", "Normal");
+        } else if (phase_ == 1 && t_ >= 1.025) {
+            phase_ = 2;
+            show_laser(n, false);
+            restart_list(n, "_laserEndParticles");
+            ScreenShake::get().shake("Strong", "Short");
+        } else if (phase_ == 2 && t_ >= 3.025 && !n->queued_for_deletion()) {
+            n->queue_free();
+        }
+    }
+
+private:
+    static void show_laser(Node* n, bool on) {
+        std::vector<Node*> list;
+        exported(n, "_laserParticles", list);
+        for (size_t i = 0; i < list.size(); ++i) {
+            set_visible(list[i], on);
+            if (on) restart(list[i]);
+        }
+        set_visible(exported_one(n, "_laserLine"), on);
+        set_visible(exported_one(n, "_laserContainer"), on);
+    }
+    int phase_;
+};
+
+/* NSweepingBeamVfx: from the Defect's eye, the beam sweeps over
+ * _sweepDuration (the sweep particles by _sweepingIndexCurve), each target
+ * hit halfway (NSweepingBeamImpactVfx, a Medium Normal shake); the end
+ * particles, 2 s more. */
+class SweepingBeam : public Effect {
+public:
+    explicit SweepingBeam(Node* n) : duration_(exported_float(n, "_sweepDuration", 0.65f)), previous_(-1), hit_(false),
+        ended_(false), box_(NULL) {
+        const Json* v = n->get_extra("_sweepingIndexCurve");
+        if (v) CurveData::from(script_resource(*v), curve_);
+    }
+    void setup(const std::vector<Vec2>& targets, Node* box) {
+        targets_ = targets;
+        box_ = box;
+    }
+    virtual void begin(Node* n) {
+        restart_list(n, "_startParticles");
+        restart_list(n, "_emittingParticles");
+    }
+    virtual void tick(Node* n, double) {
+        if (!ended_ && t_ < duration_) {
+            float k = (float)(t_ / duration_);
+            int index = (int)floorf(curve_.valid() ? curve_.sample(k) : k * 3);
+            std::vector<Node*> sweep;
+            exported(n, "_sweepingParticles", sweep);
+            if (index != previous_ && index >= 0 && index < (int)sweep.size()) {
+                restart(sweep[(size_t)index]);
+                previous_ = index;
+            }
+            if (k >= 0.5f && !hit_) {
+                hit_ = true;
+                ScreenShake::get().shake("Medium", "Normal");
+                for (size_t i = 0; i < targets_.size() && box_; ++i) {
+                    Node* fx = instance(SceneLibrary::current(), "scenes/vfx/vfx_sweeping_beam_impact.tscn");
+                    if (!fx) continue;
+                    box_->add_child(fx);
+                    set_global(fx, targets_[i]);
+                    if (fx->behavior) ((Effect*)fx->behavior)->start(fx);
+                }
+            }
+        } else if (!ended_) {
+            ended_ = true;
+            restart_list(n, "_endParticles");
+            emitting_list(n, "_emittingParticles", false);
+        }
+        if (ended_ && t_ >= duration_ + 2 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    float duration_;
+    int previous_;
+    bool hit_, ended_;
+    CurveData curve_;
+    std::vector<Vec2> targets_;
+    Node* box_;
+};
+
+/* NGrandFinaleVfx: a spotlight fades in (1 s) with its particles from the
+ * top middle of the screen; anticipation at 1.25 s, the slash at 1.5 s, a
+ * Strong Normal shake at 1.625 s, the end particles and the spotlight
+ * fading out (0.5 s) at 1.6375 s; 2 s more. */
+class GrandFinale : public Effect {
+public:
+    GrandFinale() : phase_(0), spotlight_(NULL) {}
+    void setup(const Vec2& player) { player_ = player; }
+    virtual void begin(Node* n) {
+        set_global(exported_one(n, "_anticipationParticles"), player_);
+        set_global(exported_one(n, "_slashParticles"), player_);
+        set_global(exported_one(n, "_endParticles"), player_);
+        Node* s = exported_one(n, "_spotlight");
+        spotlight_ = s && s->is_canvas_item() ? (CanvasItem*)s : NULL;
+        if (spotlight_) {
+            spotlight_->modulate = Color(1, 1, 1, 0);
+            tweens_.tween(&spotlight_->modulate.a, 1.0f, 1.0f);
+        }
+        Node* sp = exported_one(n, "_spotlightParticles");
+        set_global(sp, Vec2(960, 0));
+        restart(sp);
+    }
+    virtual void tick(Node* n, double) {
+        if (phase_ == 0 && t_ >= 1.25) { phase_ = 1; restart(exported_one(n, "_anticipationParticles")); }
+        if (phase_ == 1 && t_ >= 1.5) { phase_ = 2; restart(exported_one(n, "_slashParticles")); }
+        if (phase_ == 2 && t_ >= 1.625) { phase_ = 3; ScreenShake::get().shake("Strong", "Normal"); }
+        if (phase_ == 3 && t_ >= 1.6375) {
+            phase_ = 4;
+            restart(exported_one(n, "_endParticles"));
+            if (spotlight_) tweens_.tween(&spotlight_->modulate.a, 0.0f, 0.5f);
+        }
+        if (phase_ == 4 && t_ >= 3.6375 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    int phase_;
+    Vec2 player_;
+    CanvasItem* spotlight_;
+};
+
+/* NHellraiserSwordVfx: a sword rising out of the ground (Spring) as it turns
+ * from red to its shade, held, then sinking (Expo In) as it fades. */
+class HellraiserSword : public Effect {
+public:
+    HellraiserSword() : pos_y_(0), shade_(1), life_(0) {}
+    void setup(const Vec2& at, float pos_y, float shade) {
+        at_ = at;
+        pos_y_ = pos_y;
+        shade_ = shade;
+    }
+    virtual void begin(Node* n) {
+        Node* sw = n->get_node("TextureRect");
+        if (!n->is_control() || !sw || !sw->is_control()) return;
+        Control* self = (Control*)n;
+        Control* sword = (Control*)sw;
+        if (sword->type == "TextureRect" && chaotic_rand() % 2) ((TextureRect*)sword)->flip_h = true;
+        sword->rotation = rand_range(-20, 20) * PI_F / 180;
+        float k = rand_range(1, 2);
+        self->scale = Vec2(rand_range(0.7f, 0.9f), rand_range(0.8f, 1.2f)) * k;
+        float z;
+        do {
+            float u1 = 1 - rand_range(0, 1), u2 = rand_range(0, 1);
+            z = sqrtf(-2 * logf(u1 > 1e-6f ? u1 : 1e-6f)) * cosf(2 * PI_F * u2);
+        } while (z < 0 || z > 1);
+        set_global(n, at_);
+        self->set_position(self->position + Vec2(z * 1000 - 500, pos_y_));
+        float delay = rand_range(0, 0.8f);
+        sword->set_position(Vec2(25, 300));
+        tweens_.tween_from(&sword->offset[SIDE_TOP], 300, 80, 0.25f, TRANS_SPRING, EASE_OUT, delay);
+        tweens_.tween_from(&sword->offset[SIDE_BOTTOM], 300 + h(sword), 80 + h(sword), 0.25f, TRANS_SPRING, EASE_OUT, delay);
+        self->modulate = Color(1, 0, 0, 1);
+        tweens_.tween(&self->modulate.g, shade_, 0.25f, TRANS_LINEAR, EASE_IN_OUT, delay);
+        tweens_.tween(&self->modulate.b, shade_, 0.25f, TRANS_LINEAR, EASE_IN_OUT, delay);
+        tweens_.tween(&self->modulate.r, shade_, 0.25f, TRANS_LINEAR, EASE_IN_OUT, delay);
+        tweens_.tween(&sword->offset[SIDE_TOP], 200, 0.5f, TRANS_EXPO, EASE_IN, delay + 0.5f);
+        tweens_.tween(&sword->offset[SIDE_BOTTOM], 200 + h(sword), 0.5f, TRANS_EXPO, EASE_IN, delay + 0.5f);
+        tweens_.tween(&self->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, delay + 0.5f);
+        life_ = delay + 1.0f;
+    }
+    virtual void tick(Node* n, double) {
+        if (started_ && t_ >= life_ && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    static float h(Control* c) { return c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP]; }
+    Vec2 at_;
+    float pos_y_, shade_, life_;
+};
+
+/* NAdditiveOverlayVfx: the screen tinted (additive) up to 0.1 (Expo Out,
+ * 0.5 s), held 0.5 s, down in 0.5 s. */
+class AdditiveOverlay : public Effect {
+public:
+    virtual void begin(Node* n) {
+        CanvasItem* c = (CanvasItem*)n;
+        tweens_.tween(&c->modulate.a, 0.1f, 0.5f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween(&c->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 1.0f);
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= 1.5 && !n->queued_for_deletion()) n->queue_free();
+    }
+};
+
+Node* add_effect(SceneLibrary* lib, Node* box, const std::string& scene);
+
+/* NHellraiserVfx: ten swords in front of the target's feet (rising further
+ * up the screen the higher they stand) and ten behind, a red flash over the
+ * screen; its sound. */
+void spawn_hellraiser(SceneLibrary* lib, Node* box, Node* back, const Vec2& feet) {
+    Vec2 at = feet + Vec2(-100, -200);
+    for (int side = 0; side < 2; ++side) {
+        std::vector<float> ys;
+        for (int i = 0; i < 10; ++i) ys.push_back(side == 0 ? rand_range(10, 50) : rand_range(-50, -10));
+        std::sort(ys.begin(), ys.end());
+        if (side == 1) play_sfx("event:/sfx/characters/ironclad/ironclad_hellraiser");
+        for (size_t i = 0; i < ys.size(); ++i) {
+            Node* parent = side == 0 ? box : (back ? back : box);
+            Node* fx = add_effect(lib, parent, "scenes/vfx/cards/vfx_hellraiser/hellraiser_sword_vfx.tscn");
+            if (!fx || !fx->behavior) continue;
+            float shade = side == 0 ? 0.8f + (ys[i] - 10) / 40 * 0.2f : 0.7f + (ys[i] + 10) / -40 * -0.3f;
+            ((HellraiserSword*)fx->behavior)->setup(at, ys[i], shade);
+            ((Effect*)fx->behavior)->start(fx);
+        }
+    }
+    Node* overlay = add_effect(lib, box, "scenes/vfx/additive_overlay_vfx.tscn");
+    if (overlay && overlay->behavior) ((Effect*)overlay->behavior)->start(overlay);
+}
+
+/* NDoomSubEmitterVfx: its layers scaled across to the width (the vertical
+ * shrinking layer also down while narrower than 1), its particles restarted
+ * when it shows and stopped when it hides, and its spears shooting up
+ * again and again while on. */
+class DoomSubEmitter : public Effect {
+public:
+    explicit DoomSubEmitter(Node*) : cur_(1), on_(false), hide_at_(-1), shrink_(NULL) {}
+    virtual void begin(Node* n) {
+        /* _Ready (the children exist by now) */
+        exported(n, "_scalableLayers", layers_);
+        exported(n, "_spears", spears_);
+        shrink_ = exported_one(n, "_verticalShrinkingLayer");
+        for (size_t i = 0; i < layers_.size(); ++i)
+            base_.push_back(layers_[i]->is_node2d() ? ((Node2D*)layers_[i])->scale : Vec2(1, 1));
+        spear_state_.resize(spears_.size());
+        visibility(false);
+        cur_ = 0;
+        apply();
+    }
+    void show_or_hide(float width, float time) {
+        on_ = width > 0.1f;
+        float delay = on_ ? 0.0f : 0.3f;
+        if (on_) visibility(true);
+        else time = cur_ * 0.15f;
+        tweens_.kill(&cur_);
+        tweens_.tween(&cur_, on_ ? width : 0.0f, time, TRANS_CUBIC, on_ ? EASE_OUT : EASE_IN, delay);
+        hide_at_ = on_ ? -1 : t_ + delay + time;
+    }
+    virtual void tick(Node*, double dt) {
+        apply();
+        if (!on_ && hide_at_ >= 0 && t_ >= hide_at_) {
+            hide_at_ = -1;
+            visibility(false);
+        }
+        for (size_t i = 0; i < spears_.size(); ++i) {
+            Spear& s = spear_state_[i];
+            if (!s.live || !spears_[i]->is_control()) continue;
+            Control* c = (Control*)spears_[i];
+            s.t += (float)dt;
+            float k = s.dur > 0 ? minf(s.t / s.dur, 1) : 1;
+            c->scale = Vec2(s.sx, s.sy * (1 - k));
+            c->modulate.a = s.alpha * minf(s.t / 0.2f, 1) * minf(s.t / 0.2f, 1);
+            if (k >= 1) {
+                if (on_) fire(i);
+                else s.live = false;
+            }
+        }
+    }
+
+private:
+    struct Spear {
+        bool live;
+        float t, dur, sx, sy, alpha;
+        Spear() : live(false), t(0), dur(1), sx(1), sy(1), alpha(0) {}
+    };
+    void apply() {
+        for (size_t i = 0; i < layers_.size(); ++i) {
+            if (!layers_[i]->is_node2d()) continue;
+            Vec2 b = base_[i];
+            ((Node2D*)layers_[i])->scale = layers_[i] == shrink_ && cur_ < 1 ? Vec2(b.x * cur_, b.y * cur_) : Vec2(b.x * cur_, b.y);
+        }
+    }
+    void visibility(bool on) {
+        for (size_t i = 0; i < layers_.size(); ++i)
+            if (is_particles(layers_[i])) {
+                if (on) ((Particles2D*)layers_[i])->restart();
+                else ((Particles2D*)layers_[i])->emitting = false;
+            }
+        if (on)
+            for (size_t i = 0; i < spears_.size(); ++i) fire(i);
+    }
+    /* FireSpear: across the 140 px region (-20 for the rect's origin),
+     * leaning with its x, shrinking down to nothing in 0.3-0.6 s while it
+     * fades in to 0.4-0.7 (0.2 s Quad In). */
+    void fire(size_t i) {
+        if (!spears_[i]->is_control()) return;
+        Control* c = (Control*)spears_[i];
+        float x = rand_range(-70, 70) - 20;
+        float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT];
+        c->offset[SIDE_LEFT] = x;
+        c->offset[SIDE_RIGHT] = x + w;
+        c->rotation = (x * 0.15f + 4) * PI_F / 180;
+        Spear& s = spear_state_[i];
+        s.live = true;
+        s.t = 0;
+        s.dur = rand_range(0.3f, 0.6f);
+        /* 0.4 / width: at width 0 (the first volley, as the effect opens)
+         * Godot's scale is infinite and nothing shows */
+        s.sx = cur_ > 0.001f ? 0.4f / cur_ : 0.0f;
+        s.sy = rand_range(1, 1.5f);
+        s.alpha = rand_range(0.4f, 0.7f);
+        c->modulate.a = 0;
+        c->scale = Vec2(s.sx, s.sy);
+    }
+    std::vector<Node*> layers_, spears_;
+    std::vector<Vec2> base_;
+    std::vector<Spear> spear_state_;
+    float cur_;
+    bool on_;
+    double hide_at_;
+    Node* shrink_;
+};
+
+/* NDoomVfx: at the hitbox's bottom middle; the creature's body (when it
+ * dies) taken into the effect, grayed (hsv s 0) and sinking below the
+ * floor line (the Mask's clip) after 0.75 s over 0.75 s (Expo In); the
+ * sub-emitters as wide as 1.5x the hitbox / 260; a weak shake about 180
+ * degrees; its sound. (The game draws the body into a SubViewport shown by
+ * Mask/Visual; the body itself goes under the Mask here.) */
+class DoomVfx : public Effect {
+public:
+    DoomVfx() : holder_(NULL), phase_(0) {}
+    void setup(const Vec2& size, Node* body, bool die) {
+        size_ = size * 1.5f;
+        body_ = die ? body : NULL;
+    }
+    virtual void begin(Node* n) {
+        play_sfx("event:/sfx/characters/necrobinder/necrobinder_doom_kill");
+        set_visible(n->find_unique("Visual"), false);
+        Node* mask = n->find_unique("Mask");
+        if (body_ && mask && mask->is_control() && body_->is_node2d() && body_->parent) {
+            Xform2D xf = ((Node2D*)body_)->global_transform();
+            Node* h = SceneLibrary::create_node("Node2D");
+            mask->add_child(h);
+            holder_ = (Node2D*)h;
+            /* at the effect's origin: the Mask's top left is at its offsets
+             * (it is not laid out yet) */
+            Control* m = (Control*)mask;
+            holder_->position = Vec2(-m->offset[SIDE_LEFT], -m->offset[SIDE_TOP]);
+            body_->parent->remove_child(body_);
+            holder_->add_child(body_);
+            Node2D* b = (Node2D*)body_;
+            b->position = xf.origin - global_of(n);
+            b->rotation = 0;
+            b->scale = Vec2(sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y), sqrtf(xf.y.x * xf.y.x + xf.y.y * xf.y.y));
+            gray(body_);
+            tweens_.tween(&holder_->position.y, holder_->position.y + size_.y, 0.75f, TRANS_EXPO, EASE_IN, 0.75f);
+        }
+        ScreenShake::get().shake("Weak", "Short", 180 + rand_range(-10, 10));
+        show(n, size_.x / 260, 0.5f);
+    }
+    virtual void tick(Node* n, double) {
+        if (phase_ == 0 && t_ >= 1.5) {
+            phase_ = 1;
+            if (holder_) holder_->visible = false;
+            show(n, 0, 0.25f);
+        }
+        if (phase_ == 1 && t_ >= 3.5 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    static void show(Node* n, float width, float time) {
+        static const char* const sub[] = { "DoomVfxBack", "DoomVfxFront" };
+        for (int i = 0; i < 2; ++i) {
+            Node* s = n->get_node(sub[i]);
+            if (!s || !s->behavior) continue;
+            ((Effect*)s->behavior)->start(s); /* its _Ready first */
+            ((DoomSubEmitter*)s->behavior)->show_or_hide(width, time);
+        }
+    }
+    /* hsv s 0 over the whole body */
+    static void gray(Node* n) {
+        if (n->is_canvas_item()) {
+            CanvasItem* c = (CanvasItem*)n;
+            c->shader_params["s"] = 0;
+            if (!c->material) {
+                Resource* r = SceneLibrary::current() ? SceneLibrary::current()->ext("materials/vfx/hsv.tres") : NULL;
+                if (r && r->kind == Resource::RES_SHADER_MATERIAL) c->material = (MaterialRes*)r;
+            }
+        }
+        for (size_t i = 0; i < n->children.size(); ++i) gray(n->children[i]);
+    }
+    Vec2 size_;
+    Node* body_;
+    Node2D* holder_;
+    int phase_;
+};
+
+/* NDoomOverlayVfx.GetOrCreate: one over the room, fading in (1 s Expo
+ * Out), held 1.2 s, out in 0.5 s; asked again while it lasts, it plays
+ * again. */
+class DoomOverlay : public Effect {
+public:
+    DoomOverlay() : end_(0) {}
+    void play(Node* n) {
+        CanvasItem* c = (CanvasItem*)n;
+        tweens_.clear();
+        tweens_.tween(&c->modulate.a, 1.0f, 1.0f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween(&c->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 2.2f);
+        end_ = t_ + 2.7;
+    }
+    virtual void begin(Node* n) {
+        ((CanvasItem*)n)->modulate = Color(1, 1, 1, 0);
+        play(n);
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= end_ && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double end_;
+};
+
+ScriptBehavior* make_doom_sub_emitter(Node* n) { return new DoomSubEmitter(n); }
+ScriptBehavior* make_doom_vfx(Node*) { return new DoomVfx(); }
+ScriptBehavior* make_doom_overlay(Node*) { return new DoomOverlay(); }
+
+ScriptBehavior* make_item_throw(Node* n) { return new ItemThrow(n); }
+ScriptBehavior* make_small_missile(Node* n) { return new Missile(n, false); }
+ScriptBehavior* make_large_missile(Node* n) { return new Missile(n, true); }
+ScriptBehavior* make_bg_spike(Node*) { return new GroundSpike(false); }
+ScriptBehavior* make_fg_spike(Node*) { return new GroundSpike(true); }
+ScriptBehavior* make_kin_priest_grenade(Node*) { return new KinPriestGrenade(); }
+ScriptBehavior* make_sleeping(Node*) { return new Sleeping(); }
+ScriptBehavior* make_hyperbeam(Node*) { return new Hyperbeam(); }
+ScriptBehavior* make_sweeping_beam(Node* n) { return new SweepingBeam(n); }
+ScriptBehavior* make_grand_finale(Node*) { return new GrandFinale(); }
+ScriptBehavior* make_hellraiser_sword(Node*) { return new HellraiserSword(); }
+ScriptBehavior* make_additive_overlay(Node*) { return new AdditiveOverlay(); }
+
 ScriptBehavior* make_sequence(Node* n) {
     const Spec* s = spec_for_script(n->script);
     return s ? new Sequence(s) : NULL;
@@ -691,11 +1436,16 @@ bool spawn_big_slash(SceneLibrary* lib, Node* box, bool impact, const Args& a, V
 } /* namespace */
 
 static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGroundFireVfx", "NStunnedVfx", "NPowerUpVfx",
-                                           "NBolasVfx", "NBigSlashVfx", "NBigSlashImpactVfx", "NHitSparkVfx" };
+                                           "NBolasVfx", "NBigSlashVfx", "NBigSlashImpactVfx", "NHitSparkVfx",
+                                           "NItemThrowVfx", "NSmallMagicMissileVfx", "NLargeMagicMissileVfx",
+                                           "NSpikeSplashVfx", "NKinPriestGrenadeVfx", "NSleepingVfx", "NHyperbeamVfx",
+                                           "NSweepingBeamVfx", "NGrandFinaleVfx", "NHellraiserVfx",
+                                           "NAdditiveOverlayVfx", "NDoomVfx", "NDoomOverlayVfx" };
 
 bool is_combat_vfx_call(const std::string& call) {
     if (call == "NCombatRoom.PlaySplashVfx") return true;
     std::string cls = class_of(call);
+    if (call == "NSleepingVfx.Stop" || call == "NDoomOverlayVfx.GetOrCreate") return true;
     if (call.compare(cls.size(), std::string::npos, ".Create") != 0 && call.find(".Create") == std::string::npos)
         return false;
     if (spec_named(cls)) return true;
@@ -735,6 +1485,86 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     const Spec* s = spec_named(cls);
     if (s) {
         spawn_spec(lib, box, *s, a, anchors);
+        return true;
+    }
+    if (call == "NDoomOverlayVfx.GetOrCreate") {
+        for (size_t i = 0; i < box->children.size(); ++i) {
+            Node* fx = box->children[i];
+            if (fx->script == "res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs" && fx->behavior &&
+                !fx->queued_for_deletion()) {
+                ((DoomOverlay*)fx->behavior)->play(fx);
+                return true;
+            }
+        }
+        Node* fx = add_effect(lib, box, "scenes/vfx/doom_overlay_vfx.tscn");
+        if (fx && fx->behavior) ((Effect*)fx->behavior)->start(fx);
+        return true;
+    }
+    if (cls == "NDoomVfx") {
+        /* Create(visuals, Hitbox.GlobalPosition, Hitbox.Size, shouldDie) */
+        if (a.places.size() < 2) return true;
+        VfxCreature who;
+        if (!anchors.creature(a.places[0].who, &who)) return true;
+        Node* fx = add_effect(lib, box, "scenes/vfx/vfx_doom.tscn");
+        if (!fx) return true;
+        set_global(fx, who.hitbox.pos + Vec2(who.hitbox.size.x * 0.5f, who.hitbox.size.y));
+        bool die = !a.bools.empty() && a.bools[0];
+        if (fx->behavior) {
+            ((DoomVfx*)fx->behavior)->setup(who.hitbox.size, die ? anchors.take_visuals(a.places[0].who) : NULL, die);
+            ((Effect*)fx->behavior)->start(fx);
+        }
+        return true;
+    }
+    if (call == "NSleepingVfx.Stop") {
+        /* the monster's own effect: every one still sleeping wakes */
+        for (size_t i = 0; i < box->children.size(); ++i) {
+            Node* fx = box->children[i];
+            if (fx->script == "res://src/Core/Nodes/Vfx/NSleepingVfx.cs" && fx->behavior) ((Sleeping*)fx->behavior)->stop();
+        }
+        return true;
+    }
+    if (cls == "NItemThrowVfx" || cls == "NSmallMagicMissileVfx" || cls == "NLargeMagicMissileVfx" ||
+        cls == "NSleepingVfx") {
+        /* Create(Vector2, ...): the positions the logic's stand-in nodes gave */
+        std::vector<Vec2> at;
+        for (size_t i = 0; i < a.places.size(); ++i) {
+            Vec2 p;
+            if (resolve(a.places[i], anchors, &p)) at.push_back(p);
+        }
+        if (at.empty()) return true;
+        if (cls == "NItemThrowVfx") {
+            if (at.size() < 2) return true;
+            Node* fx = add_effect(lib, box, "scenes/vfx/vfx_item_throw.tscn");
+            if (!fx || !fx->behavior) return true;
+            Resource* r = a.paths.empty() ? NULL : lib->ext(a.paths[0]);
+            ((ItemThrow*)fx->behavior)->setup(at[0], at[1], r && r->is_texture() ? (Texture2DRes*)r : NULL);
+            ((Effect*)fx->behavior)->start(fx);
+        } else if (cls == "NSleepingVfx") {
+            Node* fx = add_effect(lib, box, "scenes/vfx/vfx_sleeping.tscn");
+            if (!fx) return true;
+            set_global(fx, at[0]);
+            if (fx->behavior) {
+                ((Sleeping*)fx->behavior)->setup(a.bools.empty() || a.bools[0]);
+                ((Effect*)fx->behavior)->start(fx);
+            }
+        } else {
+            bool large = cls == "NLargeMagicMissileVfx";
+            Node* fx = add_effect(lib, box, large ? "scenes/vfx/vfx_large_magic_missile.tscn"
+                                                   : "scenes/vfx/vfx_small_magic_missile.tscn");
+            if (!fx) return true;
+            set_global(fx, at[0]);
+            Color tint = a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0];
+            std::vector<Node*> list;
+            exported(fx, "_modulateParticles", list);
+            for (size_t i = 0; i < list.size(); ++i)
+                if (list[i]->is_canvas_item()) ((CanvasItem*)list[i])->self_modulate = tint;
+            if (fx->behavior) ((Effect*)fx->behavior)->start(fx);
+        }
+        return true;
+    }
+    if (cls == "NAdditiveOverlayVfx") {
+        Node* fx = add_effect(lib, box, "scenes/vfx/additive_overlay_vfx.tscn");
+        if (fx && fx->behavior) ((Effect*)fx->behavior)->start(fx);
         return true;
     }
     if (cls == "NBigSlashVfx" || cls == "NBigSlashImpactVfx") return spawn_big_slash(lib, box, cls == "NBigSlashImpactVfx", a, anchors);
@@ -792,6 +1622,68 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         }
         return true;
     }
+    if (cls == "NSpikeSplashVfx") {
+        /* six spikes each way in front, six each way behind; 2 s */
+        std::string color = a.words.empty() ? "Red" : a.words[0];
+        for (int i = 0; i < 6; ++i)
+            for (int layer = 0; layer < 2; ++layer)
+                for (int dir = 0; dir < 2; ++dir) {
+                    Node* parent = layer == 0 ? box : (anchors.back_box() ? anchors.back_box() : box);
+                    Node* fx = add_effect(lib, parent, layer == 0 ? "scenes/vfx/fg_ground_spike_vfx.tscn"
+                                                                  : "scenes/vfx/bg_ground_spike_vfx.tscn");
+                    if (!fx || !fx->behavior) continue;
+                    ((GroundSpike*)fx->behavior)->setup(c.bottom, dir == 0, color);
+                    ((Effect*)fx->behavior)->start(fx);
+                }
+        return true;
+    }
+    if (cls == "NKinPriestGrenadeVfx") {
+        Node* fx = add_effect(lib, box, "scenes/vfx/monsters/kin_priest_grenade_vfx.tscn");
+        if (!fx) return true;
+        set_global(fx, c.bottom);
+        if (fx->behavior) ((Effect*)fx->behavior)->start(fx);
+        return true;
+    }
+    if (cls == "NHyperbeamVfx" || cls == "NSweepingBeamVfx") {
+        Vec2 eye = c.center + (c.defect ? Vec2(34, -30) : Vec2(0, 0));
+        if (cls == "NHyperbeamVfx") {
+            VfxCreature target;
+            if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return true;
+            Node* fx = add_effect(lib, box, "scenes/vfx/vfx_hyperbeam.tscn");
+            if (!fx || !fx->is_node2d()) return true;
+            set_global(fx, eye);
+            Vec2 d = target.center - eye;
+            ((Node2D*)fx)->rotation = atan2f(d.y, d.x);
+            if (fx->behavior) ((Effect*)fx->behavior)->start(fx);
+        } else {
+            std::vector<Vec2> targets;
+            for (size_t l = 0; l < a.lists.size(); ++l)
+                for (size_t k = 0; k < a.lists[l].size(); ++k) {
+                    VfxCreature t;
+                    if (anchors.creature(a.lists[l][k], &t)) targets.push_back(t.center);
+                }
+            Node* fx = add_effect(lib, box, "scenes/vfx/vfx_sweeping_beam.tscn");
+            if (!fx) return true;
+            set_global(fx, eye);
+            if (fx->behavior) {
+                ((SweepingBeam*)fx->behavior)->setup(targets, box);
+                ((Effect*)fx->behavior)->start(fx);
+            }
+        }
+        return true;
+    }
+    if (cls == "NGrandFinaleVfx") {
+        Node* fx = add_effect(lib, box, "scenes/vfx/vfx_grand_finale.tscn");
+        if (fx && fx->behavior) {
+            ((GrandFinale*)fx->behavior)->setup(c.center);
+            ((Effect*)fx->behavior)->start(fx);
+        }
+        return true;
+    }
+    if (cls == "NHellraiserVfx") {
+        spawn_hellraiser(lib, box, anchors.back_box(), c.bottom);
+        return true;
+    }
     if (cls == "NBolasVfx") {
         VfxCreature target;
         if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return true;
@@ -814,6 +1706,21 @@ void install_combat_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/NStunnedVfx.cs", make_stunned);
     register_script("res://src/Core/Nodes/Vfx/NPowerUpVfx.cs", make_power_up);
     register_script("res://src/Core/Nodes/Vfx/Cards/NBolasVfx.cs", make_bolas);
+    register_script("res://src/Core/Nodes/Vfx/NItemThrowVfx.cs", make_item_throw);
+    register_script("res://src/Core/Nodes/Vfx/NSmallMagicMissileVfx.cs", make_small_missile);
+    register_script("res://src/Core/Nodes/Vfx/NLargeMagicMissileVfx.cs", make_large_missile);
+    register_script("res://src/Core/Nodes/Vfx/NBgGroundSpikeVfx.cs", make_bg_spike);
+    register_script("res://src/Core/Nodes/Vfx/NFgGroundSpikeVfx.cs", make_fg_spike);
+    register_script("res://src/Core/Nodes/Vfx/NKinPriestGrenadeVfx.cs", make_kin_priest_grenade);
+    register_script("res://src/Core/Nodes/Vfx/NSleepingVfx.cs", make_sleeping);
+    register_script("res://src/Core/Nodes/Vfx/NHyperbeamVfx.cs", make_hyperbeam);
+    register_script("res://src/Core/Nodes/Vfx/NSweepingBeamVfx.cs", make_sweeping_beam);
+    register_script("res://src/Core/Nodes/Vfx/NGrandFinaleVfx.cs", make_grand_finale);
+    register_script("res://src/Core/Nodes/Vfx/Cards/NHellraiserSwordVfx.cs", make_hellraiser_sword);
+    register_script("res://src/Core/Nodes/Vfx/NAdditiveOverlayVfx.cs", make_additive_overlay);
+    register_script("res://src/Core/Nodes/Vfx/NDoomSubEmitterVfx.cs", make_doom_sub_emitter);
+    register_script("res://src/Core/Nodes/Vfx/NDoomVfx.cs", make_doom_vfx);
+    register_script("res://src/Core/Nodes/Vfx/NDoomOverlayVfx.cs", make_doom_overlay);
 }
 
 } /* namespace spire */

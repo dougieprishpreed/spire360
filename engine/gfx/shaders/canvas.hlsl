@@ -68,7 +68,9 @@ sampler2D g_scrA : register(s9);      // the screen copy: the level at floor(lod
 sampler2D g_scrB : register(s10);     // and the next (level passes: the level above in s9)
 sampler2D g_scrNoise : register(s11); // noise (repeats), mask (clamped); unset: white
 sampler2D g_scrMask : register(s12);
-float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass, 4 radial blur
+float4 g_scr : register(c22);         // x: 1 dark_blur, 2 noise distortion, 3 level pass, 4 radial blur,
+                                      // 5 glass border (z: corner weight, w: add, c23: corner colour),
+                                      // 6 doom overlay (y: saturation, z: value, w: pulse, c23: gradient);
                                       // (y: count, z: power, c23.xy: centre);
                                       // y: lod fraction, z: mix, w: strength
 float4 g_scr2 : register(c23);        // xy: noise offset, zw: the level pass's texel size
@@ -80,6 +82,29 @@ float median3(float r, float g, float b) {
 float4 ps_main(VsOut i) : COLOR {
     [branch] if (g_scr.x > 0.5) {
         // Screen-reading shaders (ScreenParams); the vertex colour is not applied.
+        [branch] if (g_scr.x > 5.5) {
+            // doom_overlay: desaturated and darkened by the vertex alpha in
+            // YIQ, a pulsing gradient rising from the bottom of the screen.
+            float a = i.color.a;
+            float sf = lerp(1.0, g_scr.y, a), vf = lerp(1.0, g_scr.z, a);
+            float4 sc = tex2Dlod(g_scrA, float4(i.screen, 0.0, 0.0));
+            float y = dot(float3(0.2989, 0.5870, 0.1140), sc.rgb) * vf;
+            float ci = dot(float3(0.5959, -0.2774, -0.3216), sc.rgb) * sf * vf;
+            float cq = dot(float3(0.2115, -0.5229, 0.3114), sc.rgb) * sf * vf;
+            float g = pow(i.screen.y, 6.0) * g_scr.w * a;
+            float3 rgb = float3(y + 0.956 * ci + 0.621 * cq, y - 0.272 * ci - 0.647 * cq, y - 1.106 * ci + 1.703 * cq);
+            return saturate(float4(rgb, sc.a) + g * g_scr2);
+        }
+        [branch] if (g_scr.x > 4.5) {
+            // The Ancient cards' glass border: the screen behind, brighter,
+            // its alpha the mask's, toward the corner colour by the mask's green.
+            float4 m = tex2Dlod(g_scrMask, float4(i.uv, 0.0, 0.0));
+            float4 sc = lerp(tex2Dlod(g_scrA, float4(i.screen, 0.0, 0.0)), tex2Dlod(g_scrB, float4(i.screen, 0.0, 0.0)), g_scr.y);
+            float3 rgb = (sc.a > 0.0 ? sc.rgb / sc.a : float3(0.0, 0.0, 0.0)) + g_scr.w;
+            float4 f = lerp(float4(rgb, m.a), g_scr2, m.g * g_scr.z) * i.color;
+            float a = saturate(f.a * tex2D(g_tex, i.uv).a * m.a);
+            return float4(saturate(f.rgb) * a, a);
+        }
         [branch] if (g_scr.x > 3.5) {
             // radial_blur: the mean of count reads toward the centre.
             float2 dir = i.screen - g_scr2.xy;
