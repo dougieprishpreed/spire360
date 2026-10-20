@@ -14,6 +14,7 @@
 
 namespace spire {
 
+class BestiaryScreen;
 class CardLibraryScreen;
 class CollectionScreen;
 class StatsScreen;
@@ -54,6 +55,7 @@ private:
     CollectionScreen* collection_;
     StatsScreen* stats_;
     RunHistoryScreen* history_;
+    BestiaryScreen* bestiary_;
     Node* sub_node_;
     TweenSet tweens_;
 };

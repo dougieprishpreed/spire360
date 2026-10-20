@@ -78,6 +78,8 @@ public partial class RunDriver
             case "run_timer": if (prefs != null) prefs.ShowRunTimer = b; break;
             case "card_indices": if (prefs != null) prefs.ShowCardIndices = b; break;
             case "long_press": if (prefs != null) prefs.IsLongPressEnabled = b; break;
+            // NBestiary.OnSubmenuClosed: the mode it was left in
+            case "bestiary_actions": if (prefs != null) prefs.IsBestiaryActionsPreferred = b; break;
             case "text_effects": if (prefs != null) prefs.TextEffectsEnabled = b; break;
             case "skip_intro": pref = false; if (settings != null) settings.SkipIntroLogo = b; break;
             case "master": pref = false; if (settings != null) settings.VolumeMaster = Math.Clamp(f, 0f, 1f); break;

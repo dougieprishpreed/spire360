@@ -353,6 +353,8 @@ public:
     void set_animation(int track, const SpAnimation* anim, bool loop);
     void add_animation(int track, const SpAnimation* anim, bool loop, float delay);
     void set_empty_animation(int track);
+    /* AddEmptyAnimation: the track empties after what is queued on it. */
+    void add_empty_animation(int track);
     void update(float dt);
     void apply(SpSkeleton& skel);
     const SpAnimation* current(int track) const;

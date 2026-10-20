@@ -19,6 +19,7 @@
 #include "../../engine/game/collection_screen.h"
 #include "../../engine/game/stats_screen.h"
 #include "../../engine/game/run_history_screen.h"
+#include "../../engine/game/bestiary_screen.h"
 #include "../../engine/game/crystal_sphere_screen.h"
 #include "../../engine/game/event_screen.h"
 #include "../../engine/game/title_screen.h"
@@ -111,7 +112,9 @@ int main(int argc, char** argv) {
             } names[] = { { "A", PadState::A },     { "B", PadState::B },       { "X", PadState::X },
                           { "Y", PadState::Y },     { "LEFT", PadState::LEFT }, { "RIGHT", PadState::RIGHT },
                           { "UP", PadState::UP },   { "DOWN", PadState::DOWN }, { "START", PadState::START },
-                          { "LB", PadState::LB },   { "RB", PadState::RB } };
+                          { "LB", PadState::LB },   { "RB", PadState::RB },     { "LT", PadState::LT },
+                          { "RT", PadState::RT },   { "RS_UP", PadState::RS_UP }, { "RS_DOWN", PadState::RS_DOWN },
+                          { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT } };
             std::string list = argv[++i];
             size_t at = 0;
             while (at <= list.size()) {
@@ -152,6 +155,7 @@ int main(int argc, char** argv) {
     CollectionScreen* collection = NULL;
     StatsScreen* stats = NULL;
     RunHistoryScreen* history = NULL;
+    BestiaryScreen* bestiary = NULL;
     size_t alen = strlen(argv[2]);
     if (!scene && alen > 5 && strcmp(argv[2] + alen - 5, ".json") == 0) {
         FILE* jf = fopen(argv[2], "rb");
@@ -179,6 +183,20 @@ int main(int argc, char** argv) {
             history = new RunHistoryScreen(&lib);
             scene = history->build(&err);
             if (scene) history->set_data(d);
+        } else if (d["type"].str() == "bestiary") {
+            /* the bestiary answer; viewer-only keys: "entry" (the selected
+             * one's bestiary_entry answer), "move" (a bestiary_move answer
+             * played from the start); --pad drives it. */
+            bestiary = new BestiaryScreen(&lib);
+            scene = bestiary->build(&err);
+            if (scene) {
+                bestiary->set_data(d);
+                PadState none;
+                std::string q;
+                bestiary->input(none, &q);
+                if (d["entry"].is_object()) bestiary->set_data(d["entry"]);
+                if (d["move"].is_object()) bestiary->set_data(d["move"]);
+            }
         } else if (StatsScreen::is_answer(d["type"].str())) {
             /* the statistics answer (--pad drives it). */
             stats = new StatsScreen(&lib);
@@ -301,7 +319,7 @@ int main(int argc, char** argv) {
     }
     /* --pad A,RIGHT,...: each press after half a second, then --time again
      * before the picture; the screen's commands are printed. */
-    for (size_t k = 0; (ported || title || charsel || piles || settings || library || collection || stats || history) && k < pad_script.size(); ++k) {
+    for (size_t k = 0; (ported || title || charsel || piles || settings || library || collection || stats || history || bestiary) && k < pad_script.size(); ++k) {
         PadState pad;
         pad.pressed = pad.held = pad_script[k];
         std::string cmd = ported ? ported->input(pad) : std::string();
@@ -311,6 +329,7 @@ int main(int argc, char** argv) {
         if (collection && collection->input(pad, &cmd) == CollectionScreen::BACK) cmd = "back";
         if (stats && stats->input(pad, &cmd) == StatsScreen::BACK) cmd = "back";
         if (history && history->input(pad, &cmd) == RunHistoryScreen::BACK) cmd = "back";
+        if (bestiary && bestiary->input(pad, &cmd) == BestiaryScreen::BACK) cmd = "back";
         if (title) {
             TitleScreen::Action a = title->input(pad);
             if (a != TitleScreen::NONE) cmd = a == TitleScreen::SINGLEPLAYER ? "singleplayer" : "quit";

@@ -424,6 +424,15 @@ void SpAnimationState::add_animation(int ti, const SpAnimation* anim, bool loop,
     t.queue.push_back(e);
 }
 
+void SpAnimationState::add_empty_animation(int ti) {
+    Track& t = track(ti);
+    if (!t.has_cur) return;
+    const Entry& prev = t.queue.empty() ? t.cur : t.queue.back();
+    Entry e; /* no animation */
+    e.delay = maxf(0.0f, (prev.anim ? prev.anim->duration : 0) - default_mix);
+    t.queue.push_back(e);
+}
+
 void SpAnimationState::update(float dt) {
     dt *= time_scale;
     for (size_t i = 0; i < tracks_.size(); ++i) {
@@ -447,6 +456,12 @@ void SpAnimationState::update(float dt) {
             t.queue.erase(t.queue.begin());
             next.time = t.cur.time - next.delay;
             next.delay = 0;
+            if (!next.anim) {
+                /* the empty animation: the track lets go */
+                t.has_cur = false;
+                t.has_from = false;
+                continue;
+            }
             start(t, next);
         }
     }

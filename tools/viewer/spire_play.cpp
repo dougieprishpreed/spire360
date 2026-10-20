@@ -203,7 +203,9 @@ int main(int argc, char** argv) {
                           { "Y", PadState::Y },       { "LEFT", PadState::LEFT },   { "RIGHT", PadState::RIGHT },
                           { "UP", PadState::UP },     { "DOWN", PadState::DOWN },   { "START", PadState::START },
                           { "LB", PadState::LB },     { "RB", PadState::RB },       { "LT", PadState::LT },
-                          { "RT", PadState::RT },     { "WAIT", 0 } /* a second with no press */ };
+                          { "RT", PadState::RT },     { "RS_UP", PadState::RS_UP }, { "RS_DOWN", PadState::RS_DOWN },
+                          { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT },
+                          { "WAIT", 0 } /* a second with no press */ };
             std::string list = argv[++i];
             size_t at = 0;
             while (at <= list.size()) {

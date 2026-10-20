@@ -3764,6 +3764,8 @@ internal static class CreatureViewExtensions
         {
             d["hp_display"] = c.HpDisplay.ToString();
             d["poison_next_turn"] = c.GetPower<PoisonPower>()?.CalculateTotalDamageNextTurn() ?? 0;
+            // the CreatureAnimator's first state (idle, low health, ...)
+            if (c.CombatState != null) d["anim_init"] = Animators.Init(c);
             if (c.Monster != null)
             {
                 d["hp_bar_reduction"] = c.Monster.HpBarSizeReduction;

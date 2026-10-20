@@ -14,6 +14,14 @@ bool shake_vfx(Node* shaker, float strength, double duration);
 Node* make_vfx_projectile(SceneLibrary* lib, const std::string& handler, const std::string& projectile,
                           const Vec2& from, const Vec2& to, double delay = 0);
 
+/* NKaiserCrabBossBackground's methods the Kaiser Crab's parts call (the
+ * logic's ui cues), on the one shown; *wait: how long the caller waits for
+ * it (the Task's Cmd.Wait). False when it is no such call. */
+class Json;
+bool kaiser_crab_call(const std::string& call, const Json& args, double* wait);
+/* How long the caller of such a call waits on it (0 for none). */
+double kaiser_crab_wait(const std::string& call, const Json& args);
+
 void install_text_scripts();
 void install_anim_scripts();
 void install_vfx_scripts();

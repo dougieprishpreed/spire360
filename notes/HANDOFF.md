@@ -10,6 +10,56 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 4 (2026-10-20)
+
+Validation: traces `differences: 0` (base5 vs new16), `spire_check` on
+new16 0 failures (1,421 / 995 / 366 / 181 / 26), D3D9 check rc=0, strict
+C++98 PC build clean, encounters coverage 85/85 ok.
+
+- Bestiary (`bestiary_screen.*`, from the compendium once a monster was
+  beaten): sidebar (act dividers, unseen entries grey and skipped, room
+  colours), the selection arrow (in a plain holder so the content's
+  container leaves it alone), the three layouts (default; Kaiser Crab: the
+  background shifted to the part's arm; Decimillipede: the segments at the
+  EncounterSlots markers, placed each frame), move buttons (LB RB RT LT X,
+  then the right stick: PadState RS_*), Y moves / stats, LB / RB filters,
+  quotes in the character's bubble, B saves the mode (`set_setting
+  bestiary_actions`). The client reads the skeleton's revive / hurt / die
+  and sends them as `anims`; the logic hands GenerateBestiaryMoveList a
+  stand-in NCreatureVisuals whose skeleton answers HasAnimation from them
+  (StandIns.SkeletonAnims), so the game's own list comes out (the overrides
+  insert at fixed indices). `bestiary_move` plays a move on fresh copies
+  (StandIns.InBestiary: NBestiary.Instance / GetCreatureNode / Layout are
+  stand-ins); its steps' cues play in the screen (VfxAnchors: player side
+  at the origin as VfxCmd does outside a fight). spire_view takes a
+  `bestiary` answer with viewer-only `entry` / `move`.
+- Kaiser Crab background: `NCombatRoom.Background` is a stand-in and
+  `Node.GetNode<T>` asks `Node.Resolve` (GodotStubs), so Crusher / Rocket
+  reach `%KaiserCrab` and its calls are cues; NKaiserCrabBossBackground is
+  ported (anim_scripts.cpp: body / arm / reaction tracks, the right arm's
+  rest / charge state; `kaiser_crab_call`, its Tasks' waits in the steps).
+  Spine: `add_empty_animation` queues properly now.
+- Creature animators: the logic runs each creature's CreatureAnimator (the
+  monster's / character's GenerateAnimator; `Animators.cs`) on every
+  TriggerAnim and sends what it plays (`play` on anim cues, `anim_init` in
+  the creature view). 83 monsters have their own triggers / states
+  (Corpse Slug's attack_double, devouring hurt / die, low-health idles);
+  the client stops a trigger's ops at the first animation the skeleton
+  lacks (`play_animator_ops`), where the game's SetNextState returns.
+- Tweens: TRANS_BOUNCE.
+
+Next: the creatures' special nodes. `NCreature.GetSpecialNode<T>` returns
+null in the logic, so the calls the game makes on them never become cues
+(NKinPriestBeamVfx.Fire, NDecimillipedeSegmentVfx.Regenerate,
+NDecimillipedeSegmentDriver.AttackShake, NMyteVfx / NSnappingJaxfruitVfx
+.SetTarget; Flyconid's spores via Visuals.GetCurrentBody). Plan: the
+patcher appends a generic call's type arguments to the hook id, StandIns
+returns a stand-in of that script class per (creature, path), Steps names
+it "eN#path" as the receiver, the client ports each script (several need
+spine animation events, which the runtime does not dispatch yet). Godot
+nodes the game moves directly (bone nodes tweened by Tunneler, KinFollower,
+...) stay out of reach for now.
+
 ## Alpha push, part 3 (2026-10-20; commits 40ced41 and the next)
 
 Paused here at the user's request. Validation at the pause: traces

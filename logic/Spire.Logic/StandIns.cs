@@ -13,8 +13,11 @@
 using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Bindings.MegaSpine;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Nodes.Screens.Bestiary;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Backgrounds;
 
 namespace Spire.Logic;
 
@@ -29,6 +32,35 @@ internal static class StandIns
     private static readonly List<Creature> Slots = new();
     private static bool _failed;
 
+    /// <summary>While the Bestiary's monsters act (NBestiary.Instance is
+    /// a stand-in; their nodes are its creatures, not the fight's).</summary>
+    public static bool InBestiary;
+
+    /// <summary>The animations the Bestiary's monster's skeleton has (the
+    /// client's answer): NCreatureVisuals.SpineBody's skeleton data answers
+    /// HasAnimation from them while set.</summary>
+    public static HashSet<string>? SkeletonAnims;
+
+    private static NBestiary? _bestiary;
+    private static Godot.Control? _layout;
+    private static NCombatBackground? _background;
+    private static NKaiserCrabBossBackground? _kaiserCrab;
+
+    /// <summary>An object of a UI class without running its constructor
+    /// (its calls are redirected to the hook anyway).</summary>
+    private static T Blank<T>() => (T)RuntimeHelpers.GetUninitializedObject(typeof(T));
+
+    static StandIns()
+    {
+        // NCombatRoom.Background / NBestiary.Layout's %KaiserCrab
+        // (NKaiserCrabBossBackground, which Crusher and Rocket drive).
+        Godot.Node.Resolve = (node, path, type) =>
+            (ReferenceEquals(node, _background) || ReferenceEquals(node, _layout)) && path == "%KaiserCrab" &&
+            type == typeof(NKaiserCrabBossBackground)
+                ? _kaiserCrab ??= Blank<NKaiserCrabBossBackground>()
+                : null;
+    }
+
     /// <summary>The hook's answer for a redirected UI call, or null.</summary>
     public static object? Answer(string id, object?[] a)
     {
@@ -38,6 +70,37 @@ internal static class StandIns
         var method = id[(sep + 2)..];
         try
         {
+            if (InBestiary)
+            {
+                if (id.EndsWith("NBestiary::get_Instance", StringComparison.Ordinal)) return _bestiary ??= Blank<NBestiary>();
+                if (id.EndsWith("NBestiary::get_Layout", StringComparison.Ordinal)) return _layout ??= new Godot.Control();
+                if (id.EndsWith("NBestiary::GetCreatureNode", StringComparison.Ordinal))
+                {
+                    foreach (var x in a)
+                        if (x is Creature c)
+                            return Node(c);
+                    return null;
+                }
+                if (id.EndsWith("NCombatRoom::get_Instance", StringComparison.Ordinal)) return null;
+            }
+            if (Animators.AnswerHasAnimation && id.EndsWith("MegaSprite::HasAnimation", StringComparison.Ordinal)) return true;
+            if (SkeletonAnims != null)
+            {
+                var typeFull = id[(id.IndexOf('|') + 1)..sep];
+                switch (typeFull[(typeFull.LastIndexOf('.') + 1)..] + "::" + method)
+                {
+                    case "NCreatureVisuals::get_SpineBody": return Blank<MegaSprite>();
+                    case "MegaSprite::GetSkeleton": return Blank<MegaSkeleton>();
+                    case "MegaSkeleton::GetData": return Blank<MegaSkeletonDataResource>();
+                    case "MegaSkeletonDataResource::HasAnimation":
+                        foreach (var x in a)
+                            if (x is string name)
+                                return SkeletonAnims.Contains(name);
+                        return false;
+                }
+            }
+            if (id.EndsWith("NCombatRoom::get_Background", StringComparison.Ordinal))
+                return CombatManager.Instance.IsInProgress ? _background ??= Blank<NCombatBackground>() : null;
             if (id.EndsWith("NCombatRoom::get_Instance", StringComparison.Ordinal))
                 return CombatManager.Instance.IsInProgress ? (_room ??= new NCombatRoom()) : null;
             if (id.EndsWith("NCombatRoom::GetCreatureNode", StringComparison.Ordinal))

@@ -23,6 +23,23 @@ class Node;
 class Node2D;
 class Control;
 class SceneLibrary;
+class SpineSprite;
+
+/* NCreature.Create: creature.tscn with the visuals (*visuals) first. */
+Control* instance_creature(SceneLibrary* lib, const std::string& visuals_id, Node** visuals);
+/* NCreature.UpdateBounds: the hitbox in the creature's coordinates. */
+Rect2 creature_hitbox(Node* visuals);
+/* NCreatureVisuals.SetUpSkin + UpdatePhobiaMode from the logic's view
+ * (spine_ops, phobia_skin), after the idle starts. */
+void setup_creature_spine(Node* visuals, const Json& view);
+/* What the creature's CreatureAnimator played (the logic's ops: set_animation
+ * / add_animation, in order), stopping at the first animation the skeleton
+ * lacks (SetNextState / AddNextState return there); true when the first
+ * one played. */
+bool play_animator_ops(SpineSprite* s, const Json& ops);
+/* NCreature.Create + SetupForBestiary: a monster outside a fight (view: id,
+ * spine_ops, phobia_skin), idle, its state display and intents hidden. */
+Control* make_display_creature(SceneLibrary* lib, const Json& view, Node** visuals);
 
 class CombatScreen : private VfxAnchors {
 public:

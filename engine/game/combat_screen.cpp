@@ -94,6 +94,9 @@ Node* CombatScreen::make_background(const Json& bg) {
     return root;
 }
 
+static void play_idle(Node* n);
+static SpineSprite* first_spine(Node* n);
+
 /* NCreature.Create + _Ready: the creature scene with the visuals as its first
  * child at its origin; the visuals' %Bounds give the width placement uses. */
 bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Creature& out) {
@@ -109,28 +112,64 @@ bool CombatScreen::make_creature(const std::string& visuals_id, bool player, Cre
     out.shown_hp = out.shown_max_hp = -1;
     out.scale_temp = out.scale_default = out.scale_osty = 1;
     out.scale_base = Vec2(0, 0);
-    Node* n = instance(lib_, "scenes/combat/creature.tscn");
+    Node* v = NULL;
+    Control* n = instance_creature(lib_, visuals_id, &v);
+    if (!n) return false;
+    Node* bounds = v ? v->find_unique("Bounds") : NULL;
+    if (bounds && bounds->is_control()) {
+        Control* b = (Control*)bounds;
+        out.width = b->offset[SIDE_RIGHT] - b->offset[SIDE_LEFT]; /* anchors are 0 */
+    }
+    out.node = n;
+    out.visuals = v;
+    return true;
+}
+
+/* NCreature.Create: creature.tscn with the creature's visuals as its first
+ * child, at its origin. */
+Control* instance_creature(SceneLibrary* lib, const std::string& visuals_id, Node** visuals) {
+    *visuals = NULL;
+    Node* n = instance(lib, "scenes/combat/creature.tscn");
     if (!n || !n->is_control()) {
         delete n;
-        return false;
+        return NULL;
     }
-    Node* v = instance(lib_, "scenes/creature_visuals/" + lower(visuals_id) + ".tscn");
-    if (!v) v = instance(lib_, "scenes/creature_visuals/fallback.tscn");
+    Node* v = instance(lib, "scenes/creature_visuals/" + lower(visuals_id) + ".tscn");
+    if (!v) v = instance(lib, "scenes/creature_visuals/fallback.tscn");
     if (v) {
         n->add_child(v);
         /* MoveChild(Visuals, 0) */
         n->children.pop_back();
         n->children.insert(n->children.begin(), v);
         if (v->is_node2d()) ((Node2D*)v)->position = Vec2(0, 0);
-        Node* bounds = v->find_unique("Bounds");
-        if (bounds && bounds->is_control()) {
-            Control* b = (Control*)bounds;
-            out.width = b->offset[SIDE_RIGHT] - b->offset[SIDE_LEFT]; /* anchors are 0 */
-        }
     }
-    out.node = (Control*)n;
-    out.visuals = v;
-    return true;
+    *visuals = v;
+    return (Control*)n;
+}
+
+/* The hitbox (NCreature.UpdateBounds): %Bounds scaled by the visuals', in
+ * the creature's coordinates. */
+Rect2 creature_hitbox(Node* visuals) {
+    Node* bnode = visuals ? visuals->find_unique("Bounds") : NULL;
+    if (!bnode || !bnode->is_control()) return Rect2(Vec2(0, 0), Vec2(0, 0));
+    Control* b = (Control*)bnode;
+    Vec2 vs = visuals->is_node2d() ? ((Node2D*)visuals)->scale : Vec2(1, 1);
+    return Rect2(Vec2(b->offset[SIDE_LEFT] * vs.x, b->offset[SIDE_TOP] * vs.y),
+                 Vec2(offset_size(b).x * vs.x, offset_size(b).y * vs.y));
+}
+
+/* NCreature.Create + SetupForBestiary: a monster outside a fight, its
+ * state display and intents hidden, its idle and spine setup started. */
+Control* make_display_creature(SceneLibrary* lib, const Json& view, Node** visuals) {
+    Control* n = instance_creature(lib, view["id"].str(), visuals);
+    if (!n) return NULL;
+    hide(n->find_unique("HealthBar"));
+    hide(n->find_unique("StateDisplay"));
+    hide(n->find_unique("Intents"));
+    hide(n->find_unique("SelectionReticle"));
+    play_idle(n);
+    setup_creature_spine(*visuals, view);
+    return n;
 }
 
 static const float HP_BAR_INSET = 10.0f; /* NHealthBar._foregroundContainerInset */
@@ -1234,7 +1273,18 @@ static void phobia_mode(Node* visuals, const Json& data) {
     if (s && data["phobia_skin"].b()) s->set_skins(std::vector<std::string>(1, phobia ? "phobia" : "normal"));
 }
 
-static void setup_spine(Node* visuals, const Json& data) {
+bool play_animator_ops(SpineSprite* s, const Json& ops) {
+    if (!s) return false;
+    for (size_t i = 0; i < ops.size(); ++i) {
+        const Json& op = ops[i];
+        bool ok = op["op"].str() == "set_animation" ? s->set_animation(op["name"].str(), op["loop"].b(true), op["track"].i())
+                                                     : s->add_animation(op["name"].str(), op["loop"].b(true), op["delay"].f(), op["track"].i());
+        if (!ok) return i > 0;
+    }
+    return ops.size() > 0;
+}
+
+void setup_creature_spine(Node* visuals, const Json& data) {
     if (!visuals) return;
     Node* body = visuals->find_unique("Visuals");
     SpineSprite* s = first_spine(body ? body : visuals);
@@ -1256,6 +1306,8 @@ static void setup_spine(Node* visuals, const Json& data) {
             s->set_state_time_scale(op["scale"].f(1));
         }
     }
+    /* the animator's first state (low health, ...) over the idle */
+    if (s && data["anim_init"].is_array()) play_animator_ops(s, data["anim_init"]);
     phobia_mode(visuals, data);
 }
 
@@ -1664,8 +1716,9 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
             (*places_)[enemy_node_ids[i]] = at[i];
     }
     play_idle(root);
-    for (size_t i = 0; i < enemies_.size(); ++i) setup_spine(enemies_[i].visuals, enemies_[i].data);
-    for (size_t i = 0; i < ghosts_.size(); ++i) setup_spine(ghosts_[i].c.visuals, ghosts_[i].c.data);
+    for (size_t i = 0; i < enemies_.size(); ++i) setup_creature_spine(enemies_[i].visuals, enemies_[i].data);
+    for (size_t i = 0; i < ghosts_.size(); ++i) setup_creature_spine(ghosts_[i].c.visuals, ghosts_[i].c.data);
+    if (player_.node && !aftermath_) setup_creature_spine(player_.visuals, player_.data);
     if (visual_only_) {
         /* NCreature.ToggleIsInteractable(false) hides the state display. */
         hide(player_.node ? player_.node->find_unique("HealthBar") : NULL);
@@ -1797,7 +1850,7 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
                 if (places_ && places_->find(es[i]["combat_id"].i()) != places_->end()) c.node->set_position((*places_)[es[i]["combat_id"].i()]);
                 else c.node->set_position(Vec2(250.0f + (float)i * 220.0f, 200));
                 play_idle(c.node);
-                setup_spine(c.visuals, c.data);
+                setup_creature_spine(c.visuals, c.data);
                 c.node->visible = false; /* revealed by spawn or the final sync */
             }
             next.push_back(c);
@@ -2251,6 +2304,12 @@ void CombatScreen::fire(const Cue& c) {
             refresh_state(*cr, true);
             hide(cr->node->find_unique("Intents"));
         }
+        /* the creature's CreatureAnimator (the logic ran it) */
+        if (c.data["play"].is_array()) {
+            bool played = play_animator_ops(s, c.data["play"]);
+            if (dying) monster_death(*cr, c.who, played ? s : NULL);
+            return;
+        }
         bool played = s && s->set_animation(anim, false, 0);
         if (dying) monster_death(*cr, c.who, played ? s : NULL);
         if (!played) return;
@@ -2260,6 +2319,8 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_SCRIPTED && ScreenShake::get().cue(c.data["call"].str(), c.data["args"])) return;
+    double crab_waits;
+    if (c.kind == CUE_SCRIPTED && kaiser_crab_call(c.data["call"].str(), c.data["args"], &crab_waits)) return;
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
         creature_call(c.data["call"].str().substr(10), c.data["args"]);
         return;
@@ -2455,6 +2516,7 @@ void CombatScreen::play_steps(const Json& steps) {
                 c.kind = CUE_ANIM;
                 c.who = ch["who"].str();
                 c.name = ch["name"].str();
+                c.data = ch;
                 if (!creature_for(c.who)) continue;
                 cues_.push_back(c);
                 double w = ch["wait"].num(0);
@@ -2482,6 +2544,11 @@ void CombatScreen::play_steps(const Json& steps) {
                 c.kind = CUE_SCRIPTED;
                 c.data = ch;
                 cues_.push_back(c);
+            } else if (type == "ui" && ch["call"].str().compare(0, 26, "NKaiserCrabBossBackground.") == 0) {
+                c.kind = CUE_SCRIPTED;
+                c.data = ch;
+                cues_.push_back(c);
+                t += kaiser_crab_wait(ch["call"].str(), ch["args"]);
             } else if (type == "ui" && ch["call"].str() == "NDamageNumVfx.Create" && ch["args"].size() >= 2 &&
                        ch["args"][1].is_number() && ch["args"][1].i() > 0) {
                 /* The number the game shows (unblocked damage + overkill). */

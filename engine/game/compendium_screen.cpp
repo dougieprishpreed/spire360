@@ -6,6 +6,7 @@
 #include "collection_screen.h"
 #include "stats_screen.h"
 #include "run_history_screen.h"
+#include "bestiary_screen.h"
 #include "loc.h"
 
 #include <string.h>
@@ -15,13 +16,14 @@ namespace spire {
 static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
 CompendiumScreen::CompendiumScreen(SceneLibrary* lib)
-    : lib_(lib), root_(NULL), focus_(0), library_(NULL), collection_(NULL), stats_(NULL), history_(NULL), sub_node_(NULL) {}
+    : lib_(lib), root_(NULL), focus_(0), library_(NULL), collection_(NULL), stats_(NULL), history_(NULL), bestiary_(NULL),
+      sub_node_(NULL) {}
 
 CompendiumScreen::~CompendiumScreen() { close_sub(); }
 
 bool CompendiumScreen::is_answer(const std::string& type) {
     return type == "library" || type == "compendium" || CollectionScreen::is_answer(type) || StatsScreen::is_answer(type) ||
-           RunHistoryScreen::is_answer(type);
+           RunHistoryScreen::is_answer(type) || BestiaryScreen::is_answer(type);
 }
 
 Node* CompendiumScreen::build(const std::string& character, std::string* error) {
@@ -105,6 +107,8 @@ void CompendiumScreen::close_sub() {
     stats_ = NULL;
     delete history_;
     history_ = NULL;
+    delete bestiary_;
+    bestiary_ = NULL;
 }
 
 void CompendiumScreen::set_answer(const Json& msg) {
@@ -112,11 +116,14 @@ void CompendiumScreen::set_answer(const Json& msg) {
     if (collection_ && CollectionScreen::is_answer(msg["type"].str())) collection_->set_data(msg);
     if (stats_ && StatsScreen::is_answer(msg["type"].str())) stats_->set_data(msg);
     if (history_ && RunHistoryScreen::is_answer(msg["type"].str())) history_->set_data(msg);
+    if (bestiary_ && BestiaryScreen::is_answer(msg["type"].str())) bestiary_->set_data(msg);
     if (msg["type"].str() == "compendium") {
-        /* OnSubmenuOpened: Run History once a run ended */
+        /* OnSubmenuOpened: Run History once a run ended, the Bestiary once a
+         * monster was beaten (NBestiary.CanBeShown) */
         buttons_.clear();
         for (size_t i = 0; i < all_.size(); ++i) {
             if (!strcmp(all_[i].key, "history")) all_[i].shown = msg["run_history"].b();
+            if (!strcmp(all_[i].key, "bestiary")) all_[i].shown = msg["bestiary"].b();
             set_visible(all_[i].node, all_[i].shown);
             if (all_[i].shown) buttons_.push_back(all_[i]);
         }
@@ -140,6 +147,10 @@ CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::strin
     }
     if (history_) {
         if (history_->input(pad, cmd) == RunHistoryScreen::BACK) close_sub();
+        return NONE;
+    }
+    if (bestiary_) {
+        if (bestiary_->input(pad, cmd) == BestiaryScreen::BACK) close_sub();
         return NONE;
     }
     if (pad.pressed & PadState::B) return BACK;
@@ -177,6 +188,16 @@ CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::strin
             } else {
                 delete stats_;
                 stats_ = NULL;
+            }
+        } else if (strcmp(key, "bestiary") == 0) {
+            bestiary_ = new BestiaryScreen(lib_);
+            sub_node_ = bestiary_->build(&err);
+            if (sub_node_) {
+                root_->add_child(sub_node_);
+                *cmd = BestiaryScreen::query();
+            } else {
+                delete bestiary_;
+                bestiary_ = NULL;
             }
         } else if (strcmp(key, "history") == 0) {
             history_ = new RunHistoryScreen(lib_);

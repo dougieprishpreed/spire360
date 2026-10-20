@@ -195,7 +195,7 @@ bool SpineSprite::add_animation(const std::string& name, bool loop, float delay,
 }
 
 void SpineSprite::add_empty_animation(int track) {
-    if (ensure()) state_.set_empty_animation(track);
+    if (ensure()) state_.add_empty_animation(track);
 }
 
 void SpineSprite::set_state_time_scale(float scale) { state_.time_scale = scale; }

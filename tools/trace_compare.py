@@ -38,6 +38,7 @@ DROP = {
     "run_time", "icon_base", "relic_icon_base", "inspect_upgrade", "inspect", "item_views",  # NRunTimer (wall clock)
     "crystal_sphere",  # the finished NCrystalSphereScreen under its rewards
     "spine_ops", "phobia_skin",  # MonsterModel.SetupSkins / OnPhobiaModeToggled on the spine sprite
+    "anim_init", "play",  # what the CreatureAnimator plays
 }
 
 

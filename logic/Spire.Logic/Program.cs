@@ -131,8 +131,9 @@ internal static class Program
                 "statistics" => driver.Statistics(),
                 "compendium" => driver.CompendiumState(),
                 "bestiary" => driver.Bestiary(),
-                "bestiary_entry" => driver.BestiaryEntry(Protocol.Str(cmd.Value, "monster"), Protocol.Str(cmd.Value, "encounter") ?? ""),
-                "bestiary_move" => driver.BestiaryMove(Protocol.Str(cmd.Value, "monster"), cmd.Value.TryGetProperty("index", out var nestedMoveIndex) ? nestedMoveIndex.GetInt32() : 0),
+                "bestiary_entry" => driver.BestiaryEntry(Protocol.Str(cmd.Value, "monster"), Protocol.Str(cmd.Value, "encounter") ?? "", Anims(cmd.Value)),
+                "bestiary_move" => driver.BestiaryMove(Protocol.Str(cmd.Value, "monster"), Protocol.Str(cmd.Value, "encounter") ?? "",
+                    cmd.Value.TryGetProperty("index", out var nestedMoveIndex) ? nestedMoveIndex.GetInt32() : 0, Anims(cmd.Value)),
                 "run_history" => driver.RunHistoryView(cmd.Value.TryGetProperty("index", out var nestedRunIndex) ? nestedRunIndex.GetInt32() : 0),
                 "get_state" => driver.CurrentDecision(),
                 _ => new Dictionary<string, object?>
@@ -143,6 +144,16 @@ internal static class Program
             };
             proto.Write(reply);
         }
+    }
+
+    /// <summary>A bestiary command's "anims": the skeleton's animations the client has.</summary>
+    private static HashSet<string> Anims(JsonElement cmd)
+    {
+        var set = new HashSet<string>();
+        if (cmd.TryGetProperty("anims", out var a) && a.ValueKind == JsonValueKind.Array)
+            foreach (var x in a.EnumerateArray())
+                if (x.ValueKind == JsonValueKind.String) set.Add(x.GetString()!);
+        return set;
     }
 
     private static Dictionary<string, object?>? HandleCommand(RunDriver sim, JsonElement cmd)
@@ -264,10 +275,11 @@ internal static class Program
                 return sim.Bestiary();
 
             case "bestiary_entry":
-                return sim.BestiaryEntry(Protocol.Str(cmd, "monster"), Protocol.Str(cmd, "encounter") ?? "");
+                return sim.BestiaryEntry(Protocol.Str(cmd, "monster"), Protocol.Str(cmd, "encounter") ?? "", Anims(cmd));
 
             case "bestiary_move":
-                return sim.BestiaryMove(Protocol.Str(cmd, "monster"), cmd.TryGetProperty("index", out var moveIndex) ? moveIndex.GetInt32() : 0);
+                return sim.BestiaryMove(Protocol.Str(cmd, "monster"), Protocol.Str(cmd, "encounter") ?? "",
+                    cmd.TryGetProperty("index", out var moveIndex) ? moveIndex.GetInt32() : 0, Anims(cmd));
 
             case "run_history":
                 return sim.RunHistoryView(cmd.TryGetProperty("index", out var runIndex) ? runIndex.GetInt32() : 0);

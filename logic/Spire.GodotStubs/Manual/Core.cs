@@ -67,10 +67,13 @@ public partial class Node : GodotObject
         return new Godot.Collections.Array<Node>(_children);
     }
 
-    public T? GetNodeOrNull<T>(string path) where T : class => null;
-    public T? GetNodeOrNull<T>(NodePath path) where T : class => null;
-    public T GetNode<T>(string path) where T : class => default!;
-    public T GetNode<T>(NodePath path) where T : class => default!;
+    // Spire360: the logic's UI stand-ins answer for their own children
+    // (Spire.Logic's StandIns sets this); null for any other node.
+    public static Func<Node, string, System.Type, object?>? Resolve;
+    public T? GetNodeOrNull<T>(string path) where T : class => Resolve?.Invoke(this, path, typeof(T)) as T;
+    public T? GetNodeOrNull<T>(NodePath path) where T : class => Resolve?.Invoke(this, path.ToString(), typeof(T)) as T;
+    public T GetNode<T>(string path) where T : class => (Resolve?.Invoke(this, path, typeof(T)) as T)!;
+    public T GetNode<T>(NodePath path) where T : class => (Resolve?.Invoke(this, path.ToString(), typeof(T)) as T)!;
 
     public virtual void AddChild(Node child, bool forceReadableName = false, InternalMode mode = InternalMode.Disabled)
     {

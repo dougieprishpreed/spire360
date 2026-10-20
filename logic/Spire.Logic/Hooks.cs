@@ -115,6 +115,8 @@ internal static partial class Hooks
                 {
                     ["t"] = "anim", ["who"] = Steps.Who(c), ["name"] = name,
                     ["wait"] = a.Length > 2 && a[2] is float w ? w : 0f,
+                    // what the creature's CreatureAnimator plays for it
+                    ["play"] = Animators.Trigger(c, name),
                 });
         });
 

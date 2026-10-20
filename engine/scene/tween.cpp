@@ -128,6 +128,28 @@ static float quad(TweenEase e, float t, float b, float c, float d) {
     return -c / 2 * (t * (t - 2) - 1) + b;
 }
 
+static float bounce_out(float t, float b, float c, float d) {
+    t /= d;
+    if (t < 1 / 2.75f) return c * (7.5625f * t * t) + b;
+    if (t < 2 / 2.75f) {
+        t -= 1.5f / 2.75f;
+        return c * (7.5625f * t * t + 0.75f) + b;
+    }
+    if (t < 2.5f / 2.75f) {
+        t -= 2.25f / 2.75f;
+        return c * (7.5625f * t * t + 0.9375f) + b;
+    }
+    t -= 2.625f / 2.75f;
+    return c * (7.5625f * t * t + 0.984375f) + b;
+}
+
+static float bounce(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_OUT) return bounce_out(t, b, c, d);
+    if (e == EASE_IN) return c - bounce_out(d - t, 0, c, d) + b;
+    if (t < d / 2) return (c / 2 - bounce_out(d - t * 2, 0, c / 2, d)) + b;
+    return bounce_out(t * 2 - d, b + c / 2, c / 2, d);
+}
+
 static float spring_out(float t, float b, float c, float d) {
     t /= d;
     float s = 1.0f - t;
@@ -154,6 +176,7 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
     case TRANS_QUART: return quart(ease, t, b, c, d);
     case TRANS_SPRING: return spring(ease, t, b, c, d);
     case TRANS_QUAD: return quad(ease, t, b, c, d);
+    case TRANS_BOUNCE: return bounce(ease, t, b, c, d);
     default: return c * t / d + b;
     }
 }

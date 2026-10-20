@@ -4,12 +4,15 @@
 // statistics mode's kills / deaths and quotes per character.
 
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Acts;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Models.Encounters;
+using MegaCrit.Sts2.Core.Models.Monsters;
+using MegaCrit.Sts2.Core.Nodes.Vfx.Backgrounds;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Saves;
@@ -171,113 +174,226 @@ public partial class RunDriver
         return result;
     }
 
+    /// <summary>BestiaryEntry.CreateLayoutNode: which NBestiaryLayout shows the entry.</summary>
+    private static string BestiaryLayout(string encounterId) => encounterId switch
+    {
+        "KAISER_CRAB_BOSS" => "kaiser_crab",
+        "DECIMILLIPEDE_ELITE" => "decimillipede",
+        _ => "default",
+    };
+
     /// <summary>
-    /// NBestiaryLayout.Setup for one entry: the monsters it shows (a mutable
-    /// copy set up for combat, as the layouts make it), their spine setup and
-    /// the moves the buttons play (GenerateBestiaryMoveList; the skeleton's
-    /// revive / hurt / die animations are the client's to add, with these
-    /// sounds).
+    /// The monsters an NBestiaryLayout's Setup makes: a mutable copy of the
+    /// entry's monster set up for combat outside any fight (NullCombatState),
+    /// or the Decimillipede's segments in their encounter slots.
     /// </summary>
-    public Dictionary<string, object?> BestiaryEntry(string? monsterId, string encounterId)
+    private static List<Creature> BestiaryCreatures(string? monsterId, string encounterId)
+    {
+        var result = new List<Creature>();
+        if (BestiaryLayout(encounterId) == "decimillipede")
+        {
+            var encounter = ModelDb.AllEncounters.First(e => e.Id.Entry == encounterId).ToMutable();
+            encounter.GenerateMonstersWithSlots(MegaCrit.Sts2.Core.Runs.NullRunState.Instance);
+            foreach (var (m, slot) in encounter.MonstersWithSlots)
+            {
+                m.Rng = Rng.Chaotic;
+                m.SetUpForCombat();
+                result.Add(new Creature(m, CombatSide.Enemy, slot) { CombatState = NullCombatState.Instance });
+            }
+            return result;
+        }
+        var canonical = ModelDb.Monsters.FirstOrDefault(x => x.Id.Entry == monsterId);
+        if (canonical == null) return result;
+        var monster = canonical.ToMutable();
+        monster.Rng = Rng.Chaotic;
+        monster.RunRng = new MegaCrit.Sts2.Core.Runs.RunRngSet(Rng.Chaotic);
+        monster.SetUpForCombat();
+        result.Add(new Creature(monster, CombatSide.Enemy, null) { CombatState = NullCombatState.Instance });
+        return result;
+    }
+
+    /// <summary>One of NBestiary's move buttons (BestiaryMonsterMove).</summary>
+    private struct BestiaryButton
+    {
+        public string Name;
+        public BestiaryMonsterMove? Move;  // the monster's own
+        public string? Layout;             // the layout's action: hurt, die, writhe, reattach, dead
+    }
+
+    /// <summary>
+    /// The layout's Setup list: GenerateBestiaryMoveList, given the creature's
+    /// visuals as far as it reads them (the animations its skeleton has, from
+    /// the client), plus the Kaiser Crab's hurt / die arm; the Decimillipede's
+    /// own three.
+    /// </summary>
+    private static List<BestiaryButton> BestiaryButtons(string layout, List<Creature> creatures, HashSet<string> anims)
+    {
+        var buttons = new List<BestiaryButton>();
+        if (layout == "decimillipede")
+        {
+            foreach (var (key, act) in new[] { ("WRITHE", "writhe"), ("REATTACH", "reattach"), ("DEAD", "dead") })
+                buttons.Add(new BestiaryButton
+                {
+                    Name = new LocString("monsters", ModelDb.GetId<DecimillipedeSegment>().Entry + ".moves." + key + ".title").GetFormattedText(),
+                    Layout = act,
+                });
+            return buttons;
+        }
+        if (creatures.Count == 0) return buttons;
+        var visuals = (MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals)System.Runtime.CompilerServices.RuntimeHelpers
+            .GetUninitializedObject(typeof(MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals));
+        // (the skeleton's questions are not cues)
+        var before = Steps.Intercept;
+        Steps.Intercept = (_, _) => { };
+        StandIns.SkeletonAnims = anims;
+        try
+        {
+            foreach (var mv in creatures[0].Monster!.GenerateBestiaryMoveList(visuals))
+                buttons.Add(new BestiaryButton { Name = mv.displayName, Move = mv });
+        }
+        finally
+        {
+            StandIns.SkeletonAnims = null;
+            Steps.Intercept = before;
+        }
+        if (layout == "kaiser_crab")
+        {
+            buttons.Add(new BestiaryButton { Name = new LocString("bestiary", "ACTION_NAME.hurt").GetFormattedText(), Layout = "hurt" });
+            buttons.Add(new BestiaryButton { Name = new LocString("bestiary", "ACTION_NAME.die").GetFormattedText(), Layout = "die" });
+        }
+        return buttons;
+    }
+
+    /// <summary>
+    /// NBestiaryLayout.Setup for one entry: the layout, its monsters (their
+    /// spine setup, slots) and its move buttons. anims: the animations the
+    /// monster's skeleton has (revive / hurt / die).
+    /// </summary>
+    public Dictionary<string, object?> BestiaryEntry(string? monsterId, string encounterId, HashSet<string> anims)
     {
         EnsureModelDbInitialized();
-        var d = new Dictionary<string, object?> { ["type"] = "bestiary_entry", ["monster"] = monsterId, ["encounter"] = encounterId };
-        var encounter = ModelDb.AllEncounters.FirstOrDefault(e => e.Id.Entry == encounterId);
-        var monsters = new List<MonsterModel>();
-        if (monsterId != null)
+        string layout = BestiaryLayout(encounterId);
+        var d = new Dictionary<string, object?>
         {
-            var m = ModelDb.Monsters.FirstOrDefault(x => x.Id.Entry == monsterId);
-            if (m != null) monsters.Add(m);
-        }
-        else if (encounter != null)
+            ["type"] = "bestiary_entry", ["monster"] = monsterId, ["encounter"] = encounterId, ["layout"] = layout,
+        };
+        StandIns.InBestiary = true;
+        try
         {
-            monsters.AddRange(encounter.AllPossibleMonsters);
-        }
-        var views = new List<Dictionary<string, object?>>();
-        foreach (var canonical in monsters)
-        {
-            var view = new Dictionary<string, object?> { ["id"] = canonical.Id.Entry, ["title"] = canonical.Title.GetFormattedText() };
-            try
+            var creatures = BestiaryCreatures(monsterId, encounterId);
+            d["monsters"] = creatures.Select(c =>
             {
-                var monster = canonical.ToMutable();
-                monster.Rng = Rng.Chaotic;
-                monster.RunRng = new MegaCrit.Sts2.Core.Runs.RunRngSet(Rng.Chaotic);
-                monster.SetUpForCombat();
-                var creature = new Creature(monster, CombatSide.Enemy, null) { CombatState = NullCombatState.Instance };
-                var ops = SpineRecorder.Ops(creature);
+                var view = new Dictionary<string, object?> { ["id"] = c.Monster!.Id.Entry, ["slot"] = c.SlotName };
+                var ops = SpineRecorder.Ops(c);
                 if (ops.Count > 0) view["spine_ops"] = ops;
-                if (SpineRecorder.HasPhobiaSkin(creature)) view["phobia_skin"] = true;
-                var moves = new List<Dictionary<string, object?>>();
-                foreach (var mv in monster.GenerateBestiaryMoveList(null))
-                {
-                    moves.Add(new Dictionary<string, object?>
-                    {
-                        ["name"] = mv.displayName,
-                        ["state"] = mv.stateId,
-                        ["anim"] = mv.animId,
-                        ["sfx"] = mv.sfx,
-                        ["stop_sfx"] = mv.stopSfxLoops,
-                        ["custom"] = mv.nonStateMove != null || mv.action != null,
-                    });
-                }
-                view["moves"] = moves;
-                view["hurt_sfx"] = monster.TakeDamageSfx;
-                view["death_sfx"] = monster.DeathSfx;
-            }
-            catch (Exception ex)
+                if (SpineRecorder.HasPhobiaSkin(c)) view["phobia_skin"] = true;
+                return view;
+            }).ToList();
+            // NBestiaryLayoutKaiserCrab: the arm this crab part is
+            if (layout == "kaiser_crab" && creatures.Count > 0)
+                d["arm"] = creatures[0].Monster is Crusher ? "left" : "right";
+            d["moves"] = BestiaryButtons(layout, creatures, anims).Select(b => new Dictionary<string, object?>
             {
-                Console.Error.WriteLine($"[WARN] bestiary {canonical.Id.Entry}: {ex.Message}");
-            }
-            views.Add(view);
+                ["name"] = b.Name,
+                ["anim"] = b.Move?.animId,
+                ["sfx"] = b.Move?.sfx,
+                ["stop_sfx"] = b.Move?.stopSfxLoops ?? false,
+                ["logic"] = b.Layout != null || b.Move?.animId == null,
+                ["layout"] = b.Layout,
+            }).ToList();
         }
-        d["monsters"] = views;
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] bestiary {monsterId ?? encounterId}: {ex.Message}");
+        }
+        finally
+        {
+            StandIns.InBestiary = false;
+        }
         return d;
     }
 
     /// <summary>
-    /// NBestiary.PlayMoveAnim for a move the logic runs: the state's move
-    /// (SetMoveImmediate + PerformMove) or the monster's own action, on a
-    /// fresh copy outside any fight (NullCombatState, as the layouts make
-    /// it). What it shows comes back as the response's steps (its cues).
+    /// NBestiary.PlayMoveAnim (and the layouts' own actions) for a move the
+    /// logic plays: the state's move (SetMoveImmediate + PerformMove), the
+    /// monster's own action, the Kaiser Crab's arm or the Decimillipede's
+    /// segments, on fresh copies outside any fight (as the layouts make them).
+    /// What it shows comes back as the response's steps; who: the creatures
+    /// in the entry's order.
     /// </summary>
-    public Dictionary<string, object?> BestiaryMove(string? monsterId, int index)
+    public Dictionary<string, object?> BestiaryMove(string? monsterId, string encounterId, int index, HashSet<string> anims)
     {
         EnsureModelDbInitialized();
+        string layout = BestiaryLayout(encounterId);
         var d = new Dictionary<string, object?> { ["type"] = "bestiary_move", ["monster"] = monsterId, ["index"] = index, ["ok"] = false };
-        var canonical = ModelDb.Monsters.FirstOrDefault(x => x.Id.Entry == monsterId);
-        if (canonical == null) return d;
+        StandIns.InBestiary = true;
         try
         {
-            var monster = canonical.ToMutable();
-            monster.Rng = Rng.Chaotic;
-            monster.RunRng = new MegaCrit.Sts2.Core.Runs.RunRngSet(Rng.Chaotic);
-            monster.SetUpForCombat();
-            var creature = new Creature(monster, CombatSide.Enemy, null) { CombatState = NullCombatState.Instance };
-            var moves = monster.GenerateBestiaryMoveList(null);
-            if (index < 0 || index >= moves.Count) return d;
-            var mv = moves[index];
-            d["who"] = Steps.Who(creature);
-            if (mv.stateId != null)
+            var creatures = BestiaryCreatures(monsterId, encounterId);
+            var buttons = BestiaryButtons(layout, creatures, anims);
+            if (index < 0 || index >= buttons.Count || creatures.Count == 0) return d;
+            d["who"] = creatures.Select(c => Steps.Who(c)).ToList();
+            var b = buttons[index];
+            var monster = creatures[0].Monster!;
+            var side = monster is Crusher ? NKaiserCrabBossBackground.ArmSide.Left : NKaiserCrabBossBackground.ArmSide.Right;
+            NKaiserCrabBossBackground Crab() => (NKaiserCrabBossBackground)System.Runtime.CompilerServices.RuntimeHelpers
+                .GetUninitializedObject(typeof(NKaiserCrabBossBackground));
+            switch (b.Layout)
             {
-                monster.SetMoveImmediate((MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine.MoveState)monster.MoveStateMachine.States[mv.stateId], forceTransition: true);
-                Sched.Run(() => monster.PerformMove());
-            }
-            else if (mv.nonStateMove != null)
-            {
-                var run = mv.nonStateMove;
-                Sched.Run(() => run(Array.Empty<Creature>()));
-            }
-            else if (mv.action != null)
-            {
-                var run = mv.action;
-                Sched.Run(() => run());
+                case "hurt":
+                    Crab().PlayHurtAnim(side);
+                    break;
+                case "die":
+                    SfxCmd.Play(monster.DeathSfx);
+                    Crab().PlayArmDeathAnim(side);
+                    break;
+                case "writhe":
+                    foreach (var c in creatures) ((DecimillipedeSegment)c.Monster!).SegmentAttack();
+                    // the rocks at the middle of the screen, then Cmd.Wait(0.5)
+                    Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = "vfx/vfx_decimillipede_rocks", ["at"] = "screen" });
+                    Steps.Wait(500, "cmd");
+                    break;
+                case "reattach":
+                    Sched.Run(async () =>
+                    {
+                        foreach (var c in creatures) await CreatureCmd.TriggerAnim(c, "Revive", 0.15f);
+                    });
+                    break;
+                case "dead":
+                    Sched.Run(async () =>
+                    {
+                        foreach (var c in creatures) await CreatureCmd.TriggerAnim(c, "Dead", 0.15f);
+                    });
+                    break;
+                default:
+                    var mv = b.Move!.Value;
+                    if (mv.stateId != null)
+                    {
+                        monster.SetMoveImmediate((MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine.MoveState)monster.MoveStateMachine.States[mv.stateId], forceTransition: true);
+                        Sched.Run(() => monster.PerformMove());
+                    }
+                    else if (mv.nonStateMove != null)
+                    {
+                        var run = mv.nonStateMove;
+                        Sched.Run(() => run(Array.Empty<Creature>()));
+                    }
+                    else if (mv.action != null)
+                    {
+                        var run = mv.action;
+                        Sched.Run(() => run());
+                    }
+                    break;
             }
             Steps.Capture();
             d["ok"] = true;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[WARN] bestiary move {monsterId} {index}: {ex.Message}");
+            Console.Error.WriteLine($"[WARN] bestiary move {monsterId ?? encounterId} {index}: {ex.Message}");
+        }
+        finally
+        {
+            StandIns.InBestiary = false;
         }
         return d;
     }
