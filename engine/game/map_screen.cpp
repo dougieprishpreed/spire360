@@ -494,11 +494,8 @@ void MapScreen::focus(int i) {
 
 std::string MapScreen::input(const PadState& pad) {
     if (busy()) return std::string();
-    if (act_anim_ >= 0 && pad.pressed) {
-        /* past a quarter of it, input ends the rise */
-        act_anim_ = 4.0;
-        return std::string();
-    }
+    /* past a quarter of it, input ends the rise (and still counts) */
+    if (act_anim_ >= 0 && pad.pressed) act_anim_ = 4.0;
     if (pad.pressed & PadState::UP) scroll_to_ = minf(scroll_to_ + scroll_step_, scroll_hi_);
     if (pad.pressed & PadState::DOWN) scroll_to_ = maxf(scroll_to_ - scroll_step_, scroll_lo_);
     int n = (int)choices_.size();
