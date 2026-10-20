@@ -9,6 +9,65 @@ data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below).
 
+## Alpha push checkpoint (2026-10-20, later; commits ddc2c14..633b2cb)
+
+Validation at 633b2cb: seeded traces `differences: 0` (traces/base5 vs
+traces/new9, `work/play-data`); `spire_check` on traces/new9: 1,421
+responses, 995 rooms, 366 impacts, 181 orbs, 26 deaths, **0 failures**;
+the D3D9 path syntax-checks and every effect/canvas HLSL entry compiles
+for ps_3_0 (canvas shader ~425/512 slots). Full content coverage on the
+logic of this session (work/coverage4): all suites ok. No XDK build ran.
+Use the complete pack `work/pack-sound-effects/pack.s3p` with
+`SPIRE_DATA=work/pack-sound-effects/data` (baked NoiseTexture2D, audio);
+`work/pack` is older.
+
+Logic (presentation keys, DROPped by trace_compare where they reach
+decisions): `view_pile` (deck/draw/discard/exhaust card views, the draw
+pile by rarity, deck upgrade previews), `view_map` (the map screen's view
+without choices), `settings` / `set_setting` / `reset_gameplay_settings`
+(PrefsSave + SettingsSave through SaveManager after the FileStore is
+installed), creature `death_fade` / `death_padding` /
+`death_anim_length`, context `run_time` (RunManager.RunTime). The UI
+stand-ins (previous session): `NCombatRoom.Instance` and per-creature
+NCreature stand-ins answer GetCreatureNode, positions are encoded Vector2
+(x = 1e6 + slot·1e4, y = −1e6 − anchor·1e4; Steps prints `e1@bottom+dx,dy`).
+
+Renderer: effect shaders (`engine/gfx/effects.h`, one ps_e<id> each in
+`shaders/effects.hlsl`, the C++ twin in `SwRenderer::effect_pixel`), 20
+so far; per-particle parameters through `shader_effect_particle` (two
+curves at the life, CUSTOM.z offsets). Godot 4's fragment COLOR is vertex
+colour × texel (game shaders keep a `vertex_color` varying for the
+vertex colour alone). Render to texture: `begin_capture/end_capture`
+(the group target copied out; premultiplied textures, the canvas shader
+unpremultiplies with c28) behind `SubViewport` (update modes, size 2D
+override), `ViewportTexture` (bound per node instance:
+`bind_texture`), `SubViewportContainer`. Inline shaders are named
+`inline:<fnv64 of their code without comments/whitespace>` so copies share
+a port. Effect samplers take GradientTexture1D/2D and CurveTexture.
+MeshInstance2D draws ArrayMesh surfaces; SpineSlotNode materials apply
+per slot (ShaderMaterials included).
+
+Shown now: monster death (NMonsterDeathVfx: body captured once into the
+effect's viewport, dissolve.gdshader with its flakes and sound, after the
+death animation + 0.5 s; non-fading monsters vanish), card exhaust
+(NCardExhaustQuickVfx from the hand, NCardExhaustVfx for a played card in
+its viewport), the low-HP border (PlayerHurtVignetteHelper.Play), deck
+view (LB: sorters, View Upgrades on Y) and pile views (LT/RT/RB), the map
+overlay (Back) and map scrolling (up/down), the act banner with the
+start-of-act map rise, the settings screen (pause and title: General +
+Sound; volumes applied to the buses squared as NAudioManager, shake
+multiplier, hand indices, text effects, fast mode's act timings, run
+timer) and the credits.
+
+Open (next): Crystal Sphere screen (scry_reveal needs 121 per-cell fades:
+plan a CPU-baked ball texture + per-cell vertex alpha + border quads;
+crystal_sphere_item shine), compendium / run history / statistics,
+phobia mode bodies, long-press confirmation, intro logo, ~55 remaining
+effect shaders (`python tools/shader_survey.py <pack>`; afflictions,
+forms, scream, boss/background inline ones), NCardPlay flight details,
+inspect-card screen, soak runs. `spire_gaps` over traces is slow; sample
+(work/gaps5.* covers 2 act runs + encounters + events + scenarios).
+
 ## Coverage and screen-texture checkpoint (2026-10-20)
 
 Content coverage (`tools/content_coverage.py`, everything unlocked): all
@@ -685,10 +744,12 @@ here as they land, with the commit.
 - [ ] Room transitions (fade, the room's own enter animations) and map
       travel (the path drawn, the marker moving, the map opening/closing).
 - [ ] Act transitions, the act start banners, the final victory and the
-      ending screens.
+      ending screens. Act banner + start-of-act map rise done (`fde9a44`).
 - [ ] Crystal Sphere minigame screen (a plain list now).
 - [ ] Pause / settings menu (Start), deck viewer, draw/discard/exhaust
       pile viewers, inspect card (zoomed card with upgrade preview).
+      Done: pause, settings + credits (`c9fa02f`, `633b2cb`), deck and
+      pile viewers (`dcfe373`), map overlay (`3d2eb47`); open: inspect card.
 - [ ] Any decision type still shown as the plain list: find them with
       spire_play runs on every character and the AutoSlay screen list
       (DECISIONS D7).
