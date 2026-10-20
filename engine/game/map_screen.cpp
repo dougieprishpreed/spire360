@@ -104,7 +104,7 @@ static std::string outline_name(const std::string& type, const std::string& room
 
 MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1), next_tick_(0), current_col_(-1), current_row_(-1),
     opening_(0), travel_t_(-1), marker_(NULL), map_ctl_(NULL), scroll_(0), scroll_to_(0), scroll_lo_(0), scroll_hi_(0),
-    scroll_step_(1) {}
+    scroll_step_(1), act_anim_(-1), banner_(NULL), banner_end_(0) {}
 
 Node* MapScreen::build(const Json& d, std::string* error) {
     points_.clear();
@@ -414,6 +414,56 @@ Node* MapScreen::build(const Json& d, std::string* error) {
         tweens_.tween_from(&l->offset[SIDE_LEFT], l->offset[SIDE_LEFT] + 120, l->offset[SIDE_LEFT], 0.25f, TRANS_BACK, EASE_OUT, 0.1f);
         tweens_.tween_from(&l->offset[SIDE_RIGHT], l->offset[SIDE_RIGHT] + 120, l->offset[SIDE_RIGHT], 0.25f, TRANS_BACK, EASE_OUT, 0.1f);
     }
+
+    /* The act's first map (not one opened from the top bar): the map
+     * rises in (StartOfActAnim) under NActBanner. The first act begins
+     * after Neow, at floor 1. */
+    act_anim_ = -1;
+    banner_ = NULL;
+    bool view = d["type"].str() == "map_view";
+    bool neow = d["act"].i(1) == 1 && d["context"]["ancient"].str() == "NEOW";
+    if (!view && d["floor"].i(-1) == (neow ? 1 : 0)) {
+        act_anim_ = 0;
+        scroll_ = scroll_to_ = 1800;
+        map_ctl->offset[SIDE_TOP] = map_ctl->offset[SIDE_BOTTOM] = 1800;
+        Node* banner = instance(lib_, "scenes/ui/act_banner.tscn");
+        if (banner) {
+            root->add_child(banner);
+            banner_ = banner;
+            banner_end_ = 5.0; /* its fade ends at 4.75 */
+            /* NActBanner.AnimateVfx */
+            std::string number = Loc::get("gameplay_ui", "ACT_NUMBER");
+            size_t at = number.find("{actNumber}");
+            if (at != std::string::npos) number.replace(at, 11, format("%d", d["act"].i(1)));
+            Node* num = banner->get_node("ActNumber");
+            Node* name = banner->get_node("ActName");
+            Node* band = banner->find_unique("Banner");
+            set_label(num, number);
+            set_label(name, d["act_name"].str());
+            if (band && band->is_canvas_item()) {
+                ((CanvasItem*)band)->modulate = Color(0, 0, 0, 0);
+                tweens_.tween(&((CanvasItem*)band)->modulate.a, 0.25f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
+            }
+            if (name && name->is_canvas_item()) {
+                ((CanvasItem*)name)->modulate = Color(1, 1, 1, 0);
+                tweens_.tween(&((CanvasItem*)name)->modulate.a, 1.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 0.25f);
+            }
+            if (num && num->is_control()) {
+                Control* nc = (Control*)num;
+                nc->modulate = Color(1, 1, 1, 0);
+                tweens_.tween(&nc->modulate.a, 1.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
+                /* position:y 450 -> 440 (its anchors at the middle) */
+                float h = nc->offset[SIDE_BOTTOM] - nc->offset[SIDE_TOP];
+                float top = 450.0f - 540.0f;
+                nc->offset[SIDE_TOP] = top;
+                nc->offset[SIDE_BOTTOM] = top + h;
+                tweens_.tween(&nc->offset[SIDE_TOP], top - 10, 1.25f, TRANS_QUAD, EASE_OUT, 0.5f);
+                tweens_.tween(&nc->offset[SIDE_BOTTOM], top - 10 + h, 1.25f, TRANS_QUAD, EASE_OUT, 0.5f);
+            }
+            if (banner->is_canvas_item())
+                tweens_.tween(&((CanvasItem*)banner)->modulate.a, 0.0f, 1.0f, TRANS_QUAD, EASE_OUT, 3.75f);
+        }
+    }
     return root;
 }
 
@@ -444,6 +494,11 @@ void MapScreen::focus(int i) {
 
 std::string MapScreen::input(const PadState& pad) {
     if (busy()) return std::string();
+    if (act_anim_ >= 0 && pad.pressed) {
+        /* past a quarter of it, input ends the rise */
+        act_anim_ = 4.0;
+        return std::string();
+    }
     if (pad.pressed & PadState::UP) scroll_to_ = minf(scroll_to_ + scroll_step_, scroll_hi_);
     if (pad.pressed & PadState::DOWN) scroll_to_ = maxf(scroll_to_ - scroll_step_, scroll_lo_);
     int n = (int)choices_.size();
@@ -481,7 +536,19 @@ void MapScreen::begin_travel(int col, int row) {
 void MapScreen::frame(double dt) {
     tweens_.update(dt);
     opening_ += dt;
-    if (map_ctl_ && fabsf(scroll_ - scroll_to_) > 0.1f) {
+    if (act_anim_ >= 0) {
+        act_anim_ += dt;
+        float u = clampf((float)((act_anim_ - 1.0) / 3.0), 0, 1);
+        scroll_ = scroll_to_ = 1800.0f + (-600.0f - 1800.0f) * tween_interpolate(TRANS_EXPO, EASE_IN_OUT, u, 0, 1, 1);
+        if (map_ctl_) map_ctl_->offset[SIDE_TOP] = map_ctl_->offset[SIDE_BOTTOM] = scroll_;
+        if (u >= 1) act_anim_ = -1;
+    }
+    if (banner_ && opening_ >= banner_end_) {
+        if (banner_->parent) banner_->parent->remove_child(banner_);
+        delete banner_;
+        banner_ = NULL;
+    }
+    if (map_ctl_ && act_anim_ < 0 && fabsf(scroll_ - scroll_to_) > 0.1f) {
         float k = (float)dt * 10.0f;
         scroll_ += (scroll_to_ - scroll_) * (k > 1 ? 1 : k);
         if (fabsf(scroll_ - scroll_to_) < 0.5f) scroll_ = scroll_to_;

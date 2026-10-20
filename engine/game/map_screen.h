@@ -24,7 +24,7 @@ public:
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
     virtual void frame(double dt);
-    bool busy() const { return opening_ < 0.45 || travel_t_ >= 0; }
+    bool busy() const { return opening_ < 0.45 || travel_t_ >= 0 || (act_anim_ >= 0 && act_anim_ < 1.75); }
     void begin_travel(int col, int row);
 
 private:
@@ -62,6 +62,12 @@ private:
      * target, within the act's first and last rows. */
     Control* map_ctl_;
     float scroll_, scroll_to_, scroll_lo_, scroll_hi_, scroll_step_;
+    /* StartOfActAnim: the map rising from 1800 to -600 (1 s delay, 3 s
+     * Expo InOut); input before a quarter of it is ignored, after it ends
+     * it. -1: not playing. NActBanner over it, freed at banner_end_. */
+    double act_anim_;
+    Node* banner_;
+    double banner_end_;
     Vec2 marker_to_;
 };
 
