@@ -24,6 +24,7 @@
 namespace spire {
 
 class ConfirmPopup;
+class CreditsScreen;
 class Control;
 class SceneLibrary;
 
@@ -69,6 +70,8 @@ private:
     double toast_t_;
     ConfirmPopup* confirm_;
     Node* confirm_node_;
+    CreditsScreen* credits_;
+    Node* credits_node_;
     TweenSet tweens_;
 };
 

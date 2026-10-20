@@ -3,6 +3,7 @@
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "confirm_popup.h"
+#include "credits_screen.h"
 #include "loc.h"
 
 #include <math.h>
@@ -16,11 +17,17 @@ static const Color CREAM(1.0f, 0.964706f, 0.886275f, 1.0f), HALF_CREAM(1.0f, 0.9
 static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
 SettingsScreen::SettingsScreen(SceneLibrary* lib)
-    : lib_(lib), root_(NULL), focus_(-1), tab_(0), toast_(NULL), toast_t_(-1), confirm_(NULL), confirm_node_(NULL) {
+    : lib_(lib), root_(NULL), focus_(-1), tab_(0), toast_(NULL), toast_t_(-1), confirm_(NULL), confirm_node_(NULL),
+      credits_(NULL), credits_node_(NULL) {
     for (int i = 0; i < 2; ++i) panels_[i] = boxes_[i] = tabs_[i] = NULL;
 }
 
 SettingsScreen::~SettingsScreen() {
+    if (credits_node_) {
+        if (credits_node_->parent) credits_node_->parent->remove_child(credits_node_);
+        delete credits_node_;
+    }
+    delete credits_;
     if (confirm_node_) {
         if (confirm_node_->parent) confirm_node_->parent->remove_child(confirm_node_);
         delete confirm_node_;
@@ -272,6 +279,16 @@ std::string SettingsScreen::change(Line& l, int step) {
 
 SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* cmd) {
     cmd->clear();
+    if (credits_) {
+        if (!credits_->input(pad)) {
+            if (credits_node_->parent) credits_node_->parent->remove_child(credits_node_);
+            delete credits_node_;
+            credits_node_ = NULL;
+            delete credits_;
+            credits_ = NULL;
+        }
+        return NONE;
+    }
     if (confirm_) {
         ConfirmPopup::Action a = confirm_->input(pad);
         if (a != ConfirmPopup::NONE) {
@@ -303,7 +320,18 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
     Line& l = lines_[(size_t)focus_];
     if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) *cmd = change(l, (pad.pressed & PadState::LEFT) ? -1 : 1);
     else if (pad.pressed & PadState::A) {
-        if (l.kind == BUTTON && strcmp(l.key, "credits") == 0) return CREDITS;
+        if (l.kind == BUTTON && strcmp(l.key, "credits") == 0) {
+            /* NCreditsButton: the credits over the settings */
+            std::string err;
+            credits_ = new CreditsScreen(lib_);
+            credits_node_ = credits_->build(&err);
+            if (credits_node_) root_->add_child(credits_node_);
+            else {
+                delete credits_;
+                credits_ = NULL;
+            }
+            return NONE;
+        }
         if (l.kind == BUTTON && strcmp(l.key, "reset") == 0) {
             /* NResetGameplayButton: its confirmation first */
             std::string err;
