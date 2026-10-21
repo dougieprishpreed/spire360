@@ -599,6 +599,7 @@ void Particles2D::draw(Canvas& c) {
         if (sm->shader == "shaders/vfx/common/vfx_flipbook_shader.gdshader") fb = 1;
         if (sm->shader == "shaders/vfx/common/vfx_row_flipbook_shader.gdshader") fb = 2;
         if (sm->shader == "shaders/vfx/common/vfx_common_particle_shader.gdshader" ||
+            sm->shader == "shaders/vfx/common/vfx_round_smoke_shader.gdshader" ||
             sm->shader == "shaders/vfx/ui/card/exhaust/vfx_card_exhaust_quick_erosion_shader.gdshader")
             fb = 3;
         pivot = shader_param_vec2(sm, "pivot_offset", Vec2(0, 0));

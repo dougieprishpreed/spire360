@@ -615,6 +615,43 @@ float4 ps_e46(VsOut i) : COLOR {
     return float4(saturate(i.color.rgb) * a, a);
 }
 
+// 47: vfx_round_smoke_shader: the frame read through its own panning blue,
+// coloured by the lut at its red, eroded by its red at the particle's life.
+float4 ps_e47(VsOut i) : COLOR {
+    float db = tex2D(g_tex, i.uv + g_p0.xy).b;
+    float4 t = tex2D(g_tex, i.uv + db * g_p0.z);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(smoothstep(g_p0.w, g_p0.w + g_p1.x, t.r) * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 48: vfx_scream_squiggly_streaks: the streak pushed sideways by its own
+// panning blue (offset by the particle's rotation), in the vertex colour.
+float4 ps_e48(VsOut i) : COLOR {
+    float m = (tex2D(g_tex, i.uv * g_p0.xy + g_p0.zw + g_p1.y).b - 0.5) * 2.0;
+    float a = saturate(tex2D(g_tex, i.uv + float2(m * g_p1.x, 0.0)).a * i.color.a);
+    return float4(saturate(i.color.rgb) * a, a);
+}
+
+// 49: vfx_card_remove_erosion: the card pushed sideways by its panning
+// blue, eroded at the particle's life, its edge brightened by the lut.
+float4 ps_e49(VsOut i) : COLOR {
+    float d = tex2D(g_tex, i.uv + g_p0.x).b - 0.5;
+    float4 t = tex2D(g_tex, i.uv + float2(d * g_p0.z, 0.0));
+    float b = smoothstep(g_p0.w, g_p0.w + g_p1.y, t.a);
+    float4 l = tex2D(g_e0, float2(b, b));
+    float a = saturate(smoothstep(g_p0.w, g_p0.w + g_p1.x, t.a) * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 50: vfx_minion_divebomb_rings: the lut at the red, eroded by the alpha.
+float4 ps_e50(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(i.color.a * smoothstep(g_p0.x, g_p0.x + g_p0.y, t.a));
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
 float4 ps_e21(VsOut i) : COLOR {
     float w[7] = { 0.0702, 0.1311, 0.1907, 0.2160, 0.1907, 0.1311, 0.0702 };

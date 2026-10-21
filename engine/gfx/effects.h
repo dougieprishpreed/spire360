@@ -258,6 +258,24 @@ enum EffectId {
      * TEXTURE((UV - p0p1) / p2 + p0p1).a - TEXTURE(UV).a) * tex0(UV).r
      * (white when unset), times the vertex colour. */
     EFFECT_ECHO_LINES = 46,
+    /* vfx_round_smoke_shader (particles; the flipbook frame by CUSTOM.z in
+     * Particles2D, so UV here is the frame's): t = TEXTURE(UV + TEXTURE(UV
+     * + p0p1).b * p2); (lut(t.r).rgb, smoothstep(p3, p3 + p4, t.r)) *
+     * vertex colour; p3 the erosion curve at the particle's life. */
+    EFFECT_ROUND_SMOKE = 47,
+    /* vfx_scream_squiggly_streaks_shader (particles): m = (TEXTURE(UV *
+     * p0p1 + p2p3 + p5).b - 0.5) * 2 (p5 CUSTOM.x, the rotation); (vertex
+     * rgb, TEXTURE(UV + (m * p4, 0)).a * vertex alpha). */
+    EFFECT_SCREAM_STREAKS = 48,
+    /* vfx_card_remove_erosion_shader (particles): d = TEXTURE(UV + p0).b -
+     * 0.5 (p0: speed * TIME + CUSTOM.z), t = TEXTURE(UV + (d * p2, 0));
+     * (lut(smoothstep(p3, p3 + p5, t.a)).rgb, smoothstep(p3, p3 + p4,
+     * t.a)) * vertex colour; p3 the erosion curve at the life. */
+    EFFECT_CARD_REMOVE = 49,
+    /* vfx_minion_divebomb_rings_shader (particles): (lut(TEXTURE.r).rgb *
+     * vertex rgb, vertex alpha * smoothstep(p0, p0 + p1, TEXTURE.a)); p0 the
+     * erosion curve at the particle's life. */
+    EFFECT_DIVEBOMB_RINGS = 50,
     EFFECT_COUNT
 };
 

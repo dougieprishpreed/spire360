@@ -986,6 +986,53 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_ROUND_SMOKE: {
+        float d[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);
+        float db = d[3] > 0 ? d[2] / d[3] : 0.0f;
+        if (tex) sample(tex->img, u + db * e.p[2], v + db * e.p[2], flags, t);
+        float tr = t[3] > 0 ? t[0] / t[3] : 0.0f;
+        effect_texel(e, 0, tr, tr, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[3], e.p[3] + e.p[4], tr) * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SCREAM_STREAKS: {
+        float mk[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 };
+        if (tex) sample(tex->img, u * e.p[0] + e.p[2] + e.p[5], v * e.p[1] + e.p[3] + e.p[5], flags, mk);
+        float m = ((mk[3] > 0 ? mk[2] / mk[3] : 0.0f) - 0.5f) * 2.0f;
+        if (tex) sample(tex->img, u + m * e.p[4], v, flags, t);
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_CARD_REMOVE: {
+        float d[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, u + e.p[0], v + e.p[0], flags, d);
+        float db = (d[3] > 0 ? d[2] / d[3] : 0.0f) - 0.5f;
+        if (tex) sample(tex->img, u + db * e.p[2], v, flags, t);
+        float b = smoothstepf(e.p[3], e.p[3] + e.p[5], t[3]);
+        effect_texel(e, 0, b, b, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[3], e.p[3] + e.p[4], t[3]) * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_DIVEBOMB_RINGS: {
+        float t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, u, v, flags, t);
+        float tr = t[3] > 0 ? t[0] / t[3] : 0.0f;
+        effect_texel(e, 0, tr, tr, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(col[3] * smoothstepf(e.p[0], e.p[0] + e.p[1], t[3]), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_POISON_SKULL: {
         float d[4] = { 1, 1, 1, 1 }, t[4] = { 1, 1, 1, 1 }, l[4];
         if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);

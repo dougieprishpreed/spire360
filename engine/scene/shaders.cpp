@@ -488,6 +488,50 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[3] = ss.x;
         e.p[4] = ss.y;
         e.tex[0] = effect_texture(c, m, "mask_texture");
+    } else if (s == "shaders/vfx/common/vfx_round_smoke_shader.gdshader") {
+        Vec2 sp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
+        e.id = EFFECT_ROUND_SMOKE;
+        e.p[0] = sp.x * (float)g_shader_time;
+        e.p[1] = sp.y * (float)g_shader_time;
+        e.p[2] = param(m, "distortion_strength", 0.0f);
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[3] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[4] = param(m, "erosion_offset", 0.25f);
+        e.tex[0] = effect_texture(c, m, "lut");
+        effect_particles(EFFECT_ROUND_SMOKE);
+        g_life_param[0] = 3;
+    } else if (s == "shaders/vfx/scream/vfx_scream_squiggly_streaks_shader.gdshader") {
+        Vec2 tl = shader_param_vec2(m, "distortion_tiling", Vec2(0, 0)), sp = shader_param_vec2(m, "distortion_offset_speed", Vec2(0, 0));
+        e.id = EFFECT_SCREAM_STREAKS;
+        e.p[0] = tl.x;
+        e.p[1] = tl.y;
+        e.p[2] = sp.x * (float)g_shader_time;
+        e.p[3] = sp.y * (float)g_shader_time;
+        e.p[4] = param(m, "distortion_strength", 0.05f);
+        e.p[5] = 0;
+        effect_particles(EFFECT_SCREAM_STREAKS);
+        g_cx_param = 5;
+    } else if (s == "shaders/vfx/ui/card/remove/vfx_card_remove_erosion_shader.gdshader") {
+        e.id = EFFECT_CARD_REMOVE;
+        e.p[0] = param(m, "distortion_speed", 1.0f) * (float)g_shader_time;
+        e.p[2] = param(m, "distortion_strength", 1.0f);
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[3] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[4] = param(m, "erosion_offset", 0.25f);
+        e.p[5] = param(m, "bright_erosion_offset", 0.35f);
+        e.tex[0] = effect_texture(c, m, "lut");
+        effect_particles(EFFECT_CARD_REMOVE);
+        g_life_param[0] = 3;
+        g_cz_param[0] = 0;
+        g_cz_scale[0] = 1;
+    } else if (s == "shaders/vfx/minion_divebomb/vfx_minion_divebomb_rings_shader.gdshader") {
+        e.id = EFFECT_DIVEBOMB_RINGS;
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[0] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[1] = param(m, "erosion_offset", 0.25f);
+        e.tex[0] = effect_texture(c, m, "lut");
+        effect_particles(EFFECT_DIVEBOMB_RINGS);
+        g_life_param[0] = 0;
     } else if (s == "shaders/vfx/poison/vfx_poison_skull_shader.gdshader") {
         e.id = EFFECT_POISON_SKULL;
         Vec2 sp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
