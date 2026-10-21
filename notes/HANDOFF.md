@@ -98,7 +98,17 @@ parts 2 and 3 above it).
   Trial's accused (`event_portrait` cue from `event.trial_portrait`) is
   kept for the event's later pages, like the mirror and the rain
   (GameClient::collect_room_cues).
-- Still open: NPowerUpVfx's 3D layer, the enchant emboss.
+- Still open: NPowerUpVfx's 3D layer, the enchant emboss, and recorded ui
+  calls the client does not handle yet (from a survey of every trace's
+  ui cues, work/ui_calls.txt): NThoughtBubbleVfx.Create (1013 calls),
+  NCreature.SetAnimationTrigger (1804), NGame.DoHitStop (108),
+  NSovereignBladeVfx.Create / Forge (Regent), NGainEpochVfx, the form
+  VFX classes (NDemonFormVfx, NVoidFormVfx, NSerpentFormVfx,
+  NReaperFormVfx, NEchoFormVfx), NHorizontalLinesVfx,
+  NCreature.TrackBlockStatus, DisableInteractionForDeath,
+  NCombatRoom.ShakeOstyIfDead, NCombatRulesFtue. Check each against the
+  game code first: some may already be drawn by another path (scene-path
+  vfx cues, shaders).
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights
 
