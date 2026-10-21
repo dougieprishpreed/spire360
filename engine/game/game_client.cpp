@@ -249,7 +249,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
@@ -450,7 +450,7 @@ void GameClient::update(const PadState& pad) {
     if (combat_ && combat_->busy()) return;
     if (room_ && room_->busy()) return;
     if (ported_ && ported_->busy()) return;
-    if (auto_) choose_automatically();
+    if (auto_ && (auto_until_ <= 0 || decisions_ < auto_until_)) choose_automatically();
     else handle_input(pad);
 }
 
@@ -473,6 +473,21 @@ Node* GameClient::crystal_sphere_behind(const Json& sphere, const Json& before) 
 /* What shows behind an overlay screen (rewards, card reward): the fight's
  * room after it (aftermath: the player's state as it is now), else the
  * event's room; NULL for none. */
+/* NPlayerHand.SelectCards: a card_select from the hand runs on the fight
+ * itself (the combat screen in its selection mode). */
+class HandSelectScreen : public RunScreen {
+public:
+    explicit HandSelectScreen(CombatScreen* combat) : combat_(combat) {}
+    virtual Node* build(const Json& d, std::string*) {
+        combat_->begin_hand_select(d);
+        return combat_->root_node();
+    }
+    virtual std::string input(const PadState& pad) { return combat_->hand_select_input(pad); }
+
+private:
+    CombatScreen* combat_;
+};
+
 Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     std::string err;
     /* NCrystalSphereScreen stays under the rewards it gives, as it is. */
@@ -586,6 +601,8 @@ void GameClient::show(const Json& d) {
         Node* bar = room_node ? room_node->get_node("TopBarLayer") : NULL;
         if (bar) { room_node->remove_child(bar); delete bar; }
     }
+    /* A selection from the hand ends with its decision */
+    if (kept_room) kept_room->end_hand_select();
     if (prev_kind == "rewards" && ported_) reward_focus_ = ((RewardsScreen*)ported_)->focused();
     if (prev_kind == "shop" && ported_) {
         ShopScreen* shop = (ShopScreen*)ported_;
@@ -647,7 +664,12 @@ void GameClient::show(const Json& d) {
             ported_ = NULL;
         }
     }
-    if (kind == "card_select") {
+    const std::string& select_kind = d["kind"].str();
+    if (kind == "card_select" && room_ && (select_kind == "hand" || select_kind == "hand_upgrade")) {
+        /* NPlayerHand.SelectCards: on the fight itself */
+        ported_ = new HandSelectScreen(room_);
+        screen_ = ported_->build(d, &err);
+    } else if (kind == "card_select") {
         /* In a fight, over the fight (as it is); at the rest site or the
          * shop, over the room. */
         const std::string& rt = d["context"]["room_type"].str();

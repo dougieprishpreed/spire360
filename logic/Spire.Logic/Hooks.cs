@@ -79,7 +79,7 @@ internal static partial class Hooks
         // CardSelectCmd's entry points: which screen the pending card_select
         // stands for, and its prompt.
         foreach (var kind in new[] { "choose_a_card", "simple_grid", "combat_pile", "upgrade", "transform", "enchant",
-                                     "remove", "deck", "hand" })
+                                     "remove", "deck", "hand", "hand_upgrade" })
         {
             var k = kind;
             Spire.HookBridge.Hooks.RegisterAfter("cardselect.kind." + k, (a, r) => Driver?.AnnotateCardSelection(k, a, r));

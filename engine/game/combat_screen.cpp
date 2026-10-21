@@ -50,6 +50,12 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
       arrow_head_(NULL) {
     player_.node = NULL;
     osty_.node = NULL;
+    sel_mode_ = 0;
+    sel_row_ = false;
+    sel_focus_ = 0;
+    sel_box_ = sel_confirm_ = NULL;
+    sel_confirm_x_ = sel_confirm_y_ = 0;
+    sel_confirm_shown_ = false;
     long_press_on_ = false;
     long_press_ready_ = true;
     long_press_done_ = false;
@@ -883,8 +889,7 @@ void CombatScreen::set_hand_focus(int index) {
 
 /* The tips of the focused card (none while a card is being played). */
 void CombatScreen::refresh_tips() {
-    int n = (int)holders_.size();
-    int focus = n == 0 || play_card_ >= 0 || aiming_ ? -1 : (hand_focus_ < 0 ? n / 2 : (hand_focus_ >= n ? n - 1 : hand_focus_));
+    int focus = play_card_ >= 0 || aiming_ || (sel_mode_ && sel_row_) ? -1 : focused_holder();
     if (focus == tips_for_) return;
     tips_for_ = focus;
     if (tips_) {
@@ -893,7 +898,7 @@ void CombatScreen::refresh_tips() {
         tips_ = NULL;
     }
     if (focus < 0 || !root_) return;
-    tips_ = make_tip_set(lib_, hand_[(size_t)focus]["tips"]);
+    tips_ = make_tip_set(lib_, holders_[(size_t)focus].data["tips"]);
     if (!tips_) return;
     tips_->z_index = 10;
     tips_->modulate.a = 0; /* placed on the next frame, after the layout */
@@ -917,27 +922,61 @@ void CombatScreen::refresh_hand_indices() {
     }
 }
 
+/* The focused holder (an index into holders_) among the visible ones
+ * (NPlayerHand.ActiveHolders); -1 when none is shown. */
+int CombatScreen::focused_holder() const {
+    int first = -1, count = 0, mid = -1;
+    for (size_t i = 0; i < holders_.size(); ++i)
+        if (holders_[i].node && holders_[i].node->visible) {
+            if (first < 0) first = (int)i;
+            ++count;
+        }
+    if (count == 0) return -1;
+    int want = count / 2, k = 0;
+    for (size_t i = 0; i < holders_.size(); ++i)
+        if (holders_[i].node && holders_[i].node->visible) {
+            if (k == want) mid = (int)i;
+            ++k;
+        }
+    if (hand_focus_ < 0) return mid;
+    int last = -1;
+    for (size_t i = 0; i < holders_.size(); ++i)
+        if (holders_[i].node && holders_[i].node->visible) {
+            if ((int)i >= hand_focus_) return (int)i;
+            last = (int)i;
+        }
+    return last;
+}
+
 void CombatScreen::layout_hand(bool snap) {
     refresh_hand_indices();
-    int n = (int)holders_.size();
+    /* NPlayerHand.RefreshLayout: the visible holders (ActiveHolders) */
+    std::vector<int> act;
+    for (size_t i = 0; i < holders_.size(); ++i)
+        if (holders_[i].node && holders_[i].node->visible) act.push_back((int)i);
+    int n = (int)act.size();
     if (n == 0) return;
-    int focus = hand_focus_ < 0 ? n / 2 : (hand_focus_ >= n ? n - 1 : hand_focus_);
+    int fh = sel_mode_ && sel_row_ ? -1 : focused_holder();
+    int focus = -1;
+    for (int k = 0; k < n; ++k)
+        if (act[(size_t)k] == fh) focus = k;
     float scale = 0.8f * (n <= 7 ? 1.0f : n == 8 ? 0.95f : n == 9 ? 0.9f : 0.85f);
-    for (int i = 0; i < n; ++i) {
+    for (int k = 0; k < n; ++k) {
+        int i = act[(size_t)k];
         Holder& h = holders_[i];
         if (i == play_card_) continue; /* centred by begin_play */
-        float x = HAND_POS[n - 1][i][0], y = HAND_POS[n - 1][i][1];
-        float angle = HAND_ANGLE[n - 1][i], sc = scale;
+        float x = HAND_POS[n - 1][k][0], y = HAND_POS[n - 1][k][1];
+        float angle = HAND_ANGLE[n - 1][k], sc = scale;
         h.node->z_index = 0;
-        if (i == focus) {
+        if (k == focus) {
             y = -hitbox_height(h.node) * 0.5f + 2.0f;
             angle = 0;
             sc = 1;
             h.node->z_index = 1;
-        } else {
-            int dist = i < focus ? focus - i : i - focus;
+        } else if (focus >= 0) {
+            int dist = k < focus ? focus - k : k - focus;
             float push = 100.0f * (1.0f - minf(1.0f, (float)dist / 4.0f));
-            x += i < focus ? -push : push;
+            x += k < focus ? -push : push;
         }
         h.to_pos = Vec2(x, y);
         h.to_angle = angle;
@@ -1232,6 +1271,17 @@ void CombatScreen::process(double dt) {
         if (fabsf(h.angle - h.to_angle) < 0.1f) h.angle = h.to_angle;
         h.scale += (h.to_scale - h.scale) * minf(1.0f, t * 8.0f);
         if (fabsf(h.to_scale - h.scale) < 0.002f) h.scale = h.to_scale;
+        place(h.node, h.pos.x, h.pos.y, 0, 0);
+        h.node->rotation = h.angle * PI_F / 180.0f;
+        h.node->scale = Vec2(h.scale, h.scale);
+    }
+    for (size_t i = 0; i < selected_.size(); ++i) {
+        Holder& h = selected_[i];
+        h.pos = h.pos + (h.to_pos - h.pos) * minf(1.0f, t * 12.0f);
+        Vec2 d = h.to_pos - h.pos;
+        if (d.x * d.x + d.y * d.y < 1.0f) h.pos = h.to_pos;
+        h.angle += (h.to_angle - h.angle) * minf(1.0f, t * 12.0f);
+        h.scale += (h.to_scale - h.scale) * minf(1.0f, t * 12.0f);
         place(h.node, h.pos.x, h.pos.y, 0, 0);
         h.node->rotation = h.angle * PI_F / 180.0f;
         h.node->scale = Vec2(h.scale, h.scale);
@@ -2673,6 +2723,261 @@ void CombatScreen::play_steps(const Json& steps) {
         double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.4);
         if (cues_[i].kind != CUE_BANNER && cues_[i].kind != CUE_AUDIO && end > busy_until_) busy_until_ = end;
     }
+}
+
+/* ---- NPlayerHand's selection mode ---- */
+
+void CombatScreen::begin_hand_select(const Json& d) {
+    end_hand_select();
+    end_play();
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* hand = ui ? find_named(ui, "Hand") : NULL;
+    if (!hand || !hand_box_) return;
+    sel_ = d;
+    sel_mode_ = d["kind"].str() == "hand_upgrade" ? 2 : 1;
+    sel_row_ = false;
+    sel_focus_ = 0;
+    sel_box_ = ctl(hand, "SelectedHandCardContainer");
+    if (!sel_box_) {
+        Node* n = hand->find_unique("SelectedHandCardContainer");
+        sel_box_ = n && n->is_control() ? (Control*)n : NULL;
+    }
+    /* the backstop fades in (0.2 s) */
+    Node* back = hand->find_unique("SelectModeBackstop");
+    if (back && back->is_canvas_item()) {
+        CanvasItem* b = (CanvasItem*)back;
+        b->visible = true;
+        b->self_modulate.a = 0;
+        tweens_.tween(&b->self_modulate.a, 1.0f, 0.2f);
+    }
+    Node* header = hand->find_unique("SelectionHeader");
+    set_label(header, "[center]" + d["prompt"].str() + "[/center]");
+    set_visible(header, true);
+    /* NConfirmButton: at the corner when enabled, out of the screen when not */
+    Node* cb = hand->find_unique("SelectModeConfirmButton");
+    sel_confirm_ = cb && cb->is_control() ? (Control*)cb : NULL;
+    if (sel_confirm_) {
+        Control* c = sel_confirm_;
+        float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], h = c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
+        sel_confirm_x_ = 1920.0f - (c->offset[SIDE_RIGHT] + 120.0f);
+        sel_confirm_y_ = 1080.0f - (-c->offset[SIDE_BOTTOM] + 110.0f);
+        for (int s2 = 0; s2 < 4; ++s2) c->anchor[s2] = 0;
+        place(c, sel_confirm_x_ + 180.0f, sel_confirm_y_, w, h);
+        c->visible = true;
+        show_glyph(lib_, find_named(c, "HotkeyIcon"), "y");
+        sel_confirm_shown_ = false;
+    }
+    /* UpdateSelectModeCardVisibility: only the cards the filter takes */
+    const Json& cs = d["cards"];
+    for (size_t i = 0; i < holders_.size(); ++i) {
+        bool ok = false;
+        for (size_t k = 0; k < cs.size(); ++k)
+            if (cs[k]["instance_id"].i(-1) == holders_[i].id) ok = true;
+        holders_[i].node->visible = ok;
+    }
+    hand_focus_ = -1;
+    sel_layout();
+    layout_hand();
+    refresh_tips();
+}
+
+void CombatScreen::end_hand_select() {
+    if (!sel_mode_) return;
+    /* OnSelectModeSourceFinished: the picked cards go back to the hand */
+    while (!selected_.empty()) sel_unpick((int)selected_.size() - 1);
+    for (size_t i = 0; i < holders_.size(); ++i) holders_[i].node->visible = true;
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* hand = ui ? find_named(ui, "Hand") : NULL;
+    if (hand) {
+        set_visible(hand->find_unique("SelectModeBackstop"), false);
+        set_visible(hand->find_unique("SelectionHeader"), false);
+        set_visible(hand->find_unique("UpgradePreviewContainer"), false);
+    }
+    if (sel_confirm_) sel_confirm_->visible = false;
+    sel_mode_ = 0;
+    sel_row_ = false;
+    layout_hand();
+    refresh_tips();
+}
+
+/* The upgrade preview (NUpgradePreview): the picked card before and after. */
+static void fill_upgrade_preview(SceneLibrary* lib, Node* hand, const Json* card) {
+    Node* box = hand ? hand->find_unique("UpgradePreviewContainer") : NULL;
+    Node* before = box ? find_named(box, "Before") : NULL;
+    Node* after = box ? find_named(box, "After") : NULL;
+    Node* slots[2] = { before, after };
+    for (int s = 0; s < 2; ++s)
+        while (slots[s] && !slots[s]->children.empty()) {
+            Node* c = slots[s]->children.back();
+            slots[s]->remove_child(c);
+            delete c;
+        }
+    set_visible(box, card != NULL);
+    if (!card) return;
+    Node* c1 = before ? make_card(lib, *card) : NULL;
+    if (c1) before->add_child(c1);
+    const Json& up = (*card)["upgrade_preview"];
+    Node* c2 = after && up.is_object() ? make_card(lib, up) : NULL;
+    if (c2) after->add_child(c2);
+    set_visible(find_named(box, "Arrows"), c2 != NULL);
+}
+
+/* SelectCardInSimpleMode / SelectCardInUpgradeMode */
+void CombatScreen::sel_pick(int i) {
+    if (i < 0 || i >= (int)holders_.size() || !sel_box_) return;
+    int max = sel_["max_select"].i(1);
+    if (sel_mode_ == 2 || (int)selected_.size() >= max) {
+        if (!selected_.empty()) sel_unpick((int)selected_.size() - 1);
+        if (i >= (int)holders_.size()) i = (int)holders_.size() - 1;
+    }
+    Holder h = holders_[(size_t)i];
+    Vec2 g = hand_box_->global_transform().xform(h.pos);
+    holders_.erase(holders_.begin() + i);
+    hand_box_->remove_child(h.node);
+    sel_box_->add_child(h.node);
+    h.pos = inverse(sel_box_->global_transform()).xform(g);
+    h.to_angle = 0;
+    selected_.push_back(h);
+    if (sel_mode_ == 2) {
+        /* the hand's card leaves; the preview shows it */
+        h.node->visible = false;
+        selected_.back().node->visible = false;
+        const Json* card = NULL;
+        const Json& cs = sel_["cards"];
+        for (size_t k = 0; k < cs.size(); ++k)
+            if (cs[k]["instance_id"].i(-1) == h.id) card = &cs[k];
+        Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+        fill_upgrade_preview(lib_, ui ? find_named(ui, "Hand") : NULL, card);
+    }
+    sel_layout();
+    layout_hand();
+    tips_for_ = -2; /* the holders moved: the same index is another card */
+    refresh_tips();
+}
+
+/* DeselectCard: back into the hand at its place */
+void CombatScreen::sel_unpick(int k) {
+    if (k < 0 || k >= (int)selected_.size()) return;
+    Holder h = selected_[(size_t)k];
+    selected_.erase(selected_.begin() + k);
+    Vec2 g = sel_box_ ? sel_box_->global_transform().xform(h.pos) : h.pos;
+    if (h.node->parent) h.node->parent->remove_child(h.node);
+    hand_box_->add_child(h.node);
+    h.pos = inverse(hand_box_->global_transform()).xform(g);
+    h.node->visible = true;
+    /* GetHandInsertIndex: the hand's order */
+    int order = 0;
+    for (size_t j = 0; j < hand_.size(); ++j)
+        if (hand_[j]["instance_id"].i(-(int)j - 1) == h.id) order = (int)j;
+    size_t at = holders_.size();
+    for (size_t j = 0; j < holders_.size(); ++j) {
+        int o = 0;
+        for (size_t m = 0; m < hand_.size(); ++m)
+            if (hand_[m]["instance_id"].i(-(int)m - 1) == holders_[j].id) o = (int)m;
+        if (o > order) {
+            at = j;
+            break;
+        }
+    }
+    holders_.insert(holders_.begin() + (long)at, h);
+    if (sel_mode_ == 2) {
+        Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+        fill_upgrade_preview(lib_, ui ? find_named(ui, "Hand") : NULL, NULL);
+    }
+    if (selected_.empty()) sel_row_ = false;
+    if (sel_focus_ >= (int)selected_.size()) sel_focus_ = (int)selected_.size() - 1;
+    if (sel_focus_ < 0) sel_focus_ = 0;
+    sel_layout();
+    layout_hand();
+}
+
+/* NSelectedHandCardContainer.RefreshHolderPositions (300 px apart at the
+ * holders' small scale) and NPlayerHand.UpdateSelectedCardContainer (the
+ * row rises and shrinks past 3 and 6 cards); the confirm button shown while
+ * the count is within min..max (RefreshSelectModeConfirmButton). */
+void CombatScreen::sel_layout() {
+    int n = (int)selected_.size();
+    for (int k = 0; k < n; ++k) {
+        Holder& h = selected_[(size_t)k];
+        h.to_pos = Vec2(-300.0f * (float)(n - 1) / 2.0f + 300.0f * (float)k, 0);
+        h.to_angle = 0;
+        h.to_scale = sel_row_ && k == sel_focus_ ? 0.9f : 0.8f;
+        h.node->z_index = sel_row_ && k == sel_focus_ ? 1 : 0;
+    }
+    if (sel_box_) {
+        float s = n > 6 ? 0.55f : (n > 3 ? 0.8f : 1.0f);
+        float y = n > 6 ? 390.0f : (n > 3 ? 465.0f : 540.0f);
+        tweens_.tween(&sel_box_->offset[SIDE_TOP], y - 540.0f, 0.5f, TRANS_QUAD, EASE_IN_OUT);
+        tweens_.tween(&sel_box_->offset[SIDE_BOTTOM], y - 540.0f, 0.5f, TRANS_QUAD, EASE_IN_OUT);
+        tweens_.tween(&sel_box_->scale, Vec2(s, s), 0.5f, TRANS_QUAD, EASE_IN_OUT);
+    }
+    bool ok = n >= sel_["min_select"].i(0) && n <= sel_["max_select"].i(1);
+    if (sel_confirm_ && ok != sel_confirm_shown_) {
+        sel_confirm_shown_ = ok;
+        Control* c = sel_confirm_;
+        float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT];
+        float x = ok ? sel_confirm_x_ : sel_confirm_x_ + 180.0f;
+        TweenTrans t = ok ? TRANS_BACK : TRANS_EXPO;
+        tweens_.tween(&c->offset[SIDE_LEFT], x, 0.35f, t, EASE_OUT);
+        tweens_.tween(&c->offset[SIDE_RIGHT], x + w, 0.35f, t, EASE_OUT);
+    }
+}
+
+std::string CombatScreen::hand_select_input(const PadState& pad) {
+    if (!sel_mode_) return std::string();
+    int n = (int)selected_.size();
+    if (pad.pressed & PadState::Y) {
+        /* OnSelectModeConfirmButtonPressed */
+        if (!sel_confirm_shown_) return std::string();
+        std::string idx;
+        const Json& cs = sel_["cards"];
+        for (int k = 0; k < n; ++k)
+            for (size_t j = 0; j < cs.size(); ++j)
+                if (cs[j]["instance_id"].i(-1) == selected_[(size_t)k].id)
+                    idx += (idx.empty() ? "" : ",") + format("%d", (int)j);
+        return protocol_action("select_cards", "\"indices\":\"" + idx + "\"");
+    }
+    if ((pad.pressed & PadState::B) && sel_["cancelable"].b())
+        return protocol_action("skip_select");
+    if (sel_row_) {
+        if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) {
+            sel_focus_ = (sel_focus_ + ((pad.pressed & PadState::LEFT) ? n - 1 : 1)) % (n > 0 ? n : 1);
+            sel_layout();
+        } else if (pad.pressed & PadState::DOWN) {
+            sel_row_ = false;
+            sel_layout();
+            layout_hand();
+            refresh_tips();
+        } else if (pad.pressed & PadState::A) {
+            sel_unpick(sel_focus_);
+            tips_for_ = -2;
+            refresh_tips();
+        }
+        return std::string();
+    }
+    int f = focused_holder();
+    if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) {
+        /* the next visible card, wrapping */
+        int m = (int)holders_.size();
+        for (int s = 1; s <= m && f >= 0; ++s) {
+            int j = (f + ((pad.pressed & PadState::LEFT) ? -s : s) + m * 2) % m;
+            if (holders_[(size_t)j].node->visible) {
+                hand_focus_ = j;
+                break;
+            }
+        }
+        layout_hand();
+        refresh_tips();
+    } else if ((pad.pressed & PadState::UP) && n > 0 && sel_mode_ == 1) {
+        sel_row_ = true;
+        sel_focus_ = n - 1;
+        sel_layout();
+        layout_hand();
+        refresh_tips();
+    } else if ((pad.pressed & PadState::A) && f >= 0) {
+        sel_pick(f);
+    }
+    return std::string();
 }
 
 } /* namespace spire */

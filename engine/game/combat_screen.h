@@ -14,6 +14,7 @@
 #include "../core/json.h"
 #include "../scene/tween.h"
 #include "combat_vfx.h"
+#include "run_screen.h"
 
 #include <map>
 
@@ -95,6 +96,17 @@ public:
     /* NEndTurnButton with long press confirmation: pressed starts the hold,
      * releasing cancels it (NEndTurnLongPressBar). */
     void hold_end_turn(bool pressed, bool held);
+    /* NPlayerHand.SelectCards (CardSelectCmd.FromHand / FromHandForUpgrade):
+     * the hand in selection mode over the fight for a card_select decision
+     * of kind "hand" or "hand_upgrade". The cards that cannot be picked hide;
+     * A moves a card to the selected row above the hand (the upgrade preview
+     * when upgrading) and back, Y confirms (min..max picked), B cancels when
+     * the selection may be cancelled. end_hand_select puts the hand back as
+     * it was (the next decision's steps move its cards). */
+    void begin_hand_select(const Json& decision);
+    void end_hand_select();
+    /* One frame of pad input while selecting: a command, or "". */
+    std::string hand_select_input(const PadState& pad);
     /* The bar filled (0.5 s held) since last asked: the turn is to end. */
     bool take_end_turn_long_press() {
         bool done = long_press_done_;
@@ -298,6 +310,20 @@ private:
     /* NEndTurnLongPressBar */
     bool long_press_on_, long_press_ready_, long_press_done_;
     double long_press_t_, long_press_fade_;
+    /* hand selection mode */
+    int focused_holder() const;
+    void sel_pick(int holder);
+    void sel_unpick(int k);
+    void sel_layout();
+    int sel_mode_; /* 0 none, 1 simple, 2 upgrade */
+    Json sel_;
+    std::vector<Holder> selected_; /* in %SelectedHandCardContainer, picked order */
+    bool sel_row_;                 /* the pad on the selected row */
+    int sel_focus_;
+    Control* sel_box_;
+    Control* sel_confirm_;
+    float sel_confirm_x_, sel_confirm_y_;
+    bool sel_confirm_shown_;
 };
 
 } /* namespace spire */

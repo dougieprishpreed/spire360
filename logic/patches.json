@@ -379,6 +379,14 @@
       "note": "Labels the pending card_select with the screen the game would open and its prompt."
     },
     {
+      "id": "cardselect.kind.hand_upgrade",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",
+      "method": "FromHandForUpgrade",
+      "optional": true,
+      "note": "The hand's upgrade selection (NPlayerHand.Mode.UpgradeSelect, Armaments)."
+    },
+    {
       "id": "cardselect.choose_bundle",
       "action": "redirect",
       "type": "MegaCrit.Sts2.Core.Commands.CardSelectCmd",

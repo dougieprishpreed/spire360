@@ -19,6 +19,15 @@
  * logo (unless the settings skip it) plays out before the first press;
  * --shots-at F1,F2,... saves those frames (60 a second) as frame_FFFF.png.
  *
+ * --replay-run <trace.jsonl>: a recorded run (random_runs.py, coverage)
+ * played back in place of the logic, one recorded answer per command.
+ *
+ * --pad-after N: auto play up to screen N (the number printed for it),
+ * then the --pad presses on it.
+ *
+ * --hp N: the player's max HP and HP set to N once the run starts (a soak
+ * that reaches the end of the run).
+ *
  * --settle: frames each new screen runs before its shot (default 60: a
  * second; fewer catch the effects the decision's cues start).
  *
@@ -177,6 +186,8 @@ int main(int argc, char** argv) {
     double menu_hold = 0;
     const char* replay = NULL;
     int steps = 40;
+    int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
+    int hp = 0; /* --hp: the player's max HP and HP after the start (soaks reach the end) */
     int settle = 60; /* frames before a decision's shot */
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
@@ -190,6 +201,7 @@ int main(int argc, char** argv) {
             replay = argv[++i];
             menu = true;
         }
+        else if (strcmp(argv[i], "--replay-run") == 0 && i + 1 < argc) replay = argv[++i]; /* a run trace */
         else if (strcmp(argv[i], "--menu-hold") == 0 && i + 1 < argc) menu_hold = atof(argv[++i]);
         else if (strcmp(argv[i], "--shots-at") == 0 && i + 1 < argc) {
             /* menu frames (60 a second) to save as frame_NNNN.png */
@@ -203,6 +215,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--settle") == 0 && i + 1 < argc) settle = atoi(argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
@@ -353,16 +367,19 @@ int main(int argc, char** argv) {
         printf("%d menu shots, %d decisions\n", shots, decisions);
         return 0;
     }
-    if (pad_script.empty()) game.set_auto_play(auto_seed);
+    if (pad_script.empty() || pad_after > 0) game.set_auto_play(auto_seed);
     size_t pad_at = 0;
     game.start_run(character, seed);
+    if (hp > 0) game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
     int shown = 0, idle = 0;
     while (shown < steps) {
         PadState pad;
-        if (pad_at < pad_script.size() && !game.busy() && game.decision_count() > 0) {
+        if (pad_at < pad_script.size() && !game.busy() &&
+            (pad_after == 0 ? game.decision_count() > 0 : shown > pad_after)) {
             pad.pressed = pad.held = pad_script[pad_at++];
         } else if (pad_at >= pad_script.size() && !pad_script.empty()) {
             game.set_auto_play(auto_seed);
+            game.set_auto_play_until(0);
             pad_script.clear();
         }
         int before = game.decision_count();
@@ -396,13 +413,16 @@ int main(int argc, char** argv) {
             const std::string& kind = game.decision()["decision"].str();
             std::string base = format("%s/%04d_%s", out_dir.c_str(), shown, kind.c_str());
             if (!write_png((base + ".png").c_str(), sw.framebuffer())) fprintf(stderr, "cannot write %s.png\n", base.c_str());
-            save_text(base + ".json", link.last_decision + "\n");
+            if (!replay) save_text(base + ".json", link.last_decision + "\n");
             printf("%04d %s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)");
+            /* the screen before the pad's: auto play answers it, not the next */
+            if (pad_after > 0 && shown == pad_after - 1 && !pad_script.empty())
+                game.set_auto_play_until(game.decision_count() + 1);
             fflush(stdout);
             ++shown;
             idle = 0;
             if (game.game_over()) break;
-        } else if (link.finished()) {
+        } else if (!replay && link.finished()) {
             fprintf(stderr, "spire_play: the logic exited (see %s/logic.log)\n", out_dir.c_str());
             return 1;
         } else {

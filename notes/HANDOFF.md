@@ -10,6 +10,27 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 7 (2026-10-20): hand selection, soak
+
+- Selection from the hand (CardSelectCmd.FromHand / FromHandForDiscard /
+  FromHandForUpgrade: Survivor, Acrobatics, Armaments, ...) runs on the
+  fight as NPlayerHand.SelectCards does instead of the deck grid: the
+  backstop fades in, the prompt shows as SelectionHeader, the cards the
+  filter refuses hide and the hand lays out without them
+  (ActiveHolders); A moves a card to SelectedHandCardContainer (300 px
+  apart at 0.8, the row rising and shrinking past 3 and 6 cards) and back
+  (up / down between the rows), Y confirms once min..max are picked (the
+  confirm button slides in then), B cancels a cancelable one. Upgrading
+  shows the card in UpgradePreviewContainer (before / after). The logic
+  labels FromHandForUpgrade "hand_upgrade" (its header
+  CHOOSE_CARD_UPGRADE_HEADER) and gives the select's cards their
+  instance_id. `CombatScreen::begin_hand_select / end_hand_select /
+  hand_select_input`, `HandSelectScreen` in game_client.cpp.
+- Soak (`work/soak.sh`, ignored): spire_play `--auto` runs per character,
+  no crash, no logic error, no plain-list screen; the auto player dies in
+  act 1, so `spire_play --hp N` now sets the player's HP after the start
+  for whole-run soaks.
+
 ## Alpha push, part 6 (2026-10-20): creature effects, special nodes
 
 Pushing is on now: commit and `git push origin claude/peaceful-ritchie-zgh7h5`
@@ -35,9 +56,8 @@ build until the alpha RC.
   origin_of). TestMode guards that are presentation only now read off /
   on there: Myte.ToxicMove, SnappingJaxfruit.EnergyOrb, Flyconid's two
   spore moves, Creature.GetCreatureNode (testmode.presentation.is_on).
-  Left guarded: DecimillipedeSegment.AnimSegmentsAttack (it instantiates
-  the rocks scene in the logic), so the segments' AttackShake and rocks
-  play only in the Bestiary.
+  DecimillipedeSegment.AnimSegmentsAttack too (see below: the rocks
+  become a vfx cue).
 - Death delay: a dead monster that does not fade is hidden only once no
   IDeathDelayer in its visuals holds it (`death_delayed`: the Ceremonial
   Beast's death particles), at most 10 s later.

@@ -73,6 +73,11 @@ public partial class RunDriver
                     break;
                 }
             }
+            // FromHandForUpgrade: NPlayerHand's own prefs
+            if (kind == "hand_upgrade" && prompt == null)
+            {
+                try { prompt = new MegaCrit.Sts2.Core.Localization.LocString("gameplay_ui", "CHOOSE_CARD_UPGRADE_HEADER").GetFormattedText(); } catch { }
+            }
             if (HasPending)
             {
                 PendingKind = kind;

@@ -1632,6 +1632,7 @@ public partial class RunDriver
                 return WithCardView(card, card.Pile?.Type ?? PileType.None, new Dictionary<string, object?>
                 {
                     ["index"] = i,
+                    ["instance_id"] = Steps.IdOf(card),
                     ["id"] = card.Id.ToString(),
                     ["name"] = _loc.Card(card.Id.Entry),
                     ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
@@ -1642,8 +1643,8 @@ public partial class RunDriver
                     ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
                     ["keywords"] = selkws?.Count > 0 ? selkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(card),
-                    ["upgrade_preview"] = _cardSelector.PendingKind == "upgrade" ? UpgradePreviewView(card) : null,
-                    ["inspect_upgrade"] = _cardSelector.PendingKind == "upgrade" ? null : UpgradePreviewView(card),
+                    ["upgrade_preview"] = _cardSelector.PendingKind is "upgrade" or "hand_upgrade" ? UpgradePreviewView(card) : null,
+                    ["inspect_upgrade"] = _cardSelector.PendingKind is "upgrade" or "hand_upgrade" ? null : UpgradePreviewView(card),
                 });
             }).ToList();
 

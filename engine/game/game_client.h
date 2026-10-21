@@ -74,6 +74,8 @@ public:
     void clear_screen();
     /* Plays by itself (tests): choices picked by a seeded generator. */
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
+    /* Auto play answers only the decisions before the until-th (0: all). */
+    void set_auto_play_until(int until) { auto_until_ = until; }
 
     /* One frame: reads the logic, applies input, updates the screen. */
     void update(const PadState& pad);
@@ -164,7 +166,9 @@ private:
     Json decision_;
     std::vector<Choice> choices_;
     size_t focus_;
-    bool waiting_, ready_, auto_, menu_requested_;
+    bool waiting_, ready_, auto_;
+    int auto_until_;
+    bool menu_requested_;
     unsigned rng_;
     int decisions_, errors_;
     std::string error_, pending_start_;
