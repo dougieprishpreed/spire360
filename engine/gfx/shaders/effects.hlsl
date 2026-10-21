@@ -652,6 +652,37 @@ float4 ps_e50(VsOut i) : COLOR {
     return float4(saturate(l.rgb * i.color.rgb) * a, a);
 }
 
+// 51: vfx_hyperbeam_laser_line (fragment): the panning texture plus the
+// overlay through the lut.
+float4 ps_e51(VsOut i) : COLOR {
+    float4 t = tex2D(g_e0, i.uv + float2(g_p0.x, 0.0));
+    float o = tex2D(g_e1, i.uv).r;
+    float4 l = tex2D(g_e2, float2(t.r + o, t.r + o));
+    float a = saturate(t.a * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 52: vfx_hyperbeam_impact_spikes: the spikes sliding with the particle's
+// life, masked, thresholded.
+float4 ps_e52(VsOut i) : COLOR {
+    float t = tex2D(g_tex, i.uv * g_p0.xy + float2(g_p0.z, g_p1.x + g_p0.w)).r;
+    float a = saturate(smoothstep(0.35, 0.65, i.color.a * t * tex2D(g_e0, i.uv).r));
+    return float4(saturate(i.color.rgb) * a, a);
+}
+
+// 53: vfx_grand_finale_spotlight (add / darken): grey by the angle about
+// the source.
+float4 ps_e53(VsOut i) : COLOR {
+    float2 dl = i.uv - g_p0.xy;
+    float an = atan2(dl.y, dl.x) / (2.0 * 3.14159265) + g_p0.z;
+    an = frac(an);
+    float d = g_p1.y != 0.0 ? saturate(abs(an - g_p1.x) / g_p1.y) : 1.0;
+    d = lerp(d, 1.0 - d, g_p0.w);
+    d = smoothstep(g_p1.z, g_p1.z + g_p1.w, d);
+    float a = saturate(i.color.a);
+    return float4(saturate(d * i.color.rgb) * a, a);
+}
+
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
 float4 ps_e21(VsOut i) : COLOR {
     float w[7] = { 0.0702, 0.1311, 0.1907, 0.2160, 0.1907, 0.1311, 0.0702 };

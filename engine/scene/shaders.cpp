@@ -532,6 +532,39 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "lut");
         effect_particles(EFFECT_DIVEBOMB_RINGS);
         g_life_param[0] = 0;
+    } else if (s == "shaders/vfx/hyperbeam/vfx_hyperbeam_laser_line.gdshader") {
+        e.id = EFFECT_HYPERBEAM_LINE;
+        e.p[0] = pan(param(m, "texture_panning_speed", 0.0f));
+        e.tex[0] = effect_texture(c, m, "main_texture");
+        e.tex[1] = effect_texture(c, m, "overlay");
+        e.tex[2] = effect_texture(c, m, "lut");
+        e.repeat = 1;
+    } else if (s == "shaders/vfx/hyperbeam/vfx_hyperbeam_impact_spikes_shader.gdshader") {
+        Vec2 tl = shader_param_vec2(m, "texture_tiling", Vec2(1, 1));
+        e.id = EFFECT_HYPERBEAM_SPIKES;
+        e.p[0] = tl.x;
+        e.p[1] = tl.y;
+        CurveData::from(shader_param_resource(m, "offset_curve"), g_effect_curve);
+        e.p[3] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[4] = param(m, "initial_offset", 0.0f);
+        e.tex[0] = effect_texture(c, m, "mask_texture");
+        effect_particles(EFFECT_HYPERBEAM_SPIKES);
+        g_life_param[0] = 3;
+        g_cz_param[0] = 2;
+        g_cz_scale[0] = 1;
+    } else if (s == "shaders/vfx/grand_finale/vfx_grand_finale_spotlight_add_shader.gdshader" ||
+               s == "shaders/vfx/grand_finale/vfx_grand_finale_spotlight_darken_shader.gdshader") {
+        Vec2 sp = shader_param_vec2(m, "source_pos", Vec2(0, 0)), ap = shader_param_vec2(m, "angle_parameters", Vec2(0, 0));
+        Vec2 er = shader_param_vec2(m, "erosion", Vec2(0, 0));
+        e.id = EFFECT_SPOTLIGHT;
+        e.p[0] = sp.x;
+        e.p[1] = sp.y;
+        e.p[2] = param(m, "angle_offset", 0.0f);
+        e.p[3] = param(m, "invert", 0.0f);
+        e.p[4] = ap.x;
+        e.p[5] = ap.y;
+        e.p[6] = er.x;
+        e.p[7] = er.y;
     } else if (s == "shaders/vfx/poison/vfx_poison_skull_shader.gdshader") {
         e.id = EFFECT_POISON_SKULL;
         Vec2 sp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
@@ -1549,6 +1582,14 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/dissolve.gdshader") {
         *out = BLEND_PREMULT_ALPHA;
+        return true;
+    }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/grand_finale/vfx_grand_finale_spotlight_add_shader.gdshader") {
+        *out = BLEND_ADD;
+        return true;
+    }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/grand_finale/vfx_grand_finale_spotlight_darken_shader.gdshader") {
+        *out = BLEND_SUB;
         return true;
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/vfx_doom_flame_shader.tres") {

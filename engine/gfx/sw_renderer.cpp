@@ -1033,6 +1033,39 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_HYPERBEAM_LINE: {
+        float t[4], ov[4], l[4];
+        effect_texel(e, 0, u + e.p[0], v, t);
+        effect_texel(e, 1, u, v, ov);
+        float tr = t[3] > 0 ? t[0] / t[3] : 0.0f, orr = ov[3] > 0 ? ov[0] / ov[3] : 0.0f;
+        effect_texel(e, 2, tr + orr, tr + orr, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_HYPERBEAM_SPIKES: {
+        float t[4] = { 0, 0, 0, 0 }, mk[4];
+        if (tex) sample(tex->img, u * e.p[0] + e.p[2], v * e.p[1] + e.p[4] + e.p[3], flags, t);
+        effect_texel(e, 0, u, v, mk);
+        float tr = t[3] > 0 ? t[0] / t[3] : 0.0f, mr = mk[3] > 0 ? mk[0] / mk[3] : 0.0f;
+        float a = clampf(smoothstepf(0.35f, 0.65f, col[3] * tr * mr), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SPOTLIGHT: {
+        float ang = atan2f(v - e.p[1], u - e.p[0]) / (2 * 3.14159265f) + e.p[2];
+        ang -= floorf(ang);
+        float d = e.p[5] != 0 ? clampf(fabsf(ang - e.p[4]) / e.p[5], 0, 1) : 1.0f;
+        d = d + (1 - 2 * d) * e.p[3];
+        d = smoothstepf(e.p[6], e.p[6] + e.p[7], d);
+        float a = clampf(col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(d * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_POISON_SKULL: {
         float d[4] = { 1, 1, 1, 1 }, t[4] = { 1, 1, 1, 1 }, l[4];
         if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);

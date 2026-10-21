@@ -276,6 +276,21 @@ enum EffectId {
      * vertex rgb, vertex alpha * smoothstep(p0, p0 + p1, TEXTURE.a)); p0 the
      * erosion curve at the particle's life. */
     EFFECT_DIVEBOMB_RINGS = 50,
+    /* vfx_hyperbeam_laser_line (fragment; its vertex() wobble along y is
+     * not ported): t = tex0(UV + (p0, 0)) (main_texture, repeat); (lut(t.r
+     * + tex1(UV).r).rgb * vertex rgb, t.a * vertex alpha); tex1 overlay,
+     * tex2 lut. */
+    EFFECT_HYPERBEAM_LINE = 51,
+    /* vfx_hyperbeam_impact_spikes_shader (particles): t = TEXTURE(UV *
+     * p0p1 + (p2, p4 + p3)) (p2 CUSTOM.z, p3 the offset curve at the life,
+     * p4 initial_offset); (vertex rgb, smoothstep(0.35, 0.65, vertex alpha
+     * * t.r * tex0(UV).r)). */
+    EFFECT_HYPERBEAM_SPIKES = 52,
+    /* vfx_grand_finale_spotlight_add / _darken (blend add / sub): a =
+     * fract(atan2(UV - p0p1) / 2pi + p2), d = clamp(|a - p4| / p5, 0, 1),
+     * mixed towards 1 - d by p3, smoothstep(p6, p6 + p7, d); (d, d, d, 1) *
+     * vertex colour. */
+    EFFECT_SPOTLIGHT = 53,
     EFFECT_COUNT
 };
 
