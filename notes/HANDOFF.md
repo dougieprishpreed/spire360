@@ -1271,65 +1271,62 @@ Reported, in the user's order of importance:
 
 ## Port checklist (everything except multiplayer)
 
-Order: the flow and the bugs above first, then the rest. Tick items off
-here as they land, with the commit.
+Reconciled 2026-10-21 (part 10) against the alpha push parts above; ticks
+name where it landed. Open items stay at the end of each group.
 
 **Flow and combat**
-- [ ] Persistent combat scene; state changes animated from `steps` (HP and
-      block bars, powers, intents, energy, piles, card moves: draw,
-      discard, exhaust, shuffle, generated cards), the game's timings.
-- [ ] NPlayerHand behaviour: draw/discard animations, card play flying to
-      its target, retained cards, hand selection mode (choose cards from
-      the hand: now a grid).
-- [ ] VFX lifetimes and cleanup; effect timing and speed; damage blocked
-      effects; hit flashes and shakes (NCreature, ScreenShake).
-- [ ] Orb channel / evoke / passive effects and their timing.
-- [ ] Doom bar; death by doom (and every non-attack death) animated.
-- [ ] Creature focus tips (powers, intents) in combat.
-- [ ] Remaining combat VFX shaders (~60 effect shaders in the pack: the
-      erosion family is done; screen distortion, heavy_blunt_erosion,
-      water reflection, dark_blur and the screen-texture blurs, the rest
-      as `survey` lists them).
-- [ ] Turn banners, combat start/end, victory and boss transitions.
+- [x] Persistent combat scene; state changes animated from `steps` (bars,
+      powers, intents, energy, piles, card moves, generated cards) at the
+      game's timings (alpha push parts 2-4, spire_check's presentation
+      checks).
+- [x] NPlayerHand: draw / discard / play flights, retained cards, hand
+      selection (parts 7-8).
+- [x] VFX lifetimes, hit flashes, shakes (NCreature, ScreenShake), hit-stop
+      (parts 5-9).
+- [x] Orb channel / evoke / passive effects (spire_check orb checks).
+- [x] Doom bar; doom deaths and every non-attack death (part 6).
+- [x] Creature focus tips (powers, intents).
+- [x] Combat VFX shaders (part 8 and the survey; the mirror in part 9).
+      Open: NPowerUpVfx's 3D back layer (its 2D front draws; the 3D beam
+      and aura meshes need a perspective path, the mesh data and a spatial
+      VisualShader; only the two power-up scenes use 3D).
+- [x] Turn banners, combat start / end, victory and boss transitions.
 
 **Run flow and screens**
-- [ ] Room transitions (fade, the room's own enter animations) and map
-      travel (the path drawn, the marker moving, the map opening/closing).
-- [ ] Act transitions, the act start banners, the final victory and the
-      ending screens. Act banner + start-of-act map rise done (`fde9a44`).
-- [ ] Crystal Sphere minigame screen (a plain list now).
-- [ ] Pause / settings menu (Start), deck viewer, draw/discard/exhaust
-      pile viewers, inspect card (zoomed card with upgrade preview).
-      Done: pause, settings + credits (`c9fa02f`, `633b2cb`), deck and
-      pile viewers (`dcfe373`), map overlay (`3d2eb47`); open: inspect card.
-- [ ] Any decision type still shown as the plain list: find them with
-      spire_play runs on every character and the AutoSlay screen list
-      (DECISIONS D7).
-- [ ] Saving and continue (the game's save files; on the console under
-      the XEX's folder or a save container), Continue on the main menu.
-- [ ] Main menu extras that work in single-player (compendium, run
-      history, statistics, timeline) as far as they are single-player.
+- [x] Room transitions and map travel (the path, the marker, the rise).
+- [x] Act transitions, act banners, The Architect's ending, game over.
+- [x] Crystal Sphere minigame screen.
+- [x] Pause / settings / credits, deck and pile viewers, map overlay,
+      inspect card.
+- [x] Saving and continue, the main menu's Continue (profiles
+      checkpoint; console path untested).
+- [x] Compendium, run history, statistics, timeline (single-player
+      parts).
+- [x] FTUEs and the ascension popup (part 10; five tips not seen on
+      screen yet).
+- [ ] No decision shown as the plain list: spire_play marks one with
+      "(plain list)" and work/soak.sh counts them (plain=); confirm with
+      a soak.
 
 **Sound**
-- [x] Converter: the 12 FMOD Studio banks (301 MB, 591 named events) and the
-      mp3 temp sfx: extract the samples at conversion time (FSB5 inside
-      the banks), plus the event -> sample(s) mapping and the parameters
-      the game sets (`eec6c86`, `7877c59`, `5bb51a6`; complete local pack and
-      all sample/event/stream checks pass).
-- [ ] Engine: XAudio2 playback on the console (a PC backend for the
-      tools), streaming music.
-- [ ] The game's sound cues from `steps` (`sfx` / `music` cues are in the
-      protocol), the music logic of NRunMusicController, UI sounds.
+- [x] Converter: the FMOD Studio banks and temp sfx.
+- [x] Mixer, events, the steps' sound cues, music (NRunMusicController),
+      UI sounds; the console's XAudio2 output (engine/audio/output.cpp;
+      console test pending).
 
 **Performance and robustness**
-- [x] GPU texture budget + LRU; idle screen textures released (`2adfce5`,
-      validated by PC cache tests; console verification pending).
-- [ ] Draw call batching.
-- [ ] The 2 s rewards decision.
-- [x] Log appended and flushed per line (`2adfce5`; console
-      verification pending).
+- [x] GPU texture budget + LRU; idle screen textures released (`2adfce5`).
+- [x] Draw call batching (D3D9 renderer).
+- [x] Log appended and flushed per line (`2adfce5`).
+- [ ] The slow rewards decision (Xenia: ~2 s for the response that ends a
+      fight). PC: 33 ms JIT, 26 ms with the native (translated) logic,
+      the heaviest regular command but nothing pathological; Xenia's
+      emulated PPC is ~75x slower. Measure on the console before acting.
+- [ ] Turbulent particles on the console (part 10: ~300 noise gradients
+      per particle and step).
 - [ ] Soak: long spire_play `--auto` runs on every character with no
-      plain-list screens, no missing-texture warnings, no hangs.
+      plain-list screens, missing textures or hangs (part 9 ran all five;
+      rerun after part 10).
 
 **Not ported (by decision)**: multiplayer and everything that only exists
 for it (votes, other players' hands and holders).

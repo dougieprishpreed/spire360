@@ -373,7 +373,8 @@ int main(int argc, char** argv) {
             }
             if (game.decision_count() != decisions) {
                 decisions = game.decision_count();
-                printf("%04d %s\n", decisions, game.decision()["decision"].str().c_str());
+                printf("%04d %s%s\n", decisions, game.decision()["decision"].str().c_str(),
+                       game.showing_plain_list() ? "  (plain list)" : "");
                 fflush(stdout);
                 if (decisions >= steps) break;
             }
@@ -441,7 +442,8 @@ int main(int argc, char** argv) {
             if (!no_shots && !write_png((base + ".png").c_str(), sw.framebuffer()))
                 fprintf(stderr, "cannot write %s.png\n", base.c_str());
             if (!replay) save_text(base + ".json", link.last_decision + "\n");
-            printf("%04d %s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)");
+            printf("%04d %s%s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)",
+                   game.showing_plain_list() ? "  (plain list)" : "");
             /* the screen before the pad's: auto play answers it, not the next */
             if (pad_after > 0 && shown == pad_after - 1 && !pad_script.empty())
                 game.set_auto_play_until(game.decision_count() + 1);
