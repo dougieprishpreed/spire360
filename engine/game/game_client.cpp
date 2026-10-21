@@ -937,6 +937,24 @@ void GameClient::combat_input(const PadState& pad) {
         }
         return;
     }
+    if (combat_->creatures_focused()) {
+        /* NCreature hitboxes: left / right between them, down or B back;
+         * the end turn button still answers */
+        if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) {
+            combat_->move_creature_focus((pad.pressed & PadState::LEFT) ? -1 : 1);
+            return;
+        }
+        if (pad.pressed & (PadState::DOWN | PadState::B)) {
+            combat_->unfocus_creatures();
+            return;
+        }
+        if (pad.pressed & (PadState::A | PadState::UP)) return;
+    }
+    if (pad.pressed & PadState::UP) {
+        /* CardHolderContainer.FocusNeighborTop: the creatures */
+        combat_->focus_creatures();
+        return;
+    }
     if (n > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
         focus = (pad.pressed & PadState::LEFT) ? (focus + n - 1) % n : (focus + 1) % n;
         hand_focus_ = focus;

@@ -26,10 +26,20 @@ parts 2 and 3 above it).
   CHOOSE_CARD_UPGRADE_HEADER) and gives the select's cards their
   instance_id. `CombatScreen::begin_hand_select / end_hand_select /
   hand_select_input`, `HandSelectScreen` in game_client.cpp.
+- Creature focus in combat (NCombatRoom's pad navigation): up from the
+  hand focuses the creatures (leftmost first), left / right moves between
+  them by their place on screen (wrapping), down or B goes back; Y still
+  ends the turn. The focused creature shows its nameplate, its selection
+  reticle and its hover tips (Creature.HoverTips: intents and powers; the
+  logic sends them as each enemy's `tips` and the decision's
+  `player_tips`, presentation-only in trace_compare).
 - Soak (`work/soak.sh`, ignored): spire_play `--auto` runs per character,
   no crash, no logic error, no plain-list screen; the auto player dies in
   act 1, so `spire_play --hp N` now sets the player's HP after the start
-  for whole-run soaks.
+  for whole-run soaks (`--no-shots`: the log only). A whole run takes
+  1,600-2,400 screens, 35-55 minutes; the script runs two characters at a
+  time from copies of spire_play and the logic (work/soak-bin,
+  work/soak-logic), so builds go on meanwhile.
 
 ## Alpha push, part 6 (2026-10-20): creature effects, special nodes
 

@@ -25,6 +25,8 @@
  * --pad-after N: auto play up to screen N (the number printed for it),
  * then the --pad presses on it.
  *
+ * --no-shots: the run without the PNGs (soaks).
+ *
  * --hp N: the player's max HP and HP set to N once the run starts (a soak
  * that reaches the end of the run).
  *
@@ -187,7 +189,8 @@ int main(int argc, char** argv) {
     const char* replay = NULL;
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
-    int hp = 0; /* --hp: the player's max HP and HP after the start (soaks reach the end) */
+    int hp = 0;
+    bool no_shots = false; /* --no-shots: no PNGs (soaks keep the log only) */ /* --hp: the player's max HP and HP after the start (soaks reach the end) */
     int settle = 60; /* frames before a decision's shot */
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
@@ -216,6 +219,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--no-shots") == 0) no_shots = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--settle") == 0 && i + 1 < argc) settle = atoi(argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
@@ -396,7 +400,7 @@ int main(int argc, char** argv) {
             sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
             tree.render(canvas);
             sw.end();
-            write_png(format("%s/%04d_pad_%02d.png", out_dir.c_str(), shown, (int)pad_at).c_str(), sw.framebuffer());
+            if (!no_shots) write_png(format("%s/%04d_pad_%02d.png", out_dir.c_str(), shown, (int)pad_at).c_str(), sw.framebuffer());
         }
         if (game.decision_count() != before) {
             /* A new screen: let it settle (Godot's reference: 5th frame;
@@ -412,7 +416,8 @@ int main(int argc, char** argv) {
             sw.end();
             const std::string& kind = game.decision()["decision"].str();
             std::string base = format("%s/%04d_%s", out_dir.c_str(), shown, kind.c_str());
-            if (!write_png((base + ".png").c_str(), sw.framebuffer())) fprintf(stderr, "cannot write %s.png\n", base.c_str());
+            if (!no_shots && !write_png((base + ".png").c_str(), sw.framebuffer()))
+                fprintf(stderr, "cannot write %s.png\n", base.c_str());
             if (!replay) save_text(base + ".json", link.last_decision + "\n");
             printf("%04d %s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)");
             /* the screen before the pad's: auto play answers it, not the next */

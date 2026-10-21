@@ -103,6 +103,15 @@ public:
      * when upgrading) and back, Y confirms (min..max picked), B cancels when
      * the selection may be cancelled. end_hand_select puts the hand back as
      * it was (the next decision's steps move its cards). */
+    /* NCombatRoom's creature navigation with a pad: up from the hand to the
+     * creatures (the leftmost first), left / right between them by their
+     * place on screen (wrapping), down or B back to the hand. The focused
+     * creature shows its nameplate, its selection reticle and its hover
+     * tips (NCreature.OnFocus: its intents' and powers' tips). */
+    void focus_creatures();
+    void move_creature_focus(int step);
+    void unfocus_creatures();
+    bool creatures_focused() const { return creature_focus_ != NULL; }
     void begin_hand_select(const Json& decision);
     void end_hand_select();
     /* One frame of pad input while selecting: a command, or "". */
@@ -310,6 +319,12 @@ private:
     /* NEndTurnLongPressBar */
     bool long_press_on_, long_press_ready_, long_press_done_;
     double long_press_t_, long_press_fade_;
+    /* creature focus */
+    void creature_order(std::vector<Creature*>& out);
+    Creature* creature_of(Control* node);
+    void show_creature_focus(bool on);
+    Control* creature_focus_;  /* the focused creature's node, NULL: none */
+    Control* creature_tips_;
     /* hand selection mode */
     int focused_holder() const;
     void sel_pick(int holder);

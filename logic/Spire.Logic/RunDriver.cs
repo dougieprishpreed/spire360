@@ -2427,6 +2427,8 @@ public partial class RunDriver
                     ["intents"] = intents.Count > 0 ? intents : null,
                     ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
                     ["powers"] = ePowers?.Count > 0 ? ePowers : null,
+                    // NCreature.ShowHoverTips: its intents' and powers' tips
+                    ["tips"] = Tips(() => e.HoverTips),
                 }.WithCreatureView(e);
             }).ToList() ?? new();
 
@@ -2445,6 +2447,7 @@ public partial class RunDriver
             ["enemies"] = enemies,
             ["player"] = player.Creature != null ? PlayerSummary(player).WithCreatureView(player.Creature) : PlayerSummary(player),
             ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
+            ["player_tips"] = player.Creature != null ? Tips(() => player.Creature.HoverTips) : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
             // The combat UI (NCombatUi): exhaust pile button, star counter,

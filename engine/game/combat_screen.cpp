@@ -50,6 +50,8 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
       arrow_head_(NULL) {
     player_.node = NULL;
     osty_.node = NULL;
+    creature_focus_ = NULL;
+    creature_tips_ = NULL;
     sel_mode_ = 0;
     sel_row_ = false;
     sel_focus_ = 0;
@@ -889,7 +891,7 @@ void CombatScreen::set_hand_focus(int index) {
 
 /* The tips of the focused card (none while a card is being played). */
 void CombatScreen::refresh_tips() {
-    int focus = play_card_ >= 0 || aiming_ || (sel_mode_ && sel_row_) ? -1 : focused_holder();
+    int focus = play_card_ >= 0 || aiming_ || (sel_mode_ && sel_row_) || creature_focus_ ? -1 : focused_holder();
     if (focus == tips_for_) return;
     tips_for_ = focus;
     if (tips_) {
@@ -956,7 +958,7 @@ void CombatScreen::layout_hand(bool snap) {
         if (holders_[i].node && holders_[i].node->visible) act.push_back((int)i);
     int n = (int)act.size();
     if (n == 0) return;
-    int fh = sel_mode_ && sel_row_ ? -1 : focused_holder();
+    int fh = (sel_mode_ && sel_row_) || creature_focus_ ? -1 : focused_holder();
     int focus = -1;
     for (int k = 0; k < n; ++k)
         if (act[(size_t)k] == fh) focus = k;
@@ -1301,6 +1303,24 @@ void CombatScreen::process(double dt) {
             if (y + hgt > 1080.0f) y = 1080.0f - hgt;
             tips_->set_position(Vec2(x, y));
             tips_->modulate.a = 1;
+        }
+    }
+    /* A focused creature's tips: beside its hitbox, on the side towards the
+     * middle of the screen (HoverTip.GetHoverTipAlignment). */
+    if (creature_tips_ && creature_focus_) {
+        Creature* c = creature_of(creature_focus_);
+        if (c) {
+            Xform2D xf = c->node->global_transform();
+            Vec2 a = xf.xform(c->hitbox.pos), b = xf.xform(c->hitbox.pos + c->hitbox.size);
+            float w = creature_tips_->size.x, hgt = creature_tips_->size.y;
+            float x = (a.x + b.x) * 0.5f > 960.0f ? a.x - w - 10.0f : b.x + 10.0f;
+            if (x + w > 1920.0f) x = 1920.0f - w;
+            if (x < 0) x = 0;
+            float y = a.y;
+            if (y + hgt > 1080.0f) y = 1080.0f - hgt;
+            if (y < 0) y = 0;
+            creature_tips_->set_position(Vec2(x, y));
+            creature_tips_->modulate.a = 1;
         }
     }
     /* The steps' cues as their time comes; the damage numbers fly
@@ -1902,6 +1922,7 @@ void CombatScreen::refresh_counters() {
 /* Keep the background, Spine tracks, particles and surviving holders alive.
  * Only new combatants are instanced; absent enemies remain through death. */
 void CombatScreen::update_decision(const Json& d, bool finishing) {
+    unfocus_creatures(); /* the creatures may change */
     if (visual_only_ && !finishing) {
         /* NCombatRoom.TransitionToActiveCombat keeps all creature nodes. */
         visual_only_ = false;
@@ -2723,6 +2744,90 @@ void CombatScreen::play_steps(const Json& steps) {
         double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.4);
         if (cues_[i].kind != CUE_BANNER && cues_[i].kind != CUE_AUDIO && end > busy_until_) busy_until_ = end;
     }
+}
+
+/* ---- NCombatRoom's creature navigation ---- */
+
+/* The creatures a pad can focus, left to right (UpdateCreatureNavigation:
+ * the interactable ones by GlobalPosition.X). */
+void CombatScreen::creature_order(std::vector<Creature*>& out) {
+    out.clear();
+    if (player_.node && player_.node->visible) out.push_back(&player_);
+    if (osty_.node && osty_.node->visible && osty_.data["hp"].i(1) > 0) out.push_back(&osty_);
+    for (size_t i = 0; i < enemies_.size(); ++i)
+        if (enemies_[i].node && enemies_[i].node->visible && enemies_[i].data["hp"].i(1) > 0) out.push_back(&enemies_[i]);
+    for (size_t i = 1; i < out.size(); ++i)
+        for (size_t j = i; j > 0 && out[j]->node->global_transform().origin.x < out[j - 1]->node->global_transform().origin.x; --j) {
+            Creature* t = out[j];
+            out[j] = out[j - 1];
+            out[j - 1] = t;
+        }
+}
+
+CombatScreen::Creature* CombatScreen::creature_of(Control* node) {
+    if (!node) return NULL;
+    if (player_.node == node) return &player_;
+    if (osty_.node == node) return &osty_;
+    for (size_t i = 0; i < enemies_.size(); ++i)
+        if (enemies_[i].node == node) return &enemies_[i];
+    return NULL;
+}
+
+void CombatScreen::show_creature_focus(bool on) {
+    Creature* c = creature_of(creature_focus_);
+    if (creature_tips_) {
+        if (creature_tips_->parent) creature_tips_->parent->remove_child(creature_tips_);
+        delete creature_tips_;
+        creature_tips_ = NULL;
+    }
+    if (!c) return;
+    show_nameplate(*c, on);
+    select_reticle(*c, on);
+    if (!on || !root_) return;
+    const Json& tips = c->player ? state_["player_tips"] : c->data["tips"];
+    Node* t = make_tip_set(lib_, tips);
+    creature_tips_ = t && t->is_control() ? (Control*)t : NULL;
+    if (t && !creature_tips_) delete t;
+    if (!creature_tips_) return;
+    creature_tips_->z_index = 10;
+    creature_tips_->modulate.a = 0; /* placed on the next frame, after the layout */
+    root_->add_child(creature_tips_);
+}
+
+void CombatScreen::focus_creatures() {
+    std::vector<Creature*> order;
+    creature_order(order);
+    if (order.empty()) return;
+    unfocus_creatures();
+    creature_focus_ = order[0]->node;
+    show_creature_focus(true);
+    layout_hand();
+    refresh_tips();
+}
+
+void CombatScreen::move_creature_focus(int step) {
+    std::vector<Creature*> order;
+    creature_order(order);
+    if (order.empty()) {
+        unfocus_creatures();
+        return;
+    }
+    int at = 0;
+    for (size_t i = 0; i < order.size(); ++i)
+        if (order[i]->node == creature_focus_) at = (int)i;
+    int n = (int)order.size();
+    show_creature_focus(false);
+    creature_focus_ = order[(size_t)((at + step + n) % n)]->node;
+    show_creature_focus(true);
+}
+
+void CombatScreen::unfocus_creatures() {
+    if (!creature_focus_) return;
+    show_creature_focus(false);
+    creature_focus_ = NULL;
+    layout_hand();
+    tips_for_ = -2;
+    refresh_tips();
 }
 
 /* ---- NPlayerHand's selection mode ---- */
