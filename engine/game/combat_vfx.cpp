@@ -5,6 +5,7 @@
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
+#include "../scene/rich_text.h"
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/spine_sprite.h"
@@ -1864,7 +1865,8 @@ void vfx_emitting(Node* n, bool on) {
 bool is_combat_vfx_call(const std::string& call) {
     if (call == "NCombatRoom.PlaySplashVfx") return true;
     std::string cls = class_of(call);
-    if (call == "NSleepingVfx.Stop" || call == "NDoomOverlayVfx.GetOrCreate" || call == "PlayerHurtVignetteHelper.Play")
+    if (call == "NSleepingVfx.Stop" || call == "NDoomOverlayVfx.GetOrCreate" || call == "PlayerHurtVignetteHelper.Play" ||
+        call == "NSpeechBubbleVfx.Create")
         return true;
     if (call.compare(cls.size(), std::string::npos, ".Create") != 0 && call.find(".Create") == std::string::npos)
         return false;
@@ -1874,9 +1876,135 @@ bool is_combat_vfx_call(const std::string& call) {
     return false;
 }
 
+namespace {
+/* NSpeechBubbleVfx: fades in (0.4 s) with its text flying in, the bubble
+ * growing 0.25 -> 0.75 (0.5 s, Expo Out) and turning 7 -> 0 degrees (0.3 s,
+ * Sine Out); it bobs (sin, 4.5 rad/s, 2 px); after max(seconds - 1, 1) it
+ * fades out (0.4 s, Sine Out) and goes. */
+class SpeechBubble : public ScriptBehavior {
+public:
+    SpeechBubble(Control* root, Node2D* contents, Node2D* bubble, RichTextLabel* label, double seconds)
+        : contents_(contents), t_(0), wave_(3.14f), out_at_(0.5 + (seconds - 1 > 1 ? seconds - 1 : 1)), out_(false) {
+        tweens_.tween_from(&root->modulate.a, 0, 1, 0.4f);
+        if (label) tweens_.tween_from(&label->visible_ratio, 0, 1, 0.4f);
+        if (bubble) tweens_.tween_from(&bubble->scale, Vec2(0.25f, 0.25f), Vec2(0.75f, 0.75f), 0.5f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween_from(&root->rotation, 7 * 3.14159265f / 180, 0, 0.3f, TRANS_SINE, EASE_OUT);
+    }
+    /* AnimOut: a bubble kept until the next line goes now. */
+    void anim_out(Node* n) {
+        if (out_) return;
+        out_ = true;
+        out_at_ = t_;
+        CanvasItem* c = (CanvasItem*)n;
+        tweens_.kill(&c->modulate.a);
+        tweens_.tween(&c->modulate.r, 0, 0.4f, TRANS_SINE, EASE_OUT);
+        tweens_.tween(&c->modulate.g, 0, 0.4f, TRANS_SINE, EASE_OUT);
+        tweens_.tween(&c->modulate.b, 0, 0.4f, TRANS_SINE, EASE_OUT);
+        tweens_.tween(&c->modulate.a, 0, 0.4f, TRANS_SINE, EASE_OUT);
+    }
+    bool forever() const { return out_at_ > 1e6; }
+    virtual void process(Node* n, double dt) {
+        t_ += dt;
+        tweens_.update(dt);
+        wave_ += (float)dt * 4.5f;
+        if (contents_) contents_->position.y = sinf(wave_) * 2;
+        if (!out_ && t_ >= out_at_) anim_out(n);
+        if (out_ && t_ >= out_at_ + 0.4 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    TweenSet tweens_;
+    Node2D* contents_;
+    double t_;
+    float wave_;
+    double out_at_;
+    bool out_;
+};
+
+/* NSpeechBubbleVfx.SetSpeechBubbleColor: the bubble's hsv (h, s, v). */
+void bubble_hsv(const std::string& color, float* h, float* s, float* v) {
+    static const struct { const char* name; float h, s, v; } COLORS[] = {
+        { "Blue", 0.05f, 1.3f, 0.55f }, { "Green", 0.8f, 1.5f, 0.6f }, { "Swamp", 0.72f, 1.7f, 0.5f },
+        { "Purple", 0.3f, 0.6f, 0.5f }, { "Orange", 0.6f, 4, 0.5f },   { "Red", 0.49f, 2.5f, 0.38f },
+        { "DarkGray", 0.093f, 0.2f, 0.4f }, { "Black", 1, 0.25f, 0.3f } };
+    *h = 1;
+    *s = 0.9f;
+    *v = 0.5f;
+    for (size_t i = 0; i < sizeof(COLORS) / sizeof(COLORS[0]); ++i)
+        if (color == COLORS[i].name) {
+            *h = COLORS[i].h;
+            *s = COLORS[i].s;
+            *v = COLORS[i].v;
+        }
+}
+
+/* NSpeechBubbleVfx.Create(text, speaker, seconds, color): at the visuals'
+ * %TalkPos, else above the centre (3/8 of the hitbox) and 3/4 of its width
+ * to the speaker's front; the enemies' bubbles open to the left. */
+void spawn_speech_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnchors& anchors) {
+    VfxCreature c;
+    if (args.size() < 2) return;
+    const std::string& who = args[1].str();
+    if (!anchors.creature(who, &c)) return;
+    Vec2 at = c.center + Vec2(0, -c.hitbox.size.y * 0.5f * 0.75f);
+    at.x += c.enemy ? -c.hitbox.size.x * 0.75f : c.hitbox.size.x * 0.75f;
+    Node* visuals = anchors.visuals_of(who);
+    Node* talk = visuals ? visuals->find_unique("TalkPos") : NULL;
+    if (talk && talk->is_canvas_item()) at = ((CanvasItem*)talk)->global_transform().origin;
+    /* one line at a time: a bubble kept until the next goes now */
+    for (size_t i = 0; i < box->children.size(); ++i) {
+        Node* old = box->children[i];
+        if (old->script == "res://src/Core/Nodes/Vfx/NSpeechBubbleVfx.cs" && old->behavior && !old->queued_for_deletion() &&
+            ((SpeechBubble*)old->behavior)->forever())
+            ((SpeechBubble*)old->behavior)->anim_out(old);
+    }
+    Node* fx = instance(lib, "scenes/vfx/vfx_speech_bubble.tscn");
+    if (!fx || !fx->is_control()) {
+        delete fx;
+        return;
+    }
+    Control* root = (Control*)fx;
+    Node* container = fx->find_unique("Container");
+    Node* contents = fx->find_unique("Contents");
+    Node* bubble = fx->find_unique("Bubble");
+    Node* shadow = fx->find_unique("Shadow");
+    Node* text = fx->find_unique("Text");
+    float h, s, v;
+    bubble_hsv(args.size() > 3 ? args[3].str() : std::string(), &h, &s, &v);
+    if (bubble && bubble->is_canvas_item()) {
+        CanvasItem* b = (CanvasItem*)bubble;
+        b->shader_params["h"] = h;
+        b->shader_params["s"] = s;
+        b->shader_params["v"] = v;
+    }
+    if (c.enemy) {
+        if (container && container->is_control()) {
+            Control* k = (Control*)container;
+            float w = k->offset[SIDE_RIGHT] - k->offset[SIDE_LEFT];
+            k->set_position(Vec2(-w - k->offset[SIDE_LEFT], k->offset[SIDE_TOP]));
+        }
+        if (bubble && bubble->type == "Sprite2D") ((Sprite2D*)bubble)->flip_h = true;
+        if (shadow && shadow->type == "Sprite2D") ((Sprite2D*)shadow)->flip_h = true;
+    }
+    set_label(text, format("[center][fly_in offset_x=%d offset_y=40]%s[/fly_in][/center]", c.enemy ? 60 : -60,
+                           args[(size_t)0].str().c_str()));
+    double seconds = args.size() > 2 ? args[2].num(1.75) : 1.75;
+    delete fx->behavior;
+    fx->behavior = new SpeechBubble(root, contents && contents->is_node2d() ? (Node2D*)contents : NULL,
+                                    bubble && bubble->is_node2d() ? (Node2D*)bubble : NULL,
+                                    text && text->type == "RichTextLabel" ? (RichTextLabel*)text : NULL, seconds);
+    box->add_child(fx);
+    root->set_position(at);
+}
+} /* namespace */
+
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors) {
     if (!is_combat_vfx_call(call)) return false;
     if (!box) return true;
+    if (call == "NSpeechBubbleVfx.Create") {
+        spawn_speech_bubble(lib, box, args, anchors);
+        return true;
+    }
     Args a(args);
     std::string cls = class_of(call);
     VfxCreature c;
