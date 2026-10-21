@@ -308,7 +308,23 @@ private:
         float from_scale, to_scale;
         double t, duration;
         bool exhaust; /* at the end, NCardExhaustVfx takes it (no fade) */
+        /* 0: straight (cards that just go); 1: NCardFlyVfx to a pile (an
+         * arc, speeding up, darkening and shrinking); 2: NCardFlyPowerVfx
+         * (along the swoosh path into the player) */
+        int kind;
+        int phase;
+        float speed, accel, fdur, ftime, scale_from, scale_t;
+        Vec2 ctrl;
+        Node* trail;       /* NCardTrailVfx following the card (owned by the tree) */
+        Node* path_scene;  /* the power swoosh's scene (owned here) */
     };
+    void start_flight(MovingCard& m, int kind, const std::string& pile);
+    bool fly(MovingCard& m, double dt); /* false once the card is gone */
+    struct Trail {
+        Node* node;
+        double t;
+    };
+    std::vector<Trail> fading_trails_; /* NCardTrailVfx.FadeOut */
     std::vector<MovingCard> moving_cards_;
     /* dead monsters that do not fade: hidden at "at" once nothing delays them */
     struct DelayedHide {

@@ -342,7 +342,7 @@ private:
  * large steps. NBasicTrail and NTrail2D keep a fixed number of segments. */
 class Trail : public ScriptBehavior {
 public:
-    Trail(Node* n, int kind) : kind_(kind), target_(NULL), duration_(exported_number(n, "_pointDuration", 0.5f)),
+    Trail(Node* n, int kind, float duration = 0.5f) : kind_(kind), target_(NULL), duration_(exported_number(n, "_pointDuration", duration)),
         maximum_((int)exported_number(n, "_maxSegments", kind == 1 ? 10 : 20)), has_last_(false) {}
     virtual void ready(Node* n) {
         if (n->parent && n->parent->is_node2d()) target_ = (Node2D*)n->parent;
@@ -409,6 +409,8 @@ ScriptBehavior* make_hit_spark(Node*) { return new HitSpark(); }
 ScriptBehavior* make_shaker(Node* n) { return new Shaker(n); }
 ScriptBehavior* make_projectile_handler(Node* n) { return new ProjectileHandler(n); }
 ScriptBehavior* make_bezier_trail(Node* n) { return new Trail(n, 0); }
+/* NCardTrail: NBezierTrail's points, 0.8 s each */
+ScriptBehavior* make_card_trail(Node* n) { return new Trail(n, 0, 0.8f); }
 ScriptBehavior* make_basic_trail(Node* n) { return new Trail(n, 1); }
 ScriptBehavior* make_node_trail(Node* n) { return new Trail(n, 2); }
 
@@ -441,6 +443,7 @@ void install_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/Utilities/NVfxProjectileHandler.cs", make_projectile_handler);
     register_script("res://src/Core/Nodes/Vfx/NBezierTrail.cs", make_bezier_trail);
     register_script("res://src/Core/Nodes/Vfx/NBasicTrail.cs", make_basic_trail);
+    register_script("res://src/Core/Nodes/Vfx/NCardTrail.cs", make_card_trail);
     register_script("res://src/Core/Nodes/Vfx/Utilities/NTrail2D.cs", make_node_trail);
 }
 

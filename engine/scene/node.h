@@ -53,6 +53,9 @@ public:
 
     void add_child(Node* child);
     void remove_child(Node* child); /* does not delete */
+    /* add_child placed just before sibling (drawn under it); at the end when
+     * sibling is not a child */
+    void add_child_before(Node* child, Node* sibling);
     /* Godot's QueueFree: removed after this frame's process traversal. */
     void queue_free() { queued_free_ = true; }
     bool queued_for_deletion() const { return queued_free_; }

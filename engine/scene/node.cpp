@@ -154,6 +154,17 @@ void Node::add_child(Node* child) {
     children.push_back(child);
 }
 
+void Node::add_child_before(Node* child, Node* sibling) {
+    if (child->parent) child->parent->remove_child(child);
+    child->parent = this;
+    for (size_t i = 0; i < children.size(); ++i)
+        if (children[i] == sibling) {
+            children.insert(children.begin() + (long)i, child);
+            return;
+        }
+    children.push_back(child);
+}
+
 void Node::remove_child(Node* child) {
     for (size_t i = 0; i < children.size(); ++i) {
         if (children[i] == child) {

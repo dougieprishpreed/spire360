@@ -1,6 +1,7 @@
 #include "animation.h"
 
 #include "controls.h"
+#include "path_2d.h"
 #include "scene.h"
 #include "value.h"
 
@@ -189,6 +190,11 @@ static int slots(Node* n, const std::string& prop, const std::string& sub, float
             count = 2;
         } else if (prop == "rotation" || prop == "skew") {
             out[0] = prop == "rotation" ? &d->rotation : &d->skew;
+            count = 1;
+        } else if (n->type == "PathFollow2D" && (prop == "progress" || prop == "progress_ratio")) {
+            PathFollow2D* f = (PathFollow2D*)n;
+            f->use_ratio = prop == "progress_ratio";
+            out[0] = prop == "progress" ? &f->progress : &f->progress_ratio;
             count = 1;
         }
     } else if (n->is_control()) {

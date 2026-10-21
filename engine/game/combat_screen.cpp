@@ -10,6 +10,7 @@
 #include "../scene/tree.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
+#include "../scene/path_2d.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
 #include "../scene/rich_text.h"
@@ -873,6 +874,8 @@ void CombatScreen::sync_hand(const Json& cards, bool animate) {
             m.t = 0;
             m.duration = 0.4;
             m.exhaust = false;
+            m.kind = 0;
+            m.trail = m.path_scene = NULL;
             moving_cards_.push_back(m);
         }
     }
@@ -1244,8 +1247,22 @@ void CombatScreen::process(double dt) {
     }
     float t = (float)dt;
     tweens_.update(dt);
+    for (size_t i = fading_trails_.size(); i-- > 0;) {
+        Trail& tr = fading_trails_[i];
+        tr.t += dt;
+        if (tr.node->is_canvas_item()) ((CanvasItem*)tr.node)->modulate.a = tr.t < 0.5 ? (float)(1.0 - tr.t / 0.5) : 0.0f;
+        if (tr.t >= 0.5) {
+            if (tr.node->parent) tr.node->parent->remove_child(tr.node);
+            delete tr.node;
+            fading_trails_.erase(fading_trails_.begin() + (long)i);
+        }
+    }
     for (size_t i = moving_cards_.size(); i-- > 0;) {
         MovingCard& m = moving_cards_[i];
+        if (m.kind != 0) {
+            if (!fly(m, dt)) moving_cards_.erase(moving_cards_.begin() + (long)i);
+            continue;
+        }
         m.t += dt;
         float u = clampf((float)(m.t / m.duration), 0, 1);
         float k = tween_interpolate(TRANS_CUBIC, EASE_OUT, u, 0, 1, 1);
@@ -2074,6 +2091,10 @@ void CombatScreen::move_card(const Json& change) {
             m.duration = 0.4;
             /* played and exhausted: NCardExhaustVfx where it ends */
             m.exhaust = to == "exhaust";
+            m.kind = 0;
+            m.trail = m.path_scene = NULL;
+            if (to == "discard" || to == "draw") start_flight(m, 1, to);
+            else if (to == "none" && m.holder.data["type"].str() == "Power") start_flight(m, 2, to);
             moving_cards_.push_back(m);
             holders_.erase(holders_.begin() + (long)i);
             break;
@@ -2744,6 +2765,195 @@ void CombatScreen::play_steps(const Json& steps) {
         double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.4);
         if (cues_[i].kind != CUE_BANNER && cues_[i].kind != CUE_AUDIO && end > busy_until_) busy_until_ = end;
     }
+}
+
+/* ---- the cards' flights (NCardFlyVfx, NCardFlyPowerVfx, NCardTrailVfx) ---- */
+
+static float lerp_angle(float from, float to, float k) {
+    float d = fmodf(to - from, 2 * PI_F);
+    d = fmodf(2 * d, 2 * PI_F) - d;
+    return from + d * k;
+}
+
+static float chaotic_range(float lo, float hi) { return lo + (hi - lo) * (float)(chaotic_rand() % 100001) / 100000.0f; }
+
+/* NCardTrailVfx._Process: at the card; FadeOut: stays, fades in 0.5 s. */
+static void follow(Node* trail, Control* card) {
+    if (!trail || !trail->is_node2d() || !trail->parent) return;
+    Node2D* t = (Node2D*)trail;
+    Vec2 g = card->global_transform().origin;
+    Xform2D pg = trail->parent->is_canvas_item() ? ((CanvasItem*)trail->parent)->global_transform() : Xform2D();
+    t->position = inverse(pg).xform(g);
+    t->rotation = card->rotation;
+}
+
+/* NCardFlyVfx.Create / NCardFlyPowerVfx.Create: where the card goes (in the
+ * hand's coordinates), its trail (the character's card_trail scene) and
+ * its sound. */
+void CombatScreen::start_flight(MovingCard& m, int kind, const std::string& pile) {
+    m.kind = kind;
+    m.phase = 0;
+    m.ftime = 0;
+    m.scale_from = m.holder.scale;
+    m.scale_t = 0;
+    Xform2D to_local = inverse(hand_box_->global_transform());
+    Vec2 start = hand_box_->global_transform().xform(m.holder.pos);
+    if (kind == 1) {
+        /* PileType.GetTargetPosition: the pile button's centre */
+        Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+        Node* piles = ui ? find_named(ui, "CombatPileContainer") : NULL;
+        Node* b = piles ? piles->get_node(pile == "draw" ? "DrawPile" : "DiscardPile") : NULL;
+        Vec2 end = start;
+        if (b && b->is_control()) {
+            Control* c = (Control*)b;
+            end = c->global_transform().xform(c->size * 0.5f);
+        }
+        m.to = to_local.xform(end);
+        float off = chaotic_range(100, 400);
+        m.speed = chaotic_range(1.1f, 1.25f);
+        m.accel = chaotic_range(2, 2.5f);
+        float arc = end.y < 540.0f ? -500.0f : 500.0f + off;
+        m.fdur = chaotic_range(1, 1.75f);
+        Vec2 c = start + (end - start) * 0.5f;
+        c.y -= arc;
+        m.ctrl = to_local.xform(c);
+        if (lib_->audio())
+            lib_->audio()->ui(pile == "draw" ? "event:/sfx/ui/cards/card_movement_B_into_draw"
+                              : m.holder.id == played_instance_ ? "event:/sfx/ui/cards/card_movement_B_play_into_discard"
+                                                                : "event:/sfx/ui/cards/card_movement_B_into_discard");
+    } else {
+        /* the swoosh path, ending at the player's VfxSpawnPosition */
+        m.path_scene = instance(lib_, "scenes/vfx/vfx_card_power_fly.tscn");
+        Node* p = m.path_scene ? m.path_scene->get_node("SwooshPath") : NULL;
+        VfxCreature pc;
+        if (p && p->type == "Path2D" && creature("player", &pc)) {
+            Path2D* path = (Path2D*)p;
+            path->set_point_position(path->point_count() - 1, pc.center - start);
+            m.fdur = path->baked_length() / 3000.0f;
+        } else {
+            m.fdur = 0.3f;
+        }
+        m.from = start; /* global: the path is relative to it */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/cards/card_movement_B_power");
+    }
+    /* NCardTrailVfx._Ready: the sprites fade in and shrink, the card to 0.75 */
+    std::string ch = lower(player_.data["character"].str());
+    m.trail = ch.empty() ? NULL : instance(lib_, "scenes/vfx/card_trail_" + ch + ".tscn");
+    if (m.trail && hand_box_->parent) {
+        hand_box_->parent->add_child_before(m.trail, hand_box_);
+        follow(m.trail, m.holder.node); /* its trails start at the card */
+        Node* sprites = m.trail->get_node("Sprites");
+        if (sprites && sprites->is_canvas_item()) {
+            CanvasItem* sp = (CanvasItem*)sprites;
+            sp->modulate.a = 0;
+            tweens_.tween(&sp->modulate.a, 1.0f, 1.0f, TRANS_CUBIC, EASE_OUT);
+            if (sp->is_node2d()) tweens_.tween(&((Node2D*)sp)->scale, Vec2(0.5f, 0.5f), 0.5f, TRANS_CUBIC, EASE_IN, 0.25f);
+        }
+        tweens_.tween(&m.holder.node->modulate.a, 0.75f, 0.5f, TRANS_CUBIC, EASE_OUT);
+    } else if (m.trail) {
+        delete m.trail;
+        m.trail = NULL;
+    }
+}
+
+static void stop_particles(Node* n) {
+    if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") ((Particles2D*)n)->emitting = false;
+    for (size_t i = 0; i < n->children.size(); ++i) stop_particles(n->children[i]);
+}
+
+bool CombatScreen::fly(MovingCard& m, double dt) {
+    Control* card = m.holder.node;
+    Node* body = m.holder.card_node ? find_named(m.holder.card_node, "CardContainer") : NULL;
+    float k = (float)dt;
+    bool done = false;
+    if (m.kind == 1) {
+        /* NCardFlyVfx.PlayAnim */
+        if (m.phase == 0) {
+            m.ftime += m.speed * k;
+            m.speed += m.accel * k;
+            float u = m.ftime / m.fdur;
+            if (u > 1) {
+                place(card, m.to.x, m.to.y, 0, 0);
+                m.phase = 1;
+                m.ftime = 0;
+            } else {
+                float u2 = (m.ftime + 0.05f) / m.fdur;
+                Vec2 p = m.from * ((1 - u) * (1 - u)) + m.ctrl * (2 * (1 - u) * u) + m.to * (u * u);
+                Vec2 q = m.from * ((1 - u2) * (1 - u2)) + m.ctrl * (2 * (1 - u2) * u2) + m.to * (u2 * u2);
+                place(card, p.x, p.y, 0, 0);
+                float ang = atan2f(q.y - p.y, q.x - p.x) + PI_F / 2;
+                card->rotation = lerp_angle(card->rotation, ang, minf(k * 12, 1));
+                float d = clampf(m.ftime * 3 / m.fdur, 0, 1);
+                if (body && body->is_control()) {
+                    Control* b = (Control*)body;
+                    b->modulate = Color(1 - d, 1 - d, 1 - d, b->modulate.a);
+                    float s = 1 + (0.1f - 1) * d;
+                    b->scale = Vec2(s, s);
+                }
+            }
+        } else {
+            m.ftime += m.speed * k;
+            float u = m.ftime / m.fdur;
+            if (u > 0.25f && m.trail) {
+                stop_particles(m.trail);
+                Trail t = { m.trail, 0 };
+                fading_trails_.push_back(t);
+                m.trail = NULL;
+            }
+            if (body && body->is_control()) {
+                float s = maxf(0.1f + (-0.15f - 0.1f) * u, 0);
+                ((Control*)body)->scale = Vec2(s, s);
+            }
+            if (u > 1) done = true;
+        }
+    } else {
+        /* NCardFlyPowerVfx.PlayAnim: along the path at 3000 px/s (Quad In),
+         * turning towards it, to 0.1 in 0.3 s, then to nothing from 90% */
+        m.ftime += k;
+        float u = m.fdur > 0 ? m.ftime / m.fdur : 1.0f;
+        Node* p = m.path_scene ? m.path_scene->get_node("SwooshPath") : NULL;
+        if (p && p->type == "Path2D") {
+            Path2D* path = (Path2D*)p;
+            float rot = 0;
+            Vec2 at = path->sample_baked(minf(u, 1) * minf(u, 1) * path->baked_length(), &rot);
+            Vec2 g = m.from + at;
+            Vec2 l = inverse(hand_box_->global_transform()).xform(g);
+            place(card, l.x, l.y, 0, 0);
+            float s = rot - card->rotation;
+            float spin = PI_F + (PI_F * 50 - PI_F) * minf(u, 1);
+            float step = minf(fabsf(s), spin * k);
+            card->rotation += s < 0 ? -step : step;
+        }
+        if (u < 0.9f) {
+            m.scale_t += k;
+            float s = m.scale_from + (0.1f - m.scale_from) * minf(m.scale_t / 0.3f, 1);
+            card->scale = Vec2(s, s);
+            m.scale_from = m.scale_t >= 0.3f ? 0.1f : m.scale_from;
+        } else {
+            float rest = maxf(m.fdur * 0.1f, 0.001f);
+            float s = 0.1f * maxf(1 - (u - 0.9f) * m.fdur / rest, 0);
+            card->scale = Vec2(s, s);
+        }
+        if (u >= 1) {
+            ScreenShake::get().shake("Medium", "Short");
+            if (m.trail) {
+                stop_particles(m.trail);
+                Trail t = { m.trail, 0 };
+                fading_trails_.push_back(t);
+                m.trail = NULL;
+            }
+            done = true;
+        }
+    }
+    if (m.trail) follow(m.trail, card);
+    if (done) {
+        if (card->parent) card->parent->remove_child(card);
+        delete card;
+        delete m.path_scene;
+        m.path_scene = NULL;
+        return false;
+    }
+    return true;
 }
 
 /* ---- NCombatRoom's creature navigation ---- */
