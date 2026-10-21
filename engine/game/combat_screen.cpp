@@ -2398,6 +2398,10 @@ Node* CombatScreen::back_box() { return root_ ? find_named(root_, "BackCombatVfx
  * or its position (its feet), the middle of a side's creatures, the
  * screen's centre. */
 bool CombatScreen::vfx_position(const Cue& c, Vec2* out) {
+    if (c.where == "viewport") {
+        *out = Vec2(480, 540);
+        return true;
+    }
     if (c.where == "screen") {
         *out = Vec2(960, 540);
         return true;
@@ -2501,6 +2505,11 @@ void CombatScreen::fire(const Cue& c) {
     }
     /* CUE_DAMAGE: NDamageNumVfx.Create(target): 100 px above the centre,
      * +-10 x +-5 px. */
+    if (c.where == "viewport") {
+        Node* num = make_damage_number(lib_, Vec2(480, 540), c.amount);
+        if (num) vfx_box_->add_child(num);
+        return;
+    }
     float rx = (float)(chaotic_rand() % 2001) / 1000.0f - 1.0f, ry = (float)(chaotic_rand() % 2001) / 1000.0f - 1.0f;
     Node* num = make_damage_number(lib_, at + Vec2(rx * 10.0f, -100.0f + ry * 5.0f), c.amount);
     if (num) vfx_box_->add_child(num);
@@ -2697,6 +2706,13 @@ void CombatScreen::play_steps(const Json& steps) {
                 c.where = "center";
                 c.amount = ch["args"][1].i();
                 if (!creature_for(c.who)) continue;
+                /* requireInteractable (default true): an event's room has no
+                 * interactable creatures, so only the local player's number,
+                 * at viewport * (0.25, 0.5) */
+                if (visual_only_ && !(ch["args"].size() > 2 && ch["args"][2].is_bool() && !ch["args"][2].b())) {
+                    if (c.who != "player") continue;
+                    c.where = "viewport";
+                }
                 cues_.push_back(c);
             } else if (type == "death" || type == "despawn") {
                 c.kind = CUE_ANIM;

@@ -118,14 +118,26 @@ void heal_vfx(SceneLibrary* lib, Node* screen, const Json& player, double amount
 
 } /* namespace */
 
+bool add_room_vfx(SceneLibrary* lib, Node* screen, const std::string& call) {
+    const char* scene = call == "NMirrorVfx.Create" ? "scenes/vfx/whole_screen/mirror_vfx.tscn"
+                      : call == "NRainVfx.Create"   ? "scenes/vfx/whole_screen/vfx_rain.tscn"
+                                                    : NULL;
+    if (!scene) return false;
+    Node* fx = instance(lib, scene);
+    if (fx) add_under_bar(screen, fx);
+    return true;
+}
+
 void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
     const Json& steps = d["steps"];
+    /* an event's combat room plays its own cues (EventScreen) */
+    bool room = d["layout"].str() == "Combat";
     NoCreatures anchors;
     for (size_t i = 0; i < steps.size(); ++i)
         for (size_t k = 0; k < steps[i].size(); ++k) {
             const Json& c = steps[i][k];
             const std::string& t = c["t"].str();
-            if (t == "relic_flash") {
+            if (t == "relic_flash" && !room) {
                 Node* bar = screen->get_node("TopBarLayer");
                 Node* row = bar ? find_named(bar, "RelicInventory") : NULL;
                 int index = c["index"].i(-1);
@@ -139,6 +151,7 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
             if (t != "ui") continue;
             const std::string& call = c["call"].str();
             const Json& args = c["args"];
+            if (room && call != "PlayerFullscreenHealVfx.Play") continue;
             if (ScreenShake::get().cue(call, args)) {
                 /* NGame.ScreenShake / ScreenRumble / ScreenShakeTrauma on the room */
             } else if (call == "PlayerHurtVignetteHelper.Play") {

@@ -178,6 +178,9 @@ private:
     int characters_version_;
     RoomTransition* transition_;
     DeckPreviews* deck_previews_; /* NRun.GlobalUi's card previews (over the screens) */
+    bool event_finishing_;        /* finishing_ waits for the event's room */
+    std::vector<std::string> room_vfx_; /* the event room's own effects (ui calls) */
+    std::string room_vfx_event_;
     Json transition_pending_;
     std::vector<std::string> queued_; /* sent after the logic's "ready" */
     Json answer_;

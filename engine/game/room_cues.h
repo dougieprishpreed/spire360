@@ -25,6 +25,10 @@ class SceneLibrary;
 /* screen: the new screen's root (the top bar already added). */
 void play_room_cues(SceneLibrary* lib, Node* screen, const Json& decision);
 
+/* An event room's own effect (EventModel.OnRoomEnter: NMirrorVfx.Create,
+ * NRainVfx.Create) on the screen; false if call is none of them. */
+bool add_room_vfx(SceneLibrary* lib, Node* screen, const std::string& call);
+
 } /* namespace spire */
 
 #endif

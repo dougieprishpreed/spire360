@@ -54,10 +54,7 @@ parts 2 and 3 above it).
   first time all 64 voices are taken the mixer lists what holds them.
 - Whole-run soak (`sh work/soak.sh [LANE1 LANE2]`, two lanes): all five
   characters ran clean of crashes and stalls; after the fixes Regent and
-  Defect have no logic errors. Open: Regent hits the 64-voice cap (17
-  sounds not started), Defect twice; the listing (a re-run is in
-  work/soak/) says what fills them. FMOD steals voices rather than
-  refusing new ones.
+  Defect have no logic errors.
 - Content mismatches (keep visible, as Vine Shambler / Slithering
   Strangler): Bowlbug Silk and Living Shield use MonsterModel's default
   AttackSfx path, which the installed bank does not have.
@@ -74,8 +71,29 @@ parts 2 and 3 above it).
   and treasure rooms) and `make_shake_driver` runs the shake while it
   holds it (a fight's room keeps its own); room cues pass the
   NGame.Screen* calls on. The top bar inside a shaken room stays put.
-- Still open: The Architect's speech bubbles, NPowerUpVfx's 3D layer, the
-  enchant emboss.
+- Speech bubbles (NSpeechBubbleVfx) in fights and event rooms: %TalkPos
+  or above the centre to the speaker's front, the colour's hsv, the text
+  flying in; a VfxDuration.Forever bubble goes when the next line comes.
+- EventModel.OnRoomEnter runs headless now: the UI calls it
+  (NEventLayout.SetEvent), so the logic calls it after NEventRoom.Create
+  and NRun.SetCurrentRoom (Minigames.cs OnUiCall). The Architect: the hook
+  `architect.line` gives it the layout combat's enemy (the game reads the
+  room's nodes), so its first line, the head (anim cues on track 1), the
+  score and the closing attacks run as in the game; its hits' numbers and
+  sparks go to a null container headless, so `architect.parts` records
+  DivideWildly's parts and they come with each hit's VFX cue.
+  Reflections' mirror and Slippery Bridge's rain are recorded from their
+  OnRoomEnter and stay for every page of the event.
+- Event rooms with a combat layout play their responses' steps on the
+  room; a response that leaves the event (The Architect's game over)
+  waits for them. Damage numbers on such a room follow
+  requireInteractable (the local player's at the viewport fallback).
+- Audio: at 64 voices the mixer steals the oldest one-shot (FMOD steals
+  rather than refusing). The Regent soak's 64 were a burst of one-shots
+  (2 looping), not a leak.
+- Test runs (`start_run`) report game over without victory after WinRun:
+  only game-flow runs (`start_game_run`) record RunManager.OnEnded.
+- Still open: NPowerUpVfx's 3D layer, the enchant emboss.
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights
 

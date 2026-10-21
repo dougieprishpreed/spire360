@@ -97,7 +97,23 @@ internal static partial class Hooks
                 Steps.OrbCue(orb, true, targets);
         });
         Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature", (a, r) => VfxCue(a, "feet"));
-        Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature_center", (a, r) => VfxCue(a, "center"));
+        Spire.HookBridge.Hooks.RegisterAfter("vfx.on_creature_center", (a, r) =>
+        {
+            // The Architect's hit: its damage number and spark (see architect.parts)
+            if (_architectParts.Count > 0 && a.Length > 0 && a[0] is Creature hit)
+            {
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NDamageNumVfx.Create",
+                                                            ["args"] = new List<object?> { Steps.Who(hit), _architectParts.Dequeue(), false } });
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NHitSparkVfx.Create",
+                                                            ["args"] = new List<object?> { Steps.Who(hit), false } });
+            }
+            VfxCue(a, "center");
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("architect.parts", (a, r) =>
+        {
+            _architectParts.Clear();
+            if (r is int[] parts) foreach (var p in parts) _architectParts.Enqueue(p);
+        });
         Spire.HookBridge.Hooks.RegisterAfter("vfx.on_side", (a, r) =>
         {
             if (a.Length > 1 && a[0] is CombatSide side && a[1] is string path)
@@ -177,6 +193,36 @@ internal static partial class Hooks
                 DeckCue("transform", c, _transformedFrom, s, 0);
             _transformedFrom = null;
         });
+        // TheArchitect: OnRoomEnter looks for the Architect among the room's
+        // creature nodes; headless the layout combat's enemy stands in, and
+        // its head animations (track 1) become anim cues.
+        Spire.HookBridge.Hooks.RegisterBefore("architect.line", a =>
+        {
+            if (a.Length == 0 || a[0] is not EventModel ev) return;
+            var prop = ev.GetType().GetProperty("ArchitectCreature", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (prop == null || prop.GetValue(ev) != null) return;
+            var sync = typeof(EventModel).GetField("_combatSynchronizer", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(ev)
+                as MegaCrit.Sts2.Core.Multiplayer.Game.EventCombatSynchronizer;
+            var architect = sync?.CombatStateForLayout?.Enemies.FirstOrDefault();
+            if (architect == null) return;
+            prop.SetValue(ev, architect);
+            // OnRoomEnter's SetAnimation("_tracks/head_reading", loop, 1)
+            HeadCue(architect, new Dictionary<string, object?> { ["op"] = "set_animation", ["name"] = "_tracks/head_reading", ["loop"] = true, ["track"] = 1 });
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("architect.head", (a, r) =>
+        {
+            // the first line: head_stop_reading, 0.5 s later head_normal (looping)
+            var prop = a.Length > 0 && a[0] != null ? a[0]!.GetType().GetProperty("ArchitectCreature", BindingFlags.Instance | BindingFlags.NonPublic) : null;
+            if (prop?.GetValue(a[0]) is Creature architect)
+                HeadCue(architect,
+                    new Dictionary<string, object?> { ["op"] = "set_animation", ["name"] = "_tracks/head_stop_reading", ["loop"] = false, ["track"] = 1 },
+                    new Dictionary<string, object?> { ["op"] = "add_animation", ["name"] = "_tracks/head_normal", ["loop"] = true, ["delay"] = 0.5, ["track"] = 1 });
+        });
+        // The events' room effects added in OnRoomEnter (see patches.json).
+        Spire.HookBridge.Hooks.RegisterAfter("event.room_vfx.mirror", (a, r) =>
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NMirrorVfx.Create", ["args"] = new List<object?>() }));
+        Spire.HookBridge.Hooks.RegisterAfter("event.room_vfx.rain", (a, r) =>
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NRainVfx.Create", ["args"] = new List<object?>() }));
         Spire.HookBridge.Hooks.RegisterAfter("anim.trigger", (a, r) =>
         {
             if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)
@@ -293,6 +339,11 @@ internal static partial class Hooks
         public static void Register(string id, Func<object?[], object?> handler) =>
             Spire.HookBridge.Hooks.Register(id, handler);
     }
+
+    private static readonly Queue<int> _architectParts = new();
+
+    private static void HeadCue(Creature who, params Dictionary<string, object?>[] ops) =>
+        Steps.Cue(new Dictionary<string, object?> { ["t"] = "anim", ["who"] = Steps.Who(who), ["name"] = "Head", ["wait"] = 0, ["play"] = ops.ToList() });
 
     private static MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? _upgradeStyle, _transformStyle;
 

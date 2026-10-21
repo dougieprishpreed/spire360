@@ -50,8 +50,16 @@ u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start
     failure_ = "";
     if (!pack_) return 0;
     if (voices_.size() >= 64) {
-        failure_ = "64 voices playing";
-        return 0;
+        /* FMOD steals the oldest voice at its limit: the oldest one-shot */
+        size_t oldest = voices_.size();
+        for (size_t i = 0; i < voices_.size() && oldest == voices_.size(); ++i)
+            if (voices_[i]->loops == 0) oldest = i;
+        if (oldest == voices_.size()) {
+            failure_ = "64 looping voices playing";
+            return 0;
+        }
+        delete voices_[oldest];
+        voices_.erase(voices_.begin() + (long)oldest);
     }
     Voice* v = new Voice;
     v->path = path;

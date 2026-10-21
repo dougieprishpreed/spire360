@@ -35,6 +35,7 @@
 #include "logic_link.h"
 #include "loc.h"
 
+#include <algorithm>
 #include <stdio.h>
 
 namespace spire {
@@ -252,7 +253,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), deck_previews_(NULL),
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), deck_previews_(NULL), event_finishing_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
@@ -446,6 +447,8 @@ void GameClient::update(const PadState& pad) {
     if (!finishing_.is_null()) {
         /* The killing blow is playing: then the decision after it. */
         if ((room_ && room_->busy()) || (combat_ && combat_->busy())) return;
+        if (event_finishing_ && ported_ && ((EventScreen*)ported_)->room_playing()) return;
+        event_finishing_ = false;
         Json d = finishing_;
         finishing_ = Json();
         d.set("steps", Json()); /* already played on the persistent room */
@@ -583,6 +586,15 @@ void GameClient::show(const Json& d) {
         /* Keep the actual room through its killing blow, including deaths
          * caused by powers and orbs. Open the overlay after playback. */
         combat_->update_decision(d, true);
+        finishing_ = d;
+        return;
+    }
+    if (ported_ && prev_kind == "event_choice" && decision_["layout"].str() == "Combat" && d["steps"].size() > 0 &&
+        kind != "event_choice" && kind != "combat_play") {
+        /* The event's room plays what the choice did (The Architect's last
+         * exchange), then the screen after it. */
+        ((EventScreen*)ported_)->play_room_steps(d["steps"]);
+        event_finishing_ = true;
         finishing_ = d;
         return;
     }
@@ -842,6 +854,25 @@ void GameClient::show(const Json& d) {
         screen_->add_child(make_shake_driver(ported_->shake_target()));
     /* What the choice did outside a fight (the fights play their own). */
     if (!in_fight && kind != "game_over") play_room_cues(lib_, screen_, d);
+    /* NEventRoom's own effects (OnRoomEnter) stay for all its pages. */
+    if (kind == "event_choice") {
+        if (d["event_id"].str() != room_vfx_event_) {
+            room_vfx_.clear();
+            room_vfx_event_ = d["event_id"].str();
+        }
+        const Json& steps = d["steps"];
+        for (size_t i = 0; i < steps.size(); ++i)
+            for (size_t k = 0; k < steps[i].size(); ++k) {
+                const std::string& call = steps[i][k]["call"].str();
+                if (steps[i][k]["t"].str() == "ui" && (call == "NMirrorVfx.Create" || call == "NRainVfx.Create") &&
+                    std::find(room_vfx_.begin(), room_vfx_.end(), call) == room_vfx_.end())
+                    room_vfx_.push_back(call);
+            }
+        for (size_t i = 0; i < room_vfx_.size(); ++i) add_room_vfx(lib_, screen_, room_vfx_[i]);
+    } else {
+        room_vfx_.clear();
+        room_vfx_event_.clear();
+    }
     potions_.attach(screen_, d["player"]);
     tree_->root()->add_child(screen_);
     if (deck_previews_) {
@@ -884,6 +915,7 @@ void GameClient::clear_screen() {
     last_rest_ = Json();
     last_shop_ = Json();
     finishing_ = Json();
+    event_finishing_ = false;
     enemy_places_.clear();
 }
 

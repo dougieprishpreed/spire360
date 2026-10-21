@@ -16,10 +16,27 @@ public partial class RunDriver
     private CrystalSphereMinigame? _crystalSphereDone;
     private int _crystalSphereDoneFloor = -1;
 
+    // EventRoom.EnterInternal / Resume: NEventRoom.Create(event, ...), then
+    // NRun.SetCurrentRoom, whose NEventRoom._Ready sets up the layout
+    // (NEventLayout.SetEvent), which calls the event's OnRoomEnter (The
+    // Architect's first line, Reflections' mirror, Slippery Bridge's rain).
+    private MegaCrit.Sts2.Core.Models.EventModel? _eventEntering;
+
     /// <summary>Called for every UI cue; picks up minigame models being shown.</summary>
     internal void OnUiCall(string id, object?[] args)
     {
         TimelineUiCall(id, args);
+        if (id.EndsWith("NEventRoom::Create", StringComparison.Ordinal))
+        {
+            foreach (var a in args)
+                if (a is MegaCrit.Sts2.Core.Models.EventModel ev) _eventEntering = ev;
+        }
+        else if (id.EndsWith("NRun::SetCurrentRoom", StringComparison.Ordinal) && _eventEntering != null)
+        {
+            var ev = _eventEntering;
+            _eventEntering = null;
+            ev.OnRoomEnter();
+        }
         if (id.EndsWith("NCrystalSphereScreen::ShowScreen", StringComparison.Ordinal))
         {
             foreach (var a in args)

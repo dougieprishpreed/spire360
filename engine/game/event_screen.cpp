@@ -54,6 +54,13 @@ EventScreen::EventScreen(SceneLibrary* lib)
 
 EventScreen::~EventScreen() { delete combat_; }
 
+void EventScreen::play_room_steps(const Json& steps) {
+    sparring_ = false;
+    if (combat_) combat_->play_steps(steps);
+}
+
+bool EventScreen::room_playing() const { return combat_ && combat_->busy(); }
+
 CombatScreen* EventScreen::take_combat() {
     CombatScreen* result = combat_;
     combat_ = NULL;
@@ -122,6 +129,9 @@ Node* EventScreen::build_combat(const Json& d) {
         for (size_t i = 0; i < d["options"].size(); ++i)
             if (d["options"][i]["text_key"].str().compare(0, 23, "PUNCH_OFF.pages.INITIAL") == 0) sparring_ = true;
     if (d["event_id"].str() == "punch_off") combat_->set_creature_flipped("e1", sparring_);
+    /* what the event's own code did to its room (The Architect's attacks
+     * and lines) */
+    if (d["steps"].size() > 0) combat_->play_steps(d["steps"]);
     Node* desc = lay->find_unique("EventDescription");
     set_label(desc, d["description_bbcode"].is_string() ? d["description_bbcode"].str() : d["description"].str());
     if (desc && desc->type == "RichTextLabel") {

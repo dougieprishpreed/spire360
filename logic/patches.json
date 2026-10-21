@@ -306,6 +306,46 @@
       "note": "Transform's replacement: in the deck, NCardTransformVfx (original to replacement) in the style's container. Recorded as a deck_card transform cue."
     },
     {
+      "id": "architect.line",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Events.TheArchitect",
+      "method": "PlayCurrentLine",
+      "optional": true,
+      "note": "TheArchitect.OnRoomEnter finds the Architect among the room's creature nodes (none headless); the hook gives it the layout combat's enemy, so its lines, attacks (and their RNG) run as in the game."
+    },
+    {
+      "id": "architect.head",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Events.TheArchitect",
+      "method": "GetArchitectAnimationState",
+      "optional": true,
+      "note": "PlayCurrentLine's first line: the head stops reading, then looks normal (track 1). Recorded as an anim cue."
+    },
+    {
+      "id": "architect.parts",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Events.TheArchitect",
+      "method": "DivideWildly",
+      "optional": true,
+      "note": "AnimPlayerAttackIfNecessary's hits: NDamageNumVfx.Create(ArchitectCreature, part, false) and NHitSparkVfx go into NCombatRoom's VFX container, which is null headless (their arguments are never made). The parts are recorded with each hit's VfxCmd.PlayOnCreatureCenter."
+    },
+    {
+      "id": "event.room_vfx.mirror",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Events.Reflections",
+      "method": "OnRoomEnter",
+      "optional": true,
+      "note": "NEventRoom.Instance?.VfxContainer?.AddChildSafely(NMirrorVfx.Create()): the container is null headless, so Create never runs. Recorded as its ui cue."
+    },
+    {
+      "id": "event.room_vfx.rain",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Events.SlipperyBridge",
+      "method": "OnRoomEnter",
+      "optional": true,
+      "note": "NEventRoom's VfxContainer gets NRainVfx.Create() (as the mirror). Recorded as its ui cue."
+    },
+    {
       "id": "relic.flashed",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Entities.Players.Player",

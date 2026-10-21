@@ -34,6 +34,10 @@ public:
     void set_combat(CombatScreen* combat) { combat_ = combat; }
     /* Transfer the visual-only room across event pages or into the fight. */
     CombatScreen* take_combat();
+    /* What a choice did to the event's room, before the screen after it;
+     * true while that plays. */
+    void play_room_steps(const Json& steps);
+    bool room_playing() const;
 
 private:
     struct Option {
