@@ -10,6 +10,33 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 8 (2026-10-21): effect shaders, card flights
+
+- Effect shaders 42-58 (engine/gfx/effects.h; software + D3D9 each): the
+  Doom flame, the poison skull, the demon / reaper / serpent / echo form
+  effects, round smoke, scream streaks, card removal, divebomb rings,
+  hyperbeam laser and spikes, the Grand Finale spotlights, Aeon Glass's
+  ray, Soul Fysh's soundwave, Waterfall Giant's water, the Cubex laser's
+  colorize, the epoch chains; the Necrobinder's and the blood wall's
+  inline VisualShaders are the simple-noise / molten-fist ones. A
+  VisualShader's own node textures (tex_frg_<n>) resolve now.
+  `python tools/visual_shader_code.py <pck> <res>` prints the code Godot
+  generates for a VisualShader (to port one). `python
+  tools/shader_survey.py <pack>`: what is left in the game is the mirror
+  (Reflections event, screencap.tres: needs a screen mode that reads the
+  copy at UV), NPowerUpVfx's 3D back layer (Node3D in a SubViewport; its
+  2D layers draw), the map drawing (mouse); the rest are debug scenes
+  (the gaseous screen too: only NCombatVfxSpawner makes it).
+- Sprite2D / AnimatedSprite2D: the VFX shaders' pivot_offset shift.
+- Cards in flight: NCardFlyVfx to the discard / draw pile (arc, speeding
+  up, darkening, shrinking), NCardFlyPowerVfx's swoosh into the player
+  for a played Power, both with the character's card_trail scene and the
+  card movement sounds. Path2D / PathFollow2D are nodes now.
+- DoomVfx works without setup() (it crashed shown on its own). A render
+  of every scenes/vfx scene with scripts (spire_view, 311 scenes) shows no
+  crash; unsupported nodes left there: Node3D (power up), the gaseous
+  screen's AspectRatioContainer (debug only).
+
 ## Alpha push, part 7 (2026-10-20): hand selection, soak
 
 - Selection from the hand (CardSelectCmd.FromHand / FromHandForDiscard /
