@@ -125,6 +125,8 @@ internal static class Program
                 "view_pile" => driver.ViewPile(Protocol.Str(cmd.Value, "pile", "deck")!),
                 "view_map" => driver.ViewMap(),
                 "settings" => driver.Settings(),
+                "ftues" => driver.Ftues(),
+                "ftue_done" => driver.FtueDone(Protocol.Str(cmd.Value, "id") ?? ""),
                 "library" => driver.Library(Protocol.Str(cmd.Value, "pool", "ironclad")!),
                 "relic_collection" => driver.RelicCollection(),
                 "potion_lab" => driver.PotionLab(),
@@ -255,6 +257,15 @@ internal static class Program
 
             case "settings":
                 return sim.Settings();
+
+            case "ftues":
+                return sim.Ftues();
+
+            case "ftue_done":
+                return sim.FtueDone(Protocol.Str(cmd, "id") ?? "");
+
+            case "accept_tutorials":
+                return sim.AcceptTutorials(cmd.TryGetProperty("yes", out var yes) && yes.ValueKind == JsonValueKind.True);
 
             case "library":
                 return sim.Library(Protocol.Str(cmd, "pool", "ironclad")!);
