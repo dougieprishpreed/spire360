@@ -15,6 +15,7 @@
 #ifndef SPIRE_ROOM_CUES_H
 #define SPIRE_ROOM_CUES_H
 
+#include "../core/base.h"
 #include "../core/json.h"
 
 namespace spire {
@@ -28,6 +29,20 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& decision);
 /* An event room's own effect (EventModel.OnRoomEnter: NMirrorVfx.Create,
  * NRainVfx.Create) on the screen; false if call is none of them. */
 bool add_room_vfx(SceneLibrary* lib, Node* screen, const std::string& call);
+
+/* NSmokyVignetteVfx.Create(tint, highlight) under parent: the vignette in
+ * the tint, its highlights in the other colour, in (0.1 s) and out (1 s);
+ * under_bar: below the screen's top bar (parent: the screen's root). */
+void spawn_smoky_vignette(SceneLibrary* lib, Node* parent, const Color& tint, const Color& highlight,
+                          bool under_bar = false);
+
+/* NGainEpochVfx (NGame's child, over every screen): "Epoch Discovered"
+ * with the epoch's portrait sliding in at the left; epoch: its id
+ * ("IRONCLAD2_EPOCH"). */
+void show_epoch_gain(SceneLibrary* lib, Node* parent, const std::string& epoch);
+/* A response's cues over every screen (NGainEpochVfx.Create(epoch), the
+ * logic giving the epoch's class name, "Ironclad2Epoch"). */
+void play_global_cues(SceneLibrary* lib, Node* layer, const Json& steps);
 
 } /* namespace spire */
 

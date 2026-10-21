@@ -562,6 +562,7 @@ void GameClient::show(const Json& d) {
     Node* previews = deck_previews_->layer();
     if (!previews->parent) tree_->root()->add_child(previews);
     deck_previews_->play(d["steps"], d["player"]["character"].str());
+    play_global_cues(lib_, previews, d["steps"]);
     std::string prev_kind = decision_["decision"].str();
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];

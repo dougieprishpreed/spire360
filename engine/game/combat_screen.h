@@ -229,6 +229,11 @@ private:
     std::vector<Creature> pets_;      /* the other pets (Byrdpip, Pael's Legion) */
     std::vector<std::string> pet_who_; /* their "e<combat id>" */
     float pets_x_;                    /* PositionPlayersAndPets' targetXPos for them */
+    /* NCreature.TrackBlockStatus: whose block a creature's health bar also
+     * shows (Osty: its summoner's), by who */
+    std::map<std::string, std::string> block_tracking_;
+    /* NCreature.AnimShake running, by who: its time */
+    std::map<std::string, double> shakes_;
     TweenSet tweens_;
     int play_card_;                   /* the card being played, -1: none */
     bool aiming_;                     /* a potion aimed (begin_aim) */
@@ -270,6 +275,7 @@ private:
     void radial_blur(const std::string& position);
     /* NCreature's own calls the logic made on a creature's node. */
     void creature_call(const std::string& method, const Json& args);
+    void anim_shake(const std::string& who);
     void scale_visuals(Creature& c, float duration);
     Node* root_;
     std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */

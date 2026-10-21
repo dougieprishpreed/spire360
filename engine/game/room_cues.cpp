@@ -10,6 +10,7 @@
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/tween.h"
+#include "loc.h"
 
 #include <math.h>
 
@@ -85,21 +86,9 @@ void heal_vfx(SceneLibrary* lib, Node* screen, const Json& player, double amount
     float e = 1 - (1 - k) * (1 - k); /* Ease.QuadOut */
     /* NSmokyVignetteVfx.Create(StsColors.green with alpha max(e * 0.8, 0.4),
      * (0, 1, 0, 0.33)) */
-    Node* v = instance(lib, "scenes/vfx/whole_screen/vfx_smoky_vignette.tscn");
-    if (v && v->is_canvas_item()) {
-        CanvasItem* c = (CanvasItem*)v;
-        Color green = hex(0x7FFF00);
-        float a = e * 0.8f > 0.4f ? e * 0.8f : 0.4f;
-        c->modulate = Color(green.r, green.g, green.b, 0);
-        Node* h = v->get_node("Highlights");
-        CanvasItem* hc = h && h->is_canvas_item() ? (CanvasItem*)h : NULL;
-        if (hc) hc->modulate = Color(0, 1, 0, 0);
-        delete v->behavior;
-        v->behavior = new SmokyVignette(c, hc, a, 0.33f);
-        add_under_bar(screen, v);
-    } else {
-        delete v;
-    }
+    Color green = hex(0x7FFF00);
+    green.a = e * 0.8f > 0.4f ? e * 0.8f : 0.4f;
+    spawn_smoky_vignette(lib, screen, green, Color(0, 1, 0, 0.33f), true);
     /* The crosses over the whole viewport: e * 40 + 10 of them, rounded. */
     Node* fx = instance(lib, "scenes/vfx/vfx_cross_heal_fullscreen.tscn");
     if (!fx || !fx->is_node2d()) {
@@ -126,6 +115,105 @@ bool add_room_vfx(SceneLibrary* lib, Node* screen, const std::string& call) {
     Node* fx = instance(lib, scene);
     if (fx) add_under_bar(screen, fx);
     return true;
+}
+
+namespace {
+
+const char* const GAIN_EPOCH_SCRIPT = "res://src/Core/Nodes/Vfx/NGainEpochVfx.cs";
+
+/* NGainEpochVfx.AnimateVfx: after 3 s for each toast before it still up,
+ * %EpochContainer turns from -30 degrees and slides to x 164 (0.5 s, Back
+ * Out), stays 1.5 s, the whole fades (1 s) and goes. */
+class GainEpoch : public ScriptBehavior {
+public:
+    explicit GainEpoch(double delay) : delay_(delay), t_(0), started_(false) {}
+    virtual void process(Node* n, double dt) {
+        if (delay_ > 0) {
+            delay_ -= dt;
+            return;
+        }
+        Node* c = n->find_unique("EpochContainer");
+        Control* box = c && c->is_control() ? (Control*)c : NULL;
+        if (!started_) {
+            started_ = true;
+            if (box) {
+                box->rotation = -30.0f * 0.017453293f;
+                tweens_.tween(&box->rotation, 0.0f, 0.5f, TRANS_BACK, EASE_OUT);
+                tweens_.tween(&box->offset[SIDE_LEFT], 164.0f, 0.5f, TRANS_BACK, EASE_OUT);
+                tweens_.tween(&box->offset[SIDE_RIGHT], 164.0f, 0.5f, TRANS_BACK, EASE_OUT);
+            }
+            if (n->is_canvas_item()) tweens_.tween(&((CanvasItem*)n)->modulate.a, 0.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 2.0f);
+        }
+        tweens_.update(dt);
+        t_ += dt;
+        if (t_ >= 3.0 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double delay_, t_;
+    bool started_;
+    TweenSet tweens_;
+};
+
+/* ModelDb's id of a model's class: words split at a lower case letter or
+ * digit before a capital, and before a capital starting a word
+ * ("Act2BEpoch" -> "ACT2_B_EPOCH"). */
+std::string model_id(const std::string& cls) {
+    std::string out;
+    for (size_t i = 0; i < cls.size(); ++i) {
+        char c = cls[i];
+        bool upper = c >= 'A' && c <= 'Z';
+        if (upper && i > 0) {
+            char p = cls[i - 1];
+            bool after_word = (p >= 'a' && p <= 'z') || (p >= '0' && p <= '9');
+            bool starts_word = p >= 'A' && p <= 'Z' && i + 1 < cls.size() && cls[i + 1] >= 'a' && cls[i + 1] <= 'z';
+            if (after_word || starts_word) out += '_';
+        }
+        out += (char)(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
+    }
+    return out;
+}
+
+} /* namespace */
+
+void spawn_smoky_vignette(SceneLibrary* lib, Node* parent, const Color& tint, const Color& highlight, bool under_bar) {
+    if (!parent) return;
+    Node* v = instance(lib, "scenes/vfx/whole_screen/vfx_smoky_vignette.tscn");
+    if (!v || !v->is_canvas_item()) {
+        delete v;
+        return;
+    }
+    CanvasItem* c = (CanvasItem*)v;
+    c->modulate = Color(tint.r, tint.g, tint.b, 0);
+    Node* h = v->get_node("Highlights");
+    CanvasItem* hc = h && h->is_canvas_item() ? (CanvasItem*)h : NULL;
+    if (hc) hc->modulate = Color(highlight.r, highlight.g, highlight.b, 0);
+    delete v->behavior;
+    v->behavior = new SmokyVignette(c, hc, tint.a, highlight.a);
+    if (under_bar) add_under_bar(parent, v);
+    else parent->add_child(v);
+}
+
+void show_epoch_gain(SceneLibrary* lib, Node* parent, const std::string& epoch) {
+    if (!parent || epoch.empty()) return;
+    int before = 0;
+    for (size_t i = 0; i < parent->children.size(); ++i)
+        if (parent->children[i]->script == GAIN_EPOCH_SCRIPT && !parent->children[i]->queued_for_deletion()) ++before;
+    Node* fx = instance(lib, "scenes/vfx/vfx_gain_epoch.tscn");
+    if (!fx) return;
+    set_texture(lib, fx->find_unique("Portrait"), "images/atlases/epoch_atlas.sprites/" + lower(epoch) + ".tres");
+    set_label(fx->find_unique("Label"), Loc::get("vfx", "EPOCH_GAIN"));
+    fx->behavior = new GainEpoch(3.0 * before);
+    parent->add_child(fx);
+}
+
+void play_global_cues(SceneLibrary* lib, Node* layer, const Json& steps) {
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& c = steps[i][k];
+            if (c["t"].str() == "ui" && c["call"].str() == "NGainEpochVfx.Create" && c["args"].size() > 0)
+                show_epoch_gain(lib, layer, model_id(c["args"][(size_t)0].str()));
+        }
 }
 
 void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {

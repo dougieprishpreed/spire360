@@ -1669,7 +1669,8 @@ bool death_delayed(Node* n) {
 bool special_node_call(const std::string& call, const Json& args, VfxAnchors& anchors) {
     const std::string& name = args[(size_t)0].str();
     size_t hash = name.find('#');
-    if (hash == std::string::npos) return false;
+    /* "who#path": a creature before it (a colour, "#ffffff80", is none) */
+    if (hash == std::string::npos || hash == 0) return false;
     std::string who = name.substr(0, hash), path = name.substr(hash + 1);
     Node* visuals = anchors.visuals_of(who);
     if (path.compare(0, 5, "form/") == 0) {

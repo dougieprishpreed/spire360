@@ -61,9 +61,38 @@ parts 2 and 3 above it).
   trigger, fade), Reaper's magenta noise ring, Echo's line fragments
   drifting off the back (its mask and scale centre keep them to the
   upper-left of the copy). Echo and Reaper have no game reference yet.
-- Fight scripts: scratchpad `form_fight.py OUT CHARACTER CARD [TURNS]
-  [play]` (play: up to two attacks each turn); Void Form is the Regent's,
-  Serpent the Silent's, Reaper the Necrobinder's.
+- Fight scripts: scratchpad `form_fight.py OUT CHARACTER CARD[,CARD...]
+  [TURNS] [play]` (play: up to two attacks each turn); Void Form is the
+  Regent's, Serpent the Silent's, Reaper the Necrobinder's.
+- Fix: special_node_call took any first argument with a '#' as a
+  "who#path" stand-in, so ui calls whose first argument is a colour
+  ("#ffffff80") were swallowed (NHorizontalLinesVfx, NSmokyVignetteVfx).
+  A stand-in needs a creature before the '#'.
+- Whirlwind / Ceremonial Beast: NHorizontalLinesVfx (motion lines over
+  the VFX container, emission box from the container's height, fading in
+  and out over max(duration, 1) s; leftwards turned about the far
+  corner). Whirlwind / Haze / Nightmare: NSmokyVignetteVfx in fights
+  (`spawn_smoky_vignette`, shared with the full-screen heal); Whirlwind
+  adds it to NRun.GlobalUi, Haze to the VFX container, the cue does not
+  say which, so both go to the VFX container.
+- NGainEpochVfx ("Epoch Discovered", the epoch's portrait sliding in at
+  the left, 3 s per toast already up): from a response's steps (the
+  logic gives the class name, "Ironclad2Epoch"; ModelDb's id rule makes
+  IRONCLAD2_EPOCH) over every screen (the global layer), and from the
+  game over screen's score-bar unlock. Not checked on screen yet: the
+  first toast in `work/coverage-instr/acts/run_00_ironclad.jsonl` is at
+  screen 321 (`work/epoch.sh`, ~13 min).
+- Osty: NCreature.TrackBlockStatus (Osty's health bar takes the block
+  outline and colour while its summoner has block, no number of its own),
+  NCombatRoom.ShakeOstyIfDead (NCreature.AnimShake on each Osty card:
+  10 * sin(4u) * sin(u / 2) px, 1 s, not during "hurt").
+- NCreature.DisableInteractionForDeath needs nothing: the client's
+  targets come from the decision's living enemies.
+- Next: the FTUEs (13 one-time popups behind Progress.EnableFtues and
+  FtueCompleted: accept_tutorials at character select, combat_rules,
+  shuffle, can/cannot_play_card(s), obtain_potion, merchant, rest_site,
+  obtain_relic, combat_reward, power_card, map_select). The logic calls
+  NCombatRulesFtue.Create every fight (headless never marks it seen).
 
 ## Alpha push, part 9 (2026-10-21): flashes, room cues, deck previews
 
@@ -177,13 +206,9 @@ parts 2 and 3 above it).
   NSpineSpriteBoneFollower (SpineSprite::bone_position), NValueRamp and
   the gradients; the Echo Form's copier plays the body's animations.
   All five checked in part 10.
-- Still open: NPowerUpVfx's 3D layer, the enchant emboss, and recorded ui
-  calls the client does not handle yet (from a survey of every trace's
-  ui cues, work/ui_calls.txt): NGainEpochVfx, NHorizontalLinesVfx,
-  NCreature.TrackBlockStatus, DisableInteractionForDeath,
-  NCombatRoom.ShakeOstyIfDead, NCombatRulesFtue. Check each against the
-  game code first: some may already be drawn by another path (scene-path
-  vfx cues, shaders).
+- Still open: NPowerUpVfx's 3D layer, the enchant emboss, the FTUEs
+  (part 10). The other unhandled ui calls of the survey
+  (work/ui_calls.txt) are done in part 10.
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights
 

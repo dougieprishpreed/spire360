@@ -1,4 +1,5 @@
 #include "game_over_screen.h"
+#include "room_cues.h"
 #include "loc.h"
 
 #include "../scene/controls.h"
@@ -405,6 +406,8 @@ void GameOverScreen::frame(double dt) {
                      * starts over towards the next unlock. */
                     bar_step_ = 3;
                     bar_t_ = 0;
+                    /* SaveManager.GrantNextUnlock: NGainEpochVfx */
+                    show_epoch_gain(lib_, root_, b["epoch"].str());
                     Control* text = as_control(bar_->find_unique("UnlockText"));
                     if (text) {
                         tweens_.tween(&text->modulate.a, 1.0f, 0.25f);

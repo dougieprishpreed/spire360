@@ -262,6 +262,13 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     Control* hb = ctl(sd, "HealthBar");
     if (!hb) return;
     int hp = e["hp"].i(), max_hp = e["max_hp"].i(), blk = e["block"].i();
+    /* the block of the creature it tracks (Osty: its summoner's) */
+    int tracked = 0;
+    for (std::map<std::string, std::string>::const_iterator it = block_tracking_.begin(); it != block_tracking_.end(); ++it)
+        if (creature_for(it->first) == &c) {
+            Creature* t = creature_for(it->second);
+            if (t) tracked = t->data["block"].i();
+        }
     Control* fg = ctl(hb, "HpForeground");
     Control* mid = ctl(hb, "HpMiddleground");
     Control* poison = ctl(hb, "PoisonForeground");
@@ -286,7 +293,7 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     bool doom_lethal = doom_power && doom_amount > 0 && doom_amount >= hp - poison_dmg;
 
     /* RefreshBlockUi */
-    if (blk <= 0) {
+    if (blk <= 0 && tracked <= 0) {
         if (block && block->visible) {
             /* NBlockBrokenVfx at the block icon's centre. */
             Node* fx = instance(lib_, "scenes/vfx/vfx_block_broken.tscn");
@@ -303,8 +310,10 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     } else {
         if (outline) outline->visible = true;
         fg->self_modulate = hex(0x3B6FA3);
-        if (block) block->visible = true;
-        if (block_label && block_label->type == "Label") ((Label*)block_label)->set_text(format("%d", blk));
+        if (blk > 0) {
+            if (block) block->visible = true;
+            if (block_label && block_label->type == "Label") ((Label*)block_label)->set_text(format("%d", blk));
+        }
     }
 
     /* RefreshForeground */
@@ -1205,6 +1214,19 @@ static void long_press_bar(Node* bar, double t, float fade) {
 }
 
 void CombatScreen::process(double dt) {
+    for (std::map<std::string, double>::iterator it = shakes_.begin(); it != shakes_.end();) {
+        Creature* c = creature_for(it->first);
+        it->second += dt;
+        if (!c || !c->visuals || !c->visuals->is_node2d()) {
+            shakes_.erase(it++);
+            continue;
+        }
+        float k = (float)(it->second < 1.0 ? it->second : 1.0);
+        float u = (1.0f - (1.0f - k) * (1.0f - k) * (1.0f - k)) * 6.2831853f;
+        ((Node2D*)c->visuals)->position = Vec2(10.0f * sinf(u * 4.0f) * sinf(u * 0.5f), 0);
+        if (it->second >= 1.0) shakes_.erase(it++);
+        else ++it;
+    }
     {
         Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
         Node* end = ui ? ui->get_node("EndTurnButton") : NULL;
@@ -1880,6 +1902,12 @@ void CombatScreen::refresh_state(Creature& c, bool animate) {
     float old = mid ? mid->offset[SIDE_RIGHT] : 0;
     bool changed = c.shown_hp != c.data["hp"].i() || c.shown_max_hp != c.data["max_hp"].i();
     refresh_health_bar(c, c.data, c.powers);
+    /* NCreatureStateDisplay.OnBlockTrackingCreatureBlockChanged */
+    for (std::map<std::string, std::string>::const_iterator it = block_tracking_.begin(); it != block_tracking_.end(); ++it)
+        if (creature_for(it->second) == &c) {
+            Creature* t = creature_for(it->first);
+            if (t && t != &c && t->node) refresh_health_bar(*t, t->data, t->powers);
+        }
     if (animate && mid && c.shown_hp >= 0 && c.data["hp"].i() > 0) {
         float target = mid->offset[SIDE_RIGHT];
         mid->offset[SIDE_RIGHT] = old;
@@ -2325,6 +2353,11 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
         /* AnimHideIntent(0.4): the intents fade out over 0.5 s after 0.4 s. */
         Control* row = ctl(c->node, "Intents");
         if (row) tweens_.tween(&row->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.4f);
+    } else if (method == "TrackBlockStatus") {
+        if (args.size() > 1) {
+            block_tracking_[args[(size_t)0].str()] = args[(size_t)1].str();
+            refresh_health_bar(*c, c->data, c->powers);
+        }
     } else if (method == "RefreshIntents") {
         /* RevealIntents: from transparent to opaque over 1 s, after 0-0.3 s. */
         Control* row = ctl(c->node, "Intents");
@@ -2335,6 +2368,18 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
                           (float)(chaotic_rand() % 301) / 1000.0f);
         }
     }
+}
+
+/* NCreature.AnimShake: unless one runs or it plays "hurt", the visuals
+ * from x 0 by 10 * sin(4u) * sin(u / 2), u 0 -> 2 pi over 1 s (Cubic Out);
+ * process() runs it. */
+void CombatScreen::anim_shake(const std::string& who) {
+    Creature* c = creature_for(who);
+    if (!c || !c->node || !c->visuals || shakes_.count(who)) return;
+    SpineSprite* s = first_spine(c->visuals);
+    const SpAnimation* a = s && s->animation_state() ? s->animation_state()->current(0) : NULL;
+    if (a && a->name == "hurt") return;
+    shakes_[who] = 0;
 }
 
 /* NRadialBlurVfx.Activate: the room's RadialBlur (a BackBufferCopy whose
@@ -2507,6 +2552,11 @@ void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_SCRIPTED && special_node_call(c.data["call"].str(), c.data["args"], *this)) return;
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
         creature_call(c.data["call"].str().substr(10), c.data["args"]);
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.ShakeOstyIfDead") {
+        /* the owner's Osty node shakes (Osty.CheckMissingWithAnim) */
+        anim_shake("osty");
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.RadialBlur") {
@@ -2702,6 +2752,8 @@ void CombatScreen::play_steps(const Json& steps) {
                 cues_.push_back(c);
             } else if (type == "ui" && (is_combat_vfx_call(ch["call"].str()) || ch["call"].str() == "NCombatRoom.RadialBlur" ||
                                         ch["call"].str() == "NCreature.ScaleTo" ||
+                                        ch["call"].str() == "NCreature.TrackBlockStatus" ||
+                                        ch["call"].str() == "NCombatRoom.ShakeOstyIfDead" ||
                                         ch["call"].str() == "NCreature.SetDefaultScaleTo" ||
                                         ch["call"].str() == "NCreature.OstyScaleToSize" ||
                                         ch["call"].str() == "NCreature.StartReviveAnim" ||

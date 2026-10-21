@@ -14,6 +14,7 @@
 #include "../scene/tween.h"
 #include "../scene/value.h"
 #include "loc.h"
+#include "room_cues.h"
 #include "screen_shake.h"
 #include "ui_util.h"
 
@@ -1062,6 +1063,50 @@ public:
 
 Node* add_effect(SceneLibrary* lib, Node* box, const std::string& scene);
 
+/* NHorizontalLinesVfx (Whirlwind, Ceremonial Beast): motion lines across
+ * the VFX container, its emission box from x -500 over the container's
+ * height, the material's colour the given one; leftwards it turns 180
+ * degrees about the container's far corner. It fades in (0.45 s), stays
+ * max(duration, 1) - 0.9 s and fades out (0.45 s). */
+class HorizontalLines : public Effect {
+public:
+    explicit HorizontalLines(double duration) : duration_(duration < 1.0 ? 1.0 : duration) {}
+
+protected:
+    virtual void begin(Node* n) {
+        CanvasItem* ci = (CanvasItem*)n;
+        ci->modulate.a = 0;
+        tweens_.tween(&ci->modulate.a, 1.0f, 0.45f);
+        tweens_.tween(&ci->modulate.a, 0.0f, 0.45f, TRANS_LINEAR, EASE_IN_OUT, (float)(duration_ - 0.45));
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= duration_ + 0.6 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double duration_;
+};
+
+void spawn_horizontal_lines(SceneLibrary* lib, Node* box, const Color& color, double duration, bool rightwards) {
+    Node* fx = add_effect(lib, box, "scenes/vfx/whole_screen/horizontal_lines_vfx.tscn");
+    if (!fx || fx->type != "GPUParticles2D") return;
+    Particles2D* p = (Particles2D*)fx;
+    Control* parent = box->is_control() ? (Control*)box : NULL;
+    Vec2 size = parent ? parent->size : Vec2(1920, 1080);
+    p->mat.shape_offset[0] = -500;
+    p->mat.shape_offset[1] = size.y * 0.5f;
+    p->mat.shape_scale[0] = 200;
+    p->mat.shape_scale[1] = size.y * 0.5f;
+    p->color = color;
+    if (!rightwards) {
+        p->rotation = 3.14159265f;
+        p->position = size;
+    }
+    HorizontalLines* b = new HorizontalLines(duration);
+    fx->behavior = b;
+    b->start(fx);
+}
+
 /* NHellraiserVfx: ten swords in front of the target's feet (rising further
  * up the screen the higher they stand) and ten behind, a red flash over the
  * screen; its sound. */
@@ -1799,7 +1844,8 @@ static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGround
                                            "NItemThrowVfx", "NSmallMagicMissileVfx", "NLargeMagicMissileVfx",
                                            "NSpikeSplashVfx", "NKinPriestGrenadeVfx", "NSleepingVfx", "NHyperbeamVfx",
                                            "NSweepingBeamVfx", "NGrandFinaleVfx", "NHellraiserVfx",
-                                           "NAdditiveOverlayVfx", "NDoomVfx", "NDoomOverlayVfx" };
+                                           "NAdditiveOverlayVfx", "NDoomVfx", "NDoomOverlayVfx", "NHorizontalLinesVfx",
+                                           "NSmokyVignetteVfx" };
 
 namespace {
 /* NDamageNumVfx._Ready / AnimVfx / _Process. */
@@ -2161,6 +2207,20 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             ((DoomVfx*)fx->behavior)->setup(who.hitbox.size, die ? anchors.take_visuals(a.places[0].who) : NULL, die);
             ((Effect*)fx->behavior)->start(fx);
         }
+        return true;
+    }
+    if (cls == "NSmokyVignetteVfx") {
+        /* Create(tint, highlight): Haze's in the VFX container, Whirlwind's
+         * in NRun.GlobalUi (the cue does not say which: both here) */
+        Color tint = a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0];
+        spawn_smoky_vignette(lib, box, tint, a.colors.size() > 1 ? a.colors[1] : tint);
+        return true;
+    }
+    if (cls == "NHorizontalLinesVfx") {
+        /* Create(color, duration = 2, movingRightwards = true), into the
+         * room's VFX container */
+        spawn_horizontal_lines(lib, box, a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0],
+                               a.numbers.empty() ? 2.0 : a.numbers[0], a.bools.empty() || a.bools[0]);
         return true;
     }
     if (call == "NSleepingVfx.Stop") {
