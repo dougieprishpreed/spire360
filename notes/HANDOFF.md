@@ -42,12 +42,17 @@ parts 2 and 3 above it).
   emissions (constant every 1/frequency s, at the end, at a collision, at
   the start) to the system sub_emitter names; that one then only takes
   sent emissions into free slots (transform kept, velocity if
-  keep_velocity); unclaimed ones drop each frame. Builds and passes the
-  checks; NOT yet checked on screen (replay frame offsets kept missing
-  the heal; spire_view renders `scenes/vfx/vfx_cross_heal.tscn --time T`,
-  but the crosses are small there: zoom in or use --scale).
-- Not ported: trails (11 scenes: card smith, dagger spray, Living Fog,
-  Aeonglass, ...), emission point textures (4), attractors, fixed-fps
+  keep_velocity); unclaimed ones drop each frame. Checked with spire_view
+  (`scenes/vfx/vfx_cross_heal.tscn --time T --origin X Y`, cropped): the
+  crosses leave their falloff specks four times a second.
+- Trails (GPUParticles2D trail_enabled, 11 scenes: card smith, dagger
+  spray, Living Fog, Aeonglass, Kin Priest's grenade, ...): the trail mesh
+  as GPUParticles2D builds it (rows of +-width / 2 skinned between
+  sections + 1 bones, v down the trail), each bone the particle's
+  transform i / sections of trail_lifetime ago from a short per-particle
+  history. Checked on the dagger spray (tapered red streaks behind the
+  daggers).
+- Not ported: emission point textures (4 scenes), attractors, fixed-fps
   interpolation.
 - Forms: Echo Form's copy had no skeleton (the body was looked up as the
   first SpineSprite under the visuals, which is the form's own copier);

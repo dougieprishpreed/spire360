@@ -13,8 +13,11 @@
  * LightOccluder2D polygons of their tree, Godot's canvas SDF taken exactly
  * from the polygons. Sub-emitters: the parent's particles send emissions
  * (constant, at the end, at a collision, at the start) to the system its
- * sub_emitter names, which then emits only those. Not ported: attractors,
- * trails, the emission point textures, fixed-fps interpolation. */
+ * sub_emitter names, which then emits only those. Trails: each particle
+ * is GPUParticles2D's trail mesh, a ribbon of the texture's width through
+ * its transforms over the last trail_lifetime (bone i of the sections at
+ * i / sections of it). Not ported: attractors, the emission point
+ * textures, fixed-fps interpolation. */
 #ifndef SPIRE_PARTICLES_H
 #define SPIRE_PARTICLES_H
 
@@ -84,6 +87,10 @@ public:
     /* GPUParticles2D's seed: random at creation and each restart unless
      * fixed */
     bool use_fixed_seed;
+    /* GPUParticles2D trails: seconds, sections, subdivisions of each */
+    bool trail_enabled;
+    float trail_lifetime;
+    int trail_sections, trail_subdivisions;
     Color color;
     float pmin[P_MAX], pmax[P_MAX];
     CurveData curves[P_MAX], scale_x, scale_y, alpha_curve;
@@ -145,7 +152,10 @@ private:
         u32 cycle; /* GPU: the cycle it started in (its NUMBER) */
         Drawn d;
         bool active;
+        /* trails: its transforms since start (the system's clock) */
+        std::vector<std::pair<double, Xform2D> > trail;
     };
+    Xform2D trail_at(const Particle& p, double age) const;
     void step(double dt);
     void step_gpu(double dt);
     /* an emission from the parent system (emit_subparticle): its
@@ -176,6 +186,7 @@ private:
     Xform2D emission_, to_canvas_;
     Vec2 emitter_velocity_, last_origin_;
     bool has_last_origin_;
+    double clock_; /* the time stepped (trail history) */
     /* as a sub-emitter: emits only what its parent sends */
     bool sub_mode_;
     std::vector<Emission> pending_;

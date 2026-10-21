@@ -237,8 +237,9 @@ Particles2D::Particles2D(bool is_gpu)
       preprocess(0), speed_scale(1), explosiveness(0), randomness(0), lifetime_randomness(0), seed(0), texture(NULL),
       direction(1, 0), gravity(is_gpu ? Vec2(0, -9.8f) : Vec2(0, 980)), emission_rect_extents(1, 1), spread(45),
       emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0), collision_base_size(1),
-      collision_use_scale(false), use_fixed_seed(false), time_(0), frame_remainder_(0), cycle_(0), started_(false),
-      has_last_origin_(false), sub_mode_(false) {
+      collision_use_scale(false), use_fixed_seed(false), trail_enabled(false), trail_lifetime(0.3f), trail_sections(8),
+      trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0), started_(false), has_last_origin_(false),
+      clock_(0), sub_mode_(false) {
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
     if (gpu) seed = next_seed();
@@ -280,6 +281,10 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (gpu && key == "amount_ratio") mat.amount_ratio = jv_float(v, 1);
     else if (gpu && key == "interp_to_end") mat.interp_to_end = jv_float(v);
     else if (gpu && key == "sub_emitter") sub_emitter = v["np"].str();
+    else if (gpu && key == "trail_enabled") trail_enabled = v.b();
+    else if (gpu && key == "trail_lifetime") trail_lifetime = jv_float(v, 0.3f);
+    else if (gpu && key == "trail_sections") trail_sections = v.i(8) > 1 ? v.i(8) : 2;
+    else if (gpu && key == "trail_section_subdivisions") trail_subdivisions = v.i(4) > 0 ? v.i(4) : 1;
     else if (key == "texture") {
         Resource* r = ctx.resource(v);
         texture = bind_texture(this, r);
@@ -795,6 +800,7 @@ void Particles2D::gpu_start(Particle& p, u32 number, const Emission* from) {
     p.custom[1] = p.custom[2] = 0;
     p.custom[3] = d.life;
     p.time = 0;
+    p.trail.clear();
     if (from) {
         /* a sub-emission: its transform kept (no RESTART_POSITION /
          * ROT_SCALE), its velocity if sent; VELOCITY then goes through the
@@ -1115,6 +1121,7 @@ void Particles2D::step_gpu(double delta) {
     int total = (int)particles_.size();
     double prev_phase = time_ / lifetime;
     time_ += delta;
+    clock_ += delta;
     if (time_ > lifetime) {
         time_ = fmod(time_, lifetime);
         ++cycle_;
@@ -1171,6 +1178,11 @@ void Particles2D::step_gpu(double delta) {
         float depth = 0;
         bool collided = collision_mode != 0 && collision(p, &n, &depth);
         gpu_process(p, local_delta, collided, n, depth, sub);
+        if (trail_enabled && p.active) {
+            /* the history the trail needs (one point before its window) */
+            p.trail.push_back(std::make_pair(clock_, p.xform));
+            while (p.trail.size() > 2 && p.trail[1].first <= clock_ - trail_lifetime) p.trail.erase(p.trail.begin());
+        }
     }
     /* what no free slot took is dropped with the frame's buffer */
     pending_.clear();
@@ -1197,6 +1209,24 @@ bool Particles2D::collision(const Particle& p, Vec2* normal, float* depth) {
     *normal = n;
     *depth = -d;
     return true;
+}
+
+/* A trailed particle's transform age seconds ago, between the recorded
+ * ones (its first before it started). */
+Xform2D Particles2D::trail_at(const Particle& p, double age) const {
+    const std::vector<std::pair<double, Xform2D> >& h = p.trail;
+    if (h.empty()) return p.xform;
+    double t = clock_ - age;
+    if (t <= h[0].first) return h[0].second;
+    for (size_t i = 1; i < h.size(); ++i) {
+        if (t > h[i].first) continue;
+        double span = h[i].first - h[i - 1].first;
+        float f = span > 0 ? (float)((t - h[i - 1].first) / span) : 1.0f;
+        const Xform2D& a = h[i - 1].second;
+        const Xform2D& b = h[i].second;
+        return Xform2D(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.origin + (b.origin - a.origin) * f);
+    }
+    return h.back().second;
 }
 
 /* ---- draw: a texture-sized quad per particle, CanvasItemMaterial
@@ -1311,15 +1341,46 @@ void Particles2D::draw(Canvas& c) {
             for (int k = 0; k < 4; ++k) corners[k].x *= p.custom[2];
         float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
         int base = (int)v.size();
-        for (int k = 0; k < 4; ++k) {
-            v.push_back(px.xform(corners[k]));
-            float u = fu0 + cu[k] * fw, w = fv0 + cv[k] * fh;
-            uv.push_back(img ? Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + w * src.size.y) / is.y)
-                             : Vec2(u, w));
-            col.push_back(p.color);
+        if (trail_enabled) {
+            /* GPUParticles2D's trail mesh: rows of two vertices at
+             * (+-width / 2, 0), each row skinned between two bones (the
+             * particle's transform i / sections of the trail ago), v down
+             * the trail */
+            int sections = trail_sections, sub = trail_subdivisions, segments = sections * sub;
+            std::vector<Xform2D> bones((size_t)sections + 1);
+            for (int b = 0; b <= sections; ++b) bones[(size_t)b] = view * trail_at(p, trail_lifetime * b / sections);
+            float half = ts.x * 0.5f;
+            for (int j = 0; j <= segments; ++j) {
+                int b = j / sub;
+                float blend = 1.0f - (float)(j % sub) / (float)sub;
+                const Xform2D& b0 = bones[(size_t)b];
+                const Xform2D& b1 = bones[(size_t)(b + 1 < sections ? b + 1 : sections)];
+                float vv = (float)j / (float)segments;
+                for (int side = 0; side < 2; ++side) {
+                    Vec2 at(side ? half : -half, 0);
+                    v.push_back(b0.xform(at) * blend + b1.xform(at) * (1.0f - blend));
+                    float u = (float)side, w = vv;
+                    uv.push_back(img ? Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + w * src.size.y) / is.y)
+                                     : Vec2(u, w));
+                    col.push_back(p.color);
+                }
+                if (j > 0) {
+                    int r = base + j * 2 - 2;
+                    int q[6] = { r, r + 1, r + 2, r + 1, r + 3, r + 2 };
+                    for (int k = 0; k < 6; ++k) idx.push_back(q[k]);
+                }
+            }
+        } else {
+            for (int k = 0; k < 4; ++k) {
+                v.push_back(px.xform(corners[k]));
+                float u = fu0 + cu[k] * fw, w = fv0 + cv[k] * fh;
+                uv.push_back(img ? Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + w * src.size.y) / is.y)
+                                 : Vec2(u, w));
+                col.push_back(p.color);
+            }
+            int q[6] = { 0, 1, 2, 2, 3, 0 };
+            for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
         }
-        int q[6] = { 0, 1, 2, 2, 3, 0 };
-        for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
         if (per_screen && img) {
             float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
             shader_screen_particle(life, &screen);
