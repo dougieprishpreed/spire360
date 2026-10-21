@@ -837,6 +837,9 @@ void GameClient::show(const Json& d) {
         Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
         if (bar) screen_->add_child(bar);
     }
+    /* The room's screen shake target, unless a fight's room holds it. */
+    if (ported_ && ported_->shake_target() && !ScreenShake::get().target())
+        screen_->add_child(make_shake_driver(ported_->shake_target()));
     /* What the choice did outside a fight (the fights play their own). */
     if (!in_fight && kind != "game_over") play_room_cues(lib_, screen_, d);
     potions_.attach(screen_, d["player"]);

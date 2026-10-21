@@ -9,7 +9,9 @@
  *  PlayerFullscreenHealVfx.Play    the green smoky vignette and the rising
  *                                  crosses (vfx_cross_heal_fullscreen)
  *  relic_flash                     the relic's holder in the top bar
- *                                  (NRelicInventoryHolder.DoFlash) */
+ *                                  (NRelicInventoryHolder.DoFlash)
+ *  NGame.ScreenShake / ScreenRumble / ScreenShakeTrauma
+ *                                  the room's shake (its own target) */
 #ifndef SPIRE_ROOM_CUES_H
 #define SPIRE_ROOM_CUES_H
 

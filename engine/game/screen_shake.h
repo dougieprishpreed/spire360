@@ -17,6 +17,14 @@ class Control;
  * about -1..1. */
 float fbm(float x, float frequency, int seed);
 
+class Node;
+
+/* A node that makes target the shake's target (NGame.SetScreenShakeTarget)
+ * and runs the shake while it is; going away it clears it
+ * (ClearScreenShakeTarget). A top bar inside the target (the client puts
+ * it in the room's tree; the game's is outside the room) stays put. */
+Node* make_shake_driver(Control* target);
+
 class ScreenShake {
 public:
     static ScreenShake& get();
@@ -30,6 +38,8 @@ public:
     void trauma(const std::string& strength);
     void set_multiplier(float m) { multiplier_ = m; }
     Control* target() const { return target_; }
+    /* What the shake adds to the target's position now. */
+    Vec2 offset() const { return offset_; }
     void update(double dt);
     /* A logic cue (NGame.ScreenShake / ScreenRumble / ScreenShakeTrauma);
      * false if it is none of them. */
@@ -38,7 +48,7 @@ public:
 private:
     ScreenShake();
     Control* target_;
-    Vec2 origin_;
+    Vec2 origin_, offset_;
     float multiplier_;
     /* punch */
     bool punch_;

@@ -69,10 +69,13 @@ parts 2 and 3 above it).
   screen plays it on its visual-only room (the left construct mirrored,
   an exchange each 2.6 s as synthesized steps) while the INITIAL page is
   up.
-- Still open: screen shake outside fights (rooms
-  set their own target: NEventRoom's container, the merchant, rest site
-  and treasure rooms), The Architect's speech bubbles, NPowerUpVfx's 3D
-  layer, the enchant emboss.
+- Screen shake outside fights: each room screen names its target
+  (`RunScreen::shake_target`: the event layout, the merchant, rest site
+  and treasure rooms) and `make_shake_driver` runs the shake while it
+  holds it (a fight's room keeps its own); room cues pass the
+  NGame.Screen* calls on. The top bar inside a shaken room stays put.
+- Still open: The Architect's speech bubbles, NPowerUpVfx's 3D layer, the
+  enchant emboss.
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights
 

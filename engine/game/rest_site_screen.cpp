@@ -140,6 +140,7 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
         if (!passive_) proceed_.enable(!after_choice);
     }
     room->add_child(frame_driver(this));
+    shake_target_ = room->is_control() ? (Control*)room : NULL; /* NRestSiteRoom */
     return room;
 }
 

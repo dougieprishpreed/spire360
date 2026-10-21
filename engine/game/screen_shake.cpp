@@ -1,6 +1,8 @@
 #include "screen_shake.h"
 
 #include "../scene/node.h"
+#include "../scene/scene.h"
+#include "../scene/script.h"
 #include "ui_util.h"
 
 #include <math.h>
@@ -154,7 +156,33 @@ void ScreenShake::update(double dt) {
         v = v + t;
         trauma_ = maxf(trauma_ - (float)(2.0 * dt), 0);
     }
+    offset_ = v;
     if (target_) target_->set_position(origin_ + v);
+}
+
+namespace {
+class ShakeDriver : public ScriptBehavior {
+public:
+    explicit ShakeDriver(Control* target) : target_(target) { ScreenShake::get().set_target(target); }
+    virtual ~ShakeDriver() { ScreenShake::get().clear_target(target_); }
+    virtual void process(Node*, double dt) {
+        ScreenShake& s = ScreenShake::get();
+        if (s.target() != target_) return;
+        s.update(dt);
+        Node* bar = target_->get_node("TopBarLayer");
+        if (bar && bar->is_control()) ((Control*)bar)->set_position(s.offset() * -1.0f);
+    }
+
+private:
+    Control* target_;
+};
+} /* namespace */
+
+Node* make_shake_driver(Control* target) {
+    Node* n = SceneLibrary::create_node("Node");
+    n->name = "ShakeDriver";
+    n->behavior = new ShakeDriver(target);
+    return n;
 }
 
 bool ScreenShake::cue(const std::string& call, const Json& args) {

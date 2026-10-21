@@ -205,6 +205,7 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
         focus_merchant(true);
     }
     root_ = root;
+    shake_target_ = room->is_control() ? (Control*)room : NULL; /* NMerchantRoom */
     return root;
 }
 

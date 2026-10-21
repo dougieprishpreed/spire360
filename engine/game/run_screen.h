@@ -26,8 +26,11 @@ struct PadState {
 /* {"cmd":"action","action":name,"args":{args}}; args: "k":v pairs. */
 std::string protocol_action(const char* name, const std::string& args = std::string());
 
+class Control;
+
 class RunScreen {
 public:
+    RunScreen() : shake_target_(NULL) {}
     virtual ~RunScreen() {}
     /* A new node tree for the decision (the caller owns it); NULL on error.
      * The screen object outlives the tree (it may drive its animations). */
@@ -35,6 +38,13 @@ public:
     /* One frame of pad input: a command for the logic, or "" for none. */
     virtual std::string input(const PadState& pad) = 0;
     virtual bool busy() const { return false; }
+    /* What the room gives NGame.SetScreenShakeTarget (NEventRoom's event
+     * container, NMerchantRoom, NRestSiteRoom, NTreasureRoom); NULL for
+     * none. Set by build. */
+    Control* shake_target() const { return shake_target_; }
+
+protected:
+    Control* shake_target_;
 };
 
 } /* namespace spire */

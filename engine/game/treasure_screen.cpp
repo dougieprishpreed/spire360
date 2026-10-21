@@ -175,6 +175,7 @@ Node* TreasureScreen::build(const Json& d, std::string* error) {
         proceed_.enable(!finishing);
     }
     room->add_child(frame_driver(this));
+    shake_target_ = room->is_control() ? (Control*)room : NULL; /* NTreasureRoom */
     return room;
 }
 

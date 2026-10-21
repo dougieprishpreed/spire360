@@ -92,6 +92,8 @@ Node* EventScreen::build(const Json& d, std::string* error) {
     }
     root->add_child(layout);
     root->add_child(frame_driver(this));
+    /* NEventRoom's container; a combat layout's room holds the shake */
+    shake_target_ = !combat && layout->is_control() ? (Control*)layout : NULL;
     return root;
 }
 

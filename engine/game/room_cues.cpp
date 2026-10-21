@@ -1,5 +1,6 @@
 #include "room_cues.h"
 #include "combat_vfx.h"
+#include "screen_shake.h"
 #include "top_bar.h"
 #include "ui_util.h"
 
@@ -138,7 +139,9 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
             if (t != "ui") continue;
             const std::string& call = c["call"].str();
             const Json& args = c["args"];
-            if (call == "PlayerHurtVignetteHelper.Play") {
+            if (ScreenShake::get().cue(call, args)) {
+                /* NGame.ScreenShake / ScreenRumble / ScreenShakeTrauma on the room */
+            } else if (call == "PlayerHurtVignetteHelper.Play") {
                 spawn_combat_vfx(lib, screen, call, args, anchors);
             } else if (call == "NDamageNumVfx.Create" && args.size() >= 2 && args[(size_t)0].str() == "player" &&
                        args[1].is_number()) {
