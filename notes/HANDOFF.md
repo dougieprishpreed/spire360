@@ -88,11 +88,31 @@ parts 2 and 3 above it).
   10 * sin(4u) * sin(u / 2) px, 1 s, not during "hurt").
 - NCreature.DisableInteractionForDeath needs nothing: the client's
   targets come from the decision's living enemies.
-- Next: the FTUEs (13 one-time popups behind Progress.EnableFtues and
-  FtueCompleted: accept_tutorials at character select, combat_rules,
-  shuffle, can/cannot_play_card(s), obtain_potion, merchant, rest_site,
-  obtain_relic, combat_reward, power_card, map_select). The logic calls
-  NCombatRulesFtue.Create every fight (headless never marks it seen).
+- FTUEs (`engine/game/ftue.cpp`, `logic/Spire.Logic/Ftues.cs`): the logic
+  answers `ftues` (the profile's unseen ids; none without a profile, so
+  test runs show none), `ftue_done {id}` and `accept_tutorials {yes}`.
+  The client asks with each main_menu answer and marks a tip as it shows
+  (as the game does). FtuePopup: NModalContainer's backstop, the scene's
+  texts, "Got it!" pulsing, A closes; the control the tip is about lifted
+  over the backstop (ZIndex + 1); while one is open the hand has no
+  focused card and the fight's timeline is held (shuffle). Triggers:
+  accept_tutorials at the first Embark (ConfirmPopup on its scene, before
+  the run), combat_rules at the first fight (three pages: A / right next,
+  left back; the start banner after it), map_select once the act's rise
+  is over (a press only ends the rise), shuffle before the first discard
+  -> draw move, can_play_cards on End Turn with a playable card (three
+  ends with none turn it off), cannot_play_card on a card too costly
+  (eight plays turn it off), combat_reward on Skip with rewards left,
+  merchant on leaving with the rug unopened (opening it marks it),
+  rest_site, power_card (the Power's holder lifted), obtain_potion (a
+  potion more), obtain_relic (treasure open, a relic reward). Seen on
+  screen (spire_play --menu on a fresh profile, `work/ftuerun*.sh`;
+  spire_play writes ftue_<id>.png for each): accept_tutorials,
+  combat_rules (all pages), map_select, shuffle, can_play_cards,
+  power_card, rest_site. Not seen yet: cannot_play_card, combat_reward,
+  merchant, obtain_potion, obtain_relic. Not ported: the mouse-only
+  SneakyHitboxes. The logic still calls NCombatRulesFtue.Create every
+  fight (headless never marks it seen); the client ignores the cue.
 
 ## Alpha push, part 9 (2026-10-21): flashes, room cues, deck previews
 
@@ -206,8 +226,8 @@ parts 2 and 3 above it).
   NSpineSpriteBoneFollower (SpineSprite::bone_position), NValueRamp and
   the gradients; the Echo Form's copier plays the body's animations.
   All five checked in part 10.
-- Still open: NPowerUpVfx's 3D layer, the enchant emboss, the FTUEs
-  (part 10). The other unhandled ui calls of the survey
+- Still open: NPowerUpVfx's 3D layer, the enchant emboss, the five FTUEs
+  not seen on screen yet (part 10). The other unhandled ui calls of the survey
   (work/ui_calls.txt) are done in part 10.
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights
