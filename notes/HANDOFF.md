@@ -37,8 +37,18 @@ parts 2 and 3 above it).
   (3 us on the PC after a fast floor; the old version 6.8 us). Watch it on
   the console with the turbulent event portraits; halving its rate is the
   fallback.
-- Not ported: sub-emitters (11 scenes), trails (11), emission point
-  textures (4), attractors, fixed-fps interpolation.
+- Sub-emitters (11 scenes: the heal crosses, dagger spray / throw, Molten
+  Fist, Osty's heal, Spiny Toad, ...): the parent's process() sends
+  emissions (constant every 1/frequency s, at the end, at a collision, at
+  the start) to the system sub_emitter names; that one then only takes
+  sent emissions into free slots (transform kept, velocity if
+  keep_velocity); unclaimed ones drop each frame. Builds and passes the
+  checks; NOT yet checked on screen (replay frame offsets kept missing
+  the heal; spire_view renders `scenes/vfx/vfx_cross_heal.tscn --time T`,
+  but the crosses are small there: zoom in or use --scale).
+- Not ported: trails (11 scenes: card smith, dagger spray, Living Fog,
+  Aeonglass, ...), emission point textures (4), attractors, fixed-fps
+  interpolation.
 - Forms: Echo Form's copy had no skeleton (the body was looked up as the
   first SpineSprite under the visuals, which is the form's own copier);
   it is NCreatureVisuals' %Visuals now. All five forms render: Demon's

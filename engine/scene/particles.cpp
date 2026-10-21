@@ -238,7 +238,7 @@ Particles2D::Particles2D(bool is_gpu)
       direction(1, 0), gravity(is_gpu ? Vec2(0, -9.8f) : Vec2(0, 980)), emission_rect_extents(1, 1), spread(45),
       emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0), collision_base_size(1),
       collision_use_scale(false), use_fixed_seed(false), time_(0), frame_remainder_(0), cycle_(0), started_(false),
-      has_last_origin_(false) {
+      has_last_origin_(false), sub_mode_(false) {
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
     if (gpu) seed = next_seed();
@@ -249,7 +249,8 @@ Particles2D::Material::Material()
       directional_max(1), radial_velocity_min(0), radial_velocity_max(0), scale_over_velocity_min(0),
       scale_over_velocity_max(5), inherit_velocity_ratio(0), damping_as_friction(false), turbulence(false),
       turb_strength(1), turb_scale(0), turb_speed_random(0.2f), turb_influence_min(0.1f), turb_influence_max(0.1f),
-      turb_displacement_min(0), turb_displacement_max(0), amount_ratio(1), interp_to_end(0) {
+      turb_displacement_min(0), turb_displacement_max(0), amount_ratio(1), interp_to_end(0), sub_mode(0),
+      sub_at_end(1), sub_at_collision(1), sub_at_start(1), sub_interval(0.25f), sub_keep_velocity(false) {
     for (int i = 0; i < 3; ++i) {
         direction[i] = i == 0 ? 1.0f : 0.0f;
         emission_box[i] = shape_scale[i] = 1;
@@ -278,6 +279,7 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (key == "use_fixed_seed") use_fixed_seed = v.b();
     else if (gpu && key == "amount_ratio") mat.amount_ratio = jv_float(v, 1);
     else if (gpu && key == "interp_to_end") mat.interp_to_end = jv_float(v);
+    else if (gpu && key == "sub_emitter") sub_emitter = v["np"].str();
     else if (key == "texture") {
         Resource* r = ctx.resource(v);
         texture = bind_texture(this, r);
@@ -391,6 +393,14 @@ void Particles2D::apply_process_material(Resource* m) {
     mat.turb_displacement_min = jv_float(p["turbulence_initial_displacement_min"]);
     mat.turb_displacement_max = jv_float(p["turbulence_initial_displacement_max"]);
     CurveTex::from(sub_of(m, "turbulence_influence_over_life"), mat.turb_influence_over_life);
+    mat.sub_mode = p["sub_emitter_mode"].i();
+    /* set_sub_emitter_frequency passes the interval ("delta instead") */
+    float freq = p.has("sub_emitter_frequency") ? jv_float(p["sub_emitter_frequency"], 4) : 4.0f;
+    mat.sub_interval = freq > 0 ? 1.0f / freq : 0.0f;
+    if (p.has("sub_emitter_amount_at_end")) mat.sub_at_end = p["sub_emitter_amount_at_end"].i(1);
+    if (p.has("sub_emitter_amount_at_collision")) mat.sub_at_collision = p["sub_emitter_amount_at_collision"].i(1);
+    if (p.has("sub_emitter_amount_at_start")) mat.sub_at_start = p["sub_emitter_amount_at_start"].i(1);
+    mat.sub_keep_velocity = p["sub_emitter_keep_velocity"].b();
 }
 
 /* ---- simulation ---- */
@@ -426,7 +436,7 @@ void Particles2D::process(double dt) {
     }
     /* Stopping emission does not stop the particles already alive. In a
      * one-shot system those particles must keep aging until they finish. */
-    if (particles_.empty() || (!emitting && active_count() == 0)) return;
+    if (particles_.empty() || (!emitting && active_count() == 0 && pending_.empty())) return;
     double frame_time = fixed_fps > 0 ? 1.0 / fixed_fps : 1.0 / 30.0;
     if (gpu) {
         /* ParticlesStorage::update_particles: the preprocess at the speed
@@ -750,7 +760,7 @@ static Vec2 spread_direction(u32& s, const float direction[3], float spread_deg)
 }
 
 /* start() */
-void Particles2D::gpu_start(Particle& p, u32 number) {
+void Particles2D::gpu_start(Particle& p, u32 number, const Emission* from) {
     u32 s = idhash(number + 1u + seed);
     Drawn& d = p.d;
     /* calculate_initial_display_params */
@@ -784,6 +794,17 @@ void Particles2D::gpu_start(Particle& p, u32 number) {
     p.custom[0] = d.angle;
     p.custom[1] = p.custom[2] = 0;
     p.custom[3] = d.life;
+    p.time = 0;
+    if (from) {
+        /* a sub-emission: its transform kept (no RESTART_POSITION /
+         * ROT_SCALE), its velocity if sent; VELOCITY then goes through the
+         * emission transform like any other */
+        p.xform = from->xform;
+        Vec2 v = from->has_velocity ? from->velocity : spread_direction(s, mat.direction, spread) * d.initial_velocity;
+        p.velocity = emission_.basis_xform(v) + emitter_velocity_ * mat.inherit_velocity_ratio;
+        p.vz = from->has_velocity ? from->vz : 0.0f;
+        return;
+    }
     /* calculate_initial_position */
     float pos[3] = { 0, 0, 0 };
     if (emission_shape == 1 || emission_shape == 2) {
@@ -851,7 +872,6 @@ void Particles2D::gpu_start(Particle& p, u32 number) {
     Vec2 v = spread_direction(s, mat.direction, spread) * d.initial_velocity;
     p.velocity = emission_.basis_xform(v) + emitter_velocity_ * mat.inherit_velocity_ratio;
     p.vz = 0;
-    p.time = 0;
 }
 
 /* process_display_param at a life: the scale, animation and colour */
@@ -883,16 +903,20 @@ void Particles2D::gpu_display(const Particle& p, float life, float scale[3], flo
 }
 
 /* process() (disable_z: the particles stay in the plane) */
-void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec2& cn, float cdepth) {
+void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec2& cn, float cdepth,
+                              Particles2D* sub) {
     float dt = (float)dt_d;
     const Drawn& d = p.d;
     u32 s = d.seed;
+    int sub_mode = sub ? mat.sub_mode : 0;
+    bool just_spawned = p.custom[1] == 0.0f;
     p.custom[1] += (float)(dt_d / lifetime);
     p.custom[1] = lerpf(p.custom[1], 1.0f, mat.interp_to_end);
     float lp = p.custom[1] / d.life;
+    /* ACTIVE = false; the rest still runs (an emission at the end) */
     if (p.custom[1] > p.custom[3]) {
         p.active = false;
-        return;
+        if (sub_mode != 2) return;
     }
     Vec2 pos = p.xform.origin;
     /* the controlled displacement: orbit, radial, directional */
@@ -968,11 +992,13 @@ void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec
             p.vz *= nv / v;
         }
     }
+    if (collided && collision_mode == 2) {
+        p.active = false;
+        if (sub_mode == 3)
+            for (int k = 0; k < mat.sub_at_collision; ++k) emit_to(sub, p);
+        return;
+    }
     if (collided) {
-        if (collision_mode == 2) {
-            p.active = false;
-            return;
-        }
         /* the rigid response, in the canvas */
         Xform2D back = to_canvas_.affine_inverse();
         Vec2 at = to_canvas_.xform(p.xform.origin) + cn * cdepth;
@@ -1045,6 +1071,41 @@ void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec
     p.xform.x = p.xform.x * (signf(scale[0]) < 0 ? -1.0f : 1.0f) * maxf(fabsf(scale[0]), 0.001f);
     p.xform.y = p.xform.y * (signf(scale[1]) < 0 ? -1.0f : 1.0f) * maxf(fabsf(scale[1]), 0.001f);
     p.custom[2] = anim_offset + lp * anim_speed;
+    /* the sub-emitter's emissions */
+    int emit_count = 0;
+    if (sub_mode == 1 && mat.sub_interval > 0) {
+        float from = p.custom[1] * (float)lifetime - dt;
+        float rem = mat.sub_interval - (from - mat.sub_interval * floorf(from / mat.sub_interval));
+        if (dt >= rem) emit_count = 1;
+    } else if (sub_mode == 2) {
+        if (p.custom[1] / p.custom[3] * (float)lifetime > (float)lifetime - dt) emit_count = mat.sub_at_end;
+    } else if (sub_mode == 3) {
+        if (collided) emit_count = mat.sub_at_collision;
+    } else if (sub_mode == 4) {
+        if (just_spawned) emit_count = mat.sub_at_start;
+    }
+    for (int k = 0; k < emit_count; ++k) emit_to(sub, p);
+}
+
+/* emit_subparticle: into the sub-emitter's buffer (its amount at most) */
+void Particles2D::emit_to(Particles2D* sub, const Particle& p) {
+    if ((int)sub->pending_.size() >= sub->amount) return;
+    Emission e;
+    e.xform = p.xform;
+    e.velocity = p.velocity;
+    e.vz = p.vz;
+    e.has_velocity = mat.sub_keep_velocity;
+    sub->pending_.push_back(e);
+}
+
+/* the system sub_emitter names (it then emits only for this one) */
+Particles2D* Particles2D::sub_target() {
+    if (sub_emitter.empty() || !mat.sub_mode) return NULL;
+    Node* n = get_node(sub_emitter);
+    if (!n || n == this || n->type != "GPUParticles2D") return NULL;
+    Particles2D* s = (Particles2D*)n;
+    s->sub_mode_ = true;
+    return s;
 }
 
 /* particles.glsl's frame: each particle restarts at its phase of the
@@ -1060,11 +1121,21 @@ void Particles2D::step_gpu(double delta) {
         if (one_shot) emitting = false;
     }
     double phase = time_ / lifetime;
+    Particles2D* sub = sub_target();
     for (int i = 0; i < total; ++i) {
         Particle& p = particles_[i];
         double local_delta = delta;
         bool restart = false;
-        if (emitting) {
+        Emission from;
+        bool emitted = false;
+        if (sub_mode_) {
+            /* a sub-emitter's free slot takes a sent emission */
+            if (!p.active && !pending_.empty()) {
+                from = pending_.back();
+                pending_.pop_back();
+                restart = emitted = true;
+            }
+        } else if (emitting) {
             double restart_phase = double(i) / double(total);
             if (randomness > 0.0) {
                 u32 s = cycle_;
@@ -1093,14 +1164,16 @@ void Particles2D::step_gpu(double delta) {
         if (restart) {
             p.active = true;
             p.cycle = cycle_;
-            gpu_start(p, p.cycle * (u32)total + (u32)i);
+            gpu_start(p, p.cycle * (u32)total + (u32)i, emitted ? &from : NULL);
         }
         if (!p.active) continue;
         Vec2 n;
         float depth = 0;
         bool collided = collision_mode != 0 && collision(p, &n, &depth);
-        gpu_process(p, local_delta, collided, n, depth);
+        gpu_process(p, local_delta, collided, n, depth, sub);
     }
+    /* what no free slot took is dropped with the frame's buffer */
+    pending_.clear();
 }
 
 /* particles.glsl's 2D SDF collision: the canvas SDF of the

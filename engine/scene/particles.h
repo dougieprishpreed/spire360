@@ -11,8 +11,10 @@
  * moving emitter and ignore its scale. Collision: GPU particles whose
  * material has a collision mode bounce off (or vanish on) the
  * LightOccluder2D polygons of their tree, Godot's canvas SDF taken exactly
- * from the polygons. Not ported: sub-emitters, attractors, trails, the
- * emission point textures, fixed-fps interpolation. */
+ * from the polygons. Sub-emitters: the parent's particles send emissions
+ * (constant, at the end, at a collision, at the start) to the system its
+ * sub_emitter names, which then emits only those. Not ported: attractors,
+ * trails, the emission point textures, fixed-fps interpolation. */
 #ifndef SPIRE_PARTICLES_H
 #define SPIRE_PARTICLES_H
 
@@ -101,16 +103,22 @@ public:
         CurveTex scale, orbit, directional, radial_velocity, velocity_limit, emission, scale_over_velocity,
             turb_influence_over_life;
         float amount_ratio, interp_to_end;
+        /* sub_emitter_mode: 0 none, 1 constant (every sub_interval s), 2 at
+         * the end, 3 at a collision, 4 at the start */
+        int sub_mode, sub_at_end, sub_at_collision, sub_at_start;
+        float sub_interval;
+        bool sub_keep_velocity;
         Material();
     };
     Material mat;
+    std::string sub_emitter; /* GPUParticles2D.sub_emitter's path */
 
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual void process(double dt);
     virtual void draw(Canvas& c);
     void restart();
     size_t active_count() const;
-    bool finished() const { return !emitting && active_count() == 0; }
+    bool finished() const { return !emitting && active_count() == 0 && pending_.empty(); }
 
 private:
     /* The shader's DisplayParameters / DynamicsParameters /
@@ -140,8 +148,18 @@ private:
     };
     void step(double dt);
     void step_gpu(double dt);
-    void gpu_start(Particle& p, u32 number);
-    void gpu_process(Particle& p, double dt, bool collided, const Vec2& normal, float depth);
+    /* an emission from the parent system (emit_subparticle): its
+     * transform, and its velocity if kept */
+    struct Emission {
+        Xform2D xform;
+        Vec2 velocity;
+        float vz;
+        bool has_velocity;
+    };
+    void gpu_start(Particle& p, u32 number, const Emission* from);
+    void gpu_process(Particle& p, double dt, bool collided, const Vec2& normal, float depth, Particles2D* sub);
+    Particles2D* sub_target();
+    void emit_to(Particles2D* sub, const Particle& p);
     void gpu_display(const Particle& p, float life, float scale[3], float* anim_offset, float* anim_speed,
                      Color* color) const;
     Vec2 noise_direction(const float pos[3], float* z) const;
@@ -158,6 +176,9 @@ private:
     Xform2D emission_, to_canvas_;
     Vec2 emitter_velocity_, last_origin_;
     bool has_last_origin_;
+    /* as a sub-emitter: emits only what its parent sends */
+    bool sub_mode_;
+    std::vector<Emission> pending_;
 };
 
 /* LightOccluder2D: no lights in the game, so it draws nothing; its polygon
