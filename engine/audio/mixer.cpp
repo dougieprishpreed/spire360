@@ -39,22 +39,42 @@ struct AudioMixer::Voice {
     }
 };
 
-AudioMixer::AudioMixer(const Pack* pack, u32 rate) : pack_(pack), rate_(rate ? rate : 48000), next_id_(1), paused_(false) {}
+AudioMixer::AudioMixer(const Pack* pack, u32 rate)
+    : pack_(pack), rate_(rate ? rate : 48000), next_id_(1), paused_(false), failure_("") {}
 AudioMixer::~AudioMixer() { stop_all(); }
 
 u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start, u32 end, int loops, u32 offset) {
-    if (!pack_ || voices_.size() >= 64) return 0;
+    failure_ = "";
+    if (!pack_) return 0;
+    if (voices_.size() >= 64) {
+        failure_ = "64 voices playing";
+        return 0;
+    }
     Voice* v = new Voice;
-    if (!v->decoder.open(*pack_, path) || offset >= v->decoder.frames() || !v->decoder.seek(offset)) { delete v; return 0; }
+    if (!v->decoder.open(*pack_, path)) failure_ = "cannot open";
+    else if (offset >= v->decoder.frames()) failure_ = "start past the end";
+    else if (!v->decoder.seek(offset)) failure_ = "cannot seek";
+    if (*failure_) {
+        delete v;
+        return 0;
+    }
     if (loops != 0) {
         if (!end) end = v->decoder.frames();
-        if (start >= end || end > v->decoder.frames() || offset >= end) { delete v; return 0; }
+        if (start >= end || end > v->decoder.frames() || offset >= end) {
+            failure_ = "bad loop region";
+            delete v;
+            return 0;
+        }
         v->loop_start = start; v->loop_end = end; v->loops = loops;
     }
     v->cursor = offset;
     v->gain = maxf(gain, 0);
     v->pitch = clampf(ratio, 0.125f, 8);
-    if (!v->fetch(v->left, v->right)) { delete v; return 0; }
+    if (!v->fetch(v->left, v->right)) {
+        failure_ = "cannot decode";
+        delete v;
+        return 0;
+    }
     v->next_valid = v->fetch(v->next_left, v->next_right);
     if (!v->next_valid) { v->next_left = v->left; v->next_right = v->right; }
     v->id = next_id_++;

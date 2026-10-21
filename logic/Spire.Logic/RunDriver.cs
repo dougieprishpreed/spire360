@@ -1057,11 +1057,14 @@ public partial class RunDriver
         if (!entry.IsStocked) return Error("Card already purchased");
         if (player.Gold < entry.Cost) return Error("Not enough gold");
 
+        // The entry is cleared (and may restock) on purchase: name it first.
+        var cardName = entry.CreationResult?.Card?.GetType().Name ?? "?";
+        var cardCost = entry.Cost;
         try
         {
             Sched.Run(() => entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
             Sched.Pump();
-            Log($"Bought card: {entry.CreationResult?.Card?.GetType().Name ?? "?"} for {entry.Cost}g");
+            Log($"Bought card: {cardName} for {cardCost}g");
         }
         catch (Exception ex) { return ErrorWithTrace("Buy card failed", ex); }
 
@@ -1122,17 +1125,16 @@ public partial class RunDriver
         if (!entry.IsStocked) return Error("Potion already purchased");
         if (player.Gold < entry.Cost) return Error("Not enough gold");
 
+        // MerchantPotionEntry.ClearAfterPurchase nulls Model: name it first.
+        var potionName = entry.Model!.GetType().Name;
+        var potionCost = entry.Cost;
         try
         {
             Sched.Run(() => entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
             Sched.Pump();
-            Log($"Bought potion: {entry.Model.GetType().Name} for {entry.Cost}g");
+            Log($"Bought potion: {potionName} for {potionCost}g");
         }
-        catch (Exception ex)
-        {
-            // Potion purchase sometimes NullRefs in headless (missing potion slot UI)
-            Log($"Buy potion failed: {ex.Message}");
-        }
+        catch (Exception ex) { return ErrorWithTrace("Buy potion failed", ex); }
 
         return DetectDecisionPoint();
     }

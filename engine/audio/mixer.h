@@ -25,6 +25,8 @@ public:
     double remaining(u32 voice) const;
     u32 rate() const { return rate_; }
     size_t buffer_bytes() const;
+    /* Why the last play() returned 0. */
+    const char* last_failure() const { return failure_; }
 private:
     AudioMixer(const AudioMixer&);
     AudioMixer& operator=(const AudioMixer&);
@@ -33,6 +35,7 @@ private:
     const Pack* pack_;
     u32 rate_, next_id_;
     bool paused_;
+    const char* failure_;
     std::vector<Voice*> voices_;
 };
 }

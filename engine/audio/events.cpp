@@ -390,8 +390,15 @@ struct AudioEvents::Impl {
                     u32 frame = (u32)(offset * sample["rate"].num() + sample["frames"].num() * (*def)["seek_percent"].num() / 100);
                     voice = system->mixer.play(sample["path"].str(), gain, ratio, (u32)sample["loop_start"].num(),
                             (u32)sample["loop_end"].num(), repeats, frame);
-                    if (!voice) { ++system->errors; done = true; }
-                    else ++system->voices_started;
+                    if (!voice) {
+                        ++system->errors;
+                        done = true;
+                        const std::string& p = sample["path"].str();
+                        if (!system->warned[p]) {
+                            log_warn("audio voice not started: %s at frame %u (%s)", p.c_str(), frame, system->mixer.last_failure());
+                            system->warned[p] = true;
+                        }
+                    } else ++system->voices_started;
                 } else if (kind == "multi") select();
                 else if (kind == "event") {
                     const std::string& id = (*def)["event"].str();
