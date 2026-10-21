@@ -324,7 +324,8 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         effect_texel(e, 3, u, v, fa);
         float mb = m[2];
         if (e.p[3] < 0) mb = 1 - mb;
-        float x = (e.p[2] * n2[2] * fabsf(e.p[3]) * n1[2] + mb) * fa[3];
+        float s2 = e.extra[0] != 0 ? e.p[2] * t[3] * col[3] : e.p[2];
+        float x = (s2 * n2[2] * fabsf(e.p[3]) * n1[2] + mb) * fa[3];
         float a = clampf(smoothstepf(e.p[0], e.p[1], x), 0, 1);
         float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
         for (int k = 0; k < 3; ++k) out[k] = clampf(col[k] * t[k] * ia, 0, 1) * a;

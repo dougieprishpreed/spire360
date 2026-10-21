@@ -43,7 +43,8 @@ enum EffectId {
      * COLOR.a is written), alpha smoothstep(p0, p1, (p2 * n2.b * p3 * n1.b + m) *
      * tex3(UV).a); n1 = tex0(UV * p4p5 + p6p7), n2 = tex1(UV * p8p9 + p10p11),
      * m = tex2(((UV - (0, 0.04)) * p12p13 + (0, 0.04)) + p14p15).b, inverted
-     * when p3 < 0 (p3 = |Noise1Strength|, the sign is InvertNoiseMask). */
+     * when p3 < 0 (p3 = |Noise1Strength|, the sign is InvertNoiseMask);
+     * x0.x != 0: p2 also times the vertex alpha (the blood wall's copy). */
     EFFECT_MOLTEN_FIST = 6,
     /* images/vfx/slash_shader_flat.tres: rgb p12..14, alpha smoothstep(p0, p1,
      * shape(UV).b * p2 * n1.r * n2.r * p3) * p4; n1 = tex1 at (UV + (0.275,

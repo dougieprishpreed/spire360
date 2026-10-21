@@ -84,7 +84,8 @@ float4 ps_e6(VsOut i) : COLOR {
     float n2 = tex2D(g_e1, i.uv * g_p2.xy + g_p2.zw).b;
     float m = tex2D(g_e2, (i.uv - float2(0.0, 0.04)) * g_p3.xy + float2(0.0, 0.04) + g_p3.zw).b;
     if (g_p0.w < 0.0) m = 1.0 - m;
-    float x = (g_p0.z * n2 * abs(g_p0.w) * n1 + m) * tex2D(g_e3, i.uv).a;
+    float s2 = g_x[0].x != 0.0 ? g_p0.z * t.a * i.color.a : g_p0.z;
+    float x = (s2 * n2 * abs(g_p0.w) * n1 + m) * tex2D(g_e3, i.uv).a;
     float a = saturate(smoothstep(g_p0.x, g_p0.y, x));
     return float4(saturate(i.color.rgb * t.rgb) * a, a);
 }

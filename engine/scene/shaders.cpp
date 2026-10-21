@@ -11,6 +11,7 @@
 #include <math.h>
 #include <map>
 #include <string.h>
+#include <string.h>
 
 namespace spire {
 
@@ -44,12 +45,27 @@ static Color param_color(const MaterialRes* m, const char* name, const Color& fa
 }
 
 /* A sampler2D parameter's resource (NULL: unset). */
+/* A VisualShader's texture node (tex_frg_<n> / tex_vtx_<n>): the texture
+ * set on the node itself, which Godot makes the parameter's default. */
+static Resource* visual_shader_node_texture(const MaterialRes* m, const char* name, SceneLibrary* lib) {
+    const char* stage = strncmp(name, "tex_frg_", 8) == 0 ? "fragment" : strncmp(name, "tex_vtx_", 8) == 0 ? "vertex" : NULL;
+    if (!stage || !m->props->has("shader")) return NULL;
+    Resource* sh = lib->resolve((*m->props)["shader"], m->file);
+    if (!sh || !sh->props) return NULL;
+    std::string k = format("nodes/%s/%s/node", stage, name + 8);
+    if (!sh->props->has(k.c_str())) return NULL;
+    Resource* node = lib->resolve((*sh->props)[k.c_str()], sh->file);
+    if (!node || !node->props || !node->props->has("texture")) return NULL;
+    return lib->resolve((*node->props)["texture"], node->file);
+}
+
 Resource* shader_param_resource(const MaterialRes* m, const char* name) {
     if (!m || !m->props) return NULL;
     std::string k = std::string("shader_parameter/") + name;
-    if (!m->props->has(k.c_str())) return NULL;
     SceneLibrary* lib = SceneLibrary::current();
-    return lib ? lib->resolve((*m->props)[k.c_str()], m->file) : NULL;
+    if (!lib) return NULL;
+    if (!m->props->has(k.c_str())) return visual_shader_node_texture(m, name, lib);
+    return lib->resolve((*m->props)[k.c_str()], m->file);
 }
 
 float shader_param(const MaterialRes* m, const char* name, float fallback) { return param(m, name, fallback); }
@@ -646,8 +662,13 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         /* the erosion at each particle's life (INSTANCE_CUSTOM.y / .w) */
         effect_particles(EFFECT_POISON_SKULL);
         g_life_param[0] = 3;
-    } else if (s == "images/vfx/vfx_molten_fist/vfx_molten_fist.tres") {
+    } else if (s == "images/vfx/vfx_molten_fist/vfx_molten_fist.tres" || s == "inline:e5daec83ddc30b8d") {
+        /* inline:e5daec83ddc30b8d (vfx_blood_wall): the molten fist's with
+         * Noise2Strength times the vertex alpha and tex_frg_41 as the fade */
+        bool blood = s == "inline:e5daec83ddc30b8d";
         e.id = EFFECT_MOLTEN_FIST;
+        e.extra[0] = blood ? 1.0f : 0.0f;
+        e.extra_count = 1;
         Vec2 st = shader_param_vec2(m, "NoiseStep", Vec2(0.1f, 0.2f));
         e.p[0] = st.x;
         e.p[1] = st.y;
@@ -672,7 +693,7 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "Noise1Texture");
         e.tex[1] = effect_texture(c, m, "Noise2Texture");
         e.tex[2] = effect_texture(c, m, "NoiseMask");
-        e.tex[3] = effect_texture(c, m, "tex_frg_40");
+        e.tex[3] = effect_texture(c, m, blood ? "tex_frg_41" : "tex_frg_40");
         e.repeat = 3;
     } else if (s == "images/vfx/slash_shader_flat.tres") {
         e.id = EFFECT_SLASH_FLAT;
