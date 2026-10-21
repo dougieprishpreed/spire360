@@ -23,6 +23,8 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
       screen_(TITLE), chars_version_(0), decisions_seen_(0), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false) {
+    tutorials_ = NULL;
+    tutorials_node_ = NULL;
     /* SettingsSave.Language (LocManager.Initialize); English when none */
     const Json saved = Loc::settings_save();
     if (saved["language"].is_string()) Loc::set_language(saved["language"].str());
@@ -121,6 +123,14 @@ void MenuFlow::relocalize() {
     tree_->layout();
 }
 
+void MenuFlow::embark() {
+    last_character_ = chars_->selected();
+    note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
+    if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));
+    else game_->start_game_run(chars_->character(), chars_->ascension());
+    begin_run();
+}
+
 /* The submenu over the title goes; the title takes the pad again. */
 void MenuFlow::close_screen() {
     if (screen_node_) {
@@ -131,6 +141,13 @@ void MenuFlow::close_screen() {
     }
     delete confirm_;
     confirm_ = NULL;
+    if (tutorials_node_) {
+        if (tutorials_node_->parent) tutorials_node_->parent->remove_child(tutorials_node_);
+        delete tutorials_node_;
+        tutorials_node_ = NULL;
+    }
+    delete tutorials_;
+    tutorials_ = NULL;
     delete timeline_;
     timeline_ = NULL;
     delete profiles_;
@@ -325,16 +342,40 @@ bool MenuFlow::update(const PadState& in) {
             break;
         }
         case CHARACTERS: {
+            if (tutorials_) {
+                /* NAcceptTutorialsFtue: Yes keeps the tutorials, No turns
+                 * them off; either way the Embark goes on */
+                ConfirmPopup::Action t = tutorials_->input(pad);
+                if (t == ConfirmPopup::NONE) break;
+                game_->accept_tutorials(t == ConfirmPopup::YES);
+                if (tutorials_node_->parent) tutorials_node_->parent->remove_child(tutorials_node_);
+                delete tutorials_node_;
+                tutorials_node_ = NULL;
+                delete tutorials_;
+                tutorials_ = NULL;
+                embark();
+                break;
+            }
             CharacterSelectScreen::Action a = chars_->input(pad);
             if (a == CharacterSelectScreen::BACK) {
                 last_character_ = chars_->selected();
                 close_screen();
             } else if (a == CharacterSelectScreen::EMBARK) {
-                last_character_ = chars_->selected();
-                note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
-                if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));
-                else game_->start_game_run(chars_->character(), chars_->ascension());
-                begin_run();
+                if (!menu_.is_null() && game_->ftue_pending("accept_tutorials_ftue")) {
+                    /* NCharacterSelectScreen.OnEmbarkPressed: the first time,
+                     * whether to show the tutorials */
+                    tutorials_ = new ConfirmPopup(lib_);
+                    tutorials_node_ = tutorials_->build_scene("scenes/ftue/accept_tutorials_ftue.tscn",
+                                                              Loc::get("main_menu_ui", "ENABLE_TUTORIALS.title"),
+                                                              Loc::get("main_menu_ui", "ENABLE_TUTORIALS.description"), &err);
+                    if (tutorials_node_) {
+                        tree_->root()->add_child(tutorials_node_);
+                        break;
+                    }
+                    delete tutorials_;
+                    tutorials_ = NULL;
+                }
+                embark();
             }
             break;
         }

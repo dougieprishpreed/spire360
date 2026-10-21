@@ -21,9 +21,11 @@
 
 namespace spire {
 
+class CanvasItem;
 class CombatScreen;
 class ConfirmPopup;
 class DeckPreviews;
+class FtuePopup;
 class LogicLink;
 class PauseMenu;
 class PileScreen;
@@ -134,12 +136,38 @@ public:
     /* Bumped when the settings answer brings another language (Loc follows). */
     int language_version() const { return language_version_; }
     void request_settings();
+    /* The profile's FTUEs not seen yet (the logic's ftues answer, asked
+     * with the main menu; none in test runs). */
+    bool ftue_pending(const std::string& id) const;
+    /* SaveManager.MarkFtueAsComplete (the game marks a tip as it shows). */
+    void ftue_seen(const std::string& id);
+    /* NAcceptTutorialsFtue's answer: tutorials on (yes) or off. */
+    void accept_tutorials(bool yes);
     /* A query for the logic outside the decisions (settings): no answer
      * is waited for. */
     void send_query(const std::string& command);
     void apply_settings(const Json& s);
 private:
     bool settings_input(const PadState& pad);
+    /* An FTUE over the run (NModalContainer): it takes the input until it
+     * closes. */
+    void open_ftue(const std::string& id, const std::vector<CanvasItem*>& spotlights, const Vec2* at = NULL);
+    void close_ftue();
+    /* The FTUEs that come with a screen (combat rules, map, rest site,
+     * rewards' relic, card reward's power, potion, merchant's rug). */
+    bool check_ftues(const PadState& pad); /* true: the input waits for one */
+    /* The FTUEs that come instead of a command (rewards skipped, the shop
+     * left unopened, End Turn with cards to play): true when one did. */
+    bool ftue_instead(const std::string& command);
+    CanvasItem* screen_item(const char* name);
+    FtuePopup* ftue_;
+    Node* ftue_node_;
+    int ftue_frames_;
+    std::vector<std::string> ftues_, ftues_marked_;
+    bool combat_rules_wait_;   /* the fight's start waits for the combat rules FTUE */
+    int ftue_end_turns_;       /* turns ended with nothing to play (can_play_cards) */
+    int ftue_cards_played_;    /* cards played (cannot_play_card's auto-disable) */
+    int ftue_potions_;         /* the potions held at the last decision */
 
     SceneLibrary* lib_;
     SceneTree* tree_;

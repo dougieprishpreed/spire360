@@ -54,6 +54,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
       arrow_head_(NULL) {
     player_.node = NULL;
     osty_.node = NULL;
+    paused_ = watch_shuffle_ = shuffle_hit_ = hand_unfocused_ = false;
     creature_focus_ = NULL;
     creature_tips_ = NULL;
     sel_mode_ = 0;
@@ -948,7 +949,7 @@ int CombatScreen::focused_holder() const {
             if (first < 0) first = (int)i;
             ++count;
         }
-    if (count == 0) return -1;
+    if (count == 0 || hand_unfocused_) return -1;
     int want = count / 2, k = 0;
     for (size_t i = 0; i < holders_.size(); ++i)
         if (holders_[i].node && holders_[i].node->visible) {
@@ -1357,7 +1358,7 @@ void CombatScreen::process(double dt) {
     }
     /* The steps' cues as their time comes; the damage numbers fly
      * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
-    cue_t_ += dt;
+    if (!paused_) cue_t_ += dt;
     life_t_ += dt;
     if (radial_off_at_ > 0 && life_t_ >= radial_off_at_) {
         radial_off_at_ = 0;
@@ -1376,7 +1377,16 @@ void CombatScreen::process(double dt) {
             fading_orbs_.erase(fading_orbs_.begin() + (long)i);
         } else o.node->modulate.a = (float)(o.until - life_t_) / 0.25f;
     }
-    while (next_cue_ < cues_.size() && cues_[next_cue_].at <= cue_t_) fire(cues_[next_cue_++]);
+    while (!paused_ && next_cue_ < cues_.size() && cues_[next_cue_].at <= cue_t_) {
+        const Json& ch = cues_[next_cue_].data;
+        if (watch_shuffle_ && ch["t"].str() == "card" && ch["from"].str() == "discard" && ch["to"].str() == "draw") {
+            /* CardPileCmd.ShuffleFtueCheck: the FTUE before the shuffle */
+            watch_shuffle_ = false;
+            shuffle_hit_ = paused_ = true;
+            break;
+        }
+        fire(cues_[next_cue_++]);
+    }
     for (size_t i = delayed_hides_.size(); i-- > 0;)
         if (life_t_ >= delayed_hides_[i].at && (!death_delayed(delayed_hides_[i].visuals) || life_t_ >= delayed_hides_[i].at + 10)) {
             delayed_hides_[i].visuals->modulate.a = 0;
@@ -2673,7 +2683,7 @@ void CombatScreen::show_banner(const std::string& kind, int round) {
     banners_.push_back(bn);
 }
 
-void CombatScreen::show_start_banner() {
+void CombatScreen::show_start_banner(bool turn_banner) {
     busy_until_ = 2.6; /* NCombatStartBanner: player turn starts here. */
     Cue c;
     c.kind = CUE_BANNER;
@@ -2681,6 +2691,7 @@ void CombatScreen::show_start_banner() {
     c.at = 0;
     c.name = "start";
     add_cue(c);
+    if (!turn_banner) return;
     c.at = 2.6;
     c.name = "player";
     add_cue(c);

@@ -50,6 +50,8 @@ private:
     void relocalize();
     void close_screen();
     void begin_run();
+    /* CharacterSelectScreen's Embark: the run starts */
+    void embark();
     void open_timeline();
     void note(const std::string& e);
     SceneLibrary* lib_;
@@ -62,6 +64,9 @@ private:
     Node* title_node_;
     CharacterSelectScreen* chars_;
     ConfirmPopup* confirm_;
+    /* NAcceptTutorialsFtue over the character select (the first Embark) */
+    ConfirmPopup* tutorials_;
+    Node* tutorials_node_;
     TimelineScreen* timeline_;
     ProfileScreen* profiles_;
     SettingsScreen* settings_;

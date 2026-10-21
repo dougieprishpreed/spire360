@@ -27,6 +27,10 @@ public:
     /* NGenericPopup.WaitForConfirmation (scenes/ui/generic_popup.tscn):
      * header and body, Cancel and Confirm. */
     Node* build_generic(const std::string& header, const std::string& body, std::string* error);
+    /* Another scene with a VerticalPopup (NAcceptTutorialsFtue's). */
+    Node* build_scene(const char* scene, const std::string& header, const std::string& body, std::string* error) {
+        return make(scene, header, body, error);
+    }
     Action input(const PadState& pad);
     virtual void frame(double dt);
 

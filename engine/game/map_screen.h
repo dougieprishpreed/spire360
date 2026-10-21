@@ -28,6 +28,14 @@ public:
         return opening_ < 0.45 || travel_t_ >= 0 || (act_anim_ >= 0 && act_anim_ < act_delay_ + act_duration_ * 0.25);
     }
     void begin_travel(int col, int row);
+    /* The act's opening scroll over (NMapScreen.InitMapPrompt's moment) */
+    bool settled() const { return !busy() && act_anim_ < 0 && fabsf(scroll_ - scroll_to_) <= 0.1f; }
+    /* NMapScreen: a press during the rise ends it (DisableInputVeryBriefly) */
+    void finish_opening() {
+        if (act_anim_ >= 0) act_anim_ = act_delay_ + act_duration_;
+    }
+    /* NMapScreen._startingPointNode (the act's start: the Ancient) */
+    Control* start_point() const { return start_point_; }
 
 private:
     struct Point {
@@ -47,6 +55,7 @@ private:
     void focus(int i);
     SceneLibrary* lib_;
     std::vector<Point> points_;
+    Control* start_point_;
     std::vector<int> choices_; /* indices into points_, left to right */
     int focus_;                /* index into choices_ */
     TweenSet tweens_;

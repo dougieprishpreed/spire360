@@ -12,6 +12,7 @@
 #include "combat_screen.h"
 #include "bundle_select_screen.h"
 #include "confirm_popup.h"
+#include "ftue.h"
 #include "pause_menu.h"
 #include "pile_screen.h"
 #include "screen_shake.h"
@@ -257,9 +258,17 @@ GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
-      confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {}
+      confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {
+    ftue_ = NULL;
+    ftue_node_ = NULL;
+    ftue_frames_ = 0;
+    combat_rules_wait_ = false;
+    ftue_end_turns_ = ftue_cards_played_ = 0;
+    ftue_potions_ = -1;
+}
 
 GameClient::~GameClient() {
+    close_ftue();
     if (compendium_node_) {
         if (compendium_node_->parent) compendium_node_->parent->remove_child(compendium_node_);
         delete compendium_node_;
@@ -395,6 +404,13 @@ void GameClient::update(const PadState& pad) {
             else show(msg);
         } else if (type == "settings") {
             apply_settings(msg);
+        } else if (type == "ftues") {
+            /* the profile's FTUEs left (those marked here stay seen) */
+            ftues_.clear();
+            const Json& l = msg["ftues"];
+            for (size_t i = 0; i < l.size(); ++i)
+                if (std::find(ftues_marked_.begin(), ftues_marked_.end(), l[i].str()) == ftues_marked_.end())
+                    ftues_.push_back(l[i].str());
         } else if (compendium_ && CompendiumScreen::is_answer(type)) {
             compendium_->set_answer(msg);
         } else if (type == "map_view") {
@@ -428,7 +444,10 @@ void GameClient::update(const PadState& pad) {
             ++answers_;
             unread_.push_back(msg);
             /* a profile's prefs came with its menu */
-            if (type == "main_menu") request_settings();
+            if (type == "main_menu") {
+                request_settings();
+                send_query("{\"cmd\":\"ftues\"}");
+            }
             if (quitting_ && type == "main_menu") {
                 quitting_ = false;
                 menu_requested_ = true;
@@ -444,6 +463,20 @@ void GameClient::update(const PadState& pad) {
         return;
     }
     if (transition_ && transition_->phase != 0) return;
+    if (ftue_) {
+        /* auto play reads it a second and a half */
+        if (ftue_->input(pad) || (auto_ && ++ftue_frames_ > 90)) close_ftue();
+        return;
+    }
+    if (combat_ && combat_->take_shuffle()) {
+        /* CardPileCmd.ShuffleFtueCheck: the piles over the backstop */
+        std::vector<CanvasItem*> piles;
+        piles.push_back(screen_item("DrawPile"));
+        piles.push_back(screen_item("DiscardPile"));
+        open_ftue("shuffle_ftue", piles);
+        if (!ftue_) combat_->set_paused(false);
+        return;
+    }
     if (!finishing_.is_null()) {
         /* The killing blow is playing: then the decision after it. */
         if ((room_ && room_->busy()) || (combat_ && combat_->busy())) return;
@@ -457,12 +490,13 @@ void GameClient::update(const PadState& pad) {
     }
     if (waiting_ || decision_.is_null()) return;
     if (combat_ && combat_->take_end_turn_long_press()) {
-        send(action("end_turn"));
+        if (!ftue_instead(action("end_turn"))) send(action("end_turn"));
         return;
     }
     if (combat_ && combat_->busy()) return;
     if (room_ && room_->busy()) return;
     if (ported_ && ported_->busy()) return;
+    if (check_ftues(pad) || ftue_) return;
     if (auto_ && (auto_until_ <= 0 || decisions_ < auto_until_)) choose_automatically();
     else handle_input(pad);
 }
@@ -556,6 +590,7 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
 
 void GameClient::show(const Json& d) {
     errors_ = 0; /* the retries after an error count per decision */
+    close_ftue();
     /* The deck's changes (NRun.GlobalUi's previews) play over whatever
      * screen comes next. */
     if (!deck_previews_) deck_previews_ = new DeckPreviews(lib_);
@@ -840,6 +875,7 @@ void GameClient::show(const Json& d) {
             combat_->set_previous(before);
             screen_ = combat_->build(d, &err);
         }
+        if (combat_ && ftue_pending("shuffle_ftue")) combat_->watch_shuffle(true);
         if (!screen_) {
             log_warn("combat screen: %s", err.c_str());
             delete combat_;
@@ -849,7 +885,9 @@ void GameClient::show(const Json& d) {
              * turn. */
             combat_->play_steps(d["steps"]);
         } else if (!continuing) {
-            combat_->show_start_banner();
+            /* the combat rules FTUE first, its close the start banner */
+            if (ftue_pending("combat_rules_ftue")) combat_rules_wait_ = true;
+            else combat_->show_start_banner();
         }
     }
     plain_ = !screen_;
@@ -1008,6 +1046,8 @@ void GameClient::combat_input(const PadState& pad) {
                                                 enemies[(size_t)target_]["index"].i())));
             else
                 send(action("play_card", format("\"card_index\":%d", card["index"].i())));
+            /* AutoDisableCannotPlayCardFtueCheck: eight cards played */
+            if (++ftue_cards_played_ == 8 && ftue_pending("cannot_play_card_ftue")) ftue_seen("cannot_play_card_ftue");
         }
         return;
     }
@@ -1036,8 +1076,13 @@ void GameClient::combat_input(const PadState& pad) {
     }
     if ((pad.pressed & PadState::A) && focus >= 0 && focus < n) {
         const Json& card = hand[(size_t)focus];
-        /* NControllerCardPlay.Start: an unplayable card stays in the hand. */
-        if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) return;
+        /* NControllerCardPlay.Start: an unplayable card stays in the hand
+         * (NCardPlay.CannotPlayThisCardFtueCheck: too costly, the FTUE). */
+        if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) {
+            if (card["cost"].i() > decision_["energy"].i() && ftue_pending("cannot_play_card_ftue"))
+                open_ftue("cannot_play_card_ftue", std::vector<CanvasItem*>(1, screen_item("EndTurnButton")));
+            return;
+        }
         const std::string& type = card["target_type"].str();
         if (type == "AnyEnemy") {
             if (ne == 0) return;
@@ -1062,7 +1107,7 @@ void GameClient::combat_input(const PadState& pad) {
         /* Long press confirmation: Y held until the bar fills */
         combat_->hold_end_turn((pad.pressed & PadState::Y) != 0, (pad.held & PadState::Y) != 0);
     } else if (pad.pressed & PadState::Y) {
-        send(action("end_turn"));
+        if (!ftue_instead(action("end_turn"))) send(action("end_turn"));
     }
 }
 
@@ -1368,7 +1413,7 @@ void GameClient::handle_input(const PadState& pad) {
     }
     if (ported_) {
         std::string cmd = ported_->input(pad);
-        if (!cmd.empty()) send(cmd);
+        if (!cmd.empty() && !ftue_instead(cmd)) send(cmd);
         if (game_over() && ((GameOverScreen*)ported_)->done()) menu_requested_ = true;
         return;
     }
@@ -1442,6 +1487,183 @@ void GameClient::refresh_plain_screen() {
             ((Control*)n)->add_theme_color_override("font_color", i == focus_ ? Color(0.94f, 0.78f, 0.32f)
                                                                                 : Color(1, 0.965f, 0.886f));
     }
+}
+
+/* ---- FTUEs (scenes/ftue, ftue.h) ---- */
+
+bool GameClient::ftue_pending(const std::string& id) const {
+    return std::find(ftues_.begin(), ftues_.end(), id) != ftues_.end();
+}
+
+void GameClient::ftue_seen(const std::string& id) {
+    std::vector<std::string>::iterator it = std::find(ftues_.begin(), ftues_.end(), id);
+    if (it != ftues_.end()) ftues_.erase(it);
+    ftues_marked_.push_back(id);
+    send_query("{\"cmd\":\"ftue_done\",\"id\":\"" + id + "\"}");
+}
+
+void GameClient::accept_tutorials(bool yes) {
+    ftues_marked_.push_back("accept_tutorials_ftue");
+    if (yes) {
+        std::vector<std::string>::iterator it = std::find(ftues_.begin(), ftues_.end(), "accept_tutorials_ftue");
+        if (it != ftues_.end()) ftues_.erase(it);
+    } else {
+        ftues_.clear();
+    }
+    send_query(yes ? "{\"cmd\":\"accept_tutorials\",\"yes\":true}" : "{\"cmd\":\"accept_tutorials\",\"yes\":false}");
+}
+
+CanvasItem* GameClient::screen_item(const char* name) {
+    Node* n = screen_ ? screen_->find_unique(name) : NULL;
+    if (!n && screen_) n = find_named(screen_, name);
+    return n && n->is_canvas_item() ? (CanvasItem*)n : NULL;
+}
+
+/* NModalContainer.Add: the FTUE over the run, marked seen as it shows. */
+void GameClient::open_ftue(const std::string& id, const std::vector<CanvasItem*>& spotlights, const Vec2* at) {
+    if (ftue_) return;
+    std::string err;
+    ftue_ = new FtuePopup(lib_);
+    ftue_node_ = ftue_->build(id, spotlights, at, &err);
+    ftue_frames_ = 0;
+    if (!ftue_node_) {
+        log_warn("ftue: %s", err.c_str());
+        delete ftue_;
+        ftue_ = NULL;
+    } else {
+        tree_->root()->add_child(ftue_node_);
+        /* NFtue takes the focus: no hand card stays raised over it */
+        if (combat_) combat_->set_hand_unfocused(true);
+    }
+    ftue_seen(id);
+}
+
+/* NFtue.CloseFtue; NCombatRulesFtue's last page: NCombatStartBanner. */
+void GameClient::close_ftue() {
+    if (!ftue_) return;
+    std::string id = ftue_->id();
+    ftue_->close();
+    if (ftue_node_) {
+        if (ftue_node_->parent) ftue_node_->parent->remove_child(ftue_node_);
+        delete ftue_node_;
+    }
+    ftue_node_ = NULL;
+    delete ftue_;
+    ftue_ = NULL;
+    if (combat_) {
+        combat_->set_paused(false);
+        combat_->set_hand_unfocused(false);
+    }
+    if (id == "combat_rules_ftue" && combat_) combat_->show_start_banner(false);
+}
+
+bool GameClient::check_ftues(const PadState& pad) {
+    const std::string& kind = decision_["decision"].str();
+    /* NTopBar.PotionContainer: a potion more than at the last check */
+    int potions = (int)decision_["player"]["potions"].size();
+    bool potion_gained = ftue_potions_ >= 0 && potions > ftue_potions_ && decision_["player"].is_object();
+    if (decision_["player"].is_object()) ftue_potions_ = potions;
+    if (ftues_.empty() || pause_ || piles_ || map_view_ || settings_screen_ || compendium_) return false;
+    std::vector<CanvasItem*> none;
+    if (combat_rules_wait_) {
+        /* CombatManager.StartCombat: NCombatRulesFtue after the first turn
+         * starts */
+        combat_rules_wait_ = false;
+        if (combat_ && kind == "combat_play" && ftue_pending("combat_rules_ftue")) {
+            open_ftue("combat_rules_ftue", none);
+            return true;
+        }
+        if (combat_) combat_->show_start_banner();
+    }
+    if (potion_gained && ftue_pending("obtain_potion_ftue")) {
+        open_ftue("obtain_potion_ftue", std::vector<CanvasItem*>(1, screen_item("PotionContainer")));
+        return true;
+    }
+    if (kind == "map_select" && ported_ && ftue_pending("map_select_ftue")) {
+        /* NMapScreen.MapFtueCheck: at the act's starting point */
+        /* after the rise (a press ends it, and only that) */
+        MapScreen* map = (MapScreen*)ported_;
+        if (!map->settled()) {
+            if (pad.pressed) map->finish_opening();
+            return true;
+        }
+        Control* start = map->start_point();
+        if (start) {
+            Vec2 at = start->global_transform().xform(start->size * 0.5f);
+            open_ftue("map_select_ftue", std::vector<CanvasItem*>(1, start), &at);
+        }
+        return true;
+    }
+    if (kind == "rest_site" && ported_ && ftue_pending("rest_site_ftue")) {
+        open_ftue("rest_site_ftue", std::vector<CanvasItem*>(1, screen_item("ChoicesContainer")));
+        return true;
+    }
+    if (kind == "shop" && ported_ && ((ShopScreen*)ported_)->inventory_open() && ftue_pending("merchant_ftue")) {
+        /* NMerchantInventory.Open marks it seen */
+        ftue_seen("merchant_ftue");
+        return false;
+    }
+    if (kind == "card_reward" && ftue_pending("power_card_ftue")) {
+        /* NCardRewardSelectionScreen.PowerCardFtueCheck: a Power on offer */
+        const Json& cards = decision_["cards"];
+        for (size_t i = 0; i < cards.size(); ++i)
+            if (cards[i]["type"].str() == "Power") {
+                open_ftue("power_card_ftue", none);
+                return true;
+            }
+    }
+    if (ftue_pending("obtain_relic_ftue")) {
+        /* NTreasureRoom / NRewardsScreen.RelicFtueCheck: a relic to take */
+        bool relic = kind == "treasure" && decision_["stage"].str() == "open" && decision_["relics"].size() > 0;
+        if (kind == "rewards") {
+            const Json& rs = decision_["rewards"];
+            for (size_t i = 0; i < rs.size(); ++i)
+                if (rs[i]["type"].str() == "relic" && !rs[i]["skipped"].b()) relic = true;
+        }
+        if (relic) {
+            CanvasItem* spot = kind == "treasure" ? screen_item("RelicCollection") : screen_item("RewardsContainer");
+            open_ftue("obtain_relic_ftue", std::vector<CanvasItem*>(1, spot));
+            return true;
+        }
+    }
+    return false;
+}
+
+bool GameClient::ftue_instead(const std::string& command) {
+    if (ftues_.empty()) return false;
+    const std::string& kind = decision_["decision"].str();
+    bool proceed = command.find("\"action\":\"proceed\"") != std::string::npos;
+    if (kind == "rewards" && proceed && decision_["terminal"].b() && ftue_pending("combat_reward_ftue")) {
+        /* NRewardsScreen: Skip with rewards left, the first time */
+        const Json& rs = decision_["rewards"];
+        bool left = false;
+        for (size_t i = 0; i < rs.size(); ++i)
+            if (!rs[i]["skipped"].b()) left = true;
+        if (left) {
+            open_ftue("combat_reward_ftue", std::vector<CanvasItem*>(1, screen_item("RewardsContainer")));
+            return true;
+        }
+    }
+    if (kind == "shop" && proceed && ftue_pending("merchant_ftue")) {
+        /* NMerchantRoom.HideScreen: leaving with the rug never opened */
+        open_ftue("merchant_ftue", std::vector<CanvasItem*>(1, screen_item("MerchantButton")));
+        return true;
+    }
+    if (kind == "combat_play" && command.find("\"action\":\"end_turn\"") != std::string::npos &&
+        ftue_pending("can_play_cards_ftue")) {
+        /* NEndTurnButton.ShouldShowPlayableCardsFtue: a card it could still
+         * play; three turns ended with none turn it off */
+        const Json& hand = decision_["hand"];
+        bool playable = false;
+        for (size_t i = 0; i < hand.size(); ++i)
+            if (hand[i]["can_play"].b() && hand[i]["cost"].i() <= decision_["energy"].i()) playable = true;
+        if (playable) {
+            open_ftue("can_play_cards_ftue", std::vector<CanvasItem*>(1, screen_item("EnergyCounterContainer")));
+            return true;
+        }
+        if (++ftue_end_turns_ == 3) ftue_seen("can_play_cards_ftue");
+    }
+    return false;
 }
 
 } /* namespace spire */

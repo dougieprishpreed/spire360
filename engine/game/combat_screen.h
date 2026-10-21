@@ -76,6 +76,12 @@ public:
     /* The controller's focused card in the hand (-1: the middle one); set
      * before build, or after it to move the focus (relays the hand). */
     void set_hand_focus(int index);
+    /* No hand card focused (an FTUE has the focus): none raised, no tips. */
+    void set_hand_unfocused(bool on) {
+        hand_unfocused_ = on;
+        layout_hand();
+        refresh_tips();
+    }
     int hand_focus() const { return hand_focus_; }
     int hand_size() const { return (int)holders_.size(); }
     /* Playing a card with the pad (NControllerCardPlay): the card at hand
@@ -129,8 +135,20 @@ public:
      * animations, the effects (VfxCmd), damage numbers, deaths. */
     void play_steps(const Json& steps);
     /* The fight's first turn: "Battle Start", then the player's turn
-     * banner (NCombatStartBanner). */
-    void show_start_banner();
+     * banner (NCombatStartBanner); without the turn banner after the
+     * combat rules FTUE (NCombatRulesFtue closes into NCombatStartBanner). */
+    void show_start_banner(bool turn_banner = true);
+    /* The steps' timeline held (an FTUE waits for its confirmation). */
+    void set_paused(bool paused) { paused_ = paused; }
+    /* CardPileCmd.ShuffleFtueCheck: watching, the first shuffle (a card
+     * from the discard pile to the draw pile) holds the timeline;
+     * take_shuffle answers once that it came. */
+    void watch_shuffle(bool on) { watch_shuffle_ = on; }
+    bool take_shuffle() {
+        bool s = shuffle_hit_;
+        shuffle_hit_ = false;
+        return s;
+    }
     /* The playback is running (the pad waits for it; banners do not
      * count). */
     bool busy() const { return cue_t_ < busy_until_; }
@@ -270,6 +288,7 @@ private:
     std::vector<Cue> cues_;
     size_t next_cue_;
     double cue_t_, busy_until_;
+    bool paused_, watch_shuffle_, shuffle_hit_, hand_unfocused_;
     double life_t_; /* keeps running when a new response resets the playhead */
     double radial_off_at_; /* when the radial blur hides (life_t_), 0: off */
     void radial_blur(const std::string& position);

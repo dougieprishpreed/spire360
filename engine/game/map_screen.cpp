@@ -104,9 +104,12 @@ static std::string outline_name(const std::string& type, const std::string& room
 
 MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1), next_tick_(0), current_col_(-1), current_row_(-1),
     opening_(0), travel_t_(-1), marker_(NULL), map_ctl_(NULL), scroll_(0), scroll_to_(0), scroll_lo_(0), scroll_hi_(0),
-    scroll_step_(1), act_anim_(-1), act_delay_(1), act_duration_(3), banner_(NULL), banner_end_(0) {}
+    scroll_step_(1), act_anim_(-1), act_delay_(1), act_duration_(3), banner_(NULL), banner_end_(0) {
+    start_point_ = NULL;
+}
 
 Node* MapScreen::build(const Json& d, std::string* error) {
+    start_point_ = NULL;
     points_.clear();
     choices_.clear();
     paths_.clear();
@@ -249,6 +252,7 @@ Node* MapScreen::build(const Json& d, std::string* error) {
         }
         Control* c = (Control*)n;
         place_from_centre(c, pos, size);
+        if (kind == 1) start_point_ = c;
         Placed pl;
         pl.data = p;
         pl.pos = pos;
