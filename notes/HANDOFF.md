@@ -10,6 +10,46 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 10 (2026-10-21): GPU particles, the forms checked
+
+- GPUParticles2D now runs Godot 4.5.1's ParticleProcessMaterial shader on
+  the CPU (`engine/scene/particles.cpp`: start() / process() inside
+  particles.glsl's frame loop: restart phases, the particle's NUMBER and
+  seed, the parameters drawn from it). A survey of the game's 1403 process
+  materials (`work/res_text`, every .tscn / .tres) found these unported:
+  turbulence (~145 files), emission shape scale / offset (~100 / 19),
+  radial velocity and velocity pivot (~99), damping as friction (78), ring
+  emission (65; was drawn as a disc), scale over velocity (67), emission
+  curve (47), directional velocity (40), inherit velocity (18), amount
+  ratio. All are in now, with the shader's sphere / box / ring shapes, its
+  hue rotation (also without a curve) and velocity limit. 1397 of the 1403
+  set disable_z, the path ported (the other six run it too).
+- The shader text came from the Godot 4.5.1 binary's strings (the
+  generator's literals, MIT); `ParticleProcessMaterial::
+  set_turbulence_noise_scale`'s slider mapping is applied when loading.
+- Particles without local_coords (CPU and GPU) live in the canvas, as in
+  Godot: emitted through the global transform and drawn with an identity
+  item transform, so they stay behind a moving emitter (the card flight
+  trail now leaves its sparks behind) and ignore the emitter's scale.
+- GPUParticles2D's seed is new at creation and each restart unless
+  use_fixed_seed (a fixed sequence, so runs repeat).
+- Cost: the turbulence noise is ~300 4D gradients per particle and step
+  (3 us on the PC after a fast floor; the old version 6.8 us). Watch it on
+  the console with the turbulent event portraits; halving its rate is the
+  fallback.
+- Not ported: sub-emitters (11 scenes), trails (11), emission point
+  textures (4), attractors, fixed-fps interpolation.
+- Forms: Echo Form's copy had no skeleton (the body was looked up as the
+  first SpineSprite under the visuals, which is the form's own copier);
+  it is NCreatureVisuals' %Visuals now. All five forms render: Demon's
+  aura, Void's swords (larger when active), Serpent's snakes (flare on each
+  trigger, fade), Reaper's magenta noise ring, Echo's line fragments
+  drifting off the back (its mask and scale centre keep them to the
+  upper-left of the copy). Echo and Reaper have no game reference yet.
+- Fight scripts: scratchpad `form_fight.py OUT CHARACTER CARD [TURNS]
+  [play]` (play: up to two attacks each turn); Void Form is the Regent's,
+  Serpent the Silent's, Reaper the Necrobinder's.
+
 ## Alpha push, part 9 (2026-10-21): flashes, room cues, deck previews
 
 - Relic and power flashes: logic hooks `relic.flashed`
@@ -121,9 +161,7 @@ parts 2 and 3 above it).
   client puts the form in the visuals' %FormVfx, with
   NSpineSpriteBoneFollower (SpineSprite::bone_position), NValueRamp and
   the gradients; the Echo Form's copier plays the body's animations.
-  Verified: Demon Form's aura. Not verified yet: Echo (showed nothing
-  visible in one test), Void, Serpent, Reaper (drive one with
-  scratch-style `enter_room` + `add_to_hand` + `end_turn`).
+  All five checked in part 10.
 - Still open: NPowerUpVfx's 3D layer, the enchant emboss, and recorded ui
   calls the client does not handle yet (from a survey of every trace's
   ui cues, work/ui_calls.txt): NGainEpochVfx, NHorizontalLinesVfx,

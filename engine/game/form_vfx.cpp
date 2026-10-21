@@ -28,14 +28,6 @@ float extra_float(Node* n, const char* key, float fallback) {
     return v ? jv_float(*v, fallback) : fallback;
 }
 
-SpineSprite* find_spine(Node* n) {
-    if (!n) return NULL;
-    if (n->type == "SpineSprite") return (SpineSprite*)n;
-    for (size_t i = 0; i < n->children.size(); ++i)
-        if (SpineSprite* s = find_spine(n->children[i])) return s;
-    return NULL;
-}
-
 /* NSpineSpriteBoneFollower: at the bone (snapped, or a fixed fraction of
  * the way each frame). */
 class BoneFollower : public ScriptBehavior {
@@ -136,9 +128,12 @@ public:
             if (swords[i]->is_node2d()) swords_.push_back((Node2D*)swords[i]);
     }
 
-    /* NFormVfx.Initialize: the character's body to follow (and copy) */
+    /* NFormVfx.Initialize: the character's body to follow (and copy),
+     * NCreatureVisuals' %Visuals (not the first sprite under the visuals:
+     * the form's own copier is one) */
     void initialize(Node* n, SceneLibrary* lib, const std::string& character, Node* visuals) {
-        body_sprite_ = find_spine(visuals);
+        Node* body = visuals ? visuals->find_unique("Visuals") : NULL;
+        body_sprite_ = body && body->type == "SpineSprite" ? (SpineSprite*)body : NULL;
         if (follower_ && body_sprite_) {
             follower_->target = body_sprite_;
             std::map<std::string, std::string>::const_iterator b = bones_.find(character);

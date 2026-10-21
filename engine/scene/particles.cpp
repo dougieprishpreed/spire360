@@ -12,8 +12,11 @@
 namespace spire {
 
 static const float TAU_F = 6.28318530718f;
+/* the ParticleProcessMaterial shader's pi */
+static const float SHADER_PI = 3.14159f;
 static float deg2rad(float d) { return d * 0.0174532925f; }
 static float lerpf(float a, float b, float t) { return a + (b - a) * t; }
+static float signf(float v) { return v > 0 ? 1.0f : (v < 0 ? -1.0f : 0.0f); }
 
 /* ---- Godot's RandomPCG / pcg32 ---- */
 
@@ -45,6 +48,7 @@ struct Pcg {
     }
 };
 
+/* particles.glsl's and the material shader's hash */
 static u32 idhash(u32 x) {
     x = ((x >> 16u) ^ x) * 0x45d9f3bu;
     x = ((x >> 16u) ^ x) * 0x45d9f3bu;
@@ -112,6 +116,26 @@ float CurveData::sample(float x) const {
     float yac = a.pos.y + d * a.right, ybc = b.pos.y - d * b.left;
     float omt = 1.0f - t;
     return omt * omt * omt * a.pos.y + 3 * omt * omt * t * yac + 3 * omt * t * t * ybc + t * t * t * b.pos.y;
+}
+
+bool CurveTex::from(Resource* r, CurveTex& out) {
+    out.kind = NONE;
+    for (int i = 0; i < 3; ++i) out.c[i].points.clear();
+    if (!r || !r->props) return false;
+    if (r->type == "CurveTexture") {
+        out.kind = (*r->props)["texture_mode"].i() == 1 ? RED : RGB;
+        CurveData::from(sub_of(r, "curve"), out.c[0]);
+    } else if (r->type == "CurveXYZTexture") {
+        out.kind = XYZ;
+        for (int i = 0; i < 3; ++i) CurveData::from_xyz(r, i, out.c[i]);
+    }
+    return out.valid();
+}
+
+float CurveTex::channel(int i, float t) const {
+    if (kind == RGB) return c[0].sample(t);
+    if (kind == RED) return i == 0 ? c[0].sample(t) : 0.0f;
+    return kind == XYZ && i >= 0 && i < 3 ? c[i].sample(t) : 0.0f;
 }
 
 bool GradientData::from(Resource* r, GradientData& out) {
@@ -193,15 +217,46 @@ static const char* const CURVE_NAMES_GPU[] = { "velocity_curve", "angular_veloci
                                                 "scale_curve", "hue_variation_curve", "anim_speed_curve",
                                                 "anim_offset_curve" };
 
+/* GPUParticles2D's seed without use_fixed_seed: Math::rand() at creation
+ * and each restart (a fixed sequence here, so runs repeat). */
+static u32 next_seed() {
+    static u32 n = 0;
+    return idhash(++n * 2654435761u);
+}
+
+/* ParticleProcessMaterial::set_turbulence_noise_scale: the slider's value
+ * to the shader's frequency. */
+static float turbulence_scale(float v) {
+    const float zero_frequency = 4.0f, max_slider = 10.0f, exponent = 0.25f;
+    return powf(v, exponent) * (zero_frequency / powf(max_slider, exponent)) - zero_frequency;
+}
+
 Particles2D::Particles2D(bool is_gpu)
     : gpu(is_gpu), emitting(true), one_shot(false), local_coords(false), fractional_delta(true), align_y(false),
       split_scale(false), amount(8), fixed_fps(is_gpu ? 30 : 0), draw_order(0), emission_shape(0), lifetime(1),
       preprocess(0), speed_scale(1), explosiveness(0), randomness(0), lifetime_randomness(0), seed(0), texture(NULL),
       direction(1, 0), gravity(is_gpu ? Vec2(0, -9.8f) : Vec2(0, 980)), emission_rect_extents(1, 1), spread(45),
       emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0), collision_base_size(1),
-      collision_use_scale(false), time_(0), frame_remainder_(0), cycle_(0), started_(false) {
+      collision_use_scale(false), use_fixed_seed(false), time_(0), frame_remainder_(0), cycle_(0), started_(false),
+      has_last_origin_(false) {
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
+    if (gpu) seed = next_seed();
+}
+
+Particles2D::Material::Material()
+    : ring_height(1), ring_radius(1), ring_inner_radius(0), ring_cone_angle(90), directional_min(1),
+      directional_max(1), radial_velocity_min(0), radial_velocity_max(0), scale_over_velocity_min(0),
+      scale_over_velocity_max(5), inherit_velocity_ratio(0), damping_as_friction(false), turbulence(false),
+      turb_strength(1), turb_scale(0), turb_speed_random(0.2f), turb_influence_min(0.1f), turb_influence_max(0.1f),
+      turb_displacement_min(0), turb_displacement_max(0), amount_ratio(1), interp_to_end(0) {
+    for (int i = 0; i < 3; ++i) {
+        direction[i] = i == 0 ? 1.0f : 0.0f;
+        emission_box[i] = shape_scale[i] = 1;
+        shape_offset[i] = velocity_pivot[i] = turb_speed[i] = 0;
+        ring_axis[i] = i == 2 ? 1.0f : 0.0f;
+    }
+    turb_scale = turbulence_scale(9);
 }
 
 bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
@@ -220,6 +275,9 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (key == "collision_base_size") collision_base_size = jv_float(v, 1);
     else if (key == "draw_order") draw_order = v.i();
     else if (key == "seed") seed = (u32)v.num();
+    else if (key == "use_fixed_seed") use_fixed_seed = v.b();
+    else if (gpu && key == "amount_ratio") mat.amount_ratio = jv_float(v, 1);
+    else if (gpu && key == "interp_to_end") mat.interp_to_end = jv_float(v);
     else if (key == "texture") {
         Resource* r = ctx.resource(v);
         texture = bind_texture(this, r);
@@ -262,13 +320,19 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     return true;
 }
 
-/* convert_from_particles, reading the ParticleProcessMaterial's stored props. */
+static void vec3_of(const Json& p, const char* key, float out[3]) {
+    const Json& a = p[key]["v"];
+    if (a.size() < 3) return;
+    for (size_t i = 0; i < 3; ++i) out[i] = jv_float(a[i]);
+}
+
+/* The ParticleProcessMaterial's stored props (the rest keep its
+ * defaults). */
 void Particles2D::apply_process_material(Resource* m) {
     if (!m || !m->props || m->type != "ParticleProcessMaterial") return;
     const Json& p = *m->props;
-    Vec2 d;
-    if (p.has("direction") && p["direction"]["v"].size() >= 2)
-        direction = Vec2(jv_float(p["direction"]["v"][(size_t)0]), jv_float(p["direction"]["v"][1]));
+    vec3_of(p, "direction", mat.direction);
+    direction = Vec2(mat.direction[0], mat.direction[1]);
     if (p.has("spread")) spread = jv_float(p["spread"], 45);
     if (p.has("color")) jv_color(p["color"], color);
     GradientData::from(sub_of(m, "color_ramp"), color_ramp);
@@ -276,11 +340,9 @@ void Particles2D::apply_process_material(Resource* m) {
     CurveData::from(sub_of(m, "alpha_curve"), alpha_curve);
     align_y = p["particle_flag_align_y"].b();
     emission_shape = p["emission_shape"].i();
-    if (emission_shape == 6) emission_shape = 1; /* ring: as a sphere (2D) */
     if (p.has("emission_sphere_radius")) emission_sphere_radius = jv_float(p["emission_sphere_radius"], 1);
-    if (p.has("emission_box_extents") && p["emission_box_extents"]["v"].size() >= 2)
-        emission_rect_extents = Vec2(jv_float(p["emission_box_extents"]["v"][(size_t)0]),
-                                     jv_float(p["emission_box_extents"]["v"][1]));
+    vec3_of(p, "emission_box_extents", mat.emission_box);
+    emission_rect_extents = Vec2(mat.emission_box[0], mat.emission_box[1]);
     if (p.has("gravity") && p["gravity"]["v"].size() >= 2)
         gravity = Vec2(jv_float(p["gravity"]["v"][(size_t)0]), jv_float(p["gravity"]["v"][1]));
     lifetime_randomness = jv_float(p["lifetime_randomness"]);
@@ -293,23 +355,52 @@ void Particles2D::apply_process_material(Resource* m) {
         if (p.has((n + "_min").c_str())) pmin[i] = jv_float(p[(n + "_min").c_str()]);
         if (p.has((n + "_max").c_str())) pmax[i] = jv_float(p[(n + "_max").c_str()]);
         Resource* c = sub_of(m, CURVE_NAMES_GPU[i]);
-        if (i == P_SCALE && c && c->type == "CurveXYZTexture") {
-            split_scale = true;
-            CurveData::from(sub_of(c, "curve_x"), scale_x);
-            CurveData::from(sub_of(c, "curve_y"), scale_y);
-        } else {
-            CurveData::from(c, curves[i]);
-        }
+        if (i == P_SCALE) CurveTex::from(c, mat.scale);
+        else if (i == P_ORBIT_VELOCITY) CurveTex::from(c, mat.orbit);
+        else CurveData::from(c, curves[i]);
     }
+    vec3_of(p, "emission_shape_offset", mat.shape_offset);
+    vec3_of(p, "emission_shape_scale", mat.shape_scale);
+    vec3_of(p, "velocity_pivot", mat.velocity_pivot);
+    vec3_of(p, "emission_ring_axis", mat.ring_axis);
+    if (p.has("emission_ring_height")) mat.ring_height = jv_float(p["emission_ring_height"], 1);
+    if (p.has("emission_ring_radius")) mat.ring_radius = jv_float(p["emission_ring_radius"], 1);
+    if (p.has("emission_ring_inner_radius")) mat.ring_inner_radius = jv_float(p["emission_ring_inner_radius"]);
+    if (p.has("emission_ring_cone_angle")) mat.ring_cone_angle = jv_float(p["emission_ring_cone_angle"], 90);
+    if (p.has("directional_velocity_min")) mat.directional_min = jv_float(p["directional_velocity_min"]);
+    if (p.has("directional_velocity_max")) mat.directional_max = jv_float(p["directional_velocity_max"]);
+    mat.radial_velocity_min = jv_float(p["radial_velocity_min"]);
+    mat.radial_velocity_max = jv_float(p["radial_velocity_max"]);
+    if (p.has("scale_over_velocity_min")) mat.scale_over_velocity_min = jv_float(p["scale_over_velocity_min"]);
+    if (p.has("scale_over_velocity_max")) mat.scale_over_velocity_max = jv_float(p["scale_over_velocity_max"], 5);
+    mat.inherit_velocity_ratio = jv_float(p["inherit_velocity_ratio"]);
+    mat.damping_as_friction = p["particle_flag_damping_as_friction"].b();
+    CurveTex::from(sub_of(m, "directional_velocity_curve"), mat.directional);
+    CurveTex::from(sub_of(m, "radial_velocity_curve"), mat.radial_velocity);
+    CurveTex::from(sub_of(m, "velocity_limit_curve"), mat.velocity_limit);
+    CurveTex::from(sub_of(m, "emission_curve"), mat.emission);
+    CurveTex::from(sub_of(m, "scale_over_velocity_curve"), mat.scale_over_velocity);
+    mat.turbulence = p["turbulence_enabled"].b();
+    if (p.has("turbulence_noise_strength")) mat.turb_strength = jv_float(p["turbulence_noise_strength"], 1);
+    if (p.has("turbulence_noise_scale")) mat.turb_scale = turbulence_scale(jv_float(p["turbulence_noise_scale"], 9));
+    vec3_of(p, "turbulence_noise_speed", mat.turb_speed);
+    if (p.has("turbulence_noise_speed_random"))
+        mat.turb_speed_random = jv_float(p["turbulence_noise_speed_random"], 0.2f);
+    if (p.has("turbulence_influence_min")) mat.turb_influence_min = jv_float(p["turbulence_influence_min"], 0.1f);
+    if (p.has("turbulence_influence_max")) mat.turb_influence_max = jv_float(p["turbulence_influence_max"], 0.1f);
+    mat.turb_displacement_min = jv_float(p["turbulence_initial_displacement_min"]);
+    mat.turb_displacement_max = jv_float(p["turbulence_initial_displacement_max"]);
+    CurveTex::from(sub_of(m, "turbulence_influence_over_life"), mat.turb_influence_over_life);
 }
 
-/* ---- simulation (_update_internal / _particles_process) ---- */
+/* ---- simulation ---- */
 
 void Particles2D::restart() {
     time_ = frame_remainder_ = 0;
     cycle_ = 0;
     started_ = false;
     emitting = true;
+    if (gpu && !use_fixed_seed) seed = next_seed();
     for (size_t i = 0; i < particles_.size(); ++i) particles_[i].active = false;
 }
 
@@ -324,10 +415,40 @@ void Particles2D::process(double dt) {
         particles_.assign(amount > 0 ? amount : 0, Particle());
         for (size_t i = 0; i < particles_.size(); ++i) particles_[i].active = false;
     }
+    Xform2D g = global_transform();
+    emission_ = local_coords ? Xform2D() : g;
+    to_canvas_ = local_coords ? g : Xform2D();
+    if (gpu) {
+        /* GPUParticles2D's internal process: the emitter's velocity */
+        emitter_velocity_ = has_last_origin_ && dt > 0 ? (g.origin - last_origin_) * (float)(1.0 / dt) : Vec2();
+        last_origin_ = g.origin;
+        has_last_origin_ = true;
+    }
     /* Stopping emission does not stop the particles already alive. In a
      * one-shot system those particles must keep aging until they finish. */
     if (particles_.empty() || (!emitting && active_count() == 0)) return;
     double frame_time = fixed_fps > 0 ? 1.0 / fixed_fps : 1.0 / 30.0;
+    if (gpu) {
+        /* ParticlesStorage::update_particles: the preprocess at the speed
+         * of 1, then the frame's time scaled by speed_scale */
+        if (!started_) {
+            started_ = true;
+            for (double todo = preprocess; preprocess > 0 && todo >= 0; todo -= frame_time) step_gpu(frame_time);
+        }
+        double time_scale = speed_scale > 0 ? speed_scale : 0;
+        if (fixed_fps > 0) {
+            double l = dt > 0.1 ? 0.1 : (dt <= 0 ? 0.001 : dt);
+            double todo = frame_remainder_ + l * time_scale;
+            while (todo >= frame_time) {
+                step_gpu(frame_time);
+                todo -= frame_time;
+            }
+            frame_remainder_ = todo;
+        } else {
+            step_gpu(dt * time_scale);
+        }
+        return;
+    }
     if (!started_) {
         started_ = true;
         double todo = preprocess;
@@ -352,49 +473,9 @@ void Particles2D::process(double dt) {
     }
 }
 
-/* particles.glsl's 2D SDF collision and ParticleProcessMaterial's
- * response, in the canvas (g: the node's global transform; the particles
- * live in its local space). */
-void Particles2D::collide(Particle& p, const Xform2D& g) {
-    const Node* root = this;
-    while (root->parent) root = root->parent;
-    Vec2 pos = g.xform(p.xform.origin);
-    float d;
-    Vec2 n;
-    if (!LightOccluder2D::sdf(root, pos, &d, &n)) return;
-    float size = collision_base_size;
-    if (collision_use_scale) {
-        Vec2 sx = g.basis_xform(p.xform.x), sy = g.basis_xform(p.xform.y);
-        size *= (sqrtf(sx.x * sx.x + sx.y * sx.y) + sqrtf(sy.x * sy.x + sy.y * sy.y) + 1.0f) / 3.0f;
-    } else {
-        size *= sqrtf(g.y.x * g.y.x + g.y.y * g.y.y);
-    }
-    d -= size;
-    if (d >= 0) return;
-    if (collision_mode == 2) {
-        p.active = false;
-        return;
-    }
-    /* back to local space (the inverse basis) */
-    float det = g.x.x * g.y.y - g.y.x * g.x.y;
-    if (det == 0) return;
-    Vec2 v = g.basis_xform(p.velocity);
-    float response = n.x * v.x + n.y * v.y;
-    float bounce_edge = 2.0f / clampf(collision_bounce + 1.0f, 1.0f, 2.0f);
-    float trigger = fabsf(response) >= bounce_edge ? 1.0f : 0.0f;
-    pos = pos + n * -d;
-    v = v - n * response;
-    v = v * (1.0f - clampf(collision_friction, 0.0f, 1.0f));
-    v = v - n * (response * collision_bounce * trigger);
-    Vec2 lp = pos - g.origin;
-    p.xform.origin = Vec2((g.y.y * lp.x - g.y.x * lp.y) / det, (g.x.x * lp.y - g.x.y * lp.x) / det);
-    p.velocity = Vec2((g.y.y * v.x - g.y.x * v.y) / det, (g.x.x * v.y - g.x.y * v.x) / det);
-}
-
+/* CPUParticles2D::_particles_process */
 void Particles2D::step(double p_delta) {
     p_delta *= speed_scale;
-    bool colliding = gpu && collision_mode != 0;
-    Xform2D g = colliding ? global_transform() : Xform2D();
     int pcount = (int)particles_.size();
     double prev_time = time_;
     time_ += p_delta;
@@ -476,6 +557,9 @@ void Particles2D::step(double p_delta) {
             } else if ((emission_shape == 4 || emission_shape == 5) && !emission_points.empty()) {
                 p.xform.origin = emission_points[rng.next() % emission_points.size()];
             }
+            /* not local: emitted through the global transform */
+            p.velocity = emission_.basis_xform(p.velocity);
+            p.xform = emission_ * p.xform;
         } else if (!p.active) {
             continue;
         } else if (p.time > p.lifetime) {
@@ -493,7 +577,7 @@ void Particles2D::step(double p_delta) {
             float vlen = sqrtf(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y);
             float la = tc[P_LINEAR_ACCEL] * lerpf(pmin[P_LINEAR_ACCEL], pmax[P_LINEAR_ACCEL], rand_from_seed(s));
             if (vlen > 0) force = force + p.velocity * (la / vlen);
-            Vec2 diff = pos; /* emission origin is the node (local coordinates) */
+            Vec2 diff = pos - emission_.origin;
             float dlen = sqrtf(diff.x * diff.x + diff.y * diff.y);
             float ra = tc[P_RADIAL_ACCEL] * lerpf(pmin[P_RADIAL_ACCEL], pmax[P_RADIAL_ACCEL], rand_from_seed(s));
             if (dlen > 0) force = force + diff * (ra / dlen);
@@ -516,10 +600,6 @@ void Particles2D::step(double p_delta) {
                 float damp = tc[P_DAMPING] * lerpf(pmin[P_DAMPING], pmax[P_DAMPING], rand_from_seed(s));
                 float nl = l - damp * (float)local_delta;
                 p.velocity = nl < 0 || l == 0 ? Vec2() : p.velocity * (nl / l);
-            }
-            if (colliding) {
-                collide(p, g);
-                if (!p.active) continue;
             }
             float base_angle = tc[P_ANGLE] * lerpf(pmin[P_ANGLE], pmax[P_ANGLE], p.angle_rand);
             base_angle += p.custom[1] * (float)lifetime * tc[P_ANGULAR_VELOCITY] *
@@ -570,11 +650,489 @@ void Particles2D::step(double p_delta) {
     }
 }
 
+/* ---- GPUParticles2D: the ParticleProcessMaterial shader ---- */
+
+/* The shader's 4D noise and curl (its "Functions for 3D noise /
+ * turbulence"). */
+/* floorf, without the library call (the noise takes ~300 per particle
+ * and step); floats past 2^23 are whole already */
+static float fast_floor(float x) {
+    if (x >= 8388608.0f || x <= -8388608.0f) return x;
+    int i = (int)x;
+    return (float)(i - (x < (float)i ? 1 : 0));
+}
+
+static float fractf(float x) { return x - fast_floor(x); }
+
+static void noise_grad(const float in[4], float out[4]) {
+    static const float M[4][4] = { { 0.143081f, 0.001724f, 0.280166f, 0.262771f },
+                                   { 0.645401f, -0.047791f, -0.146698f, 0.595016f },
+                                   { -0.499665f, -0.095734f, 0.425674f, -0.207367f },
+                                   { -0.013596f, -0.848588f, 0.423736f, 0.17044f } };
+    float p[4];
+    for (int i = 0; i < 4; ++i) p[i] = fractf(M[i][0] * in[0] + M[i][1] * in[1] + M[i][2] * in[2] + M[i][3] * in[3]);
+    for (int i = 0; i < 4; ++i) out[i] = fractf(p[i] * p[(i + 1) & 3] * 2365.952041f) * 2.0f - 1.0f;
+}
+
+static float noise4(const float in[4]) {
+    /* domain rotation */
+    float d = (in[0] + in[1] + in[2]) * -0.1666667f + in[3] * -0.5f;
+    float c[4] = { in[0] + d, in[1] + d, in[2] + d, (in[0] + in[1] + in[2] + in[3]) * 0.5f };
+    float base[4], delta[4], fade[4];
+    for (int i = 0; i < 4; ++i) {
+        base[i] = fast_floor(c[i]);
+        delta[i] = c[i] - base[i];
+        fade[i] = delta[i] * delta[i] * delta[i] * (10.0f + delta[i] * (-15.0f + delta[i] * 6.0f));
+    }
+    /* the corners' gradients dotted with the offsets (bit 0 x .. bit 3 w) */
+    float r[16];
+    for (int k = 0; k < 16; ++k) {
+        float off[4] = { (float)(k & 1), (float)((k >> 1) & 1), (float)((k >> 2) & 1), (float)((k >> 3) & 1) };
+        float bp[4] = { base[0] + off[0], base[1] + off[1], base[2] + off[2], base[3] + off[3] };
+        float g[4];
+        noise_grad(bp, g);
+        r[k] = (delta[0] - off[0]) * g[0] + (delta[1] - off[1]) * g[1] + (delta[2] - off[2]) * g[2] +
+               (delta[3] - off[3]) * g[3];
+    }
+    float wz[4];
+    for (int j = 0; j < 4; ++j)
+        wz[j] = lerpf(lerpf(r[j], r[8 + j], fade[3]), lerpf(r[4 + j], r[12 + j], fade[3]), fade[2]);
+    return lerpf(lerpf(wz[0], wz[2], fade[1]), lerpf(wz[1], wz[3], fade[1]), fade[0]);
+}
+
+static void noise_3x(const float p[4], float out[3]) {
+    const float w = 1.7320508f * 2048.333333f;
+    float a[4] = { p[0], p[1], p[2], p[3] + w }, b[4] = { p[0], p[1], p[2], p[3] - w };
+    out[0] = noise4(p);
+    out[1] = noise4(a);
+    out[2] = noise4(b);
+}
+
+static void curl_3d(const float p[4], float c, float out[3]) {
+    float eps = 0.001f + c;
+    float n[3][2][3]; /* axis, -/+, the three noises */
+    for (int axis = 0; axis < 3; ++axis)
+        for (int side = 0; side < 2; ++side) {
+            float q[4] = { p[0], p[1], p[2], p[3] };
+            q[axis] += side ? eps : -eps;
+            noise_3x(q, n[axis][side]);
+        }
+    float x = (n[1][1][2] - n[1][0][2]) - (n[2][1][1] - n[2][0][1]);
+    float y = (n[2][1][0] - n[2][0][0]) - (n[0][1][2] - n[0][0][2]);
+    float z = (n[0][1][1] - n[0][0][1]) - (n[1][1][0] - n[1][0][0]);
+    float l = sqrtf(x * x + y * y + z * z);
+    float k = l > 0 ? 1.0f / l : 0.0f;
+    out[0] = x * k;
+    out[1] = y * k;
+    out[2] = z * k;
+}
+
+/* get_noise_direction (TIME: the shaders' time) */
+Vec2 Particles2D::noise_direction(const float pos[3], float* z) const {
+    float adj_contrast = maxf(mat.turb_strength - 1.0f, 0.0f) * 70.0f;
+    float t = (float)g_shader_time;
+    float p[4] = { pos[0] * mat.turb_scale + t * mat.turb_speed[0], pos[1] * mat.turb_scale + t * mat.turb_speed[1],
+                   pos[2] * mat.turb_scale + t * mat.turb_speed[2], t * mat.turb_speed_random };
+    float d[3];
+    curl_3d(p, adj_contrast, d);
+    /* mix(0.9 * d, d, strength - 9) */
+    float k = 0.9f + 0.1f * (mat.turb_strength - 9.0f);
+    *z = d[2] * k;
+    return Vec2(d[0] * k, d[1] * k);
+}
+
+/* get_random_direction_from_spread (2D) */
+static Vec2 spread_direction(u32& s, const float direction[3], float spread_deg) {
+    float spread_rad = spread_deg * (SHADER_PI / 180.0f);
+    float a = (rand_from_seed(s) * 2.0f - 1.0f) * spread_rad;
+    a += direction[0] != 0.0f ? atan2f(direction[1], direction[0]) : signf(direction[1]) * (SHADER_PI / 2.0f);
+    return Vec2(cosf(a), sinf(a));
+}
+
+/* start() */
+void Particles2D::gpu_start(Particle& p, u32 number) {
+    u32 s = idhash(number + 1u + seed);
+    Drawn& d = p.d;
+    /* calculate_initial_display_params */
+    d.scale = lerpf(pmin[P_SCALE], pmax[P_SCALE], rand_from_seed(s));
+    d.scale = signf(d.scale) * maxf(fabsf(d.scale), 0.001f);
+    d.hue_rotation = SHADER_PI * 2.0f * lerpf(pmin[P_HUE_VARIATION], pmax[P_HUE_VARIATION], rand_from_seed(s));
+    d.anim_speed = lerpf(pmin[P_ANIM_SPEED], pmax[P_ANIM_SPEED], rand_from_seed(s));
+    d.anim_offset = lerpf(pmin[P_ANIM_OFFSET], pmax[P_ANIM_OFFSET], rand_from_seed(s));
+    d.life = (float)(1.0 - lifetime_randomness * rand_from_seed(s));
+    d.color = color;
+    if (color_initial_ramp.valid()) d.color = d.color * color_initial_ramp.at(rand_from_seed(s));
+    if (emission_shape == 4 || emission_shape == 5) rand_from_seed(s); /* emission_texture_position */
+    /* calculate_initial_dynamics_params */
+    d.angle = lerpf(pmin[P_ANGLE], pmax[P_ANGLE], rand_from_seed(s));
+    d.angular_velocity = lerpf(pmin[P_ANGULAR_VELOCITY], pmax[P_ANGULAR_VELOCITY], rand_from_seed(s));
+    d.initial_velocity = lerpf(pmin[P_VELOCITY], pmax[P_VELOCITY], rand_from_seed(s));
+    d.directional = lerpf(mat.directional_min, mat.directional_max, rand_from_seed(s));
+    d.radial = lerpf(mat.radial_velocity_min, mat.radial_velocity_max, rand_from_seed(s));
+    d.orbit = lerpf(pmin[P_ORBIT_VELOCITY], pmax[P_ORBIT_VELOCITY], rand_from_seed(s));
+    d.turb_influence = lerpf(mat.turb_influence_min, mat.turb_influence_max, rand_from_seed(s));
+    /* calculate_initial_physical_params */
+    d.linear_accel = lerpf(pmin[P_LINEAR_ACCEL], pmax[P_LINEAR_ACCEL], rand_from_seed(s));
+    d.radial_accel = lerpf(pmin[P_RADIAL_ACCEL], pmax[P_RADIAL_ACCEL], rand_from_seed(s));
+    d.tangent_accel = lerpf(pmin[P_TANGENTIAL_ACCEL], pmax[P_TANGENTIAL_ACCEL], rand_from_seed(s));
+    d.damping = lerpf(pmin[P_DAMPING], pmax[P_DAMPING], rand_from_seed(s));
+    d.seed = s;
+    if (rand_from_seed(s) > mat.amount_ratio) {
+        p.active = false;
+        return;
+    }
+    p.custom[0] = d.angle;
+    p.custom[1] = p.custom[2] = 0;
+    p.custom[3] = d.life;
+    /* calculate_initial_position */
+    float pos[3] = { 0, 0, 0 };
+    if (emission_shape == 1 || emission_shape == 2) {
+        float sz = rand_from_seed(s) * 2.0f - 1.0f;
+        float t = rand_from_seed(s) * 2.0f * SHADER_PI;
+        float f = emission_shape == 1 ? rand_from_seed(s) : 1.0f;
+        float radius = emission_sphere_radius * sqrtf(1.0f - sz * sz);
+        pos[0] = radius * cosf(t) * f;
+        pos[1] = radius * sinf(t) * f;
+        pos[2] = emission_sphere_radius * sz * f;
+    } else if (emission_shape == 3) {
+        for (int k = 0; k < 3; ++k) pos[k] = (rand_from_seed(s) * 2.0f - 1.0f) * mat.emission_box[k];
+    } else if (emission_shape == 6) {
+        float rc = maxf(0.001f, mat.ring_radius);
+        float top = maxf(rc - tanf((90.0f - mat.ring_cone_angle) * 0.017453293f) * mat.ring_height, 0.0f);
+        float y_pos = rand_from_seed(s);
+        float skew = maxf(minf(rc, top) / maxf(rc, top), 0.5f);
+        y_pos = rc < top ? powf(y_pos, skew) : 1.0f - powf(y_pos, skew);
+        float angle = rand_from_seed(s) * 2.0f * SHADER_PI;
+        float ri = mat.ring_inner_radius;
+        float rr = sqrtf(rand_from_seed(s) * (rc * rc - ri * ri) + ri * ri);
+        rr = lerpf(rr, rr * (top / rc), y_pos);
+        float ax[3] = { mat.ring_axis[0], mat.ring_axis[1], mat.ring_axis[2] };
+        float al = sqrtf(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+        if (al == 0) {
+            ax[0] = ax[1] = 0;
+            ax[2] = 1;
+        } else {
+            for (int k = 0; k < 3; ++k) ax[k] /= al;
+        }
+        /* an axis across the ring: axis x (0, 1, 0) along x, else axis x (1, 0, 0) */
+        float o[3];
+        if (fabsf(ax[0]) == 1.0f && ax[1] == 0.0f && ax[2] == 0.0f) {
+            o[0] = -ax[2];
+            o[1] = 0;
+            o[2] = ax[0];
+        } else {
+            o[0] = 0;
+            o[1] = ax[2];
+            o[2] = -ax[1];
+        }
+        float ol = sqrtf(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
+        if (ol > 0)
+            for (int k = 0; k < 3; ++k) o[k] /= ol;
+        /* rotated about the axis by the spawn angle (the shader's mat3,
+         * columns) */
+        float sn = sinf(angle), cs = cosf(angle), oc = 1.0f - cs;
+        float c0[3] = { cs + ax[0] * ax[0] * oc, ax[0] * ax[1] * oc - ax[2] * sn, ax[0] * ax[2] * oc + ax[1] * sn };
+        float c1[3] = { ax[0] * ax[1] * oc + sn * ax[2], cs + ax[1] * ax[1] * oc, ax[1] * ax[2] * oc - ax[0] * sn };
+        float c2[3] = { ax[2] * ax[0] * oc - ax[1] * sn, ax[2] * ax[1] * oc + ax[0] * sn, cs + ax[2] * ax[2] * oc };
+        float h = y_pos * mat.ring_height - mat.ring_height / 2.0f;
+        for (int k = 0; k < 3; ++k) pos[k] = (c0[k] * o[0] + c1[k] * o[1] + c2[k] * o[2]) * rr + h * ax[k];
+    }
+    for (int k = 0; k < 3; ++k) pos[k] = pos[k] * mat.shape_scale[k] + mat.shape_offset[k];
+    if (mat.turbulence) {
+        float disp = lerpf(mat.turb_displacement_min, mat.turb_displacement_max, rand_from_seed(s));
+        float nz;
+        Vec2 n = noise_direction(pos, &nz);
+        pos[0] += n.x * disp;
+        pos[1] += n.y * disp;
+    }
+    /* TRANSFORM = EMISSION_TRANSFORM * TRANSFORM, z dropped */
+    p.xform = emission_;
+    p.xform.origin = emission_.xform(Vec2(pos[0], pos[1]));
+    Vec2 v = spread_direction(s, mat.direction, spread) * d.initial_velocity;
+    p.velocity = emission_.basis_xform(v) + emitter_velocity_ * mat.inherit_velocity_ratio;
+    p.vz = 0;
+    p.time = 0;
+}
+
+/* process_display_param at a life: the scale, animation and colour */
+void Particles2D::gpu_display(const Particle& p, float life, float scale[3], float* anim_offset, float* anim_speed,
+                              Color* color) const {
+    const Drawn& d = p.d;
+    for (int k = 0; k < 3; ++k) scale[k] = d.scale * (mat.scale.valid() ? mat.scale.channel(k, life) : 1.0f);
+    float hue = d.hue_rotation * (curves[P_HUE_VARIATION].valid() ? curves[P_HUE_VARIATION].sample(life) : 1.0f);
+    *anim_offset = d.anim_offset + (curves[P_ANIM_OFFSET].valid() ? curves[P_ANIM_OFFSET].sample(life) : 0.0f);
+    *anim_speed = d.anim_speed * (curves[P_ANIM_SPEED].valid() ? curves[P_ANIM_SPEED].sample(life) : 1.0f);
+    Color c = d.color;
+    if (color_ramp.valid()) c = c * color_ramp.at(life);
+    if (alpha_curve.valid()) c.a *= alpha_curve.sample(life);
+    if (hue != 0) {
+        /* rotate_hue: the luma-preserving rotation, transposed */
+        static const float m1[9] = { 0.299f, 0.587f, 0.114f, 0.299f, 0.587f, 0.114f, 0.299f, 0.587f, 0.114f };
+        static const float m2[9] = { 0.701f, -0.587f, -0.114f, -0.299f, 0.413f, -0.114f, -0.300f, -0.588f, 0.886f };
+        static const float m3[9] = { 0.168f, 0.330f, -0.497f, -0.328f, 0.035f, 0.292f, 1.250f, -1.050f, -0.203f };
+        float hc = cosf(hue), hs = sinf(hue), hm[9];
+        for (int k = 0; k < 9; ++k) hm[k] = m1[k] + m2[k] * hc + m3[k] * hs;
+        c = Color(hm[0] * c.r + hm[3] * c.g + hm[6] * c.b, hm[1] * c.r + hm[4] * c.g + hm[7] * c.b,
+                  hm[2] * c.r + hm[5] * c.g + hm[8] * c.b, c.a);
+    }
+    if (mat.emission.valid()) {
+        float e = 1.0f + mat.emission.r(life);
+        c = Color(c.r * e, c.g * e, c.b * e, c.a);
+    }
+    *color = c;
+}
+
+/* process() (disable_z: the particles stay in the plane) */
+void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec2& cn, float cdepth) {
+    float dt = (float)dt_d;
+    const Drawn& d = p.d;
+    u32 s = d.seed;
+    p.custom[1] += (float)(dt_d / lifetime);
+    p.custom[1] = lerpf(p.custom[1], 1.0f, mat.interp_to_end);
+    float lp = p.custom[1] / d.life;
+    if (p.custom[1] > p.custom[3]) {
+        p.active = false;
+        return;
+    }
+    Vec2 pos = p.xform.origin;
+    /* the controlled displacement: orbit, radial, directional */
+    Vec2 ctrl(0, 0);
+    float ctrl_z = 0;
+    if (!(fabsf(d.orbit) < 0.01f || dt < 0.001f)) {
+        float amount = d.orbit;
+        if (mat.orbit.valid()) amount *= mat.orbit.channel(mat.orbit.kind == CurveTex::XYZ ? 2 : 0, lp);
+        Vec2 disp(0, 0);
+        if (amount != 0) {
+            Vec2 diff = pos - emission_.origin;
+            float ang = amount * SHADER_PI * 2.0f * dt;
+            float c = cosf(ang), sn = sinf(ang);
+            disp = Vec2(c * diff.x + sn * diff.y, -sn * diff.x + c * diff.y) - diff;
+        }
+        ctrl = ctrl + emission_.basis_xform(disp * (1.0f / dt));
+    }
+    if (dt >= 0.001f) {
+        float mult = mat.radial_velocity.valid() ? mat.radial_velocity.r(lp) : 1.0f;
+        Vec2 pivot = emission_.xform(Vec2(mat.velocity_pivot[0], mat.velocity_pivot[1]));
+        float rel[3] = { pos.x - pivot.x, pos.y - pivot.y, -mat.velocity_pivot[2] };
+        float len = sqrtf(rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2]);
+        float disp[3];
+        if (len > 0.01f) {
+            for (int k = 0; k < 3; ++k) disp[k] = rel[k] / len * mult * d.radial;
+        } else {
+            Vec2 r = spread_direction(s, mat.direction, 360.0f) * d.radial;
+            disp[0] = r.x;
+            disp[1] = r.y;
+            disp[2] = 0;
+        }
+        float rv = mult * d.radial;
+        if (rv < 0) {
+            /* no flicker once an inward particle reaches the pivot */
+            float dl = sqrtf(disp[0] * disp[0] + disp[1] * disp[1] + disp[2] * disp[2]);
+            float want = minf(fabsf(rv), len / dt);
+            for (int k = 0; k < 3; ++k) disp[k] = dl > 0 ? disp[k] / dl * want : 0.0f;
+        }
+        ctrl = ctrl + Vec2(disp[0], disp[1]);
+        ctrl_z += disp[2];
+    }
+    if (mat.directional.valid()) {
+        Vec2 v(mat.directional.channel(0, lp) * d.directional, mat.directional.channel(1, lp) * d.directional);
+        ctrl = ctrl + emission_.basis_xform(v);
+        ctrl_z += mat.directional.channel(2, lp) * d.directional;
+    }
+    /* process_physical_parameters and the forces */
+    float linear = d.linear_accel * (curves[P_LINEAR_ACCEL].valid() ? curves[P_LINEAR_ACCEL].sample(lp) : 1.0f);
+    float radial = d.radial_accel * (curves[P_RADIAL_ACCEL].valid() ? curves[P_RADIAL_ACCEL].sample(lp) : 1.0f);
+    float tangent =
+        d.tangent_accel * (curves[P_TANGENTIAL_ACCEL].valid() ? curves[P_TANGENTIAL_ACCEL].sample(lp) : 1.0f);
+    float damping = d.damping * (curves[P_DAMPING].valid() ? curves[P_DAMPING].sample(lp) : 1.0f);
+    Vec2 force = gravity;
+    float vlen = sqrtf(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y + p.vz * p.vz);
+    if (vlen > 0) force = force + p.velocity * (linear / vlen);
+    Vec2 diff = pos - emission_.origin;
+    float dlen = sqrtf(diff.x * diff.x + diff.y * diff.y);
+    if (dlen > 0) {
+        force = force + diff * (radial / dlen);
+        force = force + Vec2(-diff.y, diff.x) * (tangent / dlen);
+    }
+    p.velocity = p.velocity + force * dt;
+    if (damping > 0) {
+        float v = sqrtf(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y + p.vz * p.vz);
+        float nv = v;
+        if (!mat.damping_as_friction) nv -= damping * dt;
+        else if (nv > 0.001f) nv -= nv * nv * damping * 0.05f * dt; /* a particle of 0.05 kg */
+        if (nv < 0 || v == 0) {
+            p.velocity = Vec2();
+            p.vz = 0;
+        } else {
+            p.velocity = p.velocity * (nv / v);
+            p.vz *= nv / v;
+        }
+    }
+    if (collided) {
+        if (collision_mode == 2) {
+            p.active = false;
+            return;
+        }
+        /* the rigid response, in the canvas */
+        Xform2D back = to_canvas_.affine_inverse();
+        Vec2 at = to_canvas_.xform(p.xform.origin) + cn * cdepth;
+        Vec2 v = to_canvas_.basis_xform(p.velocity);
+        float response = cn.x * v.x + cn.y * v.y;
+        float bounce_edge = 2.0f / clampf(collision_bounce + 1.0f, 1.0f, 2.0f);
+        float trigger = fabsf(response) >= bounce_edge ? 1.0f : 0.0f;
+        v = v - cn * response;
+        float keep = 1.0f - clampf(collision_friction, 0.0f, 1.0f);
+        v = v * keep;
+        p.vz *= keep;
+        v = v - cn * (response * collision_bounce * trigger);
+        p.xform.origin = back.xform(at);
+        p.velocity = back.basis_xform(v);
+        pos = p.xform.origin;
+    }
+    if (mat.turbulence) {
+        float life_infl = mat.turb_influence_over_life.valid() ? mat.turb_influence_over_life.r(lp) : 1.0f;
+        float at[3] = { pos.x, pos.y, 0 };
+        float nz;
+        Vec2 n = noise_direction(at, &nz);
+        float nl = sqrtf(n.x * n.x + n.y * n.y + nz * nz);
+        if (!collided && nl > 0) {
+            n = n * (1.0f / nl);
+            nz /= nl;
+            float infl = clampf(d.turb_influence * life_infl, 0.0f, 1.0f) * (dt <= 0 ? 0.0f : 1.0f);
+            float k = 1.0f + (1.0f - infl) * 0.2f;
+            float vm = sqrtf(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y + p.vz * p.vz) * k;
+            p.velocity = Vec2(lerpf(p.velocity.x, n.x * vm, infl), lerpf(p.velocity.y, n.y * vm, infl));
+            p.vz = lerpf(p.vz, nz * vm, infl);
+            float cm = sqrtf(ctrl.x * ctrl.x + ctrl.y * ctrl.y + ctrl_z * ctrl_z) * k;
+            ctrl = Vec2(lerpf(ctrl.x, n.x * cm, infl), lerpf(ctrl.y, n.y * cm, infl));
+            ctrl_z = lerpf(ctrl_z, nz * cm, infl);
+        }
+    }
+    Vec2 fv = ctrl + p.velocity;
+    float fz = ctrl_z + p.vz;
+    if (mat.velocity_limit.valid()) {
+        float fl = sqrtf(fv.x * fv.x + fv.y * fv.y + fz * fz);
+        if (fl > 0.001f) {
+            float k = minf(fl, fabsf(mat.velocity_limit.r(lp))) / fl;
+            fv = fv * k;
+        }
+    }
+    p.xform.origin = pos + fv * dt;
+    float scale[3], anim_offset, anim_speed;
+    gpu_display(p, lp, scale, &anim_offset, &anim_speed, &p.color);
+    float base_angle = d.angle;
+    if (curves[P_ANGLE].valid()) base_angle *= curves[P_ANGLE].sample(lp);
+    float spin = d.angular_velocity;
+    if (curves[P_ANGULAR_VELOCITY].valid()) spin *= curves[P_ANGULAR_VELOCITY].sample(lp);
+    base_angle += p.custom[1] * (float)lifetime * spin;
+    p.custom[0] = base_angle * (SHADER_PI / 180.0f);
+    float fl = sqrtf(fv.x * fv.x + fv.y * fv.y);
+    if (align_y) {
+        Vec2 y = fl > 0 ? fv * (1.0f / fl) : p.xform.y;
+        float yl = sqrtf(y.x * y.x + y.y * y.y);
+        if (yl > 0) y = y * (1.0f / yl);
+        p.xform.y = y;
+        p.xform.x = Vec2(y.y, -y.x);
+    } else {
+        p.xform.x = Vec2(cosf(p.custom[0]), -sinf(p.custom[0]));
+        p.xform.y = Vec2(sinf(p.custom[0]), cosf(p.custom[0]));
+    }
+    if (mat.scale_over_velocity.valid()) {
+        float range = mat.scale_over_velocity_max - mat.scale_over_velocity_min;
+        float t = range != 0 ? clampf(fl / range, 0.0f, 1.0f) : 0.0f;
+        for (int k = 0; k < 3; ++k) scale[k] *= mat.scale_over_velocity.channel(k, t);
+    }
+    p.xform.x = p.xform.x * (signf(scale[0]) < 0 ? -1.0f : 1.0f) * maxf(fabsf(scale[0]), 0.001f);
+    p.xform.y = p.xform.y * (signf(scale[1]) < 0 ? -1.0f : 1.0f) * maxf(fabsf(scale[1]), 0.001f);
+    p.custom[2] = anim_offset + lp * anim_speed;
+}
+
+/* particles.glsl's frame: each particle restarts at its phase of the
+ * system's cycle (its number: the cycle it started in), then the
+ * material's process() */
+void Particles2D::step_gpu(double delta) {
+    int total = (int)particles_.size();
+    double prev_phase = time_ / lifetime;
+    time_ += delta;
+    if (time_ > lifetime) {
+        time_ = fmod(time_, lifetime);
+        ++cycle_;
+        if (one_shot) emitting = false;
+    }
+    double phase = time_ / lifetime;
+    for (int i = 0; i < total; ++i) {
+        Particle& p = particles_[i];
+        double local_delta = delta;
+        bool restart = false;
+        if (emitting) {
+            double restart_phase = double(i) / double(total);
+            if (randomness > 0.0) {
+                u32 s = cycle_;
+                if (restart_phase >= phase) s -= 1u;
+                s *= (u32)total;
+                s += (u32)i;
+                double r = double(idhash(s) % 65536u) / 65536.0;
+                restart_phase += randomness * r * 1.0 / double(total);
+            }
+            restart_phase *= (1.0 - explosiveness);
+            if (phase > prev_phase) {
+                if (restart_phase >= prev_phase && restart_phase < phase) {
+                    restart = true;
+                    if (fractional_delta) local_delta = (phase - restart_phase) * lifetime;
+                }
+            } else if (delta > 0.0) {
+                if (restart_phase >= prev_phase) {
+                    restart = true;
+                    if (fractional_delta) local_delta = (1.0 - restart_phase + phase) * lifetime;
+                } else if (restart_phase < phase) {
+                    restart = true;
+                    if (fractional_delta) local_delta = (phase - restart_phase) * lifetime;
+                }
+            }
+        }
+        if (restart) {
+            p.active = true;
+            p.cycle = cycle_;
+            gpu_start(p, p.cycle * (u32)total + (u32)i);
+        }
+        if (!p.active) continue;
+        Vec2 n;
+        float depth = 0;
+        bool collided = collision_mode != 0 && collision(p, &n, &depth);
+        gpu_process(p, local_delta, collided, n, depth);
+    }
+}
+
+/* particles.glsl's 2D SDF collision: the canvas SDF of the
+ * LightOccluder2D polygons at the particle, less its size. */
+bool Particles2D::collision(const Particle& p, Vec2* normal, float* depth) {
+    const Node* root = this;
+    while (root->parent) root = root->parent;
+    Vec2 pos = to_canvas_.xform(p.xform.origin);
+    float d;
+    Vec2 n;
+    if (!LightOccluder2D::sdf(root, pos, &d, &n)) return false;
+    float size = collision_base_size;
+    if (collision_use_scale) {
+        Vec2 sx = to_canvas_.basis_xform(p.xform.x), sy = to_canvas_.basis_xform(p.xform.y);
+        size *= (sqrtf(sx.x * sx.x + sx.y * sx.y) + sqrtf(sy.x * sy.x + sy.y * sy.y) + 1.0f) / 3.0f;
+    } else {
+        size *= sqrtf(to_canvas_.y.x * to_canvas_.y.x + to_canvas_.y.y * to_canvas_.y.y);
+    }
+    d -= size;
+    if (d >= 0) return false;
+    *normal = n;
+    *depth = -d;
+    return true;
+}
+
 /* ---- draw: a texture-sized quad per particle, CanvasItemMaterial
  * particle animation frames ---- */
 
 void Particles2D::draw(Canvas& c) {
     if (particles_.empty()) return;
+    /* not local: drawn in the canvas (Godot's identity item transform) */
+    Xform2D view = local_coords ? Xform2D() : global_transform().affine_inverse();
     Vec2 ts = texture ? texture->size() : Vec2(1, 1);
     int hf = 1, vf = 1;
     bool loop = false, anim = false;
@@ -641,6 +1199,7 @@ void Particles2D::draw(Canvas& c) {
     for (size_t i = 0; i < particles_.size(); ++i) {
         const Particle& p = particles_[i];
         if (!p.active) continue;
+        Xform2D px = view * p.xform;
         Vec2 h = Vec2(ts.x / (anim ? hf : 1), ts.y / (anim ? vf : 1)) * 0.5f;
         float fu0 = 0, fv0 = 0, fw = 1, fh = 1;
         if (anim) {
@@ -680,7 +1239,7 @@ void Particles2D::draw(Canvas& c) {
         float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
         int base = (int)v.size();
         for (int k = 0; k < 4; ++k) {
-            v.push_back(p.xform.xform(corners[k]));
+            v.push_back(px.xform(corners[k]));
             float u = fu0 + cu[k] * fw, w = fv0 + cv[k] * fh;
             uv.push_back(img ? Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + w * src.size.y) / is.y)
                              : Vec2(u, w));

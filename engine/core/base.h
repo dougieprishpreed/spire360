@@ -85,6 +85,15 @@ struct Xform2D {
         /* this applied after o */
         return Xform2D(basis_xform(o.x), basis_xform(o.y), xform(o.origin));
     }
+    /* Godot's Transform2D.affine_inverse (identity when singular) */
+    Xform2D affine_inverse() const {
+        float det = x.x * y.y - y.x * x.y;
+        if (det == 0) return Xform2D();
+        float id = 1.0f / det;
+        Xform2D r(Vec2(y.y * id, -x.y * id), Vec2(-y.x * id, x.x * id), Vec2(0, 0));
+        r.origin = r.basis_xform(origin) * -1.0f;
+        return r;
+    }
     static Xform2D translation(const Vec2& v) { return Xform2D(Vec2(1, 0), Vec2(0, 1), v); }
     static Xform2D scaling(float sx, float sy) { return Xform2D(Vec2(sx, 0), Vec2(0, sy), Vec2(0, 0)); }
 };
