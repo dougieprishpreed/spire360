@@ -100,7 +100,7 @@ Node* FtuePopup::build(const std::string& id, const std::vector<CanvasItem*>& sp
         static const char* const KEYS[3] = { "_image1", "_image2", "_image3" };
         for (int i = 0; i < 3; ++i) {
             const Json* v = p->get_extra(KEYS[i]);
-            images_[i] = v ? script_resource(*v) : NULL;
+            images_[i] = v ? lib_->resolve(*v, lib_->file(scene)) : NULL; /* its ExtResources */
         }
         set_label(p->get_node("Header"), Loc::get("ftues", "COMBAT_BASICS_FTUE_HEADER"));
         set_label(page_count_, page_count(1));

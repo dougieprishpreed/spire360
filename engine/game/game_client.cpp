@@ -465,7 +465,8 @@ void GameClient::update(const PadState& pad) {
     if (transition_ && transition_->phase != 0) return;
     if (ftue_) {
         /* auto play reads it a second and a half */
-        if (ftue_->input(pad) || (auto_ && ++ftue_frames_ > 90)) close_ftue();
+        ++ftue_frames_;
+        if (ftue_->input(pad) || (auto_ && ftue_frames_ > 90)) close_ftue();
         return;
     }
     if (combat_ && combat_->take_shuffle()) {
@@ -1491,6 +1492,8 @@ void GameClient::refresh_plain_screen() {
 
 /* ---- FTUEs (scenes/ftue, ftue.h) ---- */
 
+std::string GameClient::ftue_open() const { return ftue_ ? ftue_->id() : std::string(); }
+
 bool GameClient::ftue_pending(const std::string& id) const {
     return std::find(ftues_.begin(), ftues_.end(), id) != ftues_.end();
 }
@@ -1608,7 +1611,8 @@ bool GameClient::check_ftues(const PadState& pad) {
         const Json& cards = decision_["cards"];
         for (size_t i = 0; i < cards.size(); ++i)
             if (cards[i]["type"].str() == "Power") {
-                open_ftue("power_card_ftue", none);
+                Control* h = ported_ ? ((CardRewardScreen*)ported_)->holder(i) : NULL;
+                open_ftue("power_card_ftue", std::vector<CanvasItem*>(1, h));
                 return true;
             }
     }

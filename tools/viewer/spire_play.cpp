@@ -364,6 +364,13 @@ int main(int argc, char** argv) {
                 fflush(stdout);
                 ++shots;
             }
+            /* each FTUE once it has come in (tests of the tips) */
+            if (!game.ftue_open().empty() && game.ftue_frames() == 40) {
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
+                tree.render(canvas);
+                sw.end();
+                write_png(format("%s/ftue_%s.png", out_dir.c_str(), game.ftue_open().c_str()).c_str(), sw.framebuffer());
+            }
             if (game.decision_count() != decisions) {
                 decisions = game.decision_count();
                 printf("%04d %s\n", decisions, game.decision()["decision"].str().c_str());

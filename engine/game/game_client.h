@@ -143,6 +143,9 @@ public:
     void ftue_seen(const std::string& id);
     /* NAcceptTutorialsFtue's answer: tutorials on (yes) or off. */
     void accept_tutorials(bool yes);
+    /* The FTUE open over the run ("" none) and for how many frames. */
+    std::string ftue_open() const;
+    int ftue_frames() const { return ftue_frames_; }
     /* A query for the logic outside the decisions (settings): no answer
      * is waited for. */
     void send_query(const std::string& command);
