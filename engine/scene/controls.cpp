@@ -832,9 +832,11 @@ void packed_bytes(const Json& v, std::vector<u8>& out) {
     }
 }
 
+/* A little-endian float (the console is big-endian). */
 static float read_f32(const u8* p) {
+    u32 u = (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
     float f;
-    memcpy(&f, p, 4);
+    memcpy(&f, &u, 4);
     return f;
 }
 
