@@ -912,6 +912,93 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_DOOM_FLAME: {
+        const float* x = e.extra;
+        float n1[4], n2[4], m[4], d1[4], d2[4], t[4] = { 1, 1, 1, 1 };
+        effect_texel(e, 0, u * e.p[0] + e.p[2], v * e.p[1] + e.p[3], n1);
+        effect_texel(e, 1, u * e.p[4] + e.p[6], v * e.p[5] + e.p[7], n2);
+        effect_texel(e, 2, u * e.p[8] + e.p[10], (v - 0.04f) * e.p[9] + 0.04f + e.p[11], m);
+        effect_texel(e, 3, u * x[0] + x[2], v * x[1] + x[3], d1);
+        effect_texel(e, 4, u * x[4] + x[6], v * x[5] + x[7], d2);
+        float du = d1[0] * x[8] + d2[0] * x[9], dv = d1[1] * x[8] + d2[1] * x[9];
+        if (tex) sample(tex->img, u + du, v + dv, flags, t);
+        float tb = t[3] > 0 ? t[2] / t[3] : 0.0f;
+        float mb = e.p[13] != 0 ? 1.0f - m[2] : m[2];
+        float val = (e.p[12] * n1[2] * n2[2] + mb) * tb;
+        float inner = smoothstepf(e.p[14], e.p[15], val);
+        float a = clampf(smoothstepf(x[10], x[11], val), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(x[12 + k] + inner * x[16 + k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_FORM_PANNING: {
+        float uu = u, vv = v;
+        if (e.p[11] != 0) {
+            /* rotate(UV, 0.5, angle) then polar_coordinates(.., 0.5, 1, 1) */
+            float sa = sinf(e.p[12]), ca = cosf(e.p[12]);
+            float x = u - 0.5f, y = v - 0.5f;
+            float rx = x * sa - y * ca, ry = x * ca + y * sa;
+            float r = sqrtf(rx * rx + ry * ry) * 2.0f;
+            float ang = atan2f(ry, rx) / (3.1416f * 2.0f);
+            uu = r - floorf(r);
+            vv = ang - floorf(ang);
+        }
+        float na[4] = { 0, 0, 0, 0 }, nb[4] = { 0, 0, 0, 0 }, ov[4], mk[4], l[4];
+        if (tex) sample(tex->img, uu * e.p[0] + e.p[2], vv * e.p[1] + e.p[3], flags, na);
+        if (tex) sample(tex->img, uu * e.p[4] + e.p[6], vv * e.p[5] + e.p[7], flags, nb);
+        float ra = na[3] > 0 ? na[0] / na[3] : 0.0f, rb = nb[3] > 0 ? nb[0] / nb[3] : 0.0f;
+        effect_texel(e, 1, u, v, ov);
+        effect_texel(e, 2, u, v, mk);
+        float ovb = ov[3] > 0 ? ov[2] / ov[3] : 0.0f, mr = mk[3] > 0 ? mk[0] / mk[3] : 0.0f;
+        float n = smoothstepf(e.p[8], e.p[8] + e.p[9], ((ra + rb) * 0.5f + ovb) * mr);
+        effect_texel(e, 0, n, n, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = n * (e.p[13] != 0 ? (1.0f - u) * e.p[10] : 1.0f);
+        a = clampf(a * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SERPENT_SNAKES: {
+        float dm[4] = { 0, 0, 0, 0 }, dt[4] = { 0, 0, 0, 0 }, t[4] = { 0, 0, 0, 0 }, l[4];
+        if (tex) sample(tex->img, u, v, flags, dm);
+        if (tex) sample(tex->img, u * e.p[0] + e.p[2], v * e.p[1] + e.p[3], flags, dt);
+        float b = dm[3] > 0 ? dm[2] / dm[3] : 0.0f, g = dt[3] > 0 ? dt[1] / dt[3] : 0.0f;
+        float k2 = (g - 0.5f) * 2.0f * e.p[4] * b;
+        if (tex) sample(tex->img, u + k2 * e.p[5], v + k2 * e.p[6], flags, t);
+        float ta = t[3], tr = ta > 0 ? t[0] / ta : 0.0f;
+        effect_texel(e, 0, tr, tr, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(ta * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_ECHO_LINES: {
+        float s1[4] = { 0, 0, 0, 0 }, s0[4] = { 0, 0, 0, 0 }, mk[4];
+        float k = e.p[2] != 0 ? 1.0f / e.p[2] : 1.0f;
+        if (tex) sample(tex->img, (u - e.p[0]) * k + e.p[0], (v - e.p[1]) * k + e.p[1], flags, s1);
+        if (tex) sample(tex->img, u, v, flags, s0);
+        effect_texel(e, 0, u, v, mk);
+        float mr = mk[3] > 0 ? mk[0] / mk[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[3], e.p[4], s1[3] - s0[3]) * mr * col[3], 0, 1);
+        for (int q = 0; q < 3; ++q) out[q] = clampf(col[q], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_POISON_SKULL: {
+        float d[4] = { 1, 1, 1, 1 }, t[4] = { 1, 1, 1, 1 }, l[4];
+        if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);
+        float db = d[3] > 0 ? d[2] / d[3] : 0.0f;
+        if (tex) sample(tex->img, u, v + db * e.p[2], flags, t);
+        float ta = t[3], tr = ta > 0 ? t[0] / ta : 0.0f, tg = ta > 0 ? t[1] / ta : 0.0f;
+        effect_texel(e, 0, tr, tr, l);
+        float ia = l[3] > 0 ? 1.0f / l[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[3], e.p[3] + e.p[4], tg) * ta * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(l[k] * ia * col[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_PANNING: {
         float t[4] = { 1, 1, 1, 1 }, l[4], m[4];
         if (tex) sample(tex->img, u * e.p[0] + e.p[2], v * e.p[1] + e.p[3], flags, t);

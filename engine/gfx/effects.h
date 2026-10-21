@@ -229,6 +229,35 @@ enum EffectId {
      * 0.75 added where |UV.x - UV.y - o| <= 0.17 and 0.5 where |UV.x - UV.y
      * - o + 0.3| <= 0.03, o = mix(-1, 1.5, p0) (val). */
     EFFECT_SHINE = 41,
+    /* shaders/vfx/vfx_doom_flame_shader.tres (a VisualShader, blend_add):
+     * x = (p12 * n1.b * n2.b + m) * TEXTURE(UV + d).b, n1 = tex0(UV * p0p1
+     * + p2p3), n2 = tex1(UV * p4p5 + p6p7), m = tex2((UV - (0, 0.04)) *
+     * p8p9 + (0, 0.04) + p10p11).b (1 - m when p13 != 0), d = tex3(UV *
+     * x0.xy + x0.zw).xy * x2.x + tex4(UV * x1.xy + x1.zw).xy * x2.y (its
+     * DistortionMask unset in the game: white); rgb x3.rgb + smoothstep(p14,
+     * p15, x) * x4.rgb, alpha smoothstep(x2.z, x2.w, x). The vertex colour
+     * is not applied. */
+    EFFECT_DOOM_FLAME = 42,
+    /* shaders/vfx/poison/vfx_poison_skull_shader.gdshader (particles):
+     * t = TEXTURE(UV + (0, TEXTURE(UV + p0p1).b * p2)); (lut(t.r).rgb,
+     * smoothstep(p3, p3 + p4, t.g) * t.a) * vertex colour; tex0 lut, p3
+     * the erosion curve at the particle's life. */
+    EFFECT_POISON_SKULL = 43,
+    /* vfx_demon_form_idle_panning_fire_shader and
+     * vfx_reaper_form_idle_panning_noise_shader: n = smoothstep(p8, p8 +
+     * p9, ((TEXTURE(u * p0p1 + p2p3).r + TEXTURE(u * p4p5 + p6p7).r) / 2 +
+     * tex1(UV).b) * tex2(UV).r); (lut(n).rgb, n * (p13 != 0 ? (1 - UV.x) *
+     * p10 : 1)) * vertex colour; tex0 lut. u = UV, or with p11 != 0 the
+     * polar coordinates of UV rotated by p12 about the centre (reaper). */
+    EFFECT_FORM_PANNING = 44,
+    /* vfx_serpent_form_snakes_shader: TEXTURE at UV + (g - 0.5) * 2 * p4 *
+     * TEXTURE(UV).b * p5p6, g = TEXTURE(UV * p0p1 + p2p3).g; (lut(its
+     * r).rgb, its a) * vertex colour; tex0 lut (clamped). */
+    EFFECT_SERPENT_SNAKES = 45,
+    /* vfx_echo_form_echo_lines_shader: white, alpha smoothstep(p3, p4,
+     * TEXTURE((UV - p0p1) / p2 + p0p1).a - TEXTURE(UV).a) * tex0(UV).r
+     * (white when unset), times the vertex colour. */
+    EFFECT_ECHO_LINES = 46,
     EFFECT_COUNT
 };
 

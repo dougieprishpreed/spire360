@@ -550,6 +550,71 @@ float4 ps_e41(VsOut i) : COLOR {
     return float4(saturate(t.rgb + add) * a, a);
 }
 
+// 42: vfx_doom_flame_shader: the flame's blue through two panning noises
+// over the inverted mask, read through two distortions; outer colour plus
+// the stepped inner colour, the outer step as alpha (drawn additive).
+float4 ps_e42(VsOut i) : COLOR {
+    float n1 = tex2D(g_e0, i.uv * g_p0.xy + g_p0.zw).b;
+    float n2 = tex2D(g_e1, i.uv * g_p1.xy + g_p1.zw).b;
+    float m = tex2D(g_e2, (i.uv - float2(0.0, 0.04)) * g_p2.xy + float2(0.0, 0.04) + g_p2.zw).b;
+    if (g_p3.y != 0.0) m = 1.0 - m;
+    float2 d = tex2D(g_e3, i.uv * g_x[0].xy + g_x[0].zw).xy * g_x[2].x + tex2D(g_e4, i.uv * g_x[1].xy + g_x[1].zw).xy * g_x[2].y;
+    float x = (g_p3.x * n1 * n2 + m) * tex2D(g_tex, i.uv + d).b;
+    float a = saturate(smoothstep(g_x[2].z, g_x[2].w, x));
+    return float4(saturate(g_x[3].rgb + smoothstep(g_p3.z, g_p3.w, x) * g_x[4].rgb) * a, a);
+}
+
+// 43: vfx_poison_skull_shader: the texture read through its own panning
+// blue, coloured by the lut at its red, eroded by its green at the
+// particle's life.
+float4 ps_e43(VsOut i) : COLOR {
+    float db = tex2D(g_tex, i.uv + g_p0.xy).b;
+    float4 t = tex2D(g_tex, i.uv + float2(0.0, db * g_p0.z));
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(smoothstep(g_p0.w, g_p0.w + g_p1.x, t.g) * t.a * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 44: the demon / reaper form's panning fire: two panning noises plus the
+// overlay through the mask, eroded, coloured by the lut (the reaper reads
+// the noise in polar coordinates of the rotated uv).
+float4 ps_e44(VsOut i) : COLOR {
+    float2 u = i.uv;
+    if (g_p2.w != 0.0) {
+        float sa = sin(g_p3.x), ca = cos(g_p3.x);
+        float2 d = i.uv - 0.5;
+        float2 r = float2(d.x * sa - d.y * ca, d.x * ca + d.y * sa);
+        float2 pc = float2(length(r) * 2.0, atan2(r.y, r.x) / (3.1416 * 2.0));
+        u = pc - floor(pc);
+    }
+    float na = tex2D(g_tex, u * g_p0.xy + g_p0.zw).r;
+    float nb = tex2D(g_tex, u * g_p1.xy + g_p1.zw).r;
+    float n = smoothstep(g_p2.x, g_p2.x + g_p2.y, ((na + nb) * 0.5 + tex2D(g_e1, i.uv).b) * tex2D(g_e2, i.uv).r);
+    float4 l = tex2D(g_e0, float2(n, n));
+    float a = saturate(n * (g_p3.y != 0.0 ? (1.0 - i.uv.x) * g_p2.z : 1.0) * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 45: the serpent form's snakes: the texture pushed along a direction by
+// its own panning green, coloured by the lut.
+float4 ps_e45(VsOut i) : COLOR {
+    float b = tex2D(g_tex, i.uv).b;
+    float g = tex2D(g_tex, i.uv * g_p0.xy + g_p0.zw).g;
+    float k = (g - 0.5) * 2.0 * g_p1.x * b;
+    float4 t = tex2D(g_tex, i.uv + k * g_p1.yz);
+    float4 l = tex2D(g_e0, t.rr);
+    float a = saturate(t.a * i.color.a);
+    return float4(saturate(l.rgb * i.color.rgb) * a, a);
+}
+
+// 46: the echo form's lines: a scaled copy's alpha less the texture's own.
+float4 ps_e46(VsOut i) : COLOR {
+    float s1 = tex2D(g_tex, (i.uv - g_p0.xy) / g_p0.z + g_p0.xy).a;
+    float s0 = tex2D(g_tex, i.uv).a;
+    float a = saturate(smoothstep(g_p0.w, g_p1.x, s1 - s0) * tex2D(g_e0, i.uv).r * i.color.a);
+    return float4(saturate(i.color.rgb) * a, a);
+}
+
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
 float4 ps_e21(VsOut i) : COLOR {
     float w[7] = { 0.0702, 0.1311, 0.1907, 0.2160, 0.1907, 0.1311, 0.0702 };

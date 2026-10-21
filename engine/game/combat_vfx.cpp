@@ -1195,7 +1195,8 @@ private:
  * Mask/Visual; the body itself goes under the Mask here.) */
 class DoomVfx : public Effect {
 public:
-    DoomVfx() : holder_(NULL), phase_(0) {}
+    /* without setup (a scene on its own): 260 px wide, no body */
+    DoomVfx() : size_(260, 0), body_(NULL), holder_(NULL), phase_(0) {}
     void setup(const Vec2& size, Node* body, bool die) {
         size_ = size * 1.5f;
         body_ = die ? body : NULL;

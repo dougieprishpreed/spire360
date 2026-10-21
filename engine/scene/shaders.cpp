@@ -397,6 +397,110 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[1] = effect_texture(c, m, "suckGradient");
         e.tex[2] = effect_texture(c, m, "suckShape");
         e.repeat = 1;
+    } else if (s == "shaders/vfx/vfx_doom_flame_shader.tres") {
+        e.id = EFFECT_DOOM_FLAME;
+        Vec2 s1 = shader_param_vec2(m, "Noise1Scaling", Vec2(1, 1)), p1 = shader_param_vec2(m, "Noise1Panning", Vec2(1, 1));
+        Vec2 s2 = shader_param_vec2(m, "Noise2Scaling", Vec2(1, 1)), p2 = shader_param_vec2(m, "Noise2Panning", Vec2(1, 1));
+        Vec2 ms = shader_param_vec2(m, "NoiseMaskScale", Vec2(1, 1)), mo = shader_param_vec2(m, "NoiseMaskOffset", Vec2(0, 0));
+        Vec2 ics = shader_param_vec2(m, "InnerColorStep", Vec2(0.3f, 0.4f)), os = shader_param_vec2(m, "OuterStep", Vec2(0.1f, 0.2f));
+        e.p[0] = s1.x;
+        e.p[1] = s1.y;
+        e.p[2] = pan(p1.x);
+        e.p[3] = pan(p1.y);
+        e.p[4] = s2.x;
+        e.p[5] = s2.y;
+        e.p[6] = pan(p2.x);
+        e.p[7] = pan(p2.y);
+        e.p[8] = ms.x;
+        e.p[9] = ms.y;
+        e.p[10] = mo.x;
+        e.p[11] = mo.y;
+        e.p[12] = param(m, "Noise1Strength", 1.0f) * param(m, "Noise2Strength", 1.0f);
+        e.p[13] = param(m, "InvertNoiseMask", 1.0f) != 0.0f ? 1.0f : 0.0f;
+        e.p[14] = ics.x;
+        e.p[15] = ics.y;
+        Vec2 d1s = shader_param_vec2(m, "Distortion1Scale", Vec2(1, 1)), d1p = shader_param_vec2(m, "Distortion1Panning", Vec2(1, 1));
+        Vec2 d2s = shader_param_vec2(m, "Distortion2Scale", Vec2(1, 1)), d2p = shader_param_vec2(m, "Distortion2Panning", Vec2(1, 1));
+        Color outer = param_color(m, "OuterColor", Color(1, 0, 0, 1)), inner = param_color(m, "InnerColor", Color(1, 0.85f, 0, 1));
+        float x[20] = { d1s.x, d1s.y, pan(d1p.x), pan(d1p.y), d2s.x, d2s.y, pan(d2p.x), pan(d2p.y),
+                        param(m, "Distortion1Strength", 0.02f), param(m, "Distortion2Strength", 0.02f), os.x, os.y,
+                        outer.r, outer.g, outer.b, 0, inner.r, inner.g, inner.b, 0 };
+        for (int k = 0; k < 20; ++k) e.extra[k] = x[k];
+        e.extra_count = 5;
+        e.tex[0] = effect_texture(c, m, "Noise1Texture");
+        e.tex[1] = effect_texture(c, m, "Noise2Texture");
+        e.tex[2] = effect_texture(c, m, "NoiseMask");
+        e.tex[3] = effect_texture(c, m, "Distortion1Texture");
+        e.tex[4] = effect_texture(c, m, "Distortion2Texture");
+        e.repeat = 1 | 2 | 8 | 16;
+    } else if (s == "shaders/vfx/forms/demon/vfx_demon_form_idle_panning_fire_shader.gdshader" ||
+               s == "shaders/vfx/forms/reaper/vfx_reaper_form_idle_panning_noise_shader.gdshader") {
+        /* tiling_and_offset: UV * st.xy + st.zw * TIME + initial_offset */
+        bool reaper = s == "shaders/vfx/forms/reaper/vfx_reaper_form_idle_panning_noise_shader.gdshader";
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float a[4], b[4];
+        param_vec4(m, "main_st_a", st0, a);
+        param_vec4(m, "main_st_b", st0, b);
+        Vec2 ia = shader_param_vec2(m, "main_st_a_initial_offset", Vec2(0, 0));
+        Vec2 ib = shader_param_vec2(m, "main_st_b_initial_offset", Vec2(0, 0));
+        Vec2 er = shader_param_vec2(m, "erosion", Vec2(0, 0));
+        e.id = EFFECT_FORM_PANNING;
+        e.p[0] = a[0];
+        e.p[1] = a[1];
+        e.p[2] = fmodf(pan(a[2]) + ia.x, 1.0f);
+        e.p[3] = fmodf(pan(a[3]) + ia.y, 1.0f);
+        e.p[4] = b[0];
+        e.p[5] = b[1];
+        e.p[6] = fmodf(pan(b[2]) + ib.x, 1.0f);
+        e.p[7] = fmodf(pan(b[3]) + ib.y, 1.0f);
+        e.p[8] = er.x;
+        e.p[9] = er.y;
+        float div = param(m, "mask_divisor", 0.5f);
+        e.p[10] = div != 0 ? 1.0f / div : 0.0f;
+        e.p[11] = reaper ? 1.0f : 0.0f;
+        e.p[12] = 3.14159265f * param(m, "rotation_normalized", 0.0f);
+        e.p[13] = reaper ? 0.0f : 1.0f;
+        e.tex[0] = effect_texture(c, m, "lut");
+        e.tex[1] = effect_texture(c, m, "alpha_overlay");
+        e.tex[2] = effect_texture(c, m, "mask");
+    } else if (s == "shaders/vfx/forms/serpent/vfx_serpent_form_snakes_shader.gdshader") {
+        static const float st0[4] = { 0, 0, 0, 0 };
+        float st[4];
+        param_vec4(m, "distortion_st", st0, st);
+        Vec2 io = shader_param_vec2(m, "distortion_initial_offset", Vec2(0, 0));
+        Vec2 dir = shader_param_vec2(m, "distortion_dir", Vec2(0, 0));
+        e.id = EFFECT_SERPENT_SNAKES;
+        e.p[0] = st[0];
+        e.p[1] = st[1];
+        e.p[2] = fmodf(pan(st[2]) + io.x, 1.0f);
+        e.p[3] = fmodf(pan(st[3]) + io.y, 1.0f);
+        e.p[4] = param(m, "distortion_strength", 0.0f);
+        e.p[5] = dir.x;
+        e.p[6] = dir.y;
+        e.tex[0] = effect_texture(c, m, "lut");
+    } else if (s == "shaders/vfx/forms/echo/vfx_echo_form_echo_lines_shader.gdshader") {
+        Vec2 sc = shader_param_vec2(m, "scale_center", Vec2(0.5f, 0.5f));
+        Vec2 ss = shader_param_vec2(m, "scale_alpha_smoothstep", Vec2(0, 1));
+        e.id = EFFECT_ECHO_LINES;
+        e.p[0] = sc.x;
+        e.p[1] = sc.y;
+        e.p[2] = param(m, "scale_factor", 1.1f);
+        e.p[3] = ss.x;
+        e.p[4] = ss.y;
+        e.tex[0] = effect_texture(c, m, "mask_texture");
+    } else if (s == "shaders/vfx/poison/vfx_poison_skull_shader.gdshader") {
+        e.id = EFFECT_POISON_SKULL;
+        Vec2 sp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
+        e.p[0] = sp.x * (float)g_shader_time;
+        e.p[1] = sp.y * (float)g_shader_time;
+        e.p[2] = param(m, "distortion_strength", 0.0f);
+        CurveData::from(shader_param_resource(m, "erosion_curve"), g_effect_curve);
+        e.p[3] = g_effect_curve.valid() ? g_effect_curve.sample(0) : 0.0f;
+        e.p[4] = param(m, "erosion_offset", 0.25f);
+        e.tex[0] = effect_texture(c, m, "lut");
+        /* the erosion at each particle's life (INSTANCE_CUSTOM.y / .w) */
+        effect_particles(EFFECT_POISON_SKULL);
+        g_life_param[0] = 3;
     } else if (s == "images/vfx/vfx_molten_fist/vfx_molten_fist.tres") {
         e.id = EFFECT_MOLTEN_FIST;
         Vec2 st = shader_param_vec2(m, "NoiseStep", Vec2(0.1f, 0.2f));
@@ -1401,6 +1505,10 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/dissolve.gdshader") {
         *out = BLEND_PREMULT_ALPHA;
+        return true;
+    }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/vfx_doom_flame_shader.tres") {
+        *out = BLEND_ADD;
         return true;
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "images/vfx/simple_noise_add_shader.tres") {

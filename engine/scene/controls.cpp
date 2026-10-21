@@ -718,6 +718,11 @@ void AnimatedSprite2D::draw(Canvas& c) {
     Vec2 fs = t->size();
     Vec2 d = offset;
     if (centered) d = d - fs * 0.5f;
+    /* the VFX shaders' vertex(): VERTEX += pivot_offset / TEXTURE_PIXEL_SIZE */
+    if (material && material->kind == Resource::RES_SHADER_MATERIAL) {
+        Vec2 pv = shader_param_vec2(material, "pivot_offset", Vec2(0, 0));
+        d = d + Vec2(pv.x * fs.x, pv.y * fs.y);
+    }
     Rect2 dst(d, fs);
     if (flip_h) dst.size.x = -dst.size.x;
     if (flip_v) dst.size.y = -dst.size.y;
@@ -937,6 +942,12 @@ void Sprite2D::draw(Canvas& c) {
     Rect2 src(base.pos + fo, fs);
     Vec2 d = offset;
     if (centered) d = d - fs * 0.5f;
+    /* the VFX shaders' vertex(): VERTEX += pivot_offset / TEXTURE_PIXEL_SIZE */
+    if (material && material->kind == Resource::RES_SHADER_MATERIAL) {
+        Vec2 pv = shader_param_vec2(material, "pivot_offset", Vec2(0, 0));
+        Vec2 ts = texture->size();
+        d = d + Vec2(pv.x * ts.x, pv.y * ts.y);
+    }
     Rect2 dst(d, fs);
     if (flip_h) dst.size.x = -dst.size.x;
     if (flip_v) dst.size.y = -dst.size.y;
