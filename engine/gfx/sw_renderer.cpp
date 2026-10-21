@@ -1124,19 +1124,16 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
-    case EFFECT_ENCHANT_TAB: {
-        static const float add[3] = { 1.0f, 0.75f, 0.9f };
-        float s = smoothstepf(e.p[0], e.p[0] + 0.2f, u);
-        float t[4] = { 0, 0, 0, 0 };
-        if (tex) sample(tex->img, u, v + ((v - 0.5f) * 0.75f + 0.5f - v) * s, flags, t);
-        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
-        float f = smoothstepf(e.p[0] + 0.2f, e.p[0] + 0.25f, u);
-        float ca = (t[3] + (1 - t[3]) * s) * (1 - f);
-        float a = clampf(ca * t[3], 0, 1);
-        for (int k = 0; k < 3; ++k) {
-            float c = t[k] * ia + add[k] * s;
-            out[k] = clampf(c + (add[k] - c) * f, 0, 1) * a;
-        }
+    case EFFECT_POWERUP_AURA: {
+        float mix_t[4], m1[4], m2[4], sc[4];
+        effect_texel(e, 0, u, v, mix_t);
+        effect_texel(e, 1, u, v, m1);
+        effect_texel(e, 2, u, v, m2);
+        effect_texel(e, 3, u + 1.0f, v + e.p[6], sc);
+        float k = mix_t[3] > 0 ? mix_t[0] / mix_t[3] : 0.0f;
+        float a1 = m1[3] > 0 ? m1[0] / m1[3] : 0.0f, a2 = m2[3] > 0 ? m2[0] / m2[3] : 0.0f;
+        float a = clampf(a1 * a2 * sc[3], 0, 1);
+        for (int q = 0; q < 3; ++q) out[q] = clampf(e.p[q] + (e.p[3 + q] - e.p[q]) * k, 0, 1) * a;
         out[3] = a;
         return;
     }

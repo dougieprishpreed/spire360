@@ -10,7 +10,7 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
-## Alpha push, part 10 (2026-10-21): GPU particles, the forms checked
+## Alpha push, part 10 (2026-10-21): GPU particles, the forms, FTUEs, 3D
 
 - GPUParticles2D now runs Godot 4.5.1's ParticleProcessMaterial shader on
   the CPU (`engine/scene/particles.cpp`: start() / process() inside
@@ -117,6 +117,30 @@ parts 2 and 3 above it).
   TestMode). Not ported: the mouse-only
   SneakyHitboxes. The logic still calls NCombatRulesFtue.Create every
   fight (headless never marks it seen); the client ignores the cue.
+- NPowerUpVfx's 3D back layer (Inflame, Corruption, Crimson Mantle,
+  Unmovable; the ghostly copy): `engine/scene/node3d.{h,cpp}`. Node3D /
+  Camera3D / MeshInstance3D (GPUParticles3D are plain Node3Ds: the two
+  rings are hidden, the beam never emits), Transform3D (basis rows, then
+  the origin) with top_level, the camera's perspective (fov of the kept
+  height, near plane), ArrayMesh surfaces in format version 2, plain or
+  compressed (unorm16 positions in the AABB, uvs over +-uv_scale, u16 /
+  u32 indices). A SubViewport draws its 3D first (meshes far to near,
+  triangles in index order, behind-the-camera ones dropped), then its
+  canvas. The aura's VisualShader (inline:9d11d5fdbce06d0e) is effect 59
+  (EFFECT_POWERUP_AURA): two colours mixed by a GradientTexture2D, alpha
+  a second gradient x the baked noise x aura.png scrolled by TIME *
+  FloatParameter * 1.8; every sampler repeats (spatial default).
+  Checked against an independent numpy render of the same meshes
+  (perspective-correct uvs, Godot's sampling) for both scenes at T 0.5:
+  same placement, shape and colours (the engine is a little brighter:
+  BackVfx is additive); in a replay (`work/puplay.sh`, Ironclad new33
+  screen 31) the crown of flames sits at the creature's feet behind it.
+  UVs are affine per triangle (no perspective correction; the meshes are
+  small and flat enough).
+- The enchant emboss reuses EFFECT_TAB_APPEAR (16), which already ported
+  enchantment_tab_appear; the duplicate effect 59 of 4f7134c is gone.
+- `tools/check_canvas_shader.py` compiles every effect pixel shader too
+  (59 ps_eN plus the two canvas stages, system D3DCompiler).
 
 ## Alpha push, part 9 (2026-10-21): flashes, room cues, deck previews
 
@@ -232,7 +256,7 @@ parts 2 and 3 above it).
   All five checked in part 10.
 - The enchant emboss: NCardEnchantVfx's %EnchantmentViewport (the
   enchantment's icon and amount) on the card's EnchantmentVfxOverride
-  through enchantment_tab_appear (EFFECT_ENCHANT_TAB, progress 0 -> 1 over
+  through enchantment_tab_appear (EFFECT_TAB_APPEAR, progress 0 -> 1 over
   1 s, Quad InOut), the card's %Enchantment tab hidden (as the game; the
   override sits 45 px below the tab of a card without a star cost, as in
   the game). ViewportTextureRes can name its viewport directly
@@ -1293,10 +1317,8 @@ name where it landed. Open items stay at the end of each group.
 - [x] Orb channel / evoke / passive effects (spire_check orb checks).
 - [x] Doom bar; doom deaths and every non-attack death (part 6).
 - [x] Creature focus tips (powers, intents).
-- [x] Combat VFX shaders (part 8 and the survey; the mirror in part 9).
-      Open: NPowerUpVfx's 3D back layer (its 2D front draws; the 3D beam
-      and aura meshes need a perspective path, the mesh data and a spatial
-      VisualShader; only the two power-up scenes use 3D).
+- [x] Combat VFX shaders (part 8 and the survey; the mirror in part 9;
+      NPowerUpVfx's 3D back layer in part 10, the only 3D in the game).
 - [x] Turn banners, combat start / end, victory and boss transitions.
 
 **Run flow and screens**

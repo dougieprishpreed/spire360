@@ -315,12 +315,11 @@ enum EffectId {
      * times the vertex colour (p0..3 bright_color, p4 bright_enabled, p5
      * erosion_enabled, p6 erosion_base, p7 erosion_offset). */
     EFFECT_EPOCH_CHAINS = 58,
-    /* enchantment_tab_appear (the card's EnchantmentVfxOverride): s =
-     * smoothstep(p0, p0 + 0.2, UV.x); t = TEXTURE(UV.x, mix(UV.y, (UV.y -
-     * 0.5) * 0.75 + 0.5, s)); c = mix(t, (t.rgb + (1, 0.75, 0.9), 1), s),
-     * then mix(c, ((1, 0.75, 0.9), 0), smoothstep(p0 + 0.2, p0 + 0.25,
-     * UV.x)); (c.rgb, c.a * t.a), no vertex colour. p0 progress. */
-    EFFECT_ENCHANT_TAB = 59,
+    /* the power-up auras' VisualShader (MeshInstance3D, node3d.cpp): rgb
+     * mix(p0..2, p3..5, tex0(UV).r), alpha tex1(UV).r * tex2(UV).r *
+     * tex3(UV + (1, p6)).a (p6 TIME * FloatParameter * 1.8); all repeat.
+     * No vertex colour. */
+    EFFECT_POWERUP_AURA = 59,
     EFFECT_COUNT
 };
 

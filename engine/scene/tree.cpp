@@ -1,4 +1,5 @@
 #include "tree.h"
+#include "node3d.h"
 
 #include "canvas.h"
 #include "controls.h"
@@ -257,6 +258,8 @@ void SceneTree::render_viewport(Canvas& canvas, SubViewport* vp) {
         canvas.set_clip(NULL);
         canvas.draw_rect(Rect2(Vec2(0, 0), Vec2((float)w, (float)h)), Color(0.3f, 0.3f, 0.3f, 1));
     }
+    /* the 3D under it first (Godot's 3D pass, then its canvas) */
+    draw_3d(canvas, vp, units, xf);
     draw_items(canvas, items);
     vp->rendered(canvas.renderer()->end_capture(vp->texture));
 }

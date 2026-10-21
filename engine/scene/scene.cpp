@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "node3d.h"
 #include "line_2d.h"
 #include "animation.h"
 
@@ -423,6 +424,9 @@ static Node* new_node(const std::string& type) {
     if (type == "RichTextLabel") return new RichTextLabel();
     if (type == "Sprite2D") return new Sprite2D();
     if (type == "MeshInstance2D") return new MeshInstance2D();
+    if (type == "Node3D" || type == "GPUParticles3D") return new Node3D();
+    if (type == "Camera3D") return new Camera3D();
+    if (type == "MeshInstance3D") return new MeshInstance3D();
     if (type == "SubViewport") return new SubViewport();
     if (type == "SubViewportContainer") return new SubViewportContainer();
     if (type == "CanvasGroup") return new CanvasGroup();

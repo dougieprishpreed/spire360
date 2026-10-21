@@ -637,9 +637,24 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[1] = k.g;
         e.p[2] = k.b;
         e.p[3] = param(m, "MultiplyVsAdd", 1.0f) != 0.0f ? 1.0f : 0.0f;
-    } else if (s == "shaders/enchantment_tab_appear.gdshader") {
-        e.id = EFFECT_ENCHANT_TAB;
-        e.p[0] = param(m, "progress", 0.0f);
+    } else if (s == "inline:9d11d5fdbce06d0e") {
+        /* the power-up auras' VisualShader (vfx_power_up_3d_back and its
+         * ghostly copy, on their MeshInstance3Ds) */
+        Color a = param_color(m, "ColorParameter", Color(0, 0, 0, 1));
+        Color b = param_color(m, "ColorParameter2", Color(0, 0, 0, 1));
+        e.id = EFFECT_POWERUP_AURA;
+        e.p[0] = a.r;
+        e.p[1] = a.g;
+        e.p[2] = a.b;
+        e.p[3] = b.r;
+        e.p[4] = b.g;
+        e.p[5] = b.b;
+        e.p[6] = pan(param(m, "FloatParameter", 0.0f) * 1.8f);
+        e.tex[0] = effect_texture(c, m, "tex_frg_16");
+        e.tex[1] = effect_texture(c, m, "tex_frg_11");
+        e.tex[2] = effect_texture(c, m, "tex_frg_18");
+        e.tex[3] = effect_texture(c, m, "tex_frg_2");
+        e.repeat = 1 | 2 | 4 | 8;
     } else if (s == "shaders/vfx/ui/vfx_ui_epoch_unlock_chains_shader.gdshader") {
         Color k = param_color(m, "bright_color", Color(0, 0, 0, 0));
         e.id = EFFECT_EPOCH_CHAINS;

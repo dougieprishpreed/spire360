@@ -37,7 +37,8 @@ Line geometry checks cover gradients, width, all join modes, round caps
 and closed paths; projectile captures also show their trails.
 
 On Windows, `python tools/check_canvas_shader.py` compiles both PC D3D9
-shader stages with the system D3DCompiler; it does not invoke the XDK.
+canvas shader stages and every effect pixel shader (`effects.hlsl`'s
+`ps_eN`) with the system D3DCompiler; it does not invoke the XDK.
 
 `random_runs.py --timing-dir work/timings` records one JSONL timing file
 per run with the command/action, previous and resulting decision, and

@@ -724,16 +724,12 @@ float4 ps_e58(VsOut i) : COLOR {
     return float4(saturate(lerp(t.rgb, g_p0.rgb, g_p1.x) * i.color.rgb) * a, a);
 }
 
-// 59: enchantment_tab_appear: the tab squeezed and whitened ahead of the
-// progress, gone past it.
+// 59: the power-up auras (a 3D mesh): two colours mixed by a texture; alpha
+// two masks and a scrolling texture.
 float4 ps_e59(VsOut i) : COLOR {
-    float s = smoothstep(g_p0.x, g_p0.x + 0.2, i.uv.x);
-    float4 t = tex2D(g_tex, float2(i.uv.x, lerp(i.uv.y, (i.uv.y - 0.5) * 0.75 + 0.5, s)));
-    float3 add = float3(1.0, 0.75, 0.9);
-    float4 c = lerp(t, float4(t.rgb + add, 1.0), s);
-    c = lerp(c, float4(add, 0.0), smoothstep(g_p0.x + 0.2, g_p0.x + 0.25, i.uv.x));
-    float a = saturate(c.a * t.a);
-    return float4(saturate(c.rgb) * a, a);
+    float3 c = lerp(g_p0.xyz, float3(g_p0.w, g_p1.x, g_p1.y), tex2D(g_e0, i.uv).r);
+    float a = saturate(tex2D(g_e1, i.uv).r * tex2D(g_e2, i.uv).r * tex2D(g_e3, i.uv + float2(1.0, g_p1.z)).a);
+    return float4(saturate(c) * a, a);
 }
 
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
