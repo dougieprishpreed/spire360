@@ -10,6 +10,8 @@
 #include "../core/base.h"
 #include "../core/json.h"
 
+#include <vector>
+
 namespace spire {
 
 class Node;
@@ -66,8 +68,10 @@ bool death_delayed(Node* visuals);
  * NCombatRoom.CombatVfxContainer. */
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors);
 bool is_combat_vfx_call(const std::string& call);
-/* The node an exported NodePath names ("_overlay"), NULL if none. */
+/* The node an exported NodePath names ("_overlay"), NULL if none; the
+ * nodes of a NodePath array. */
 Node* vfx_exported(Node* root, const char* key);
+void vfx_exported_all(Node* root, const char* key, std::vector<Node*>& out);
 /* GpuParticles2D.Restart, or NParticlesContainer.Restart (its _particles). */
 void vfx_restart(Node* n);
 /* NParticlesContainer.SetEmitting (or one particle system's). */

@@ -304,6 +304,14 @@ void SpineSprite::follow_bones() {
     }
 }
 
+bool SpineSprite::bone_position(const std::string& bone, Vec2* out) {
+    if (!ensure()) return false;
+    int i = skel_->data()->find_bone(bone);
+    if (i < 0) return false;
+    *out = Vec2(skel_->bones[(size_t)i].world_x, skel_->bones[(size_t)i].world_y);
+    return true;
+}
+
 Rect2 SpineSprite::bounds() {
     if (!ensure()) return Rect2(0, 0, 0, 0);
     const SpSkeleton& s = *skel_;

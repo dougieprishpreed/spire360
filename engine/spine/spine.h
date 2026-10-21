@@ -377,6 +377,8 @@ public:
     void update(float dt);
     void apply(SpSkeleton& skel);
     const SpAnimation* current(int track) const;
+    /* Whether the current entry of a track loops. */
+    bool current_loop(int track) const;
     /* Seconds into the current animation of a track (-1: none). */
     float track_time(int track) const;
     /* MegaTrackEntry.SetTrackTime: the current entry moved to t seconds. */

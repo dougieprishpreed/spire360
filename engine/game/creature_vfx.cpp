@@ -4,6 +4,7 @@
  * SpineSprite::fired) and drives particles, nodes and slot materials from
  * them. SpineScript is the common part; each port below follows its C#. */
 #include "../core/json.h"
+#include "form_vfx.h"
 #include "../scene/controls.h"
 #include "../scene/line_2d.h"
 #include "../scene/node.h"
@@ -1671,6 +1672,11 @@ bool special_node_call(const std::string& call, const Json& args, VfxAnchors& an
     if (hash == std::string::npos) return false;
     std::string who = name.substr(0, hash), path = name.substr(hash + 1);
     Node* visuals = anchors.visuals_of(who);
+    if (path.compare(0, 5, "form/") == 0) {
+        /* the power's form (StandIns' "who#form/NDemonFormVfx") */
+        form_vfx_call(visuals, path.substr(5), call, args);
+        return true;
+    }
     Node* n = NULL;
     if (visuals && path.compare(0, 5, "body:") == 0) {
         /* NCreatureVisuals.GetCurrentBody: the phobia body when shown */

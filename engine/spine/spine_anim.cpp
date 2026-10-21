@@ -539,6 +539,10 @@ const SpAnimation* SpAnimationState::current(int ti) const {
     return tracks_[ti].cur.anim;
 }
 
+bool SpAnimationState::current_loop(int ti) const {
+    return ti >= 0 && (size_t)ti < tracks_.size() && tracks_[ti].has_cur && tracks_[ti].cur.loop;
+}
+
 float SpAnimationState::track_time(int ti) const {
     if (ti < 0 || (size_t)ti >= tracks_.size() || !tracks_[ti].has_cur) return -1;
     return tracks_[ti].cur.time;

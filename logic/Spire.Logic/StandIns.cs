@@ -82,6 +82,17 @@ internal static class StandIns
         [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NSnappingJaxfruitVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSnappingJaxfruitVfx>(),
         [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NFlyconidSporesVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NFlyconidSporesVfx>(),
     };
+    // The powers' forms (NFormVfx.Create(creature)): a stand-in per creature
+    // and form ("player#form/NDemonFormVfx"), so SetActive and
+    // OnEffectTriggered on the power's Vfx become cues.
+    private static readonly Dictionary<string, Func<object>> FormClasses = new()
+    {
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NDemonFormVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NDemonFormVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NVoidFormVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NVoidFormVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NSerpentFormVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NSerpentFormVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NReaperFormVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NReaperFormVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NEchoFormVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.Forms.NEchoFormVfx>(),
+    };
     private static readonly Dictionary<string, object> Specials = new();
     private static readonly ConditionalWeakTable<object, string> SpecialNames = new();
     private static readonly ConditionalWeakTable<Creature, Godot.Node2D> Bodies = new();
@@ -122,6 +133,24 @@ internal static class StandIns
         }
         try
         {
+            // GodotObject.IsValid / NodeUtil.IsValid on a special node's stand-in:
+            // the node exists (the game keeps it, e.g. a power's form Vfx)
+            if (method == "IsValid" && a.Length > 0 && a[0] != null && SpecialNames.TryGetValue(a[0]!, out _)) return true;
+            if (method == "Create" && a.Length > 0 && a[0] is Creature fc)
+            {
+                var formType = id[(id.IndexOf('|') + 1)..sep];
+                if (FormClasses.TryGetValue(formType, out var makeForm))
+                {
+                    var key = Steps.Who(fc) + "#form/" + formType[(formType.LastIndexOf('.') + 1)..];
+                    if (!Specials.TryGetValue(key, out var form))
+                    {
+                        form = makeForm();
+                        Specials[key] = form;
+                        SpecialNames.AddOrUpdate(form, key);
+                    }
+                    return form;
+                }
+            }
             // NCreature.GetSpecialNode<T>(name): a stand-in of T for a script the game calls
             if (method == "GetSpecialNode" && a.Length > 1 && a[0] is NCreature sn && Creatures.TryGetValue(sn, out var sc) &&
                 a[1] is string spath)

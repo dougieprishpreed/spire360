@@ -1852,6 +1852,7 @@ Node* make_damage_number(SceneLibrary* lib, const Vec2& at, int amount) {
 }
 
 Node* vfx_exported(Node* root, const char* key) { return exported_one(root, key); }
+void vfx_exported_all(Node* root, const char* key, std::vector<Node*>& out) { exported(root, key, out); }
 void vfx_restart(Node* n) { restart(n); }
 void vfx_emitting(Node* n, bool on) {
     if (!n) return;

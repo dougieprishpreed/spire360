@@ -114,11 +114,19 @@ parts 2 and 3 above it).
   lambdas (<m>b__N in <>c / <>c__DisplayClassN), as its notes said.
 - NCreature.SetAnimationTrigger cues duplicate the anim cues of
   CreatureCmd.TriggerAnim (not a gap).
+- Power forms (`engine/game/form_vfx.cpp`): StandIns answers the five
+  N*FormVfx.Create calls with a special stand-in ("player#form/NDemonFormVfx")
+  and NodeUtil.IsValid is true for special stand-ins (the power's Vfx
+  getter checks it), so SetActive / OnEffectTriggered are recorded. The
+  client puts the form in the visuals' %FormVfx, with
+  NSpineSpriteBoneFollower (SpineSprite::bone_position), NValueRamp and
+  the gradients; the Echo Form's copier plays the body's animations.
+  Verified: Demon Form's aura. Not verified yet: Echo (showed nothing
+  visible in one test), Void, Serpent, Reaper (drive one with
+  scratch-style `enter_room` + `add_to_hand` + `end_turn`).
 - Still open: NPowerUpVfx's 3D layer, the enchant emboss, and recorded ui
   calls the client does not handle yet (from a survey of every trace's
-  ui cues, work/ui_calls.txt): NGainEpochVfx, the form
-  VFX classes (NDemonFormVfx, NVoidFormVfx, NSerpentFormVfx,
-  NReaperFormVfx, NEchoFormVfx), NHorizontalLinesVfx,
+  ui cues, work/ui_calls.txt): NGainEpochVfx, NHorizontalLinesVfx,
   NCreature.TrackBlockStatus, DisableInteractionForDeath,
   NCombatRoom.ShakeOstyIfDead, NCombatRulesFtue. Check each against the
   game code first: some may already be drawn by another path (scene-path

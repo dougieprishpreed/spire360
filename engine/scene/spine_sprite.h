@@ -73,6 +73,9 @@ public:
     /* Skeleton.GetBounds: the region and mesh attachments' world vertices'
      * box, in the sprite's coordinates (empty without any). */
     Rect2 bounds();
+    /* MegaSprite.GetGlobalBoneTransform's origin, in the sprite's
+     * coordinates; false without that bone. */
+    bool bone_position(const std::string& bone, Vec2* out);
 
 private:
     bool ensure();

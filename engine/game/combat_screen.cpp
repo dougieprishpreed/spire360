@@ -5,6 +5,7 @@
 #include "loc.h"
 #include "../audio/game_audio.h"
 #include "ui_util.h"
+#include "form_vfx.h"
 #include "sovereign_blade.h"
 #include "top_bar.h"
 
@@ -2484,6 +2485,13 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_SCRIPTED && ScreenShake::get().cue(c.data["call"].str(), c.data["args"])) return;
+    if (c.kind == CUE_SCRIPTED && c.data["args"].size() > 0) {
+        /* a power's form (Demon Form, ...) on the creature's visuals */
+        const std::string& who = c.data["args"][(size_t)0].str();
+        if (form_vfx_create(lib_, c.data["call"].str(), visuals_of(who),
+                            who == "player" ? player_.data["character"].str() : std::string()))
+            return;
+    }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NGame.DoHitStop") {
         /* NHitStop.EaseForStrength / SecondsForDuration */
         const std::string& strength = c.data["args"][(size_t)0].str();
@@ -2700,7 +2708,8 @@ void CombatScreen::play_steps(const Json& steps) {
                                         ch["call"].str() == "NCreature.PerformIntent" ||
                                         ch["call"].str() == "NCreature.RefreshIntents" ||
                                         ch["call"].str().compare(0, 12, "NGame.Screen") == 0 ||
-                                        ch["call"].str() == "NGame.DoHitStop")) {
+                                        ch["call"].str() == "NGame.DoHitStop" ||
+                                        ch["call"].str().find("FormVfx.Create") != std::string::npos)) {
                 /* The game's scripted effects (combat_vfx). */
                 c.kind = CUE_SCRIPTED;
                 c.data = ch;
