@@ -25,6 +25,8 @@ public:
     double remaining(u32 voice) const;
     u32 rate() const { return rate_; }
     size_t buffer_bytes() const;
+    /* The voices playing (how many loop, each sample's count), for logs. */
+    std::string describe() const;
     /* Why the last play() returned 0. */
     const char* last_failure() const { return failure_; }
 private:

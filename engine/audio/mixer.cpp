@@ -1,11 +1,14 @@
 #include "mixer.h"
 #include "decoder.h"
 #include "../core/pack.h"
+#include <map>
+#include <stdio.h>
 #include <string.h>
 
 namespace spire {
 struct AudioMixer::Voice {
     AudioDecoder decoder;
+    std::string path;
     std::vector<float> buffer;
     u32 id, cursor, loop_start, loop_end;
     int loops, used, count;
@@ -51,6 +54,7 @@ u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start
         return 0;
     }
     Voice* v = new Voice;
+    v->path = path;
     if (!v->decoder.open(*pack_, path)) failure_ = "cannot open";
     else if (offset >= v->decoder.frames()) failure_ = "start past the end";
     else if (!v->decoder.seek(offset)) failure_ = "cannot seek";
@@ -81,6 +85,24 @@ u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start
     if (!next_id_) ++next_id_;
     voices_.push_back(v);
     return v->id;
+}
+
+std::string AudioMixer::describe() const {
+    std::map<std::string, int> count;
+    int looping = 0;
+    for (size_t i = 0; i < voices_.size(); ++i) {
+        ++count[voices_[i]->path];
+        if (voices_[i]->loops != 0) ++looping;
+    }
+    std::string out;
+    char buf[32];
+    sprintf(buf, "%d looping:", looping);
+    out = buf;
+    for (std::map<std::string, int>::const_iterator it = count.begin(); it != count.end(); ++it) {
+        sprintf(buf, " %dx ", it->second);
+        out += buf + it->first.substr(it->first.rfind('/') + 1, 12);
+    }
+    return out;
 }
 
 AudioMixer::Voice* AudioMixer::find(u32 id) {

@@ -9,6 +9,7 @@
 #include "../scene/text_nodes.h"
 
 #include <ctype.h>
+#include <string.h>
 
 namespace spire {
 
@@ -46,7 +47,8 @@ static std::string option_text(const Json& o) {
 }
 
 EventScreen::EventScreen(SceneLibrary* lib)
-    : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), ancient_(false), line_(0), laid_out_(false),
+    : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), sparring_(false), spar_at_(0),
+      ancient_(false), line_(0), laid_out_(false),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
 
@@ -109,6 +111,15 @@ Node* EventScreen::build_combat(const Json& d) {
     }
     if (!room) { delete combat_; combat_ = NULL; delete lay; return NULL; }
     box->add_child(room);
+    /* PunchOff.AfterEventStarted's sparring lasts until I Can Take Them
+     * (TakeThem cancels it) or the room is left; the left construct turns
+     * back when it ends. */
+    sparring_ = false;
+    spar_at_ = 0;
+    if (d["event_id"].str() == "punch_off")
+        for (size_t i = 0; i < d["options"].size(); ++i)
+            if (d["options"][i]["text_key"].str().compare(0, 23, "PUNCH_OFF.pages.INITIAL") == 0) sparring_ = true;
+    if (d["event_id"].str() == "punch_off") combat_->set_creature_flipped("e1", sparring_);
     Node* desc = lay->find_unique("EventDescription");
     set_label(desc, d["description_bbcode"].is_string() ? d["description_bbcode"].str() : d["description"].str());
     if (desc && desc->type == "RichTextLabel") {
@@ -401,10 +412,31 @@ std::string EventScreen::input(const PadState& pad) {
     return std::string();
 }
 
+/* One exchange of PunchEachOther: an attack, 0.1 s later the blunt hit and
+ * spark on the other construct and its Hit, 1.2 s later the other way. */
+static Json spar_steps() {
+    static const char* const STEPS =
+        "[[{\"t\":\"anim\",\"who\":\"e1\",\"name\":\"Attack\",\"wait\":0},{\"t\":\"wait\",\"ms\":100},"
+        "{\"t\":\"vfx\",\"path\":\"vfx/vfx_attack_blunt\",\"who\":\"e2\",\"at\":\"center\"},"
+        "{\"t\":\"ui\",\"call\":\"NHitSparkVfx.Create\",\"args\":[\"e2\",false]},"
+        "{\"t\":\"anim\",\"who\":\"e2\",\"name\":\"Hit\",\"wait\":0},{\"t\":\"wait\",\"ms\":1200},"
+        "{\"t\":\"anim\",\"who\":\"e2\",\"name\":\"Attack\",\"wait\":0},{\"t\":\"wait\",\"ms\":100},"
+        "{\"t\":\"vfx\",\"path\":\"vfx/vfx_attack_blunt\",\"who\":\"e1\",\"at\":\"center\"},"
+        "{\"t\":\"ui\",\"call\":\"NHitSparkVfx.Create\",\"args\":[\"e1\",false]},"
+        "{\"t\":\"anim\",\"who\":\"e1\",\"name\":\"Hit\",\"wait\":0}]]";
+    std::string error;
+    return Json::parse(STEPS, strlen(STEPS), &error);
+}
+
 void EventScreen::frame(double dt) {
     float before = time_;
     time_ += (float)dt;
     tweens_.update(dt);
+    if (sparring_ && combat_ && time_ >= spar_at_) {
+        static const Json steps = spar_steps();
+        combat_->play_steps(steps);
+        spar_at_ += 2.6f;
+    }
     for (size_t i = 0; i < options_.size(); ++i) {
         Option& op = options_[i];
         /* The slide moves the button's contents (its own place is the

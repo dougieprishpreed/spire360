@@ -10,6 +10,70 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 9 (2026-10-21): flashes, room cues, deck previews
+
+- Relic and power flashes: logic hooks `relic.flashed`
+  (Player.OnRelicFlashed) and `power.flashed` (PowerModel.Flash) record
+  `relic_flash` / `power_flash` cues. Combat shows NRelicFlashVfx over each
+  target's hitbox top, NPowerFlashVfx's big icon, and the top bar holder's
+  flash particles (`make_relic_holder_flash`, shared with the top bar).
+- Mirror: screen mode SCREEN_AT_UV for screencap.tres; NMirrorVfx script.
+- Outside fights (`engine/game/room_cues.cpp`): the hurt vignette, damage
+  numbers (the local player's at a quarter of the width, half the height),
+  PlayerFullscreenHealVfx (smoky vignette and crosses) and relic holder
+  flashes from the response's steps. NDamageNumVfx is one self-running
+  node (`make_damage_number`) for combat and rooms.
+- Top bar: a relic new since the decision before rises into its holder and
+  flashes (PlayNewlyAcquiredAnimation; every RelicCmd.Obtain plays it).
+- Deck previews (`engine/game/deck_previews.cpp`, NRun.GlobalUi): the
+  logic records `deck_card` cues (add, show, remove, upgrade, transform,
+  enchant) with the card's view, from CardCmd.Preview /
+  PreviewCardPileAdd, CardPileCmd.RemoveFromDeck, FinalizeUpgradeInternal
+  inside CardCmd.Upgrade, AfterTransformedFrom/To inside CardCmd.Transform
+  and NCardEnchantVfx.Create. The client's layer stays over the screens
+  (previews outlive the page or room that started them) with the row,
+  grid, event and messy containers laid out as their scripts do, the
+  remove / upgrade / transform (NCardTransformShineVfx) / enchant
+  timelines, then NCardFlyVfx into the top bar's deck with the card trail.
+  Hooks never enumerate lazy arguments (they may draw from an RNG).
+  Not drawn yet: the enchant emboss (EnchantmentVfxOverride's viewport
+  icon and progress shader); the enchanted card shows its tab as it is.
+- Patcher: `call_before` (Hooks.Before on entry), covered by the patch test
+  (`sh logic/tests/run_patcher_test.sh <outdir>`).
+- Fixes: a played card counts as failed only if the combat history has no
+  play of it (Shining Strike drawn straight back into its slot was
+  reported unplayable, 23 errors in the Regent soak); the client's
+  last_error is the last command's (it stuck, so every later screen
+  counted as an error) and error retries count per decision; shop
+  purchase logs read the item before the entry clears (the "Buy potion
+  failed" lines were successful purchases).
+- spire_play `--frames-after N[:EVERY]`: every EVERY-th frame (default 10)
+  while the steps after screen N play (its response, its settle).
+  `--settle` is a frame count (integer).
+- Audio: a voice that does not start logs why once per sample, and the
+  first time all 64 voices are taken the mixer lists what holds them.
+- Whole-run soak (`sh work/soak.sh [LANE1 LANE2]`, two lanes): all five
+  characters ran clean of crashes and stalls; after the fixes Regent and
+  Defect have no logic errors. Open: Regent hits the 64-voice cap (17
+  sounds not started), Defect twice; the listing (a re-run is in
+  work/soak/) says what fills them. FMOD steals voices rather than
+  refusing new ones.
+- Content mismatches (keep visible, as Vine Shambler / Slithering
+  Strangler): Bowlbug Silk and Living Shield use MonsterModel's default
+  AttackSfx path, which the installed bank does not have.
+- Gaps sweep (work/gaps8, 3724 decisions): left are NPowerUpVfx's 3D back
+  layer, the Spine dark colour timelines, Aeonglass's stale RaySlot and
+  the absent audio events; the three shader entries were a stale binary
+  (current build: 0 gaps on those traces).
+- Punch-Off: PunchEachOther runs only with creature nodes, so the event
+  screen plays it on its visual-only room (the left construct mirrored,
+  an exchange each 2.6 s as synthesized steps) while the INITIAL page is
+  up.
+- Still open: screen shake outside fights (rooms
+  set their own target: NEventRoom's container, the merchant, rest site
+  and treasure rooms), The Architect's speech bubbles, NPowerUpVfx's 3D
+  layer, the enchant emboss.
+
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights
 
 - Effect shaders 42-58 (engine/gfx/effects.h; software + D3D9 each): the

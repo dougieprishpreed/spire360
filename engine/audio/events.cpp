@@ -396,6 +396,11 @@ struct AudioEvents::Impl {
                         const std::string& p = sample["path"].str();
                         if (!system->warned[p]) {
                             log_warn("audio voice not started: %s at frame %u (%s)", p.c_str(), frame, system->mixer.last_failure());
+                            if (!system->described && system->mixer.active_voices() >= 64) {
+                                /* the first time the voices run out: what holds them */
+                                system->described = true;
+                                log_warn("audio voices: %s", system->mixer.describe().c_str());
+                            }
                             system->warned[p] = true;
                         }
                     } else ++system->voices_started;
@@ -520,7 +525,8 @@ struct AudioEvents::Impl {
     unsigned missing;
     std::map<std::string, bool> warned;
     u64 voices_started;
-    Impl(const Pack* p, u32 rate) : pack(p), mixer(p, rate), rng(0x3a97bc25u), next_id(1), errors(0), missing(0), voices_started(0) {
+    bool described; /* the voices listed once they ran out */
+    Impl(const Pack* p, u32 rate) : pack(p), mixer(p, rate), rng(0x3a97bc25u), next_id(1), errors(0), missing(0), voices_started(0), described(false) {
         read_json(pack, "audio/runtime.json", index);
     }
     ~Impl() { stop_all(0); for (std::map<std::string, Bank*>::iterator i = banks.begin(); i != banks.end(); ++i) delete i->second; }

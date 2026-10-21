@@ -62,6 +62,10 @@ private:
     bool enabled_; /* the options take the pad */
     float enable_at_;
     float time_;
+    /* PunchOff.PunchEachOther: the constructs spar on the first page (the
+     * left one mirrored), one exchange each 2.6 s. */
+    bool sparring_;
+    float spar_at_;
     TweenSet tweens_;
 
     /* Ancient layout. */

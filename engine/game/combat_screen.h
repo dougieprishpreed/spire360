@@ -62,6 +62,8 @@ public:
     void set_final() { final_ = true; }
     /* NCombatRoom VisualOnly: event scenery, with inactive creature UI. */
     void set_visual_only() { visual_only_ = final_ = true; }
+    /* A creature's node mirrored (its Scale.X negated) or not. */
+    void set_creature_flipped(const std::string& who, bool flipped);
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
     /* NCombatRoom lives for the fight. Apply a response to that room;

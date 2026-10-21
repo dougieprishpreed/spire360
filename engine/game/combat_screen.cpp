@@ -2250,6 +2250,11 @@ bool CombatScreen::creature(const std::string& who, VfxCreature* out) {
     return true;
 }
 
+void CombatScreen::set_creature_flipped(const std::string& who, bool flipped) {
+    Creature* cr = creature_for(who);
+    if (cr && cr->node && (cr->node->scale.x < 0) != flipped) cr->node->scale.x = -cr->node->scale.x;
+}
+
 Node* CombatScreen::visuals_of(const std::string& who) {
     Creature* cr = creature_for(who);
     return cr ? cr->visuals : NULL;
