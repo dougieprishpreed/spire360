@@ -228,6 +228,22 @@
       "note": "Records a full-screen combat effect."
     },
     {
+      "id": "relic.flashed",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Entities.Players.Player",
+      "method": "OnRelicFlashed",
+      "optional": true,
+      "note": "RelicModel.Flash: the Player handler plays the relic's sound (recorded) and gives each target an NRelicFlashVfx, which TestMode's null VFX container skips; the top bar's holder flashes too (NRelicInventoryHolder). Recorded as a relic_flash cue."
+    },
+    {
+      "id": "power.flashed",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.PowerModel",
+      "method": "Flash",
+      "optional": true,
+      "note": "PowerModel.Flash: only UI subscribers (NCreature's NPowerFlashVfx, NPower's icon particles). Recorded as a power_flash cue when the power would play its VFX."
+    },
+    {
       "id": "anim.trigger",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Commands.CreatureCmd",

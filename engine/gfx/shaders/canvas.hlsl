@@ -85,6 +85,10 @@ float median3(float r, float g, float b) {
 float4 ps_main(VsOut i) : COLOR {
     [branch] if (g_scr.x > 0.5) {
         // Screen-reading shaders (ScreenParams); the vertex colour is not applied.
+        [branch] if (g_scr.x > 8.5) {
+            // screencap: the copy at the quad's own uv.
+            return tex2Dlod(g_scrA, float4(i.uv, 0.0, 0.0));
+        }
         [branch] if (g_scr.x > 7.5) {
             // Chromatic aberration: red and blue read along the quad's
             // radius by the distance curve and the texel's red.

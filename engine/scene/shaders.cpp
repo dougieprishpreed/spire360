@@ -1381,6 +1381,12 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
          * is not ported. */
         return true;
     }
+    if (m->shader == "shaders/vfx/screencap.tres") {
+        ScreenParams p;
+        memset(&p, 0, sizeof(p));
+        p.mode = SCREEN_AT_UV;
+        return c.renderer()->set_screen(&p);
+    }
     if (m->shader == "shaders/dark_blur.gdshader") {
         ScreenParams p;
         memset(&p, 0, sizeof(p));

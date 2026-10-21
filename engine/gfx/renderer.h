@@ -95,9 +95,12 @@ struct VfxParams {
  *      noise(d, d).r * the texel's red, d the distance from the middle of
  *      the quad (noise: the distance curve); red from SCREEN_UV + dir / 2 *
  *      i, green at SCREEN_UV, blue from SCREEN_UV + dir * i, dir =
- *      normalize((0.5, 0.5) - UV); opaque. */
+ *      normalize((0.5, 0.5) - UV); opaque.
+ *  SCREEN_AT_UV (shaders/vfx/screencap.tres, the Reflections event's
+ *      mirror): the copy at the draw's own UV (the whole screen over the
+ *      quad). */
 enum ScreenMode { SCREEN_DARK = 1, SCREEN_NOISE = 2, SCREEN_RADIAL = 4, SCREEN_GLASS = 5, SCREEN_DOOM = 6, SCREEN_DISTORT = 7,
-                  SCREEN_CHROMA = 8 };
+                  SCREEN_CHROMA = 8, SCREEN_AT_UV = 9 };
 
 struct ScreenParams {
     int mode;

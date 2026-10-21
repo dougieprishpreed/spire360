@@ -5,6 +5,7 @@
 #include "loc.h"
 #include "../audio/game_audio.h"
 #include "ui_util.h"
+#include "top_bar.h"
 
 #include "../scene/controls.h"
 #include "../scene/tree.h"
@@ -2131,6 +2132,8 @@ void CombatScreen::apply_state(const Json& ch) {
     const std::string& type = ch["t"].str();
     Creature* c = creature_for(ch["who"].str());
     if (type == "card") { move_card(ch); return; }
+    if (type == "relic_flash") { flash_relic(ch); return; }
+    if (type == "power_flash") { flash_power(ch); return; }
     if (type == "orb_activate") { activate_orb(ch); return; }
     if (type == "orbs" && ch["orbs"].is_array()) {
         sync_orbs(ch["orbs"], ch["slots"].i(), true);
@@ -2954,6 +2957,165 @@ bool CombatScreen::fly(MovingCard& m, double dt) {
         return false;
     }
     return true;
+}
+
+/* ---- relic and power flashes ---- */
+
+/* A node that frees itself after its time (one-shot particles). */
+class FreeAfter : public ScriptBehavior {
+public:
+    explicit FreeAfter(double t) : left_(t) {}
+    virtual void process(Node* n, double dt) {
+        left_ -= dt;
+        if (left_ <= 0 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double left_;
+};
+
+/* NRelicFlashVfx.StartVfx: from 64 px below the top of the hitbox up to it
+ * (1 s, Expo Out); its three icons appear 0.2 s apart, each growing to 1.25
+ * (1 s, Cubic Out) while it fades out over 1.5 s. */
+class RelicFlashAnim : public ScriptBehavior {
+public:
+    explicit RelicFlashAnim(float y) : t_(0), y_(y) {}
+    virtual void process(Node* n, double dt) {
+        t_ += (float)dt;
+        if (n->is_control()) {
+            float k = minf(t_ / 1.0f, 1);
+            float e = k >= 1 ? 1 : 1 - powf(2, -10 * k);
+            Control* c = (Control*)n;
+            float h = c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
+            c->offset[SIDE_TOP] = y_ + 64 - 64 * e;
+            c->offset[SIDE_BOTTOM] = c->offset[SIDE_TOP] + h;
+        }
+        for (int i = 0; i < 3; ++i) {
+            Node* img = n->get_node(format("Image%d", i + 1));
+            if (!img || !img->is_control()) continue;
+            Control* c = (Control*)img;
+            float lt = t_ - 0.2f * (float)i;
+            if (lt < 0) {
+                c->modulate.a = 0;
+                continue;
+            }
+            float g = minf(lt / 1.0f, 1), u = 1 - g;
+            float s = 1 + 0.25f * (1 - u * u * u);
+            c->scale = Vec2(s, s);
+            c->modulate.a = maxf(1 - lt / 1.5f, 0);
+        }
+        if (t_ >= 1.95f && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    float t_, y_;
+};
+
+/* NPowerFlashVfx.StartVfx: the big icon grows to 0.4 (0.4 s) and fades in
+ * (0.25 s, Sine Out), then to 0.45 (0.4 s), then out (0.25 s, Sine In). */
+class PowerFlashAnim : public ScriptBehavior {
+public:
+    PowerFlashAnim(Node2D* sprite) : t_(0), sprite_(sprite), from_(sprite ? sprite->scale.x : 0) {}
+    virtual void process(Node* n, double dt) {
+        t_ += (float)dt;
+        if (sprite_) {
+            float s, a;
+            if (t_ < 0.4f) {
+                s = from_ + (0.4f - from_) * (t_ / 0.4f);
+                a = 1;
+            } else if (t_ < 0.8f) {
+                s = 0.4f + 0.05f * ((t_ - 0.4f) / 0.4f);
+                a = 1;
+            } else {
+                s = 0.45f;
+                float k = minf((t_ - 0.8f) / 0.25f, 1);
+                a = cosf(k * 1.5707963f);
+            }
+            sprite_->scale = Vec2(s, s);
+            sprite_->modulate.a = a;
+        }
+        if (t_ >= 1.05f && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    float t_;
+    Node2D* sprite_;
+    float from_;
+};
+
+void CombatScreen::flash_relic(const Json& cue) {
+    if (!root_) return;
+    const Json& relics = state_["player"]["relics"];
+    int index = cue["index"].i(-1);
+    if (index < 0 || index >= (int)relics.size()) return;
+    std::string base = relic_icon_base(relics[(size_t)index]);
+    Texture2DRes* icon = NULL;
+    /* NRelicInventoryHolder.DoFlash: the flash particles of the relic's icon
+     * over its holder in the top bar */
+    Node* bar = root_->get_node("TopBarLayer");
+    Node* row = bar ? find_named(bar, "RelicInventory") : NULL;
+    Node* holder = row && index < (int)row->children.size() ? row->children[(size_t)index] : NULL;
+    if (holder && holder->is_control()) {
+        Node* hi = holder->find_unique("Icon");
+        if (hi && hi->type == "TextureRect") icon = ((TextureRect*)hi)->texture;
+        Node* fx = instance(lib_, "scenes/vfx/relic_inventory_flash_vfx.tscn");
+        if (fx && fx->is_node2d()) {
+            Control* h = (Control*)holder;
+            ((Node2D*)fx)->position = h->global_transform().xform(h->size * 0.5f);
+            Node* p = fx->get_node("Particles");
+            if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D") && icon) ((Particles2D*)p)->texture = icon;
+            if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D")) ((Particles2D*)p)->restart();
+            fx->behavior = new FreeAfter(3.0);
+            root_->add_child(fx);
+        } else {
+            delete fx;
+        }
+    }
+    /* Player.OnRelicFlashed: NRelicFlashVfx at each target's top of hitbox */
+    const Json& targets = cue["targets"];
+    for (size_t i = 0; i < targets.size(); ++i) {
+        VfxCreature vc;
+        if (!creature(targets[i].str(), &vc)) continue;
+        Node* fx = instance(lib_, "scenes/vfx/relic_flash_vfx.tscn");
+        if (!fx || !fx->is_control()) {
+            delete fx;
+            continue;
+        }
+        for (int k = 1; k <= 3; ++k) {
+            Node* img = fx->get_node(format("Image%d", k));
+            if (!img) continue;
+            if (icon && img->type == "TextureRect") ((TextureRect*)img)->texture = icon;
+            else set_relic_icon(lib_, img, base);
+            if (img->is_canvas_item()) ((CanvasItem*)img)->modulate.a = 0;
+        }
+        Control* c = (Control*)fx;
+        float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], h = c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
+        for (int s2 = 0; s2 < 4; ++s2) c->anchor[s2] = 0;
+        float y = vc.top.y + c->offset[SIDE_TOP];
+        place(c, vc.top.x + c->offset[SIDE_LEFT], y + 64, w, h);
+        fx->behavior = new RelicFlashAnim(y);
+        root_->add_child(fx);
+    }
+}
+
+void CombatScreen::flash_power(const Json& cue) {
+    VfxCreature vc;
+    if (!root_ || !creature(cue["who"].str(), &vc)) return;
+    /* PowerModel.BigIcon: images/powers/<id>.png, else the beta one */
+    std::string id = lower(cue["power"].str());
+    Resource* r = lib_->ext("images/powers/" + id + ".png");
+    if (!r || !r->is_texture()) r = lib_->ext("images/powers/beta/" + id + ".png");
+    if (!r || !r->is_texture()) return;
+    Node* fx = instance(lib_, "scenes/vfx/power_flash_vfx.tscn");
+    Node* sp = fx ? fx->get_node("Sprite2D") : NULL;
+    if (!fx || !fx->is_node2d() || !sp || sp->type != "Sprite2D") {
+        delete fx;
+        return;
+    }
+    ((Sprite2D*)sp)->texture = (Texture2DRes*)r;
+    ((Node2D*)fx)->position = vc.center;
+    fx->behavior = new PowerFlashAnim((Node2D*)sp);
+    root_->add_child(fx);
 }
 
 /* ---- NCombatRoom's creature navigation ---- */

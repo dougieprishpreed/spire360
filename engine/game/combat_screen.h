@@ -319,6 +319,9 @@ private:
         Node* path_scene;  /* the power swoosh's scene (owned here) */
     };
     void start_flight(MovingCard& m, int kind, const std::string& pile);
+    /* RelicModel.Flash / PowerModel.Flash (relic_flash / power_flash cues) */
+    void flash_relic(const Json& cue);
+    void flash_power(const Json& cue);
     bool fly(MovingCard& m, double dt); /* false once the card is gone */
     struct Trail {
         Node* node;

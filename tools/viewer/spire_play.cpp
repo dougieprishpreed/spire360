@@ -196,6 +196,7 @@ int main(int argc, char** argv) {
     unsigned auto_seed = 1;
     std::vector<unsigned> pad_script;
     std::vector<int> shots_at;
+    int frames_after = -1, frames_every = 10; /* screen after which every so many frames are saved */
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
@@ -221,6 +222,13 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
         else if (strcmp(argv[i], "--no-shots") == 0) no_shots = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
+            /* N[:EVERY] */
+            const char* a = argv[++i];
+            frames_after = atoi(a);
+            if (strchr(a, ':')) frames_every = atoi(strchr(a, ':') + 1);
+            if (frames_every < 1) frames_every = 1;
+        }
         else if (strcmp(argv[i], "--settle") == 0 && i + 1 < argc) settle = atoi(argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
@@ -375,7 +383,7 @@ int main(int argc, char** argv) {
     size_t pad_at = 0;
     game.start_run(character, seed);
     if (hp > 0) game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
-    int shown = 0, idle = 0;
+    int shown = 0, idle = 0, frame_n = 0;
     while (shown < steps) {
         PadState pad;
         if (pad_at < pad_script.size() && !game.busy() &&
@@ -410,6 +418,13 @@ int main(int argc, char** argv) {
                 tree.process(1.0 / 60.0);
                 audio.update(1.0 / 60.0);
                 tree.layout(1);
+                if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
+                    /* the steps after that screen as they play */
+                    sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                    tree.render(canvas);
+                    sw.end();
+                    write_png(format("%s/%04d_f%03d.png", out_dir.c_str(), shown, frame_n).c_str(), sw.framebuffer());
+                }
             }
             sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
             tree.render(canvas);
@@ -436,6 +451,13 @@ int main(int argc, char** argv) {
             tree.process(1.0 / 60.0);
             audio.update(1.0 / 60.0);
             tree.layout(1);
+            if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
+                /* the steps after that screen as they play */
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                tree.render(canvas);
+                sw.end();
+                write_png(format("%s/%04d_f%03d.png", out_dir.c_str(), shown, frame_n).c_str(), sw.framebuffer());
+            }
             usleep(2000);
             if (++idle > 60000) { /* 2 minutes without an answer */
                 fprintf(stderr, "spire_play: no answer from the logic\n");

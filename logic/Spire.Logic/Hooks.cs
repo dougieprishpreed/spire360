@@ -108,6 +108,27 @@ internal static partial class Hooks
             if (a.Length > 0 && a[0] is string path)
                 Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = path, ["at"] = "screen" });
         });
+        // RelicModel.Flash (Player.OnRelicFlashed: this, relic, targets) and
+        // PowerModel.Flash (this): the flashes the UI would show.
+        Spire.HookBridge.Hooks.RegisterAfter("relic.flashed", (a, r) =>
+        {
+            if (a.Length > 2 && a[0] is Player p && a[1] is RelicModel relic)
+            {
+                var who = new List<string>();
+                if (a[2] is IEnumerable<Creature> targets)
+                    foreach (var t in targets) who.Add(Steps.Who(t));
+                Steps.Cue(new Dictionary<string, object?>
+                {
+                    ["t"] = "relic_flash", ["relic"] = relic.Id.Entry, ["index"] = p.Relics.ToList().IndexOf(relic),
+                    ["targets"] = who,
+                });
+            }
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("power.flashed", (a, r) =>
+        {
+            if (a.Length > 0 && a[0] is PowerModel pw && pw.Owner != null && pw.ShouldPlayVfx)
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "power_flash", ["power"] = pw.Id.Entry, ["who"] = Steps.Who(pw.Owner) });
+        });
         Spire.HookBridge.Hooks.RegisterAfter("anim.trigger", (a, r) =>
         {
             if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)

@@ -204,6 +204,31 @@ static float exported_number(Node* n, const char* key, float fallback = 0) {
 
 /* NShaker interpolates between chaotic offsets, with its frequency in
  * seconds. NOrbVfx reduces Strength with a sine OutIn tween. */
+/* NMirrorVfx (the Reflections event): its three masks and their
+ * reflections of the screen scaled 1.05 + noise and turned by |noise| * 10,
+ * 20, 30 degrees (FastNoiseLite's defaults, seeds 0..5, at TIME * 2). */
+class MirrorVfx : public ScriptBehavior {
+public:
+    MirrorVfx() : t_(0) {}
+    virtual void process(Node* n, double dt) {
+        t_ += (float)dt * 2;
+        for (int i = 0; i < 3; ++i) {
+            Node* mask = n->get_node(format("Mask%d", i + 1));
+            Node* refl = mask ? mask->get_node("Reflection") : NULL;
+            float s = 1.05f + fbm(t_, 0.01f, i * 2);
+            float r = fabsf(fbm(t_, 0.01f, i * 2 + 1)) * 10.0f * (float)(i + 1);
+            if (mask && mask->is_node2d()) {
+                ((Node2D*)mask)->scale = Vec2(s, s);
+                ((Node2D*)mask)->rotation = r * 3.14159265f / 180.0f;
+            }
+            if (refl && refl->is_control()) ((Control*)refl)->scale = Vec2(s, s);
+        }
+    }
+
+private:
+    float t_;
+};
+
 class Shaker : public ScriptBehavior {
 public:
     explicit Shaker(Node* n) : target_(NULL), timer_(0), previous_rot_(0), rotation_(0),
@@ -407,6 +432,7 @@ ScriptBehavior* make_big_slash(Node*) { return new BigSlash(false); }
 ScriptBehavior* make_big_slash_impact(Node*) { return new BigSlash(true); }
 ScriptBehavior* make_hit_spark(Node*) { return new HitSpark(); }
 ScriptBehavior* make_shaker(Node* n) { return new Shaker(n); }
+ScriptBehavior* make_mirror(Node*) { return new MirrorVfx(); }
 ScriptBehavior* make_projectile_handler(Node* n) { return new ProjectileHandler(n); }
 ScriptBehavior* make_bezier_trail(Node* n) { return new Trail(n, 0); }
 /* NCardTrail: NBezierTrail's points, 0.8 s each */
@@ -443,6 +469,7 @@ void install_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/Utilities/NVfxProjectileHandler.cs", make_projectile_handler);
     register_script("res://src/Core/Nodes/Vfx/NBezierTrail.cs", make_bezier_trail);
     register_script("res://src/Core/Nodes/Vfx/NBasicTrail.cs", make_basic_trail);
+    register_script("res://src/Core/Nodes/Vfx/NMirrorVfx.cs", make_mirror);
     register_script("res://src/Core/Nodes/Vfx/NCardTrail.cs", make_card_trail);
     register_script("res://src/Core/Nodes/Vfx/Utilities/NTrail2D.cs", make_node_trail);
 }

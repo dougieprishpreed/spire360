@@ -1431,6 +1431,10 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                     s[1] = acc[1] / n;
                     s[2] = acc[2] / n;
                     s[3] = 1;
+                } else if (screen_.mode == SCREEN_AT_UV) {
+                    float u = A.uv.x * w0 + B.uv.x * w1 + C.uv.x * w2;
+                    float v = A.uv.y * w0 + B.uv.y * w1 + C.uv.y * w2;
+                    sample_screen(u, v, 0, s);
                 } else if (screen_.mode == SCREEN_DARK) {
                     sample_screen(su, sv, screen_.lod, s);
                     /* mix(color, vec4(0, 0, 0, 1), k) on the straight colour */
