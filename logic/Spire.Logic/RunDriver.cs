@@ -901,18 +901,19 @@ public partial class RunDriver
         Log($"Playing card {card.GetType().Name} (index {cardIndex}) targeting {(target != null ? target.Monster?.GetType().Name ?? "creature" : "none")}");
 
         var handCountBefore = hand.Count;
+        var playsBefore = PlaysStarted(card);
 
         var playAction = new PlayCardAction(card, target);
         RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
         WaitForActionExecutor();
 
-        // Check if card play had no effect (hand unchanged, same card still at same index).
-        // Exception: some cards (e.g. Particle Wall) are 0-cost and intentionally return
-        // themselves to Hand after a successful play, so "still in hand" is expected and NOT
-        // a failure — flagging it killed otherwise-valid runs.
+        // Check if card play had no effect (hand unchanged, same card still at same index)
+        // and the combat history has no play of it. A played card can be back in the same
+        // slot: Particle Wall returns to the hand, Shining Strike goes on top of the draw
+        // pile and a draw can bring it straight back.
         var handAfter = pcs.Hand.Cards;
         if (handAfter.Count == handCountBefore && cardIndex < handAfter.Count && handAfter[cardIndex] == card
-            && !ReturnsToHandOnPlay(card))
+            && PlaysStarted(card) <= playsBefore)
         {
             return Error($"Card could not be played (still in hand after action): {card.GetType().Name} [{card.Id}]");
         }
@@ -3388,29 +3389,13 @@ public partial class RunDriver
         return ctx;
     }
 
-    // CardModel.GetResultPileTypeForCardPlay() is protected/virtual; cache the reflective handle.
-    private static System.Reflection.MethodInfo? _getResultPileMethod;
-
     /// <summary>
-    /// True if this card is designed to return itself to the player's Hand after being played
-    /// (PileType.Hand == 2), e.g. Particle Wall ("Gain Block. Return this card to your Hand.").
-    /// Such cards legitimately remain in hand post-play, so the "still in hand" no-effect guard
-    /// must not treat them as failures.
+    /// How many plays of this card the combat history has started (CardPlayStartedEntry).
     /// </summary>
-    private static bool ReturnsToHandOnPlay(CardModel card)
+    private static int PlaysStarted(CardModel card)
     {
-        try
-        {
-            _getResultPileMethod ??= typeof(CardModel).GetMethod(
-                "GetResultPileTypeForCardPlay",
-                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-            var pile = _getResultPileMethod?.Invoke(card, null);  // virtual → dispatches to override
-            return pile != null && Convert.ToInt32(pile) == 2;    // PileType.Hand
-        }
-        catch
-        {
-            return false;
-        }
+        var history = CombatManager.Instance?.History;
+        return history == null ? 0 : history.CardPlaysStarted.Count(e => e.CardPlay.Card == card);
     }
 
     /// <summary>

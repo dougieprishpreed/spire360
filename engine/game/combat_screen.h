@@ -255,11 +255,6 @@ private:
         int amount;
         Json data;
     };
-    struct FlyingNumber {
-        Node2D* node;
-        Vec2 velocity;
-        double until;
-    };
     Creature* creature_for(const std::string& who);
     bool vfx_position(const Cue& c, Vec2* out);
     void fire(const Cue& c);
@@ -286,7 +281,6 @@ private:
     bool final_;
     bool visual_only_;
     Control* vfx_box_;                    /* %CombatVfxContainer (screen coordinates) */
-    std::vector<FlyingNumber> numbers_;
     struct Banner {
         Control* node;
         double until; /* hidden then (QueueFree) */

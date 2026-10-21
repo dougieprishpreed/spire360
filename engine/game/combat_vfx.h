@@ -66,6 +66,11 @@ bool death_delayed(Node* visuals);
  * NCombatRoom.CombatVfxContainer. */
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors);
 bool is_combat_vfx_call(const std::string& call);
+/* NDamageNumVfx.Create(globalPosition, damage) (scenes/vfx/vfx_damage_num.tscn)
+ * at a position in its parent's (screen) coordinates: thrown up (gravity
+ * 2000 px/s2), red to cream, shrinking from 2.5, fading out over 2 s, then
+ * freed. NULL without the scene. */
+Node* make_damage_number(SceneLibrary* lib, const Vec2& at, int amount);
 /* NCreature.AnimDie's fade (MonsterModel.ShouldFadeAfterDeath), added to
  * parent (the creature's container): after delay (its death animation's
  * rest and half a second), NMonsterDeathVfx takes the creature's body

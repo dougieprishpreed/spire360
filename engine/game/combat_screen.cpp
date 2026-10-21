@@ -1373,16 +1373,6 @@ void CombatScreen::process(double dt) {
             banners_[i].node->queue_free();
             banners_.erase(banners_.begin() + (long)i);
         }
-    for (size_t i = numbers_.size(); i-- > 0;) {
-        FlyingNumber& n = numbers_[i];
-        if (life_t_ >= n.until) {
-            n.node->queue_free();
-            numbers_.erase(numbers_.begin() + (long)i);
-            continue;
-        }
-        n.node->position = n.node->position + n.velocity * t;
-        n.velocity = n.velocity + Vec2(0, 2000) * t;
-    }
     if (arrow_ && arrow_->visible && (play_card_ >= 0 || aiming_)) {
         arrow_pos_ = arrow_pos_ + (arrow_to_ - arrow_pos_) * minf(1.0f, t * 14.0f);
         update_arrow(arrow_pos_);
@@ -1791,7 +1781,6 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     next_cue_ = 0;
     cue_t_ = 0;
     busy_until_ = 0;
-    numbers_.clear();
     root_ = root;
     state_ = d;
     vfx_box_ = ctl(root, "CombatVfxContainer");
@@ -2515,32 +2504,11 @@ void CombatScreen::fire(const Cue& c) {
         vfx_box_->add_child(fx);
         return;
     }
-    /* CUE_DAMAGE: NDamageNumVfx (scenes/vfx/vfx_damage_num.tscn) 100 px
-     * above the centre, thrown up, red to cream, fading over 2 s. */
-    Node* num = instance(lib_, "scenes/vfx/vfx_damage_num.tscn");
-    if (!num || !num->is_node2d()) {
-        delete num;
-        return;
-    }
-    Node2D* n = (Node2D*)num;
+    /* CUE_DAMAGE: NDamageNumVfx.Create(target): 100 px above the centre,
+     * +-10 x +-5 px. */
     float rx = (float)(chaotic_rand() % 2001) / 1000.0f - 1.0f, ry = (float)(chaotic_rand() % 2001) / 1000.0f - 1.0f;
-    n->position = at + Vec2(rx * 10.0f, -100.0f + ry * 5.0f);
-    n->rotation = ((float)(chaotic_rand() % 1001) / 100.0f - 5.0f) * PI_F / 180.0f;
-    Node* label = num->get_node("Label");
-    set_label(label, format("%d", c.amount));
-    if (label && label->is_control()) {
-        float k = 1.2f + (float)(chaotic_rand() % 101) / 1000.0f;
-        ((Control*)label)->scale = Vec2(k, k);
-    }
-    Color cream = hex(0xFFF6E2);
-    tweens_.tween(&n->modulate.r, cream.r, 0.5f, TRANS_CUBIC, EASE_OUT);
-    tweens_.tween(&n->modulate.g, cream.g, 0.5f, TRANS_CUBIC, EASE_OUT);
-    tweens_.tween(&n->modulate.b, cream.b, 0.5f, TRANS_CUBIC, EASE_OUT);
-    tweens_.tween(&n->modulate.a, 0.0f, 2.0f, TRANS_QUAD, EASE_IN);
-    tweens_.tween_from(&n->scale, Vec2(2.5f, 2.5f), Vec2(1, 1), 1.2f, TRANS_QUAD, EASE_OUT);
-    vfx_box_->add_child(num);
-    FlyingNumber f = { n, Vec2(rx * 100.0f, -700.0f - (float)(chaotic_rand() % 101)), life_t_ + 2.05 };
-    numbers_.push_back(f);
+    Node* num = make_damage_number(lib_, at + Vec2(rx * 10.0f, -100.0f + ry * 5.0f), c.amount);
+    if (num) vfx_box_->add_child(num);
 }
 
 void CombatScreen::add_cue(const Cue& c) {
@@ -2961,19 +2929,6 @@ bool CombatScreen::fly(MovingCard& m, double dt) {
 
 /* ---- relic and power flashes ---- */
 
-/* A node that frees itself after its time (one-shot particles). */
-class FreeAfter : public ScriptBehavior {
-public:
-    explicit FreeAfter(double t) : left_(t) {}
-    virtual void process(Node* n, double dt) {
-        left_ -= dt;
-        if (left_ <= 0 && !n->queued_for_deletion()) n->queue_free();
-    }
-
-private:
-    double left_;
-};
-
 /* NRelicFlashVfx.StartVfx: from 64 px below the top of the hitbox up to it
  * (1 s, Expo Out); its three icons appear 0.2 s apart, each growing to 1.25
  * (1 s, Cubic Out) while it fades out over 1.5 s. */
@@ -3058,18 +3013,8 @@ void CombatScreen::flash_relic(const Json& cue) {
     if (holder && holder->is_control()) {
         Node* hi = holder->find_unique("Icon");
         if (hi && hi->type == "TextureRect") icon = ((TextureRect*)hi)->texture;
-        Node* fx = instance(lib_, "scenes/vfx/relic_inventory_flash_vfx.tscn");
-        if (fx && fx->is_node2d()) {
-            Control* h = (Control*)holder;
-            ((Node2D*)fx)->position = h->global_transform().xform(h->size * 0.5f);
-            Node* p = fx->get_node("Particles");
-            if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D") && icon) ((Particles2D*)p)->texture = icon;
-            if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D")) ((Particles2D*)p)->restart();
-            fx->behavior = new FreeAfter(3.0);
-            root_->add_child(fx);
-        } else {
-            delete fx;
-        }
+        Node* fx = make_relic_holder_flash(lib_, (Control*)holder);
+        if (fx) root_->add_child(fx);
     }
     /* Player.OnRelicFlashed: NRelicFlashVfx at each target's top of hitbox */
     const Json& targets = cue["targets"];

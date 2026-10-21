@@ -27,6 +27,7 @@
 #include "rest_site_screen.h"
 #include "rewards_screen.h"
 #include "shop_screen.h"
+#include "room_cues.h"
 #include "top_bar.h"
 #include "treasure_screen.h"
 #include "crystal_sphere_screen.h"
@@ -327,6 +328,8 @@ void GameClient::send(const std::string& command) {
         }
     }
     waiting_ = true;
+    /* last_error: what the last command (not the retry after it) did */
+    if (command != "{\"cmd\":\"get_state\"}") error_.clear();
     if (!link_->send(command)) error_ = "the logic is not running";
 }
 
@@ -540,6 +543,7 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
 }
 
 void GameClient::show(const Json& d) {
+    errors_ = 0; /* the retries after an error count per decision */
     std::string prev_kind = decision_["decision"].str();
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];
@@ -820,6 +824,8 @@ void GameClient::show(const Json& d) {
         Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
         if (bar) screen_->add_child(bar);
     }
+    /* What the choice did outside a fight (the fights play their own). */
+    if (!in_fight && kind != "game_over") play_room_cues(lib_, screen_, d);
     potions_.attach(screen_, d["player"]);
     tree_->root()->add_child(screen_);
     if (transition_ && transition_->parent) {

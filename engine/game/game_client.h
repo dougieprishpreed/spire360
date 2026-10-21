@@ -94,7 +94,7 @@ public:
     bool paused() const { return pause_ != NULL; }
     /* The decision shown has no ported screen: the plain list of choices. */
     bool showing_plain_list() const { return plain_; }
-    /* The last error the logic reported ("" if none). */
+    /* The logic's error for the last command sent, empty when it had none. */
     const std::string& last_error() const { return error_; }
 
     static std::vector<Choice> choices(const Json& d);

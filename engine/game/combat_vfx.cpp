@@ -1800,6 +1800,56 @@ static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGround
                                            "NSweepingBeamVfx", "NGrandFinaleVfx", "NHellraiserVfx",
                                            "NAdditiveOverlayVfx", "NDoomVfx", "NDoomOverlayVfx" };
 
+namespace {
+/* NDamageNumVfx._Ready / AnimVfx / _Process. */
+class DamageNumber : public ScriptBehavior {
+public:
+    DamageNumber(const Vec2& velocity) : velocity_(velocity), left_(2.0) {}
+    TweenSet tweens;
+    virtual void process(Node* n, double dt) {
+        float t = (float)dt;
+        tweens.update(dt);
+        Node2D* d = (Node2D*)n;
+        d->position = d->position + velocity_ * t;
+        velocity_ = velocity_ + Vec2(0, 2000) * t;
+        left_ -= dt;
+        if (left_ <= 0 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    Vec2 velocity_;
+    double left_;
+};
+} /* namespace */
+
+Node* make_damage_number(SceneLibrary* lib, const Vec2& at, int amount) {
+    Node* num = instance(lib, "scenes/vfx/vfx_damage_num.tscn");
+    if (!num || !num->is_node2d()) {
+        delete num;
+        return NULL;
+    }
+    Node2D* n = (Node2D*)num;
+    n->position = at;
+    Node* label = num->get_node("Label");
+    set_label(label, format("%d", amount));
+    float vx = (float)(chaotic_rand() % 2001) / 10.0f - 100.0f;
+    float vy = -700.0f - (float)(chaotic_rand() % 101);
+    if (label && label->is_control()) {
+        float k = 1.2f + (float)(chaotic_rand() % 101) / 1000.0f;
+        ((Control*)label)->scale = Vec2(k, k);
+    }
+    n->rotation = ((float)(chaotic_rand() % 1001) / 100.0f - 5.0f) * 3.14159265f / 180.0f;
+    DamageNumber* b = new DamageNumber(Vec2(vx, vy));
+    Color cream = hex(0xFFF6E2);
+    b->tweens.tween(&n->modulate.r, cream.r, 0.5f, TRANS_CUBIC, EASE_OUT);
+    b->tweens.tween(&n->modulate.g, cream.g, 0.5f, TRANS_CUBIC, EASE_OUT);
+    b->tweens.tween(&n->modulate.b, cream.b, 0.5f, TRANS_CUBIC, EASE_OUT);
+    b->tweens.tween(&n->modulate.a, 0.0f, 2.0f, TRANS_QUAD, EASE_IN);
+    b->tweens.tween_from(&n->scale, Vec2(2.5f, 2.5f), Vec2(1, 1), 1.2f, TRANS_QUAD, EASE_OUT);
+    num->behavior = b;
+    return num;
+}
+
 bool is_combat_vfx_call(const std::string& call) {
     if (call == "NCombatRoom.PlaySplashVfx") return true;
     std::string cls = class_of(call);

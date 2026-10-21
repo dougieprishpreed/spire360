@@ -4,24 +4,80 @@
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
+#include "../scene/particles.h"
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/tween.h"
 
 #include <math.h>
 #include <string.h>
+#include <vector>
 
 namespace spire {
 
 namespace {
-/* The bar's own animations (the potions'), run by the bar's node: its
- * tweens go with it. */
+/* A node that frees itself after its time (one-shot particles). */
+class FreeAfter : public ScriptBehavior {
+public:
+    explicit FreeAfter(double t) : left_(t) {}
+    virtual void process(Node* n, double dt) {
+        left_ -= dt;
+        if (left_ <= 0 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double left_;
+};
+
+/* The bar's own animations (the potions' and relics'), run by the bar's
+ * node: its tweens go with it. A new relic's holder flashes when its icon
+ * is in place (PlayNewlyAcquiredAnimation's DoFlash callback). */
 class BarAnimations : public ScriptBehavior {
 public:
+    struct Flash {
+        Control* holder;
+        float at;
+    };
+    BarAnimations(SceneLibrary* lib) : lib_(lib), time_(0) {}
     TweenSet tweens;
-    virtual void process(Node*, double dt) { tweens.update(dt); }
+    std::vector<Flash> flashes;
+    virtual void process(Node* n, double dt) {
+        tweens.update(dt);
+        time_ += (float)dt;
+        for (size_t i = 0; i < flashes.size();) {
+            if (time_ + 1e-4f < flashes[i].at) {
+                ++i;
+                continue;
+            }
+            Node* fx = make_relic_holder_flash(lib_, flashes[i].holder);
+            if (fx && n->parent) n->parent->add_child(fx);
+            else delete fx;
+            flashes.erase(flashes.begin() + (long)i);
+        }
+    }
+
+private:
+    SceneLibrary* lib_;
+    float time_;
 };
 } /* namespace */
+
+Node* make_relic_holder_flash(SceneLibrary* lib, Control* holder) {
+    Node* fx = instance(lib, "scenes/vfx/relic_inventory_flash_vfx.tscn");
+    if (!fx || !fx->is_node2d()) {
+        delete fx;
+        return NULL;
+    }
+    ((Node2D*)fx)->position = holder->global_transform().xform(holder->size * 0.5f);
+    Node* hi = holder->find_unique("Icon");
+    Node* p = fx->get_node("Particles");
+    if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D")) {
+        if (hi && hi->type == "TextureRect" && ((TextureRect*)hi)->texture) ((Particles2D*)p)->texture = ((TextureRect*)hi)->texture;
+        ((Particles2D*)p)->restart();
+    }
+    fx->behavior = new FreeAfter(3.0);
+    return fx;
+}
 
 /* ImageHelper.GetRoomIconPath: images/ui/run_history/<suffix>.png, "" for
  * none (the act-start map room). */
@@ -205,10 +261,21 @@ static void make_potions(SceneLibrary* lib, Node* bar, const Json& player, const
     }
 }
 
+static int count_id(const Json& relics, const std::string& id, size_t n) {
+    int c = 0;
+    for (size_t i = 0; i < n && i < relics.size(); ++i)
+        if (relics[i]["id"].str() == id) ++c;
+    return c;
+}
+
 /* NRelicInventory: the relics in acquisition order, 68 px each, in a row
  * under the bar (run.tscn, which places it, is not in the bundles: the
- * game's screenshots show the row from x ~11, y ~81). */
-static Node* make_relics(SceneLibrary* lib, const Json& player) {
+ * game's screenshots show the row from x ~11, y ~81). With the player as
+ * the decision before had them, a relic new since rises into place
+ * (RelicCmd.Obtain's AnimateRelic: NRelicInventoryHolder.
+ * PlayNewlyAcquiredAnimation, the icon from 40 px lower fading in over
+ * 0.1 s, Back Out over 0.35 s, then DoFlash). */
+static Node* make_relics(SceneLibrary* lib, const Json& player, const Json& before, BarAnimations* anims) {
     FlowContainer* row = (FlowContainer*)SceneLibrary::create_node("HFlowContainer");
     row->name = "RelicInventory";
     place(row, 11, 81, 1898, 68);
@@ -221,7 +288,18 @@ static Node* make_relics(SceneLibrary* lib, const Json& player) {
             break;
         }
         ((Control*)r)->custom_minimum_size = Vec2(68, 68);
-        set_relic_icon(lib, r->find_unique("Icon"), relic_icon_base(relics[i]));
+        Node* icon = r->find_unique("Icon");
+        set_relic_icon(lib, icon, relic_icon_base(relics[i]));
+        const std::string& id = relics[i]["id"].str();
+        if (anims && icon && icon->is_control() && count_id(relics, id, i + 1) > count_id(before["relics"], id, before["relics"].size())) {
+            Control* ic = (Control*)icon;
+            float top = ic->offset[SIDE_TOP], bottom = ic->offset[SIDE_BOTTOM];
+            anims->tweens.tween_from(&ic->modulate.a, 0.0f, 1.0f, 0.1f);
+            anims->tweens.tween_from(&ic->offset[SIDE_TOP], top + 40, top, 0.35f, TRANS_BACK, EASE_OUT);
+            anims->tweens.tween_from(&ic->offset[SIDE_BOTTOM], bottom + 40, bottom, 0.35f, TRANS_BACK, EASE_OUT);
+            BarAnimations::Flash f = {(Control*)r, 0.35f};
+            anims->flashes.push_back(f);
+        }
         row->add_child(r);
     }
     return row;
@@ -232,7 +310,7 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
     if (!bar) return NULL;
     BarAnimations* anims = NULL;
     if (before.is_object() && !bar->behavior) {
-        anims = new BarAnimations();
+        anims = new BarAnimations(lib);
         bar->behavior = anims;
     }
     const Json& player = d["player"];
@@ -295,7 +373,7 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
     hide(find_named(bar, "GoldPopup"));
 
     Control* root = full_rect_control("TopBarLayer");
-    root->add_child(make_relics(lib, player));
+    root->add_child(make_relics(lib, player, before, anims));
     root->add_child(bar);
     return root;
 }

@@ -12,6 +12,7 @@
 
 namespace spire {
 
+class Control;
 class Node;
 class SceneLibrary;
 
@@ -26,6 +27,10 @@ Node* make_potion(SceneLibrary* lib, const std::string& potion_id);
 /* A relic's atlas icon and outline on relic.tscn's %Icon (or any
  * TextureRect with an %Outline child). */
 void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id);
+/* NRelicInventoryHolder.DoFlash: relic_inventory_flash_vfx.tscn over a
+ * relic holder (relic.tscn) with its icon as the particles, freeing itself
+ * after 3 s; position in the holder's canvas. NULL without the scene. */
+Node* make_relic_holder_flash(SceneLibrary* lib, Control* holder);
 /* A relic's icon name from the logic's relic: its icon_key ("icon_base":
  * RelicModel.IconBaseName), else its id. */
 std::string relic_icon_base(const Json& relic, const char* icon_key = "icon_base", const char* id_key = "id");
