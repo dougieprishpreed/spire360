@@ -282,13 +282,13 @@ static float turbulence_scale(float v) {
 
 Particles2D::Particles2D(bool is_gpu)
     : gpu(is_gpu), emitting(true), one_shot(false), local_coords(false), fractional_delta(true), align_y(false),
-      split_scale(false), amount(8), fixed_fps(is_gpu ? 30 : 0), draw_order(0), emission_shape(0), lifetime(1),
-      preprocess(0), speed_scale(1), explosiveness(0), randomness(0), lifetime_randomness(0), seed(0), texture(NULL),
-      direction(1, 0), gravity(is_gpu ? Vec2(0, -9.8f) : Vec2(0, 980)), emission_rect_extents(1, 1), spread(45),
-      emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0), collision_base_size(1),
-      collision_use_scale(false), use_fixed_seed(false), trail_enabled(false), trail_lifetime(0.3f), trail_sections(8),
-      trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0), started_(false), has_last_origin_(false),
-      clock_(0), sub_mode_(false) {
+      split_scale(false), interpolate(true), amount(8), fixed_fps(is_gpu ? 30 : 0), draw_order(0), emission_shape(0),
+      lifetime(1), preprocess(0), speed_scale(1), explosiveness(0), randomness(0), lifetime_randomness(0), seed(0),
+      texture(NULL), direction(1, 0), gravity(is_gpu ? Vec2(0, -9.8f) : Vec2(0, 980)), emission_rect_extents(1, 1),
+      spread(45), emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0),
+      collision_base_size(1), collision_use_scale(false), use_fixed_seed(false), trail_enabled(false),
+      trail_lifetime(0.3f), trail_sections(8), trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0),
+      started_(false), has_last_origin_(false), clock_(0), sub_mode_(false) {
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
     if (gpu) seed = next_seed();
@@ -322,6 +322,7 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (key == "randomness") randomness = jv_float(v);
     else if (key == "lifetime_randomness") lifetime_randomness = jv_float(v);
     else if (key == "fixed_fps") fixed_fps = v.i();
+    else if (key == "interpolate") interpolate = v.b(true);
     else if (key == "fract_delta") fractional_delta = v.b(true);
     else if (key == "local_coords") local_coords = v.b();
     else if (key == "collision_base_size") collision_base_size = jv_float(v, 1);
@@ -1370,10 +1371,16 @@ void Particles2D::draw(Canvas& c) {
     std::vector<Vec2> v, uv;
     std::vector<Color> col;
     std::vector<int> idx;
+    /* particles_copy: txform[3].xyz += VELOCITY * frame_remainder (the
+     * time since the last fixed-fps step), before the canvas transform */
+    float ahead = gpu && interpolate && fixed_fps > 0 ? (float)frame_remainder_ : 0.0f;
     for (size_t i = 0; i < particles_.size(); ++i) {
         const Particle& p = particles_[i];
         if (!p.active) continue;
-        Xform2D px = view * p.xform;
+        Vec2 shift = p.velocity * ahead;
+        Xform2D pxf = p.xform;
+        pxf.origin = pxf.origin + shift;
+        Xform2D px = view * pxf;
         Vec2 h = Vec2(ts.x / (anim ? hf : 1), ts.y / (anim ? vf : 1)) * 0.5f;
         float fu0 = 0, fv0 = 0, fw = 1, fh = 1;
         if (anim) {
@@ -1419,7 +1426,11 @@ void Particles2D::draw(Canvas& c) {
              * the trail */
             int sections = trail_sections, sub = trail_subdivisions, segments = sections * sub;
             std::vector<Xform2D> bones((size_t)sections + 1);
-            for (int b = 0; b <= sections; ++b) bones[(size_t)b] = view * trail_at(p, trail_lifetime * b / sections);
+            for (int b = 0; b <= sections; ++b) {
+                Xform2D t = trail_at(p, trail_lifetime * b / sections);
+                t.origin = t.origin + shift;
+                bones[(size_t)b] = view * t;
+            }
             float half = ts.x * 0.5f;
             for (int j = 0; j <= segments; ++j) {
                 int b = j / sub;

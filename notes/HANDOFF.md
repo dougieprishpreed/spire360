@@ -61,7 +61,16 @@ parts 2 and 3 above it).
   colour texel; directed points turn the velocity by the normal texel,
   disable_z's mat2). Seen on the blade in a Regent replay
   (`work/bladeplay.sh`, new33 regent-2 screen 66).
-- Not ported: attractors, fixed-fps interpolation.
+- Fixed-fps interpolation (GPUParticles2D.interpolate, on by default):
+  each particle is drawn VELOCITY * the fixed-fps remainder ahead, as
+  particles_copy does (GLES3 and RD alike), so the 30 fps steps move every
+  60 Hz frame (before: every other frame identical; `work/interpview.sh`
+  on the heal crosses). Attractors: no scene of the game has one.
+- Soak after part 10 (`work/soak.sh`, 9999 HP autoplay, every character):
+  all five rc 0, no logic errors, no plain-list screen, no decoder
+  failures; Ironclad, Defect and Regent won, Silent ran 2439 screens, the
+  Necrobinder fell to the Knight Gang on floor 43 (the random play's long
+  fight). Absent audio calls are the known content mismatches.
 - Forms: Echo Form's copy had no skeleton (the body was looked up as the
   first SpineSprite under the visuals, which is the form's own copier);
   it is NCreatureVisuals' %Visuals now. All five forms render: Demon's
@@ -1353,9 +1362,9 @@ name where it landed. Open items stay at the end of each group.
 - [x] Compendium, run history, statistics, timeline (single-player
       parts).
 - [x] FTUEs and the ascension popup (part 10; all seen on screen).
-- [ ] No decision shown as the plain list: spire_play marks one with
-      "(plain list)" and work/soak.sh counts them (plain=); confirm with
-      a soak.
+- [x] No decision shown as the plain list: spire_play marks one with
+      "(plain list)" and work/soak.sh counts them (plain=0 on all five,
+      part 10's soak).
 
 **Sound**
 - [x] Converter: the FMOD Studio banks and temp sfx.
@@ -1373,9 +1382,9 @@ name where it landed. Open items stay at the end of each group.
       emulated PPC is ~75x slower. Measure on the console before acting.
 - [ ] Turbulent particles on the console (part 10: ~300 noise gradients
       per particle and step).
-- [ ] Soak: long spire_play `--auto` runs on every character with no
+- [x] Soak: long spire_play `--auto` runs on every character with no
       plain-list screens, missing textures or hangs (part 9 ran all five;
-      rerun after part 10).
+      rerun after part 10: clean).
 
 **Not ported (by decision)**: multiplayer and everything that only exists
 for it (votes, other players' hands and holders).

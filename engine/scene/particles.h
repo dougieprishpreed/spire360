@@ -73,6 +73,7 @@ public:
     explicit Particles2D(bool gpu);
     bool gpu;
     bool emitting, one_shot, local_coords, fractional_delta, align_y, split_scale;
+    bool interpolate; /* GPUParticles2D: drawn ahead by VELOCITY * the fixed-fps remainder */
     int amount, fixed_fps, draw_order, emission_shape;
     double lifetime, preprocess, speed_scale, explosiveness, randomness, lifetime_randomness;
     u32 seed;
