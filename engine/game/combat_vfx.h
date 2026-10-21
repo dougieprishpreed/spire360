@@ -66,6 +66,12 @@ bool death_delayed(Node* visuals);
  * NCombatRoom.CombatVfxContainer. */
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors);
 bool is_combat_vfx_call(const std::string& call);
+/* The node an exported NodePath names ("_overlay"), NULL if none. */
+Node* vfx_exported(Node* root, const char* key);
+/* GpuParticles2D.Restart, or NParticlesContainer.Restart (its _particles). */
+void vfx_restart(Node* n);
+/* NParticlesContainer.SetEmitting (or one particle system's). */
+void vfx_emitting(Node* n, bool on);
 /* NDamageNumVfx.Create(globalPosition, damage) (scenes/vfx/vfx_damage_num.tscn)
  * at a position in its parent's (screen) coordinates: thrown up (gravity
  * 2000 px/s2), red to cream, shrinking from 2.5, fading out over 2 s, then

@@ -996,16 +996,6 @@ void CombatScreen::layout_hand(bool snap) {
     if (snap) process(0);
 }
 
-/* Godot's Transform2D.affine_inverse. */
-static Xform2D inverse(const Xform2D& t) {
-    float det = t.x.x * t.y.y - t.y.x * t.x.y;
-    if (det == 0) return Xform2D();
-    float id = 1.0f / det;
-    Xform2D r(Vec2(t.y.y * id, -t.x.y * id), Vec2(-t.y.x * id, t.x.x * id), Vec2(0, 0));
-    r.origin = r.basis_xform(t.origin) * -1.0f;
-    return r;
-}
-
 static Vec2 global_pos(Node* n) {
     return n && n->is_canvas_item() ? ((CanvasItem*)n)->global_transform().origin : Vec2(0, 0);
 }

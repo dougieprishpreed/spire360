@@ -155,6 +155,15 @@ void set_label(Node* n, const std::string& text) {
     else if (n && n->type == "RichTextLabel") ((RichTextLabel*)n)->text = text;
 }
 
+Xform2D inverse(const Xform2D& t) {
+    float det = t.x.x * t.y.y - t.y.x * t.x.y;
+    if (det == 0) return Xform2D();
+    float id = 1.0f / det;
+    Xform2D r(Vec2(t.y.y * id, -t.x.y * id), Vec2(-t.y.x * id, t.x.x * id), Vec2(0, 0));
+    r.origin = r.basis_xform(t.origin) * -1.0f;
+    return r;
+}
+
 unsigned chaotic_rand() {
     static unsigned state = 0;
     if (!state) state = ((unsigned)time(NULL) * 2654435761u) ^ (unsigned)clock() ^ 0x9E3779B9u;

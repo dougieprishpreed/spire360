@@ -27,6 +27,7 @@ void install_anim_scripts();
 void install_vfx_scripts();
 void install_combat_vfx_scripts();
 void install_creature_vfx_scripts();
+void install_deck_preview_scripts();
 
 inline void install_game_scripts() {
     install_text_scripts();
@@ -34,6 +35,7 @@ inline void install_game_scripts() {
     install_vfx_scripts();
     install_combat_vfx_scripts();
     install_creature_vfx_scripts();
+    install_deck_preview_scripts();
 }
 
 } /* namespace spire */

@@ -12,6 +12,8 @@ void Check(string name, bool ok)
 }
 
 var afterLog = new List<string>();
+var beforeLog = new List<string>();
+Hooks.RegisterBefore("before-exec", a => beforeLog.Add($"{((GameAction)a[1]!).Name}@{afterLog.Count}"));
 Hooks.Register("loc.raw", a => ((string)a[1]!) + "!");
 Hooks.Register("coord.sum", a => ((Coord)a[0]!).X * 100 + ((Coord)a[0]!).Y);
 Hooks.Register("echo", a => a[0] is int i ? i + 1 : a[0]);
@@ -34,6 +36,7 @@ int r1 = exec.Execute(new GameAction { Name = "a" });
 int r2 = exec.Execute(new GameAction { Name = "early" });
 Check("call_after keeps result", r1 == 10 && r2 == -1);
 Check("call_after sees every return", string.Join(",", afterLog) == "a=10,early=-1");
+Check("call_before runs first, once a call", string.Join(",", beforeLog) == "a@0,early@1");
 
 Check("redirect on value type", new Coord(3, 4).Sum() == 304);
 Check("redirect generic method (int)", ActionExecutor.Echo(41) == 42);

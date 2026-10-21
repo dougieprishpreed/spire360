@@ -23,6 +23,7 @@ namespace spire {
 
 class CombatScreen;
 class ConfirmPopup;
+class DeckPreviews;
 class LogicLink;
 class PauseMenu;
 class PileScreen;
@@ -176,6 +177,7 @@ private:
     Json characters_;
     int characters_version_;
     RoomTransition* transition_;
+    DeckPreviews* deck_previews_; /* NRun.GlobalUi's card previews (over the screens) */
     Json transition_pending_;
     std::vector<std::string> queued_; /* sent after the logic's "ready" */
     Json answer_;

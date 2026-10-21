@@ -40,6 +40,8 @@ Vec2 offset_size(const Control* c);
 Color hex(unsigned rgb);
 /* Rng.Chaotic: a different number every time (seeded from the clock). */
 unsigned chaotic_rand();
+/* Godot's Transform2D.affine_inverse. */
+Xform2D inverse(const Xform2D& t);
 /* NHoverTipSet's text tip (scenes/ui/hover_tip.tscn): a title (none:
  * "") and a description (BBCode); NULL without the scene. Place it with
  * place() or set_position on the screen's root. */

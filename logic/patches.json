@@ -228,6 +228,84 @@
       "note": "Records a full-screen combat effect."
     },
     {
+      "id": "deck.preview",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardCmd",
+      "method": "Preview",
+      "all_overloads": true,
+      "optional": true,
+      "note": "CardCmd.Preview(card(s), time, style): the cards shown in NRun.GlobalUi's preview container, then flown to their pile; these return before the UI in TestMode. Recorded as deck_card show cues outside combat."
+    },
+    {
+      "id": "deck.preview_add",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardCmd",
+      "method": "PreviewCardPileAdd",
+      "all_overloads": true,
+      "optional": true,
+      "note": "CardCmd.PreviewCardPileAdd(result(s), time, style): the cards just added, shown and flown to their pile. Recorded as deck_card add cues outside combat."
+    },
+    {
+      "id": "deck.remove",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardPileCmd",
+      "method": "RemoveFromDeck",
+      "params": ["IReadOnlyList`1", "System.Boolean"],
+      "optional": true,
+      "note": "CardPileCmd.RemoveFromDeck(cards, showPreview): the card grows in and burns away (NCardRemoveVfx). Recorded as deck_card remove cues."
+    },
+    {
+      "id": "deck.upgrade.begin",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardCmd",
+      "method": "Upgrade",
+      "params": ["IEnumerable`1", "CardPreviewStyle"],
+      "optional": true,
+      "note": "CardCmd.Upgrade(cards, style): its preview style, for the deck cards it upgrades (deck.upgraded)."
+    },
+    {
+      "id": "deck.upgrade.end",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.CardCmd",
+      "method": "Upgrade",
+      "params": ["IEnumerable`1", "CardPreviewStyle"],
+      "optional": true,
+      "note": "The end of CardCmd.Upgrade(cards, style)."
+    },
+    {
+      "id": "deck.upgraded",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "FinalizeUpgradeInternal",
+      "optional": true,
+      "note": "A card upgraded inside CardCmd.Upgrade: a deck card gets NCardUpgradeVfx in the style's container. Recorded as a deck_card upgrade cue."
+    },
+    {
+      "id": "deck.transform.begin",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardCmd",
+      "method": "Transform",
+      "params": ["IEnumerable`1", "Rng", "CardPreviewStyle"],
+      "optional": true,
+      "note": "CardCmd.Transform(transformations, rng, style): its preview style (the transformations are not enumerated here)."
+    },
+    {
+      "id": "deck.transformed_from",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "AfterTransformedFrom",
+      "optional": true,
+      "note": "Transform's original card, just before AfterTransformedTo on its replacement."
+    },
+    {
+      "id": "deck.transformed_to",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "AfterTransformedTo",
+      "optional": true,
+      "note": "Transform's replacement: in the deck, NCardTransformVfx (original to replacement) in the style's container. Recorded as a deck_card transform cue."
+    },
+    {
       "id": "relic.flashed",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Entities.Players.Player",

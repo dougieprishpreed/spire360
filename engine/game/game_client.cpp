@@ -27,6 +27,7 @@
 #include "rest_site_screen.h"
 #include "rewards_screen.h"
 #include "shop_screen.h"
+#include "deck_previews.h"
 #include "room_cues.h"
 #include "top_bar.h"
 #include "treasure_screen.h"
@@ -251,7 +252,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), deck_previews_(NULL),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
@@ -273,6 +274,12 @@ GameClient::~GameClient() {
     if (transition_) {
         if (transition_->parent) transition_->parent->remove_child(transition_);
         delete transition_;
+    }
+    if (deck_previews_) {
+        Node* layer = deck_previews_->layer();
+        if (layer->parent) layer->parent->remove_child(layer);
+        delete layer;
+        delete deck_previews_;
     }
     if (screen_) {
         screen_->parent->remove_child(screen_);
@@ -544,6 +551,12 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
 
 void GameClient::show(const Json& d) {
     errors_ = 0; /* the retries after an error count per decision */
+    /* The deck's changes (NRun.GlobalUi's previews) play over whatever
+     * screen comes next. */
+    if (!deck_previews_) deck_previews_ = new DeckPreviews(lib_);
+    Node* previews = deck_previews_->layer();
+    if (!previews->parent) tree_->root()->add_child(previews);
+    deck_previews_->play(d["steps"], d["player"]["character"].str());
     std::string prev_kind = decision_["decision"].str();
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];
@@ -828,6 +841,11 @@ void GameClient::show(const Json& d) {
     if (!in_fight && kind != "game_over") play_room_cues(lib_, screen_, d);
     potions_.attach(screen_, d["player"]);
     tree_->root()->add_child(screen_);
+    if (deck_previews_) {
+        Node* previews = deck_previews_->layer();
+        tree_->root()->remove_child(previews);
+        tree_->root()->add_child(previews);
+    }
     if (transition_ && transition_->parent) {
         tree_->root()->remove_child(transition_); tree_->root()->add_child(transition_);
     }
@@ -841,6 +859,7 @@ void GameClient::clear_screen() {
     if (transition_) { transition_->phase = 0; transition_->visible = false; }
     transition_pending_ = Json();
     potions_.detach();
+    if (deck_previews_) deck_previews_->clear();
     if (screen_) {
         if (screen_->parent) screen_->parent->remove_child(screen_);
         delete screen_;

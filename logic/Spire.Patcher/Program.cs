@@ -13,6 +13,7 @@
 //   return_completed_task  body = return Task.CompletedTask / Task.FromResult(default)
 //   return_const           body = return <bool|int|string value>
 //   redirect               body = return (T)Hooks.Invoke(id, new object[] { this?, args... })
+//   call_before            on entry: Hooks.Before(id, new object[] { this?, args... })
 //   call_after             before every ret: Hooks.After(id, new object[] { this?, args... }, result)
 //   replace_calls          every call to the target method anywhere in the assembly
 //                          becomes (T)Hooks.Invoke(id, new object[] { this?, args... })
@@ -203,6 +204,7 @@ internal sealed class Patcher
     private readonly MethodReference _invoke;
     private readonly FieldReference _standIn;
     private readonly MethodReference _after;
+    private readonly MethodReference _before;
 
     public Patcher(ModuleDefinition module, ModuleDefinition bridge)
     {
@@ -212,6 +214,7 @@ internal sealed class Patcher
         _invoke = module.ImportReference(hooks.Methods.Single(m => m.Name == "Invoke"));
         _standIn = module.ImportReference(hooks.Fields.Single(f => f.Name == "StandIn"));
         _after = module.ImportReference(hooks.Methods.Single(m => m.Name == "After"));
+        _before = module.ImportReference(hooks.Methods.Single(m => m.Name == "Before"));
     }
 
     public PatchResult Apply(PatchSpec spec)
@@ -251,6 +254,7 @@ internal sealed class Patcher
                     case "return_completed_task": ReplaceBody(m, il => EmitCompletedTask(il, m.ReturnType)); break;
                     case "return_const": ReplaceBody(m, il => EmitConst(il, m.ReturnType, spec.Value)); break;
                     case "redirect": ReplaceBody(m, il => EmitRedirect(il, m, spec.Id)); break;
+                    case "call_before": InsertCallBefore(m, spec.Id); break;
                     case "call_after": InsertCallAfter(m, spec.Id); break;
                     default: throw new InvalidOperationException($"unknown action '{spec.Action}'");
                 }
@@ -490,6 +494,24 @@ internal sealed class Patcher
         EmitArgsArray(il, m);
         il.Emit(OpCodes.Call, _invoke);
         EmitUnboxResult(il, m.ReturnType);
+    }
+
+    private void InsertCallBefore(MethodDefinition m, string id)
+    {
+        // ldstr id; args[]; call Before; then the original body. Branches back
+        // to the old first instruction (loops) do not repeat the call.
+        var body = m.Body;
+        body.SimplifyMacros();
+        var il = body.GetILProcessor();
+        var tmp = new MethodBody(m);
+        var tmpIl = tmp.GetILProcessor();
+        tmpIl.Emit(OpCodes.Ldstr, id);
+        EmitArgsArray(tmpIl, m);
+        tmpIl.Emit(OpCodes.Call, _before);
+        var first = body.Instructions[0];
+        foreach (var ins in tmp.Instructions.ToList())
+            il.InsertBefore(first, ins);
+        body.OptimizeMacros();
     }
 
     private void InsertCallAfter(MethodDefinition m, string id)

@@ -5,6 +5,7 @@
     {"id": "loc.raw", "action": "redirect", "type": "MegaCrit.Sts2.Core.Localization.LocTable", "method": "GetRawText", "params": ["System.String"]},
     {"id": "loc.has", "action": "return_const", "type": "MegaCrit.Sts2.Core.Localization.LocTable", "method": "HasEntry", "value": true},
     {"id": "wait-queue", "action": "return_default", "type": "*", "method": "WaitUntilQueueIsEmptyOrWaitingOnNonPlayerDrivenAction"},
+    {"id": "before-exec", "action": "call_before", "type": "MegaCrit.Sts2.Core.GameActions.ActionExecutor", "method": "Execute"},
     {"id": "after-exec", "action": "call_after", "type": "MegaCrit.Sts2.Core.GameActions.ActionExecutor", "method": "Execute"},
     {"id": "coord.sum", "action": "redirect", "type": "MegaCrit.Sts2.Core.GameActions.Coord", "method": "Sum"},
     {"id": "echo", "action": "redirect", "type": "MegaCrit.Sts2.Core.GameActions.ActionExecutor", "method": "Echo"},

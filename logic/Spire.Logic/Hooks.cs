@@ -129,6 +129,54 @@ internal static partial class Hooks
             if (a.Length > 0 && a[0] is PowerModel pw && pw.Owner != null && pw.ShouldPlayVfx)
                 Steps.Cue(new Dictionary<string, object?> { ["t"] = "power_flash", ["power"] = pw.Id.Entry, ["who"] = Steps.Who(pw.Owner) });
         });
+        // Deck changes outside combat: what NRun.GlobalUi's preview containers
+        // show (TestMode returns before the UI, so they are recorded here).
+        // CardCmd.Preview(card or cards, time, style)
+        Spire.HookBridge.Hooks.RegisterBefore("deck.preview", a =>
+        {
+            if (a.Length < 3 || a[1] is not float time || a[2] is not MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style) return;
+            if (a[0] is CardModel card) PreviewCue("show", card, style, time);
+            else if (a[0] is IReadOnlyList<CardModel> cards)
+                foreach (var c in cards) PreviewCue("show", c, style, time);
+        });
+        // CardCmd.PreviewCardPileAdd(result or results, time, style): the successful ones
+        Spire.HookBridge.Hooks.RegisterBefore("deck.preview_add", a =>
+        {
+            if (a.Length < 3 || a[1] is not float time || a[2] is not MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style) return;
+            if (a[0] is CardPileAddResult r) { if (r.success) PreviewCue("add", r.cardAdded, style, time); }
+            else if (a[0] is IReadOnlyList<CardPileAddResult> results)
+                foreach (var x in results)
+                    if (x.success) PreviewCue("add", x.cardAdded, style, time);
+        });
+        Spire.HookBridge.Hooks.RegisterBefore("deck.remove", a =>
+        {
+            // CardPileCmd.RemoveFromDeck(cards, showPreview)
+            if (a.Length > 1 && a[0] is IReadOnlyList<CardModel> cards && a[1] is true)
+                foreach (var c in cards)
+                    if (c.Pile?.Type == PileType.Deck) DeckCue("remove", c, null, null, 0);
+        });
+        Spire.HookBridge.Hooks.RegisterBefore("deck.upgrade.begin", a =>
+            _upgradeStyle = a.Length > 1 ? a[1] as MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? : null);
+        Spire.HookBridge.Hooks.RegisterAfter("deck.upgrade.end", (a, r) => _upgradeStyle = null);
+        Spire.HookBridge.Hooks.RegisterAfter("deck.upgraded", (a, r) =>
+        {
+            if (a.Length > 0 && a[0] is CardModel c && c.Pile?.Type == PileType.Deck && _upgradeStyle is { } s
+                && s != MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle.None)
+                DeckCue("upgrade", c, null, s, 0);
+        });
+        Spire.HookBridge.Hooks.RegisterBefore("deck.transform.begin", a =>
+        {
+            _transformStyle = a.Length > 2 ? a[2] as MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? : null;
+            _transformedFrom = null;
+        });
+        Spire.HookBridge.Hooks.RegisterAfter("deck.transformed_from", (a, r) => _transformedFrom = a.Length > 0 ? a[0] as CardModel : null);
+        Spire.HookBridge.Hooks.RegisterAfter("deck.transformed_to", (a, r) =>
+        {
+            if (a.Length > 0 && a[0] is CardModel c && c.Pile?.Type == PileType.Deck && _transformStyle is { } s
+                && s != MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle.None)
+                DeckCue("transform", c, _transformedFrom, s, 0);
+            _transformedFrom = null;
+        });
         Spire.HookBridge.Hooks.RegisterAfter("anim.trigger", (a, r) =>
         {
             if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)
@@ -195,6 +243,9 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterPrefix("ui", (id, a) =>
         {
             Steps.Ui(id, a);
+            // The events' NCardEnchantVfx.Create(card): the enchanted card's view.
+            if (id.EndsWith("NCardEnchantVfx::Create", StringComparison.Ordinal) && a.Length > 0 && a[0] is CardModel enchanted)
+                DeckCue("enchant", enchanted, null, null, 0);
             Driver?.OnUiCall(id, a);
             return StandIns.Answer(id, a);
         });
@@ -241,6 +292,30 @@ internal static partial class Hooks
     {
         public static void Register(string id, Func<object?[], object?> handler) =>
             Spire.HookBridge.Hooks.Register(id, handler);
+    }
+
+    private static MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? _upgradeStyle, _transformStyle;
+
+    /// <summary>CardCmd.PreviewInternal's checks: a card in a pile, not while the
+    /// combat ends; the combat piles' previews are the fight's.</summary>
+    private static void PreviewCue(string op, CardModel card, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style, float time)
+    {
+        if (card.Pile == null || card.Pile.Type.IsCombatPile() || CombatManager.Instance.IsEnding) return;
+        DeckCue(op, card, null, style, time);
+    }
+    private static CardModel? _transformedFrom;
+
+    /// <summary>A deck_card cue: op (add, show, remove, upgrade, transform,
+    /// enchant), the card's view, the original's for a transform, the preview
+    /// style and time when the game gives them.</summary>
+    private static void DeckCue(string op, CardModel card, CardModel? from, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? style, float time)
+    {
+        if (Driver == null) return;
+        var cue = new Dictionary<string, object?> { ["t"] = "deck_card", ["op"] = op, ["card"] = Driver.DeckCardView(card) };
+        if (from != null) cue["from"] = Driver.DeckCardView(from);
+        if (style != null) cue["style"] = style.ToString();
+        if (time > 0) cue["time"] = time;
+        Steps.Cue(cue);
     }
 
     /// <summary>VfxCmd.PlayOnCreature / PlayOnCreatureCenter(target, path): at the

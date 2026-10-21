@@ -113,6 +113,14 @@ static float quart(TweenEase e, float t, float b, float c, float d) {
     return -c / 2 * (powf(t - 2, 4) - 2) + b;
 }
 
+static float quint(TweenEase e, float t, float b, float c, float d) {
+    if (e == EASE_IN) return c * powf(t / d, 5) + b;
+    if (e == EASE_OUT) return c * (powf(t / d - 1, 5) + 1) + b;
+    t = t / d * 2;
+    if (t < 1) return c / 2 * powf(t, 5) + b;
+    return c / 2 * (powf(t - 2, 5) + 2) + b;
+}
+
 static float quad(TweenEase e, float t, float b, float c, float d) {
     if (e == EASE_IN) {
         t /= d;
@@ -174,6 +182,7 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
     case TRANS_CUBIC: return cubic(ease, t, b, c, d);
     case TRANS_CIRC: return circ(ease, t, b, c, d);
     case TRANS_QUART: return quart(ease, t, b, c, d);
+    case TRANS_QUINT: return quint(ease, t, b, c, d);
     case TRANS_SPRING: return spring(ease, t, b, c, d);
     case TRANS_QUAD: return quad(ease, t, b, c, d);
     case TRANS_BOUNCE: return bounce(ease, t, b, c, d);

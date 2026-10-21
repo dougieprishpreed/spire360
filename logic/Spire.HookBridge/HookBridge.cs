@@ -12,6 +12,7 @@ public static class Hooks
 {
     private static readonly Dictionary<string, Func<object?[], object?>> Handlers = new();
     private static readonly Dictionary<string, Action<object?[], object?>> AfterHandlers = new();
+    private static readonly Dictionary<string, Action<object?[]>> BeforeHandlers = new();
 
     /// <summary>Handler for a "redirect" patch: receives (this?, args...) and returns the result.</summary>
     public static void Register(string id, Func<object?[], object?> handler) => Handlers[id] = handler;
@@ -19,7 +20,11 @@ public static class Hooks
     /// <summary>Handler for a "call_after" patch: receives (this?, args...) and the return value.</summary>
     public static void RegisterAfter(string id, Action<object?[], object?> handler) => AfterHandlers[id] = handler;
 
-    public static bool IsRegistered(string id) => Handlers.ContainsKey(id) || AfterHandlers.ContainsKey(id);
+    /// <summary>Handler for a "call_before" patch: receives (this?, args...) as the method starts.</summary>
+    public static void RegisterBefore(string id, Action<object?[]> handler) => BeforeHandlers[id] = handler;
+
+    public static bool IsRegistered(string id) =>
+        Handlers.ContainsKey(id) || AfterHandlers.ContainsKey(id) || BeforeHandlers.ContainsKey(id);
 
     /// <summary>
     /// The receiver a UI singleton getter returns where its ?. chain is a
@@ -46,6 +51,13 @@ public static class Hooks
 
     /// <summary>Handler for every "prefix|..." id, e.g. all redirected UI calls.</summary>
     public static void RegisterPrefix(string prefix, Func<string, object?[], object?> handler) => PrefixHandlers[prefix] = handler;
+
+    /// <summary>Called on entry to a method patched with "call_before".</summary>
+    public static void Before(string id, object?[] args)
+    {
+        if (BeforeHandlers.TryGetValue(id, out var h))
+            h(args);
+    }
 
     /// <summary>Called at every return of a method patched with "call_after".</summary>
     public static void After(string id, object?[] args, object? result)

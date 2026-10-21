@@ -1850,6 +1850,17 @@ Node* make_damage_number(SceneLibrary* lib, const Vec2& at, int amount) {
     return num;
 }
 
+Node* vfx_exported(Node* root, const char* key) { return exported_one(root, key); }
+void vfx_restart(Node* n) { restart(n); }
+void vfx_emitting(Node* n, bool on) {
+    if (!n) return;
+    std::vector<Node*> list;
+    if (is_particles(n)) list.push_back(n);
+    else exported(n, "_particles", list);
+    for (size_t i = 0; i < list.size(); ++i)
+        if (is_particles(list[i])) ((Particles2D*)list[i])->emitting = on;
+}
+
 bool is_combat_vfx_call(const std::string& call) {
     if (call == "NCombatRoom.PlaySplashVfx") return true;
     std::string cls = class_of(call);

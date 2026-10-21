@@ -2108,6 +2108,27 @@ public partial class RunDriver
         }
     }
 
+    /// <summary>A deck card as the previews show it (the deck_card cues).</summary>
+    internal Dictionary<string, object?> DeckCardView(CardModel card)
+    {
+        var stats = new Dictionary<string, object?>();
+        try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
+        var kws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
+        return WithCardView(card, card.Pile?.Type ?? PileType.None, new Dictionary<string, object?>
+        {
+            ["instance_id"] = Steps.IdOf(card),
+            ["id"] = card.Id.ToString(),
+            ["name"] = _loc.Card(card.Id.Entry),
+            ["cost"] = card.EnergyCost?.GetResolved() ?? 0,
+            ["type"] = card.Type.ToString(),
+            ["rarity"] = card.Rarity.ToString(),
+            ["upgraded"] = card.IsUpgraded,
+            ["stats"] = stats.Count > 0 ? stats : null,
+            ["description"] = _loc.Bilingual("cards", card.Id.Entry + ".description"),
+            ["keywords"] = kws?.Count > 0 ? kws : null,
+        });
+    }
+
     // The card's view fields (AddCardView) on a decision's card entry.
     private static Dictionary<string, object?> WithCardView(CardModel? c, PileType pile, Dictionary<string, object?> d)
     {
