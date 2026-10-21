@@ -19,18 +19,21 @@ struct Tip {
     const char* id;
     const char* title;
     const char* description;
+    const char* disclaimer; /* %Disclaimer (the ascension popup) */
 };
 const Tip TIPS[] = {
-    { "shuffle_ftue", "SHUFFLE_FTUE_TITLE", "SHUFFLE_FTUE_DESCRIPTION" },
-    { "can_play_cards_ftue", "CAN_PLAY_CARDS_FTUE_TITLE", "CAN_PLAY_CARDS_FTUE_DESCRIPTION" },
-    { "cannot_play_card_ftue", "CANNOT_PLAY_CARD_FTUE_TITLE", "CANNOT_PLAY_CARD_FTUE_DESCRIPTION" },
-    { "combat_reward_ftue", "REWARDS_FTUE_TITLE", "REWARDS_FTUE_DESCRIPTION" },
-    { "merchant_ftue", "MERCHANT_FTUE_TITLE", "MERCHANT_FTUE_DESCRIPTION" },
-    { "obtain_potion_ftue", "POTION_FTUE_TITLE", "POTION_FTUE_DESCRIPTION" },
-    { "obtain_relic_ftue", "RELIC_FTUE_TITLE", "RELIC_FTUE_DESCRIPTION" },
-    { "power_card_ftue", "POWER_FTUE_TITLE", "POWER_FTUE_DESCRIPTION" },
-    { "rest_site_ftue", "REST_SITE_FTUE_TITLE", "REST_SITE_FTUE_DESCRIPTION" },
-    { "map_select_ftue", "MAP_SELECT_TITLE", "MAP_SELECT_DESCRIPTION" },
+    { "shuffle_ftue", "SHUFFLE_FTUE_TITLE", "SHUFFLE_FTUE_DESCRIPTION", NULL },
+    { "can_play_cards_ftue", "CAN_PLAY_CARDS_FTUE_TITLE", "CAN_PLAY_CARDS_FTUE_DESCRIPTION", NULL },
+    { "cannot_play_card_ftue", "CANNOT_PLAY_CARD_FTUE_TITLE", "CANNOT_PLAY_CARD_FTUE_DESCRIPTION", NULL },
+    { "combat_reward_ftue", "REWARDS_FTUE_TITLE", "REWARDS_FTUE_DESCRIPTION", NULL },
+    { "merchant_ftue", "MERCHANT_FTUE_TITLE", "MERCHANT_FTUE_DESCRIPTION", NULL },
+    { "obtain_potion_ftue", "POTION_FTUE_TITLE", "POTION_FTUE_DESCRIPTION", NULL },
+    { "obtain_relic_ftue", "RELIC_FTUE_TITLE", "RELIC_FTUE_DESCRIPTION", NULL },
+    { "power_card_ftue", "POWER_FTUE_TITLE", "POWER_FTUE_DESCRIPTION", NULL },
+    { "rest_site_ftue", "REST_SITE_FTUE_TITLE", "REST_SITE_FTUE_DESCRIPTION", NULL },
+    { "map_select_ftue", "MAP_SELECT_TITLE", "MAP_SELECT_DESCRIPTION", NULL },
+    { "ascension_singleplayer_ftue", "ASCENSION_SINGLEPLAYER_FTUE_TITLE", "ASCENSION_SINGLEPLAYER_FTUE_DESCRIPTION",
+      "ASCENSION_SINGLEPLAYER_FTUE_DISCLAIMER" },
 };
 
 const Tip* tip_of(const std::string& id) {
@@ -131,6 +134,18 @@ Node* FtuePopup::build(const std::string& id, const std::vector<CanvasItem*>& sp
         if (t) {
             set_label(header, Loc::get("ftues", t->title));
             set_body(body, Loc::get("ftues", t->description));
+            if (t->disclaimer) set_body(p->find_unique("Disclaimer"), Loc::get("ftues", t->disclaimer));
+        }
+        if (id == "ascension_singleplayer_ftue") {
+            /* NAscensionSingleplayerFtue._Ready: after 1 s it rises 100 px
+             * (0.3 s, Back Out) and fades in */
+            Control* c = (Control*)p;
+            c->modulate.a = 0;
+            tweens_.tween(&c->modulate.a, 1.0f, 0.3f, TRANS_LINEAR, EASE_OUT, 1.0f);
+            tweens_.tween_from(&c->offset[SIDE_TOP], c->offset[SIDE_TOP] + 100, c->offset[SIDE_TOP], 0.3f, TRANS_BACK,
+                               EASE_OUT, 1.0f);
+            tweens_.tween_from(&c->offset[SIDE_BOTTOM], c->offset[SIDE_BOTTOM] + 100, c->offset[SIDE_BOTTOM], 0.3f,
+                               TRANS_BACK, EASE_OUT, 1.0f);
         }
         /* NFtueConfirmButton: "Got it!", the outline pulsing 1 <-> 0.25 */
         set_label(confirm ? confirm->find_unique("Label") : NULL, Loc::get("ftues", "CONFIRM_BUTTON"));

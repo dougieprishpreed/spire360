@@ -27,6 +27,15 @@ public partial class RunDriver
         var list = new List<object?>();
         foreach (var id in FtueIds)
             if (!SaveManager.Instance.SeenFtue(id)) list.Add(id);
+        // StartRunLobby.SetSingleplayerAscensionAfterCharacterChanged: the
+        // ascension popup once any character has an ascension (SeenPopup,
+        // tutorials on or off; its FtueCompleted test, as TestMode makes
+        // SeenPopup true here)
+        int maxAscension = 0;
+        foreach (var stats in SaveManager.Instance.Progress.CharacterStats.Values)
+            maxAscension = Math.Max(maxAscension, stats.MaxAscension);
+        if (maxAscension > 0 && !SaveManager.Instance.Progress.FtueCompleted.Contains("ascension_singleplayer_ftue"))
+            list.Add("ascension_singleplayer_ftue");
         return list;
     }
 

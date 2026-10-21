@@ -110,7 +110,11 @@ parts 2 and 3 above it).
   spire_play writes ftue_<id>.png for each): accept_tutorials,
   combat_rules (all pages), map_select, shuffle, can_play_cards,
   power_card, rest_site. Not seen yet: cannot_play_card, combat_reward,
-  merchant, obtain_potion, obtain_relic. Not ported: the mouse-only
+  merchant, obtain_potion, obtain_relic. The ascension popup
+  (NAscensionSingleplayerFtue: once any character has an ascension, at the
+  character select, tutorials on or off; marked as it closes) is in the
+  same list; the logic tests FtueCompleted itself (SeenPopup is true under
+  TestMode). Not ported: the mouse-only
   SneakyHitboxes. The logic still calls NCombatRulesFtue.Create every
   fight (headless never marks it seen); the client ignores the cue.
 

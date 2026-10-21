@@ -6,6 +6,7 @@
 #include "../scene/tree.h"
 #include "character_select.h"
 #include "confirm_popup.h"
+#include "ftue.h"
 #include "game_client.h"
 #include "profile_screen.h"
 #include "timeline_screen.h"
@@ -25,6 +26,8 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
       quit_(false), leaving_run_(false) {
     tutorials_ = NULL;
     tutorials_node_ = NULL;
+    ascension_ = NULL;
+    ascension_node_ = NULL;
     /* SettingsSave.Language (LocManager.Initialize); English when none */
     const Json saved = Loc::settings_save();
     if (saved["language"].is_string()) Loc::set_language(saved["language"].str());
@@ -123,6 +126,16 @@ void MenuFlow::relocalize() {
     tree_->layout();
 }
 
+void MenuFlow::close_ascension() {
+    if (ascension_node_) {
+        if (ascension_node_->parent) ascension_node_->parent->remove_child(ascension_node_);
+        delete ascension_node_;
+        ascension_node_ = NULL;
+    }
+    delete ascension_;
+    ascension_ = NULL;
+}
+
 void MenuFlow::embark() {
     last_character_ = chars_->selected();
     note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
@@ -148,6 +161,7 @@ void MenuFlow::close_screen() {
     }
     delete tutorials_;
     tutorials_ = NULL;
+    close_ascension();
     delete timeline_;
     timeline_ = NULL;
     delete profiles_;
@@ -342,6 +356,25 @@ bool MenuFlow::update(const PadState& in) {
             break;
         }
         case CHARACTERS: {
+            if (ascension_) {
+                /* its "Got it!": MarkFtueAsComplete as it closes */
+                if (ascension_->input(pad)) {
+                    close_ascension();
+                    game_->ftue_seen("ascension_singleplayer_ftue");
+                }
+                break;
+            }
+            if (!menu_.is_null() && game_->ftue_pending("ascension_singleplayer_ftue")) {
+                ascension_ = new FtuePopup(lib_);
+                ascension_node_ = ascension_->build("ascension_singleplayer_ftue", std::vector<CanvasItem*>(), NULL, &err);
+                if (ascension_node_) {
+                    tree_->root()->add_child(ascension_node_);
+                    break;
+                }
+                delete ascension_;
+                ascension_ = NULL;
+                game_->ftue_seen("ascension_singleplayer_ftue");
+            }
             if (tutorials_) {
                 /* NAcceptTutorialsFtue: Yes keeps the tutorials, No turns
                  * them off; either way the Embark goes on */

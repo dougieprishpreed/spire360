@@ -67,6 +67,11 @@ private:
     /* NAcceptTutorialsFtue over the character select (the first Embark) */
     ConfirmPopup* tutorials_;
     Node* tutorials_node_;
+    /* NAscensionSingleplayerFtue over the character select (once a
+     * character has an ascension) */
+    class FtuePopup* ascension_;
+    Node* ascension_node_;
+    void close_ascension();
     TimelineScreen* timeline_;
     ProfileScreen* profiles_;
     SettingsScreen* settings_;
