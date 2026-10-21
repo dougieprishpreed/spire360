@@ -105,12 +105,20 @@ parts 2 and 3 above it).
   (eight plays turn it off), combat_reward on Skip with rewards left,
   merchant on leaving with the rug unopened (opening it marks it),
   rest_site, power_card (the Power's holder lifted), obtain_potion (a
-  potion more), obtain_relic (treasure open, a relic reward). Seen on
-  screen (spire_play --menu on a fresh profile, `work/ftuerun*.sh`;
-  spire_play writes ftue_<id>.png for each): accept_tutorials,
-  combat_rules (all pages), map_select, shuffle, can_play_cards,
-  power_card, rest_site. Not seen yet: cannot_play_card, combat_reward,
-  merchant, obtain_potion, obtain_relic. The ascension popup
+  potion more), obtain_relic (treasure open, a relic reward). All seen
+  on screen (spire_play --menu on a fresh profile; spire_play writes
+  ftue_<id>.png for each): `work/ftuerun*.sh` for the first seven,
+  `work/ftuescout.sh` (seed FTUE1, 999 HP, autoplay: the potion and the
+  relic) and `work/ftuecase.sh NAME SCREEN PRESSES STEPS` for what only
+  the pad reaches (cannot_play_card: A presses in the first fight;
+  combat_reward: Y on screen 21's rewards; merchant: Y in screen 74's
+  shop). Fixed on the way: the merchant tip waited for "proceed" but the
+  shop leaves with leave_room (it never showed); the relic tip lifts the
+  relic's own reward button (or the treasure's SingleplayerRelicHolder,
+  else the collection) and puts %Arrow at its bottom centre, as
+  NRelicRewardFtue; closing cannot_play_card ends the turn
+  (SecretEndTurnLogicViaFtue, no playable-cards tip) and closing merchant
+  opens the rug (CloseFtueAndOpenRug). The ascension popup
   (NAscensionSingleplayerFtue: once any character has an ascension, at the
   character select, tutorials on or off; marked as it closes) is in the
   same list; the logic tests FtueCompleted itself (SeenPopup is true under
@@ -137,6 +145,11 @@ parts 2 and 3 above it).
   screen 31) the crown of flames sits at the creature's feet behind it.
   UVs are affine per triangle (no perspective correction; the meshes are
   small and flat enough).
+- spire_play --menu: `--seed S` is the run's seed (GameClient::
+  set_run_seed; the menus' embark passes it), `--hp N` applies once the
+  run is on, and `--pad-after N --pad-run PRESSES` stops the autoplay at
+  the run's screen N for those presses (a shot after each), then it plays
+  on. Autoplay's 1.5 s close of a tip only while it is playing.
 - The enchant emboss reuses EFFECT_TAB_APPEAR (16), which already ported
   enchantment_tab_appear; the duplicate effect 59 of 4f7134c is gone.
 - `tools/check_canvas_shader.py` compiles every effect pixel shader too
@@ -1331,8 +1344,7 @@ name where it landed. Open items stay at the end of each group.
       checkpoint; console path untested).
 - [x] Compendium, run history, statistics, timeline (single-player
       parts).
-- [x] FTUEs and the ascension popup (part 10; five tips not seen on
-      screen yet).
+- [x] FTUEs and the ascension popup (part 10; all seen on screen).
 - [ ] No decision shown as the plain list: spire_play marks one with
       "(plain list)" and work/soak.sh counts them (plain=); confirm with
       a soak.

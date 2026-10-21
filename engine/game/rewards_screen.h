@@ -35,6 +35,8 @@ public:
      * Sphere's Cmd.Wait(0.75) after its last divination). */
     void set_delay(double seconds) { delay_ = seconds; }
     int focused() const { return focus_; }
+    /* The row of the decision's reward with that index (NULL: none). */
+    Control* row_for(int reward_index) const;
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
     virtual bool busy() const { return delay_ > 0; }

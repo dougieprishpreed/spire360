@@ -464,9 +464,11 @@ void GameClient::update(const PadState& pad) {
     }
     if (transition_ && transition_->phase != 0) return;
     if (ftue_) {
-        /* auto play reads it a second and a half */
+        /* auto play reads it a second and a half (not while it has
+         * stopped for a test's presses) */
         ++ftue_frames_;
-        if (ftue_->input(pad) || (auto_ && ftue_frames_ > 90)) close_ftue();
+        bool autoplaying = auto_ && (auto_until_ <= 0 || decisions_ < auto_until_);
+        if (ftue_->input(pad) || (autoplaying && ftue_frames_ > 90)) close_ftue();
         return;
     }
     if (combat_ && combat_->take_shuffle()) {
@@ -1558,6 +1560,12 @@ void GameClient::close_ftue() {
         combat_->set_hand_unfocused(false);
     }
     if (id == "combat_rules_ftue" && combat_) combat_->show_start_banner(false);
+    const std::string& kind = decision_["decision"].str();
+    /* NCannotPlayCardFtue.CloseFtueAndEndTurn: the turn ends (Secret-
+     * EndTurnLogicViaFtue: no playable-cards tip) */
+    if (id == "cannot_play_card_ftue" && combat_ && kind == "combat_play") send(action("end_turn"));
+    /* NMerchantFtue.CloseFtueAndOpenRug */
+    if (id == "merchant_ftue" && ported_ && kind == "shop") ((ShopScreen*)ported_)->open_rug();
 }
 
 bool GameClient::check_ftues(const PadState& pad) {
@@ -1617,16 +1625,32 @@ bool GameClient::check_ftues(const PadState& pad) {
             }
     }
     if (ftue_pending("obtain_relic_ftue")) {
-        /* NTreasureRoom / NRewardsScreen.RelicFtueCheck: a relic to take */
+        /* NTreasureRoom / NRewardsScreen.RelicFtueCheck: a relic to take;
+         * the tip is about its holder (the singleplayer one, else the
+         * collection) or its reward button */
         bool relic = kind == "treasure" && decision_["stage"].str() == "open" && decision_["relics"].size() > 0;
+        CanvasItem* spot = NULL;
+        if (relic) {
+            spot = screen_item("SingleplayerRelicHolder");
+            if (!spot || !spot->visible) spot = screen_item("RelicCollection");
+        }
         if (kind == "rewards") {
             const Json& rs = decision_["rewards"];
-            for (size_t i = 0; i < rs.size(); ++i)
-                if (rs[i]["type"].str() == "relic" && !rs[i]["skipped"].b()) relic = true;
+            for (size_t i = 0; i < rs.size() && !relic; ++i)
+                if (rs[i]["type"].str() == "relic" && !rs[i]["skipped"].b()) {
+                    relic = true;
+                    if (ported_) spot = ((RewardsScreen*)ported_)->row_for(rs[i]["index"].i((int)i));
+                }
         }
         if (relic) {
-            CanvasItem* spot = kind == "treasure" ? screen_item("RelicCollection") : screen_item("RewardsContainer");
-            open_ftue("obtain_relic_ftue", std::vector<CanvasItem*>(1, spot));
+            /* the arrow under it: GlobalPosition + (Size.X / 2, Size.Y) */
+            Vec2 at;
+            bool placed = spot && spot->is_control();
+            if (placed) {
+                Control* c = (Control*)spot;
+                at = c->global_transform().origin + Vec2(c->size.x * 0.5f, c->size.y);
+            }
+            open_ftue("obtain_relic_ftue", std::vector<CanvasItem*>(1, spot), placed ? &at : NULL);
             return true;
         }
     }
@@ -1648,8 +1672,10 @@ bool GameClient::ftue_instead(const std::string& command) {
             return true;
         }
     }
-    if (kind == "shop" && proceed && ftue_pending("merchant_ftue")) {
-        /* NMerchantRoom.HideScreen: leaving with the rug never opened */
+    if (kind == "shop" && (proceed || command.find("\"action\":\"leave_room\"") != std::string::npos) &&
+        ftue_pending("merchant_ftue")) {
+        /* NMerchantRoom.HideScreen: leaving with the rug never opened (the
+         * shop's Proceed is leave_room) */
         open_ftue("merchant_ftue", std::vector<CanvasItem*>(1, screen_item("MerchantButton")));
         return true;
     }

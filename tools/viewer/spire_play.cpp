@@ -15,7 +15,10 @@
  * profiles, timeline, character select, the run's pause menu), one each
  * time the screen has been idle a second, saving menu_KK.png after each;
  * --menu-hold N waits N extra seconds before the first press. Once the
- * buttons are used up, a run that has started plays by itself. The intro
+ * buttons are used up, a run that has started plays by itself (with
+ * --seed S, the run's seed is S; --hp works as below); --pad-after N
+ * --pad-run A,WAIT,... stops that at the run's screen N for those
+ * presses, then it plays on (tests of what only the pad reaches). The intro
  * logo (unless the settings skip it) plays out before the first press;
  * --shots-at F1,F2,... saves those frames (60 a second) as frame_FFFF.png.
  *
@@ -169,6 +172,29 @@ static void on_crash(int sig, siginfo_t* info, void* ctx) {
     _exit(139);
 }
 
+/* A --pad list ("A,RIGHT,WAIT,..."). */
+static void parse_pad(const std::string& list, std::vector<unsigned>& out) {
+    static const struct {
+        const char* name;
+        unsigned bit;
+    } names[] = { { "A", PadState::A },       { "B", PadState::B },         { "X", PadState::X },
+                  { "Y", PadState::Y },       { "LEFT", PadState::LEFT },   { "RIGHT", PadState::RIGHT },
+                  { "UP", PadState::UP },     { "DOWN", PadState::DOWN },   { "START", PadState::START },
+                  { "LB", PadState::LB },     { "RB", PadState::RB },       { "LT", PadState::LT },
+                  { "RT", PadState::RT },     { "RS_UP", PadState::RS_UP }, { "RS_DOWN", PadState::RS_DOWN },
+                  { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT },
+                  { "WAIT", 0 } /* a second with no press */ };
+    size_t at = 0;
+    while (at <= list.size()) {
+        size_t comma = list.find(',', at);
+        std::string tok = list.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k)
+            if (tok == names[k].name) out.push_back(names[k].bit);
+        if (comma == std::string::npos) break;
+        at = comma + 1;
+    }
+}
+
 static bool save_text(const std::string& path, const std::string& text) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
@@ -184,7 +210,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::string logic_cmd, character = "Ironclad", seed = "spire360", audio_wav;
-    bool audio_device = false, menu = false;
+    bool audio_device = false, menu = false, seed_given = false;
     double menu_hold = 0;
     const char* replay = NULL;
     int steps = 40;
@@ -194,7 +220,7 @@ int main(int argc, char** argv) {
     int settle = 60; /* frames before a decision's shot */
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
-    std::vector<unsigned> pad_script;
+    std::vector<unsigned> pad_script, run_script; /* --pad-run: in a --menu run, from --pad-after on */
     std::vector<int> shots_at;
     int frames_after = -1, frames_every = 10; /* screen after which every so many frames are saved */
     for (int i = 3; i < argc; ++i) {
@@ -217,7 +243,10 @@ int main(int argc, char** argv) {
         }
         else if (strcmp(argv[i], "--audio-wav") == 0 && i + 1 < argc) audio_wav = argv[++i];
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
-        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
+        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            seed = argv[++i];
+            seed_given = true;
+        }
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
         else if (strcmp(argv[i], "--no-shots") == 0) no_shots = true;
@@ -232,28 +261,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--settle") == 0 && i + 1 < argc) settle = atoi(argv[++i]);
         else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
-        else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
-            static const struct {
-                const char* name;
-                unsigned bit;
-            } names[] = { { "A", PadState::A },       { "B", PadState::B },         { "X", PadState::X },
-                          { "Y", PadState::Y },       { "LEFT", PadState::LEFT },   { "RIGHT", PadState::RIGHT },
-                          { "UP", PadState::UP },     { "DOWN", PadState::DOWN },   { "START", PadState::START },
-                          { "LB", PadState::LB },     { "RB", PadState::RB },       { "LT", PadState::LT },
-                          { "RT", PadState::RT },     { "RS_UP", PadState::RS_UP }, { "RS_DOWN", PadState::RS_DOWN },
-                          { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT },
-                          { "WAIT", 0 } /* a second with no press */ };
-            std::string list = argv[++i];
-            size_t at = 0;
-            while (at <= list.size()) {
-                size_t comma = list.find(',', at);
-                std::string tok = list.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
-                for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k)
-                    if (tok == names[k].name) pad_script.push_back(names[k].bit);
-                if (comma == std::string::npos) break;
-                at = comma + 1;
-            }
-        }
+        else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) parse_pad(argv[++i], pad_script);
+        else if (strcmp(argv[i], "--pad-run") == 0 && i + 1 < argc) parse_pad(argv[++i], run_script);
     }
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -303,6 +312,9 @@ int main(int argc, char** argv) {
     if (menu) {
         /* The menus, driven by the pad script; then the run plays itself. */
         MenuFlow flow(&lib, &tree, &game, pack.game_version());
+        if (seed_given) game.set_run_seed(seed);
+        size_t run_at = 0;
+        bool hp_set = false;
         if (!replay) {
             link.echo = true;
             link.trace = fopen((out_dir + "/trace.jsonl").c_str(), "wb");
@@ -319,12 +331,22 @@ int main(int argc, char** argv) {
                 hold -= 1.0 / 60.0;
                 settled = false;
             }
+            if (hp > 0 && !hp_set && flow.in_run() && game.decision_count() > 0) {
+                game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
+                hp_set = true;
+            }
             if (settled && at < pad_script.size()) {
                 pad.pressed = pad.held = pad_script[at++];
                 idle = 0;
                 quiet = 0; /* the last screen is shot once its press has settled */
+            } else if (settled && autoplay && run_at < run_script.size() && game.decision_count() >= pad_after) {
+                pad.pressed = pad.held = run_script[run_at++];
+                idle = 0;
+                quiet = 0;
+                if (run_at == run_script.size()) game.set_auto_play_until(0);
             } else if (at >= pad_script.size() && flow.in_run() && !autoplay) {
                 game.set_auto_play(auto_seed);
+                if (!run_script.empty()) game.set_auto_play_until(pad_after > 0 ? pad_after : 1);
                 autoplay = true;
             } else if (at >= pad_script.size() && quiet >= 300) {
                 /* The buttons are used up and no run is on: the last
@@ -353,14 +375,15 @@ int main(int argc, char** argv) {
             if (flow.in_run() || flow.starting() || game.busy() || flow.in_logo()) quiet = 0;
             else ++quiet;
             /* A shot of the first settled menu, then 45 frames after each
-             * press. */
-            bool shot = (idle == 45 && shots < (int)at + 1 && (at > 0 || !game.busy()));
+             * press (--pad-run's too). */
+            int presses = (int)(at + run_at);
+            bool shot = (idle == 45 && shots < presses + 1 && (at > 0 || !game.busy()));
             if (shot) {
                 sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
                 tree.render(canvas);
                 sw.end();
                 write_png(format("%s/menu_%02d.png", out_dir.c_str(), shots).c_str(), sw.framebuffer());
-                printf("menu_%02d after %d presses%s\n", shots, (int)at, flow.in_run() ? " (in a run)" : "");
+                printf("menu_%02d after %d presses%s\n", shots, presses, flow.in_run() ? " (in a run)" : "");
                 fflush(stdout);
                 ++shots;
             }

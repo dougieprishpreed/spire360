@@ -320,6 +320,12 @@ void ShopScreen::close_inspect() {
     inspect_relic_ = NULL;
 }
 
+void ShopScreen::open_rug() {
+    if (open_ || !inventory_) return;
+    open_inventory(true);
+    if (!slots_list_.empty()) focus_slot(0);
+}
+
 std::string ShopScreen::input(const PadState& pad) {
     if (inspect_card_ || inspect_relic_) {
         if (!(inspect_card_ ? inspect_card_->input(pad) : inspect_relic_->input(pad))) close_inspect();
@@ -351,8 +357,7 @@ std::string ShopScreen::input(const PadState& pad) {
     }
     if (!open_) {
         if ((pad.pressed & PadState::A) && inventory_) {
-            open_inventory(true);
-            if (!slots_list_.empty()) focus_slot(0);
+            open_rug();
             return std::string();
         }
         if ((pad.pressed & PadState::Y) && proceed_.enabled()) return protocol_action("leave_room");

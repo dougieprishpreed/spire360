@@ -162,6 +162,12 @@ Node* RewardsScreen::build(const Json& d, std::string* error) {
 }
 
 /* NRewardButton.OnFocus / OnUnfocus. */
+Control* RewardsScreen::row_for(int reward_index) const {
+    for (size_t i = 0; i < rows_.size(); ++i)
+        if (rows_[i].index == reward_index) return rows_[i].node;
+    return NULL;
+}
+
 void RewardsScreen::focus(int i) {
     if (i < 0 || i >= (int)rows_.size() || i == focus_) return;
     if (focus_ >= 0 && focus_ < (int)rows_.size()) {

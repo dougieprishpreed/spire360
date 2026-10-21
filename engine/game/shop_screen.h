@@ -33,6 +33,9 @@ public:
         start_index_ = index;
     }
     bool inventory_open() const { return open_; }
+    /* NMerchantRoom.OpenInventory (the merchant tip's "Got it!"), as A on
+     * the merchant does */
+    void open_rug();
     std::string focused_kind() const;
     int focused_index() const;
     virtual Node* build(const Json& decision, std::string* error);

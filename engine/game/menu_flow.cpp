@@ -140,7 +140,7 @@ void MenuFlow::embark() {
     last_character_ = chars_->selected();
     note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
     if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));
-    else game_->start_game_run(chars_->character(), chars_->ascension());
+    else game_->start_game_run(chars_->character(), chars_->ascension(), game_->run_seed());
     begin_run();
 }
 

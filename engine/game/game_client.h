@@ -79,6 +79,9 @@ public:
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
     /* Auto play answers only the decisions before the until-th (0: all). */
     void set_auto_play_until(int until) { auto_until_ = until; }
+    /* The seed of runs started from the menus ("": the game's own; tests) */
+    void set_run_seed(const std::string& seed) { run_seed_ = seed; }
+    const std::string& run_seed() const { return run_seed_; }
 
     /* One frame: reads the logic, applies input, updates the screen. */
     void update(const PadState& pad);
@@ -200,6 +203,7 @@ private:
     size_t focus_;
     bool waiting_, ready_, auto_;
     int auto_until_;
+    std::string run_seed_;
     bool menu_requested_;
     unsigned rng_;
     int decisions_, errors_;

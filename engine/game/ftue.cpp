@@ -151,6 +151,17 @@ Node* FtuePopup::build(const std::string& id, const std::vector<CanvasItem*>& sp
         set_label(confirm ? confirm->find_unique("Label") : NULL, Loc::get("ftues", "CONFIRM_BUTTON"));
         Node* outline = confirm ? confirm->get_node("Outline") : NULL;
         outline_ = outline && outline->is_control() ? (Control*)outline : NULL;
+        /* NRelicRewardFtue: %Arrow's top left at the relic's bottom centre */
+        Node* arrow = id == "obtain_relic_ftue" ? p->find_unique("Arrow") : NULL;
+        if (at && arrow && arrow->is_control()) {
+            Control* c = (Control*)arrow;
+            float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], h = c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
+            for (int k = 0; k < 4; ++k) c->anchor[k] = 0;
+            c->offset[SIDE_LEFT] = at->x;
+            c->offset[SIDE_TOP] = at->y;
+            c->offset[SIDE_RIGHT] = at->x + w;
+            c->offset[SIDE_BOTTOM] = at->y + h;
+        }
         /* NMapSelectFtue: %Positioner at the first room's centre */
         Node* pos = p->find_unique("Positioner");
         if (at && pos && pos->is_control()) {
