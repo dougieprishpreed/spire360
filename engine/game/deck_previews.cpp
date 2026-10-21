@@ -10,6 +10,7 @@
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/tween.h"
+#include "../scene/viewport.h"
 
 #include <math.h>
 
@@ -632,14 +633,14 @@ private:
     bool shined_;
 };
 
-/* NCardEnchantVfx: the enchanted card (first child), the enchantment's
- * sparkles from 0.2 s moving 72 px right over 0.4 s; it flies 2 s in. The
- * emboss on the card's enchantment tab (EnchantmentVfxOverride with the
- * viewport's icon, its progress shader) is not drawn: the tab shows as it
- * is. */
+/* NCardEnchantVfx: the enchanted card (first child) with its enchantment
+ * tab hidden and EnchantmentVfxOverride showing %EnchantmentViewport (the
+ * enchantment's icon and amount) through enchantment_tab_appear, its
+ * progress 0 -> 1 over 1 s (Quad InOut); the sparkles from 0.2 s moving
+ * 72 px right over 0.4 s; it flies 2 s in. */
 class EnchantPreview : public Preview {
 public:
-    EnchantPreview(Layer* l, const Json& cue) : Preview(l, cue), sparkles_(NULL), lit_(false) {
+    EnchantPreview(Layer* l, const Json& cue) : Preview(l, cue), sparkles_(NULL), override_(NULL), lit_(false) {
         root_ = instance(l->lib, "scenes/vfx/vfx_card_enchant.tscn");
         card_ = root_ ? new_card(cue["card"]) : NULL;
         if (!card_) {
@@ -647,9 +648,32 @@ public:
             root_ = NULL;
             return;
         }
-        hide(root_->find_unique("EnchantmentViewport"));
         if (root_->children.empty()) root_->add_child(card_);
         else root_->add_child_before(card_, root_->children[0]);
+        /* _Ready: the viewport's icon and amount */
+        const Json& ench = cue["card"]["enchantment_view"];
+        Node* in = root_->find_unique("EnchantmentInViewport");
+        if (in) {
+            set_texture(l->lib, in->get_node("Icon"), ench["icon"].str());
+            set_label(in->get_node("Label"), format("%d", ench["amount"].i()));
+            Node* label = in->get_node("Label");
+            if (label && label->is_canvas_item()) ((CanvasItem*)label)->visible = ench["show_amount"].b();
+        }
+        hide(card_->find_unique("Enchantment")); /* NCard.EnchantmentTab */
+        Node* over = card_->find_unique("EnchantmentVfxOverride");
+        Node* vp = root_->find_unique("EnchantmentViewport");
+        if (over && vp && over->type == "TextureRect") {
+            /* Viewport.GetTexture */
+            ViewportTextureRes* t = new ViewportTextureRes();
+            t->direct = vp->type == "SubViewport" ? (SubViewport*)vp : NULL;
+            t->user = over;
+            over->owned_resources.push_back(t);
+            ((TextureRect*)over)->texture = t;
+            ((CanvasItem*)over)->visible = true;
+            override_ = (CanvasItem*)over;
+            override_->shader_params["progress"] = 0;
+            tweens_.tween(&override_->shader_params["progress"], 1.0f, 1.0f, TRANS_QUAD, EASE_IN_OUT);
+        }
         Node* s = root_->find_unique("EnchantmentAppearSparkles");
         if (s && s->is_node2d()) sparkles_ = (Node2D*)s;
         l->add(BOX_ROW, root_);
@@ -667,6 +691,7 @@ public:
 
 private:
     Node2D* sparkles_;
+    CanvasItem* override_;
     bool lit_;
 };
 

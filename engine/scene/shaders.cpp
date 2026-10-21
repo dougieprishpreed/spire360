@@ -637,6 +637,9 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[1] = k.g;
         e.p[2] = k.b;
         e.p[3] = param(m, "MultiplyVsAdd", 1.0f) != 0.0f ? 1.0f : 0.0f;
+    } else if (s == "shaders/enchantment_tab_appear.gdshader") {
+        e.id = EFFECT_ENCHANT_TAB;
+        e.p[0] = param(m, "progress", 0.0f);
     } else if (s == "shaders/vfx/ui/vfx_ui_epoch_unlock_chains_shader.gdshader") {
         Color k = param_color(m, "bright_color", Color(0, 0, 0, 0));
         e.id = EFFECT_EPOCH_CHAINS;

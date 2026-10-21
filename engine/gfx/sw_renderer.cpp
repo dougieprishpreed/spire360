@@ -1124,6 +1124,22 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_ENCHANT_TAB: {
+        static const float add[3] = { 1.0f, 0.75f, 0.9f };
+        float s = smoothstepf(e.p[0], e.p[0] + 0.2f, u);
+        float t[4] = { 0, 0, 0, 0 };
+        if (tex) sample(tex->img, u, v + ((v - 0.5f) * 0.75f + 0.5f - v) * s, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float f = smoothstepf(e.p[0] + 0.2f, e.p[0] + 0.25f, u);
+        float ca = (t[3] + (1 - t[3]) * s) * (1 - f);
+        float a = clampf(ca * t[3], 0, 1);
+        for (int k = 0; k < 3; ++k) {
+            float c = t[k] * ia + add[k] * s;
+            out[k] = clampf(c + (add[k] - c) * f, 0, 1) * a;
+        }
+        out[3] = a;
+        return;
+    }
     case EFFECT_POISON_SKULL: {
         float d[4] = { 1, 1, 1, 1 }, t[4] = { 1, 1, 1, 1 }, l[4];
         if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);

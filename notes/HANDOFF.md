@@ -230,8 +230,15 @@ parts 2 and 3 above it).
   NSpineSpriteBoneFollower (SpineSprite::bone_position), NValueRamp and
   the gradients; the Echo Form's copier plays the body's animations.
   All five checked in part 10.
-- Still open: NPowerUpVfx's 3D layer, the enchant emboss, the five FTUEs
-  not seen on screen yet (part 10). The other unhandled ui calls of the survey
+- The enchant emboss: NCardEnchantVfx's %EnchantmentViewport (the
+  enchantment's icon and amount) on the card's EnchantmentVfxOverride
+  through enchantment_tab_appear (EFFECT_ENCHANT_TAB, progress 0 -> 1 over
+  1 s, Quad InOut), the card's %Enchantment tab hidden (as the game; the
+  override sits 45 px below the tab of a card without a star cost, as in
+  the game). ViewportTextureRes can name its viewport directly
+  (Viewport.GetTexture from code).
+- Still open: NPowerUpVfx's 3D layer, the five FTUEs not seen on screen
+  yet (part 10). The other unhandled ui calls of the survey
   (work/ui_calls.txt) are done in part 10.
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights

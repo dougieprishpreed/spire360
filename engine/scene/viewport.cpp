@@ -116,6 +116,7 @@ void SubViewportContainer::draw(Canvas& c) {
 /* ---- ViewportTexture ---- */
 
 SubViewport* ViewportTextureRes::viewport() const {
+    if (direct) return direct;
     if (!user || viewport_path.empty()) return NULL;
     /* local to the scene: the path is from the root of the user's scene */
     Node* root = user->owner ? user->owner : user;

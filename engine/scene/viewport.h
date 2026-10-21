@@ -55,9 +55,12 @@ public:
  * shows it binds a copy of its own (bind_texture). */
 class ViewportTextureRes : public Texture2DRes {
 public:
-    ViewportTextureRes() : Texture2DRes(RES_VIEWPORT_TEXTURE, "ViewportTexture"), user(NULL) {}
+    ViewportTextureRes() : Texture2DRes(RES_VIEWPORT_TEXTURE, "ViewportTexture"), user(NULL), direct(NULL) {}
     std::string viewport_path;
     Node* user; /* the node it is bound to (NULL: not bound) */
+    /* Viewport.GetTexture from code: that viewport (in the same tree as
+     * the user, gone with it) */
+    SubViewport* direct;
     SubViewport* viewport() const;
     virtual Vec2 size() const;
     virtual bool get_rect_region(const Rect2& dst, const Rect2& src, Rect2& out_dst, Rect2& out_src,
