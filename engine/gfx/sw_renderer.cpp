@@ -1066,6 +1066,36 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_AEONGLASS_RAY: {
+        float r[4], em[4];
+        effect_texel(e, 0, u + e.p[0], v, r);
+        effect_texel(e, 1, u * e.p[7], v * e.p[8], em);
+        float rr = r[3] > 0 ? r[0] / r[3] : 0.0f, rg = r[3] > 0 ? r[1] / r[3] : 0.0f, eg = em[3] > 0 ? em[1] / em[3] : 0.0f;
+        float a = clampf(rg * eg, 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[1 + k] * rr + e.p[4 + k] * rg, 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_SOUL_FYSH_WAVE: {
+        float em[4], w[4];
+        effect_texel(e, 0, u, v, em);
+        effect_texel(e, 1, u + e.p[0], v, w);
+        float er = em[3] > 0 ? em[0] / em[3] : 0.0f, wr = w[3] > 0 ? w[0] / w[3] : 0.0f;
+        float a = clampf(smoothstepf(e.p[2], e.p[3], er * wr * e.p[1]), 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[4 + k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
+    case EFFECT_WATERFALL_WATER: {
+        float mv[4], wt[4];
+        effect_texel(e, 0, (u + e.p[0]) * e.p[2] + e.p[4], (v + e.p[1]) * e.p[3] + e.p[5], mv);
+        effect_texel(e, 1, u, v, wt);
+        float im = mv[3] > 0 ? 1.0f / mv[3] : 0.0f, iw = wt[3] > 0 ? 1.0f / wt[3] : 0.0f;
+        float a = clampf(wt[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(e.p[6 + k] * mv[k] * im + wt[k] * iw, 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_POISON_SKULL: {
         float d[4] = { 1, 1, 1, 1 }, t[4] = { 1, 1, 1, 1 }, l[4];
         if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);

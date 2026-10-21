@@ -565,6 +565,52 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[5] = ap.y;
         e.p[6] = er.x;
         e.p[7] = er.y;
+    } else if (s == "shaders/vfx/monsters/aeonglass_ray_shader.tres") {
+        Color core = param_color(m, "CoreColor", Color(0, 0, 0, 1)), blur = param_color(m, "BlurColor", Color(0, 0, 0, 1));
+        Vec2 sc = shader_param_vec2(m, "EdgeMaskScale", Vec2(1, 1));
+        e.id = EFFECT_AEONGLASS_RAY;
+        e.p[0] = param(m, "Progress", 0.0f);
+        e.p[1] = core.r;
+        e.p[2] = core.g;
+        e.p[3] = core.b;
+        e.p[4] = blur.r;
+        e.p[5] = blur.g;
+        e.p[6] = blur.b;
+        e.p[7] = sc.x;
+        e.p[8] = sc.y;
+        e.tex[0] = effect_texture(c, m, "RayTex");
+        e.tex[1] = effect_texture(c, m, "EdgeMaskTex");
+    } else if (s == "shaders/vfx/monsters/soul_fysh_soundwave_shader.tres") {
+        Color k = param_color(m, "ColorParameter", Color(1, 0.682353f, 0.039216f, 1));
+        Vec2 st = shader_param_vec2(m, "step", Vec2(0.4f, 0.6f));
+        e.id = EFFECT_SOUL_FYSH_WAVE;
+        e.p[0] = fmodf((param(m, "startingOffset", 0.0f) + (float)g_shader_time) * param(m, "ScrollSpeed", 0.8f), 1.0f);
+        e.p[1] = param(m, "amount", 1.0f);
+        e.p[2] = st.x;
+        e.p[3] = st.y;
+        e.p[4] = k.r;
+        e.p[5] = k.g;
+        e.p[6] = k.b;
+        e.tex[0] = effect_texture(c, m, "edgeMask");
+        e.tex[1] = effect_texture(c, m, "soundwaveTex");
+        e.repeat = 3;
+    } else if (s == "shaders/vfx/monsters/waterfall_giant_water_shader.tres") {
+        Color k = param_color(m, "ColorParameter", Color(1, 0.682353f, 0.039216f, 1));
+        Vec2 off = shader_param_vec2(m, "movingTexOffset", Vec2(0, 0)), sc = shader_param_vec2(m, "movingTexScale", Vec2(0, 0));
+        Vec2 sp = shader_param_vec2(m, "scrollSpeed", Vec2(0, 0));
+        e.id = EFFECT_WATERFALL_WATER;
+        e.p[0] = off.x;
+        e.p[1] = off.y;
+        e.p[2] = sc.x;
+        e.p[3] = sc.y;
+        e.p[4] = pan(sp.x);
+        e.p[5] = pan(sp.y);
+        e.p[6] = k.r;
+        e.p[7] = k.g;
+        e.p[8] = k.b;
+        e.tex[0] = effect_texture(c, m, "movingTex");
+        e.tex[1] = effect_texture(c, m, "waterTex");
+        e.repeat = 3;
     } else if (s == "shaders/vfx/poison/vfx_poison_skull_shader.gdshader") {
         e.id = EFFECT_POISON_SKULL;
         Vec2 sp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));

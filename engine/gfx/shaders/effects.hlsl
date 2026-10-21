@@ -683,6 +683,28 @@ float4 ps_e53(VsOut i) : COLOR {
     return float4(saturate(d * i.color.rgb) * a, a);
 }
 
+// 54: aeonglass_ray_shader: the ray's core and blur colours, edge masked.
+float4 ps_e54(VsOut i) : COLOR {
+    float4 r = tex2D(g_e0, i.uv + float2(g_p0.x, 0.0));
+    float a = saturate(r.g * tex2D(g_e1, i.uv * float2(g_p1.w, g_p2.x)).g);
+    return float4(saturate(g_p0.yzw * r.r + g_p1.xyz * r.g) * a, a);
+}
+
+// 55: soul_fysh_soundwave_shader: the scrolling wave through the edge mask.
+float4 ps_e55(VsOut i) : COLOR {
+    float x = tex2D(g_e0, i.uv).r * tex2D(g_e1, i.uv + float2(g_p0.x, 0.0)).r * g_p0.y;
+    float a = saturate(smoothstep(g_p0.z, g_p0.w, x));
+    return float4(saturate(g_p1.xyz) * a, a);
+}
+
+// 56: waterfall_giant_water_shader: the scrolling tint over the water.
+float4 ps_e56(VsOut i) : COLOR {
+    float3 mv = tex2D(g_e0, (i.uv + g_p0.xy) * g_p0.zw + g_p1.xy).rgb;
+    float4 w = tex2D(g_e1, i.uv);
+    float a = saturate(w.a);
+    return float4(saturate(float3(g_p1.z, g_p1.w, g_p2.x) * mv + w.rgb) * a, a);
+}
+
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
 float4 ps_e21(VsOut i) : COLOR {
     float w[7] = { 0.0702, 0.1311, 0.1907, 0.2160, 0.1907, 0.1311, 0.0702 };

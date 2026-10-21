@@ -291,6 +291,20 @@ enum EffectId {
      * mixed towards 1 - d by p3, smoothstep(p6, p6 + p7, d); (d, d, d, 1) *
      * vertex colour. */
     EFFECT_SPOTLIGHT = 53,
+    /* shaders/vfx/monsters/aeonglass_ray_shader.tres: r = tex0(UV + (p0,
+     * 0)) (RayTex, clamped; p0 Progress); rgb p1..3 * r.r + p4..6 * r.g,
+     * alpha r.g * tex1(UV * p7p8).g (EdgeMaskTex). No vertex colour. */
+    EFFECT_AEONGLASS_RAY = 54,
+    /* shaders/vfx/monsters/soul_fysh_soundwave_shader.tres: rgb p4..6,
+     * alpha smoothstep(p2, p3, tex0(UV).r * tex1(UV + (p0, 0)).r * p1)
+     * (edgeMask, soundwaveTex, both repeat; p0 (startingOffset + TIME) *
+     * ScrollSpeed, p1 amount). No vertex colour. */
+    EFFECT_SOUL_FYSH_WAVE = 55,
+    /* shaders/vfx/monsters/waterfall_giant_water_shader.tres: rgb p6..8 *
+     * tex0((UV + p0p1) * p2p3 + p4p5).rgb + tex1(UV).rgb, alpha tex1(UV).a
+     * (movingTex, waterTex, both repeat; p4p5 TIME * scrollSpeed). No
+     * vertex colour. */
+    EFFECT_WATERFALL_WATER = 56,
     EFFECT_COUNT
 };
 
