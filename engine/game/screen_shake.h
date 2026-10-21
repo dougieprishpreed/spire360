@@ -13,6 +13,10 @@ namespace spire {
 
 class Control;
 
+/* Godot's FastNoiseLite as the game sets it up (Perlin FBM), one-dimensional;
+ * about -1..1. */
+float fbm(float x, float frequency, int seed);
+
 class ScreenShake {
 public:
     static ScreenShake& get();

@@ -720,6 +720,9 @@ internal sealed class Patcher
                         changed = true;
                     }
                     var name = spec.Id + "|" + target.DeclaringType.GetElementType().FullName + "::" + target.Name;
+                    // a generic method's type arguments (GetSpecialNode<T>: the stand-in's class)
+                    if (target is GenericInstanceMethod generic)
+                        name += "<" + string.Join(",", generic.GenericArguments.Select(a => a.FullName)) + ">";
                     bool standIn = spec.StandInSingletons && !target.HasThis && target.Name == "get_Instance" &&
                                    IsStatementUiChain(body.Instructions, idx, IsUi, spec.NullTolerant);
                     ReplaceCallWithDefault(method, ins, target, name, standIn, IsUi);

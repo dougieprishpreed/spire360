@@ -50,6 +50,11 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
       arrow_head_(NULL) {
     player_.node = NULL;
     osty_.node = NULL;
+    long_press_on_ = false;
+    long_press_ready_ = true;
+    long_press_done_ = false;
+    long_press_t_ = 0;
+    long_press_fade_ = 0;
     next_cue_ = 0;
     cue_t_ = 0;
     life_t_ = 0;
@@ -1144,7 +1149,58 @@ void CombatScreen::update_arrow(const Vec2& target) {
 
 /* NHandCardHolder.AnimPosition / AnimAngle / AnimScale (lerps at 7, 10
  * and 8 per second), the tweens, NTargetingArrow._Process (14). */
+void CombatScreen::hold_end_turn(bool pressed, bool held) {
+    if (pressed) long_press_on_ = true;
+    if (!held) long_press_on_ = false;
+}
+
+/* NEndTurnLongPressBar._Process: held, the bar fills over 0.5 s (its width
+ * to 204, its colour from blue-grey to gold, its alpha CubicOut); let go, it
+ * drains; full, the turn ends and the bar fades (0.25 s). */
+static void long_press_bar(Node* bar, double t, float fade) {
+    if (!bar || bar->type != "ColorRect") return;
+    ColorRect* r = (ColorRect*)bar;
+    float k = (float)(t / 0.5);
+    r->set_size(Vec2(k * 204.0f, 6.0f));
+    r->color = Color(k * 2.5f, 0.6f + k, 0.6f, 1);
+    float x = k * 0.75f - 1;
+    r->modulate.a = (x * x * x + 1) * fade;
+}
+
 void CombatScreen::process(double dt) {
+    {
+        Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+        Node* end = ui ? ui->get_node("EndTurnButton") : NULL;
+        Node* bar = end ? find_named(end, "Bar") : NULL;
+        if (long_press_fade_ > 0) {
+            long_press_fade_ -= dt;
+            if (bar && bar->is_canvas_item()) ((CanvasItem*)bar)->modulate.a = (float)(long_press_fade_ / 0.25 > 0 ? long_press_fade_ / 0.25 : 0);
+            if (long_press_fade_ <= 0) {
+                long_press_ready_ = true;
+                long_press_on_ = false;
+                if (bar && bar->type == "ColorRect") ((ColorRect*)bar)->color = Color(1, 0.85f, 0.36f, 1);
+            }
+        } else if (long_press_ready_ && long_press_on_) {
+            long_press_t_ += dt;
+            if (long_press_t_ > 0.5) {
+                long_press_ready_ = false;
+                long_press_t_ = 0;
+                long_press_done_ = true;
+                long_press_fade_ = 0.25;
+                long_press_bar(bar, 0.5, 1);
+            } else {
+                long_press_bar(bar, long_press_t_, 1);
+            }
+        } else if (long_press_ready_ && long_press_t_ > 0) {
+            long_press_t_ -= dt;
+            if (long_press_t_ < 0) {
+                long_press_t_ = 0;
+                if (bar && bar->is_canvas_item()) ((CanvasItem*)bar)->modulate.a = 0;
+            } else {
+                long_press_bar(bar, long_press_t_, 1);
+            }
+        }
+    }
     float t = (float)dt;
     tweens_.update(dt);
     for (size_t i = moving_cards_.size(); i-- > 0;) {
@@ -1219,6 +1275,11 @@ void CombatScreen::process(double dt) {
         } else o.node->modulate.a = (float)(o.until - life_t_) / 0.25f;
     }
     while (next_cue_ < cues_.size() && cues_[next_cue_].at <= cue_t_) fire(cues_[next_cue_++]);
+    for (size_t i = delayed_hides_.size(); i-- > 0;)
+        if (life_t_ >= delayed_hides_[i].at && (!death_delayed(delayed_hides_[i].visuals) || life_t_ >= delayed_hides_[i].at + 10)) {
+            delayed_hides_[i].visuals->modulate.a = 0;
+            delayed_hides_.erase(delayed_hides_.begin() + (long)i);
+        }
     for (size_t i = banners_.size(); i-- > 0;)
         if (life_t_ >= banners_[i].until) {
             banners_[i].node->queue_free();
@@ -2115,6 +2176,18 @@ bool CombatScreen::creature(const std::string& who, VfxCreature* out) {
     return true;
 }
 
+Node* CombatScreen::visuals_of(const std::string& who) {
+    Creature* cr = creature_for(who);
+    return cr ? cr->visuals : NULL;
+}
+
+bool CombatScreen::origin_of(const std::string& who, Vec2* out) {
+    Creature* cr = creature_for(who);
+    if (!cr || !cr->node) return false;
+    *out = global_origin(cr->node);
+    return true;
+}
+
 bool CombatScreen::side_center(bool enemies, Vec2* out) {
     Cue c;
     c.where = "side";
@@ -2218,8 +2291,10 @@ void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSpri
         if (p.size() >= 2) pad = Vec2(p[(size_t)0].f(1.2f), p[(size_t)1].f(1.2f));
         spawn_monster_death(lib_, cr.node->parent, *this, who, wait, pad);
     } else if (cr.visuals && cr.visuals->is_canvas_item()) {
-        /* freed at once (the end of its animation leaves nothing) */
-        tweens_.tween(&((CanvasItem*)cr.visuals)->modulate.a, 0.0f, 0.01f, TRANS_LINEAR, EASE_IN_OUT, (float)wait);
+        /* freed at once (the end of its animation leaves nothing), after any
+         * IDeathDelayer of it is done */
+        DelayedHide h = { (CanvasItem*)cr.visuals, life_t_ + wait };
+        delayed_hides_.push_back(h);
     }
 }
 
@@ -2321,6 +2396,7 @@ void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_SCRIPTED && ScreenShake::get().cue(c.data["call"].str(), c.data["args"])) return;
     double crab_waits;
     if (c.kind == CUE_SCRIPTED && kaiser_crab_call(c.data["call"].str(), c.data["args"], &crab_waits)) return;
+    if (c.kind == CUE_SCRIPTED && special_node_call(c.data["call"].str(), c.data["args"], *this)) return;
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
         creature_call(c.data["call"].str().substr(10), c.data["args"]);
         return;
@@ -2541,6 +2617,12 @@ void CombatScreen::play_steps(const Json& steps) {
                                         ch["call"].str() == "NCreature.RefreshIntents" ||
                                         ch["call"].str().compare(0, 12, "NGame.Screen") == 0)) {
                 /* The game's scripted effects (combat_vfx). */
+                c.kind = CUE_SCRIPTED;
+                c.data = ch;
+                cues_.push_back(c);
+            } else if (type == "ui" && ch["args"].size() > 0 && ch["args"][(size_t)0].is_string() &&
+                       ch["args"][(size_t)0].str().find('#') != std::string::npos) {
+                /* a call on a creature's special node */
                 c.kind = CUE_SCRIPTED;
                 c.data = ch;
                 cues_.push_back(c);

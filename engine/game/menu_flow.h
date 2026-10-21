@@ -23,6 +23,7 @@ class SceneLibrary;
 class SceneTree;
 class TimelineScreen;
 class TitleScreen;
+class LogoScreen;
 
 class MenuFlow {
 public:
@@ -33,6 +34,8 @@ public:
     bool update(const PadState& pad);
     /* A run is shown (its first decision arrived). */
     bool in_run() const { return in_run_; }
+    /* The intro logo still playing (the title comes after it). */
+    bool in_logo() const { return logo_ != NULL; }
     /* A run was asked for and has not shown its first screen yet. */
     bool starting() const { return starting_; }
     /* The last main menu answer (null before the logic's). */
@@ -44,6 +47,7 @@ private:
     enum Screen { TITLE, CHARACTERS, ABANDON, TIMELINE, PROFILES, SETTINGS, COMPENDIUM };
     void handle_answer(const Json& a);
     void show_title();
+    void relocalize();
     void close_screen();
     void begin_run();
     void open_timeline();
@@ -52,6 +56,8 @@ private:
     SceneTree* tree_;
     GameClient* game_;
     std::string version_;
+    LogoScreen* logo_; /* NLogoAnimation before the title */
+    Node* logo_node_;
     TitleScreen* title_;
     Node* title_node_;
     CharacterSelectScreen* chars_;
@@ -59,7 +65,7 @@ private:
     TimelineScreen* timeline_;
     ProfileScreen* profiles_;
     SettingsScreen* settings_;
-    int settings_seen_;
+    int settings_seen_, language_seen_;
     CompendiumScreen* compendium_;
     Node* screen_node_; /* the submenu over the title */
     Screen screen_;

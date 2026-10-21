@@ -36,7 +36,31 @@ public:
     /* The creature's NCreatureVisuals, taken by an effect that keeps its
      * body (the doom kill): the screen forgets it. */
     virtual Node* take_visuals(const std::string& who) = 0;
+    /* The creature's NCreatureVisuals and NCreature's position (its node's
+     * origin), for the calls on its special nodes; none by default. */
+    virtual Node* visuals_of(const std::string& who) {
+        (void)who;
+        return NULL;
+    }
+    virtual bool origin_of(const std::string& who, Vec2* out) {
+        (void)who;
+        (void)out;
+        return false;
+    }
 };
+
+/* A call the game made on a creature's special node (NCreature.
+ * GetSpecialNode / Visuals.GetCurrentBody().GetNode: the logic names it
+ * "<who>#<path>", "body:<path>" for the current body's): the node found in
+ * the creature's visuals and its script's port run (the Kin Priest's beam,
+ * the Decimillipede's regeneration and shake, the Myte's and Snapping
+ * Jaxfruit's target, the Flyconid's spore kind). False when it is no such
+ * call. */
+bool special_node_call(const std::string& call, const Json& args, VfxAnchors& anchors);
+/* NCreature.AnimDie's IDeathDelayer wait: true while a script in the
+ * creature's visuals holds its death back (the Ceremonial Beast's death
+ * particles still running). */
+bool death_delayed(Node* visuals);
 
 /* True when call is one of the scripted effects (shown or not). box:
  * NCombatRoom.CombatVfxContainer. */

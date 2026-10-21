@@ -178,11 +178,11 @@ public partial class RunDriver
     /// profile's prefs and progress), or the last profile when id is 0, as
     /// the game does at start-up.
     /// </summary>
-    public Dictionary<string, object?> SelectProfile(int id, string lang = "en")
+    public Dictionary<string, object?> SelectProfile(int id, string? lang = null)
     {
         try
         {
-            _loc.Lang = lang;
+            ApplyLanguage(lang);
             EnsureModelDbInitialized();
             if (_runState != null) EndRun();
             if (id <= 0)
@@ -369,11 +369,11 @@ public partial class RunDriver
 
     // ─── A new run (NCharacterSelectScreen, StartRunLobby, NGame) ───
 
-    public Dictionary<string, object?> StartGameRun(string characterName, int ascension, string? seed, string lang)
+    public Dictionary<string, object?> StartGameRun(string characterName, int ascension, string? seed, string? lang)
     {
         try
         {
-            _loc.Lang = lang;
+            ApplyLanguage(lang);
             EnsureModelDbInitialized();
             if (_profileId <= 0) return Error("No profile selected");
             if (_runState != null) EndRun();
@@ -430,11 +430,11 @@ public partial class RunDriver
 
     // ─── Continue, abandon, save and quit (NMainMenu, NPauseMenu) ───
 
-    public Dictionary<string, object?> ContinueRun(string lang)
+    public Dictionary<string, object?> ContinueRun(string? lang)
     {
         try
         {
-            _loc.Lang = lang;
+            ApplyLanguage(lang);
             EnsureModelDbInitialized();
             if (_profileId <= 0) return Error("No profile selected");
             if (_runState != null) EndRun();

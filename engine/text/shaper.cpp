@@ -107,7 +107,40 @@ void shape_run(const std::vector<u32>& text, int start, int end, const FontRes* 
             g.asc = face->ascent * size / face->base_size + (font ? font->spacing_top : 0);
             g.desc = face->descent * size / face->base_size + (font ? font->spacing_bottom : 0);
         }
-        if (face && !zero_width(c)) {
+        /* a character the font lacks: its fallbacks' (TextServer's
+         * fallback to other fonts, then system fonts) */
+        const FontRes* gfont = font;
+        FontFace* gface = face;
+        if (face && !zero_width(c) && !is_whitespace_cp(c) && !is_linebreak_cp(c) && c != 0x0009 &&
+            !face->glyph_for(c)) {
+            FontLibrary* lib = FontLibrary::current();
+            const FontRes* other = lib ? lib->font_with(font, c) : font;
+            FontFace* of = other != font ? face_of(other) : NULL;
+            if (of) {
+                gfont = other;
+                gface = of;
+                g.face = of;
+                g.asc = of->ascent * size / of->base_size + (other ? other->spacing_top : 0);
+                g.desc = of->descent * size / of->base_size + (other ? other->spacing_bottom : 0);
+                out.ascent = maxf(out.ascent, g.asc);
+                out.descent = maxf(out.descent, g.desc);
+            }
+        }
+        if (gface != face) {
+            /* one glyph of the fallback font: no ligatures or kerning across
+             * fonts */
+            float scale = size / gface->base_size;
+            g.gid = gface->glyph_for(c);
+            double a = gface->char_advance(c) * scale;
+            (void)gfont;
+            if (scale != 1.0f) {
+                g.advance = (float)a;
+            } else {
+                double full = adv_rem + a;
+                g.advance = (float)floor(full + 0.5);
+                adv_rem = full - g.advance;
+            }
+        } else if (face && !zero_width(c)) {
             float scale = size / face->base_size;
             bool subpos = scale != 1.0f; /* MSDF fonts scale; at base size Godot rounds */
             double base_adv;

@@ -7,9 +7,62 @@
 #include "loc.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace spire {
+
+/* NLanguageDropdown._languageCodeToName: each language in its own words */
+static const struct {
+    const char* code;
+    const char* name;
+} LANGUAGE_NAMES[] = {
+    { "eng", "English" },
+    { "zhs", "\xE4\xB8\xAD\xE6\x96\x87" },
+    { "zht", "\xE7\xB9\x81\xE9\xAB\x94\xE4\xB8\xAD\xE6\x96\x87" },
+    { "deu", "Deutsch" },
+    { "esp", "Espa\xC3\xB1ol (Latinoam\xC3\xA9rica)" },
+    { "fra", "Fran\xC3\xA7" "ais" },
+    { "ind", "Bahasa Indonesia" },
+    { "ita", "Italiano" },
+    { "jpn", "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E" },
+    { "kor", "\xED\x95\x9C\xEA\xB5\xAD\xEC\x96\xB4" },
+    { "pol", "Polski" },
+    { "ptb", "Portugu\xC3\xAAs Brasileiro" },
+    { "rus", "\xD0\xA0\xD1\x83\xD1\x81\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9" },
+    { "spa", "Espa\xC3\xB1ol (Castellano)" },
+    { "tha", "\xE0\xB9\x84\xE0\xB8\x97\xE0\xB8\xA2" },
+    { "tur", "T\xC3\xBCrk\xC3\xA7" "e" },
+};
+
+static std::string language_name(const std::string& code) {
+    for (size_t i = 0; i < sizeof(LANGUAGE_NAMES) / sizeof(LANGUAGE_NAMES[0]); ++i)
+        if (code == LANGUAGE_NAMES[i].code) return LANGUAGE_NAMES[i].name;
+    return code;
+}
+
+/* LocManager.GetLanguageCompletion: the language's keys over English's
+ * (data/localization/completion.json) */
+static float language_completion(const std::string& code) {
+    static Json counts;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        std::string path = Loc::data_path("localization/completion.json");
+        FILE* f = fopen(path.c_str(), "rb");
+        if (f) {
+            std::string text;
+            char buf[4096];
+            size_t got;
+            while ((got = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, got);
+            fclose(f);
+            std::string err;
+            counts = Json::parse(text.c_str(), text.size(), &err);
+        }
+    }
+    float eng = counts["eng"].f(0);
+    return eng > 0 ? counts[code.c_str()].f(0) / eng : 1.0f;
+}
 
 /* StsColors.cream / halfTransparentCream */
 static const Color CREAM(1.0f, 0.964706f, 0.886275f, 1.0f), HALF_CREAM(1.0f, 0.964706f, 0.886275f, 0.5f);
@@ -18,7 +71,8 @@ static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n 
 
 SettingsScreen::SettingsScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), focus_(-1), tab_(0), toast_(NULL), toast_t_(-1), confirm_(NULL), confirm_node_(NULL),
-      credits_(NULL), credits_node_(NULL) {
+      credits_(NULL), credits_node_(NULL), dropdown_(NULL), dropdown_open_(false), language_enabled_(true), item_focus_(0),
+      scroll_(0), scroll_target_(0), scroll_limit_(0) {
     for (int i = 0; i < 2; ++i) panels_[i] = boxes_[i] = tabs_[i] = NULL;
 }
 
@@ -56,6 +110,9 @@ Node* SettingsScreen::build(const Json& settings, std::string* error) {
     tweens_.clear();
     focus_ = -1;
     tab_ = 0;
+    items_.clear();
+    codes_.clear();
+    dropdown_open_ = false;
     Node* screen = instance(lib_, "scenes/screens/settings_screen.tscn");
     if (!screen) {
         if (error) *error = "no settings_screen.tscn";
@@ -98,7 +155,7 @@ Node* SettingsScreen::build(const Json& settings, std::string* error) {
         set_label(l ? l->get_node("Label") : NULL, Loc::get("settings_ui", labels[i].key));
     }
     /* the PC's lines (and the dividers above them) */
-    static const char* const pc_lines[] = { "LanguageLine", "LanguageDropdown", "ShowMpDrawingsDivider", "ShowMpDrawings",
+    static const char* const pc_lines[] = { "ShowMpDrawingsDivider", "ShowMpDrawings",
                                             "LimiFpsDivider", "LimitFpsInBackground", "UploadDataDivider",
                                             "UploadGameplayData", "SendFeedbackDivider", "SendFeedback", "ModdingDivider",
                                             "Modding", "ScreenshakeDivider" };
@@ -109,6 +166,28 @@ Node* SettingsScreen::build(const Json& settings, std::string* error) {
     }
 
     /* the lines in the order the pad moves through them */
+    dropdown_ = control_of(screen->find_unique("LanguageDropdown"));
+    size_t before = lines_.size();
+    if (dropdown_ && general) add(0, general, "LanguageLine", NULL, DROPDOWN, "language");
+    if (lines_.size() > before) {
+        Line& l = lines_.back();
+        Node* line = find_named(general, "LanguageLine");
+        set_label(line ? line->get_node("Label") : NULL,
+                  Loc::get("settings_ui", settings["in_run"].b() ? "LANGUAGE_IN_RUN" : "LANGUAGE"));
+        l.control = dropdown_;
+        l.reticle = dropdown_->get_node("SelectionReticle");
+        hide(l.reticle);
+        set_label(dropdown_->find_unique("Label"), language_name(settings["language"].str()));
+        /* NSettingsScreen: in a run the language stays as it is */
+        language_enabled_ = !settings["in_run"].b();
+        if (!language_enabled_) {
+            Color gray(0.5f, 0.5f, 0.5f, 1); /* StsColors.gray */
+            Node* label = find_named(general, "LanguageLine");
+            label = label ? label->get_node("Label") : NULL;
+            if (label && label->is_canvas_item()) ((CanvasItem*)label)->modulate = gray;
+            dropdown_->modulate = gray;
+        }
+    }
     add(0, general, "Screenshake", "Paginator", PAGINATOR, "screenshake");
     add(0, general, "FastMode", "FastModeTickbox", TICKBOX, "fast_mode");
     add(0, general, "PhobiaMode", "PhobiaModeTickbox", TICKBOX, "phobia_mode");
@@ -214,6 +293,12 @@ void SettingsScreen::show_tab(int tab) {
 void SettingsScreen::focus(int i) {
     for (size_t k = 0; k < lines_.size(); ++k) set_visible(lines_[k].reticle, (int)k == i);
     focus_ = i;
+    if (dropdown_) {
+        /* NSettingsDropdown.OnFocus / OnUnfocus */
+        Node* h = dropdown_->find_unique("Highlight");
+        bool on = i >= 0 && lines_[(size_t)i].kind == DROPDOWN;
+        if (h && h->is_canvas_item()) ((CanvasItem*)h)->modulate = on ? hex(0x3C5B6B) : hex(0x2C434F);
+    }
     if (i < 0 || !boxes_[tab_]) return;
     /* NSettingsPanel: the focused line kept inside the panel */
     Control* box = boxes_[tab_];
@@ -277,8 +362,87 @@ std::string SettingsScreen::change(Line& l, int step) {
     return std::string();
 }
 
+/* NLanguageDropdown.PopulateOptions + NDropdown.OpenDropdown: an item per
+ * language (a warning icon when under 90% translated), the first focused. */
+void SettingsScreen::open_dropdown() {
+    Node* container = dropdown_->find_unique("DropdownContainer");
+    Control* box = control_of(container ? container->get_node("VBoxContainer") : NULL);
+    if (!box) return;
+    while (!box->children.empty()) {
+        Node* c = box->children.back();
+        box->remove_child(c);
+        delete c;
+    }
+    items_.clear();
+    codes_.clear();
+    const Json& langs = settings_["languages"];
+    for (size_t i = 0; i < langs.size(); ++i) {
+        Node* item = instance(lib_, "scenes/ui/language_dropdown_item.tscn");
+        if (!item || !item->is_control()) {
+            delete item;
+            continue;
+        }
+        std::string code = langs[i].str();
+        std::string text = language_name(code);
+        if (language_completion(code) < 0.9f) text = "[img]res://images/ui/language_warning.png[/img]" + text;
+        set_label(item->get_node("RichLabel"), text);
+        hide(item->get_node("Highlight"));
+        box->add_child(item);
+        items_.push_back((Control*)item);
+        codes_.push_back(code);
+    }
+    /* NDropdownContainer.RefreshLayout: as tall as the items, at most its
+     * own 600 px (then it scrolls) */
+    Control* c = control_of(container);
+    float content = 44.0f * (float)items_.size();
+    float max_h = 600.0f;
+    if (c) c->offset[SIDE_BOTTOM] = c->offset[SIDE_TOP] + (content < max_h ? content : max_h);
+    scroll_limit_ = content > max_h ? max_h - content : 0.0f;
+    set_visible(container ? container->get_node("Scrollbar") : NULL, content > max_h);
+    scroll_ = scroll_target_ = 0;
+    box->offset[SIDE_TOP] = 0;
+    box->offset[SIDE_BOTTOM] = content - (content < max_h ? content : max_h);
+    set_visible(container, true);
+    dropdown_open_ = true;
+    focus_item(0);
+}
+
+void SettingsScreen::close_dropdown() {
+    set_visible(dropdown_ ? dropdown_->find_unique("DropdownContainer") : NULL, false);
+    dropdown_open_ = false;
+}
+
+/* NDropdownItem.OnFocus, NDropdownContainer.ProcessGuiFocus: the focused
+ * item highlighted and scrolled towards the middle */
+void SettingsScreen::focus_item(int i) {
+    if (items_.empty()) return;
+    if (i < 0) i = 0;
+    if (i >= (int)items_.size()) i = (int)items_.size() - 1;
+    item_focus_ = i;
+    for (size_t k = 0; k < items_.size(); ++k) set_visible(items_[k]->get_node("Highlight"), (int)k == i);
+    float target = -44.0f * (float)i + 300.0f;
+    scroll_target_ = clampf(target, scroll_limit_, 0.0f);
+}
+
 SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* cmd) {
     cmd->clear();
+    if (dropdown_open_) {
+        if (pad.pressed & PadState::B) close_dropdown();
+        else if (pad.pressed & PadState::UP) focus_item(item_focus_ - 1);
+        else if (pad.pressed & PadState::DOWN) focus_item(item_focus_ + 1);
+        else if ((pad.pressed & PadState::A) && item_focus_ < (int)codes_.size()) {
+            /* NLanguageDropdown.OnDropdownItemSelected: a new language is
+             * saved and set (the screens follow the logic's answer) */
+            const std::string& code = codes_[(size_t)item_focus_];
+            close_dropdown();
+            if (code != settings_["language"].str()) {
+                set_label(dropdown_->find_unique("Label"), language_name(code));
+                settings_.set("language", Json::make_string(code));
+                *cmd = format("{\"cmd\":\"set_setting\",\"name\":\"language\",\"value\":\"%s\"}", code.c_str());
+            }
+        }
+        return NONE;
+    }
     if (credits_) {
         if (!credits_->input(pad)) {
             if (credits_node_->parent) credits_node_->parent->remove_child(credits_node_);
@@ -320,6 +484,10 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
     Line& l = lines_[(size_t)focus_];
     if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) *cmd = change(l, (pad.pressed & PadState::LEFT) ? -1 : 1);
     else if (pad.pressed & PadState::A) {
+        if (l.kind == DROPDOWN) {
+            if (language_enabled_) open_dropdown();
+            return NONE;
+        }
         if (l.kind == BUTTON && strcmp(l.key, "credits") == 0) {
             /* NCreditsButton: the credits over the settings */
             std::string err;
@@ -352,6 +520,27 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
 
 void SettingsScreen::frame(double dt) {
     tweens_.update(dt);
+    if (dropdown_open_ && scroll_ != scroll_target_) {
+        /* NDropdownContainer.UpdateScrollPosition: 15 a second towards the
+         * target; the scrollbar's train follows */
+        float before = scroll_;
+        scroll_ += (scroll_target_ - scroll_) * minf((float)dt * 15.0f, 1.0f);
+        if (fabsf(scroll_ - scroll_target_) < 0.5f || (before - scroll_target_) * (scroll_ - scroll_target_) < 0)
+            scroll_ = scroll_target_;
+        Node* container = dropdown_->find_unique("DropdownContainer");
+        Control* box = control_of(container ? container->get_node("VBoxContainer") : NULL);
+        if (box) {
+            float h = box->offset[SIDE_BOTTOM] - box->offset[SIDE_TOP];
+            box->offset[SIDE_TOP] = scroll_;
+            box->offset[SIDE_BOTTOM] = scroll_ + h;
+        }
+        Control* train = control_of(container ? container->get_node("Scrollbar/Train") : NULL);
+        if (train && scroll_limit_ < 0) {
+            float k = scroll_ / scroll_limit_;
+            train->offset[SIDE_TOP] = -291.0f + k * 494.0f;
+            train->offset[SIDE_BOTTOM] = train->offset[SIDE_TOP] + 88.0f;
+        }
+    }
 }
 
 } /* namespace spire */

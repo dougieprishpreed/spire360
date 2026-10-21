@@ -450,6 +450,7 @@ void BestiaryScreen::fire(const Json& ch) {
     if (type != "ui") return;
     double wait;
     if (kaiser_crab_call(call, ch["args"], &wait)) return;
+    if (special_node_call(call, ch["args"], *this)) return;
     if (ScreenShake::get().cue(call, ch["args"])) return;
     if (is_combat_vfx_call(call) && box) spawn_combat_vfx(lib_, box, call, ch["args"], *this);
 }
@@ -497,6 +498,18 @@ bool BestiaryScreen::side_center(bool enemies, Vec2* out) {
 Node* BestiaryScreen::back_box() { return screen_ ? screen_->find_unique("BackVfxContainer") : NULL; }
 
 Node* BestiaryScreen::take_visuals(const std::string&) { return NULL; }
+
+Node* BestiaryScreen::visuals_of(const std::string& who) {
+    Shown* s = shown_for(who);
+    return s ? s->visuals : NULL;
+}
+
+bool BestiaryScreen::origin_of(const std::string& who, Vec2* out) {
+    Shown* s = shown_for(who);
+    if (!s || !s->node) return false;
+    *out = global_origin(s->node);
+    return true;
+}
 
 /* ToggleMode / ShowMovesPanel / ShowStatsPanel: the panel slides in from
  * x 210 to 242 and fades in over 0.5 s. */

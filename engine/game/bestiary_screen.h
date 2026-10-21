@@ -78,6 +78,8 @@ private:
     virtual bool side_center(bool enemies, Vec2* out);
     virtual Node* back_box();
     virtual Node* take_visuals(const std::string& who);
+    virtual Node* visuals_of(const std::string& who);
+    virtual bool origin_of(const std::string& who, Vec2* out);
 
     SceneLibrary* lib_;
     Node* root_;

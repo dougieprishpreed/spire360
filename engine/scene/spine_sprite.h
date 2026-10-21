@@ -70,6 +70,9 @@ public:
     /* animation_started / animation_event since the last frame (its process
      * fills it; the scripts on its children read it in theirs). */
     const std::vector<SpFired>& fired() const { return fired_; }
+    /* Skeleton.GetBounds: the region and mesh attachments' world vertices'
+     * box, in the sprite's coordinates (empty without any). */
+    Rect2 bounds();
 
 private:
     bool ensure();

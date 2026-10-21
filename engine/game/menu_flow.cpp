@@ -12,16 +12,33 @@
 #include "settings_screen.h"
 #include "compendium_screen.h"
 #include "title_screen.h"
+#include "logo_screen.h"
 #include "ui_util.h"
+#include "loc.h"
 
 namespace spire {
 
 MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
-    : lib_(lib), tree_(tree), game_(game), version_(version), title_(new TitleScreen(lib)), title_node_(NULL),
-      chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), compendium_(NULL), screen_node_(NULL),
+    : lib_(lib), tree_(tree), game_(game), version_(version), logo_(NULL), logo_node_(NULL), title_(new TitleScreen(lib)), title_node_(NULL),
+      chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
       screen_(TITLE), chars_version_(0), decisions_seen_(0), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false) {
-    show_title();
+    /* SettingsSave.Language (LocManager.Initialize); English when none */
+    const Json saved = Loc::settings_save();
+    if (saved["language"].is_string()) Loc::set_language(saved["language"].str());
+    /* NGame.LaunchMainMenu: the logo first unless the settings skip it */
+    if (!LogoScreen::skip_intro()) {
+        std::string err;
+        logo_ = new LogoScreen(lib);
+        logo_node_ = logo_->build(&err);
+        if (logo_node_) {
+            tree_->root()->add_child(logo_node_);
+        } else {
+            delete logo_;
+            logo_ = NULL;
+        }
+    }
+    if (!logo_) show_title();
     /* The game data loads while the menu shows; the last profile is read
      * as the game does at start-up. */
     game_->request_characters();
@@ -29,6 +46,11 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
 }
 
 MenuFlow::~MenuFlow() {
+    if (logo_node_) {
+        if (logo_node_->parent) logo_node_->parent->remove_child(logo_node_);
+        delete logo_node_;
+    }
+    delete logo_;
     close_screen();
     if (title_node_) {
         if (title_node_->parent) title_node_->parent->remove_child(title_node_);
@@ -57,6 +79,45 @@ void MenuFlow::show_title() {
     title_->set_menu(menu_);
     title_->set_covered(false);
     if (lib_->audio()) lib_->audio()->menu();
+    tree_->layout();
+}
+
+/* NLanguageDropdown.OnDropdownItemSelected: NGame.Relocalize, then the
+ * settings menu opened again. The title (behind) and an open settings
+ * screen are built again in the new language; the menus' data (characters,
+ * timeline, ...) is asked for again. */
+void MenuFlow::relocalize() {
+    std::string err;
+    if (title_node_) {
+        if (title_node_->parent) title_node_->parent->remove_child(title_node_);
+        title_->detach();
+        delete title_node_;
+        title_node_ = title_->build(version_, &err);
+        if (title_node_) {
+            tree_->root()->add_child(title_node_);
+            title_->set_menu(menu_);
+        }
+    }
+    if (screen_ == SETTINGS && settings_) {
+        if (screen_node_) {
+            if (screen_node_->parent) screen_node_->parent->remove_child(screen_node_);
+            delete screen_node_;
+        }
+        delete settings_;
+        settings_ = new SettingsScreen(lib_);
+        screen_node_ = settings_->build(game_->settings(), &err);
+        settings_seen_ = game_->settings_version();
+        if (screen_node_) tree_->root()->add_child(screen_node_);
+    } else if (screen_node_) {
+        /* the submenu stays over the title */
+        tree_->root()->remove_child(screen_node_);
+        tree_->root()->add_child(screen_node_);
+    }
+    if (title_node_ && screen_ != TITLE) {
+        title_->set_covered(true);
+        title_->set_submenu(true);
+    }
+    game_->send_query("{\"cmd\":\"main_menu\"}");
     tree_->layout();
 }
 
@@ -141,9 +202,26 @@ bool MenuFlow::update(const PadState& in) {
     /* The logic's answers to the menus. */
     Json answer;
     while (game_->take_answer(&answer)) handle_answer(answer);
+    if (game_->language_version() != language_seen_) {
+        language_seen_ = game_->language_version();
+        if (!in_run_ && !logo_) relocalize();
+    }
     if (game_->characters_version() != chars_version_) {
         chars_version_ = game_->characters_version();
         chars_->set_data(game_->characters());
+    }
+
+    if (logo_) {
+        logo_->input(pad);
+        if (logo_->done()) {
+            logo_node_->parent->remove_child(logo_node_);
+            delete logo_node_;
+            logo_node_ = NULL;
+            delete logo_;
+            logo_ = NULL;
+            show_title();
+        }
+        return !quit_;
     }
 
     if (in_run_) {

@@ -51,6 +51,10 @@ float perlin(float x, int seed) {
     return (a + (b - a) * t) * 2.0f;
 }
 
+float rand01() { return (float)(chaotic_rand() % 1000001) / 1000000.0f; }
+
+} /* namespace */
+
 float fbm(float x, float frequency, int seed) {
     float sum = 0, amp = 1, bound = 0, f = frequency;
     for (int o = 0; o < 5; ++o) {
@@ -61,10 +65,6 @@ float fbm(float x, float frequency, int seed) {
     }
     return sum / bound;
 }
-
-float rand01() { return (float)(chaotic_rand() % 1000001) / 1000000.0f; }
-
-} /* namespace */
 
 ScreenShake::ScreenShake()
     : target_(NULL), multiplier_(1), punch_(false), punch_strength_(0), punch_angle_(0), punch_t_(0), punch_len_(0),

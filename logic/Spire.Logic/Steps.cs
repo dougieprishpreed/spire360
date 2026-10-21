@@ -61,6 +61,8 @@ internal static class Steps
         var sep = id.LastIndexOf("::", StringComparison.Ordinal);
         if (sep < 0) return;
         var method = id[(sep + 2)..];
+        var generic = method.IndexOf('<');
+        if (generic >= 0) method = method[..generic];
         if (method.StartsWith("get_", StringComparison.Ordinal) || method.StartsWith("set_", StringComparison.Ordinal)
             || method.StartsWith("add_", StringComparison.Ordinal) || method.StartsWith("remove_", StringComparison.Ordinal))
             return;
@@ -71,6 +73,11 @@ internal static class Steps
         foreach (var a in args)
         {
             if (ReferenceEquals(a, Spire.HookBridge.Hooks.StandIn)) continue; // a singleton's stand-in receiver
+            if (StandIns.TrySpecial(a, out var special))
+            {
+                outArgs.Add(special); // a creature's special node: "<who>#<path>"
+                continue;
+            }
             if (StandIns.TryCreature(a, out var standing))
             {
                 outArgs.Add(Who(standing)); // a creature's stand-in node (the receiver of its calls)

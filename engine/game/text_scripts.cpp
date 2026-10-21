@@ -2,14 +2,18 @@
  * to the rect by binary search between MinFontSize and MaxFontSize) and the
  * custom RichTextEffects they install ([gold], [blue], [sine], ...).
  * Behaviour reimplemented from the game's addons/mega_text and
- * Core/RichTextTags; colours are StsColors. */
+ * Core/RichTextTags; colours are StsColors. Both swap in the language's
+ * fonts where the game's FontManager does (Japanese, Korean, Polish,
+ * Russian, Thai, Chinese). */
 #include "game.h"
+#include "loc.h"
 
 #include "../scene/rich_text.h"
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/text_nodes.h"
 #include "../scene/value.h"
+#include "../text/font.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -170,6 +174,71 @@ static Vec2 estimate_text_size(const std::vector<TextSeg>& segs, const FontRes* 
     return out;
 }
 
+/* ---- FontManager / FontControlUtils.ApplyLocaleFontSubstitution ---- */
+
+/* The fonts of the languages the theme's fonts do not cover (the
+ * FontPathSets): regular, bold, italic. */
+static const struct {
+    const char* lang;
+    const char* fonts[3];
+} LOCALE_FONTS[] = {
+    { "jpn", { "themes/fonts/jpn/noto_sans_cjkjp_regular_shared.tres", "themes/fonts/jpn/noto_sans_cjkjp_bold_shared.tres",
+               "themes/fonts/jpn/noto_sans_cjkjp_medium_shared.tres" } },
+    { "kor", { "themes/fonts/kor/gyeonggi_cheonnyeon_batang_bold_shared.tres",
+               "themes/fonts/kor/gyeonggi_cheonnyeon_batang_bold_shared.tres",
+               "themes/fonts/kor/gyeonggi_cheonnyeon_batang_bold_shared.tres" } },
+    { "pol", { "themes/fonts/rus/fira_sans_extra_condensed_regular_shared.tres",
+               "themes/fonts/rus/fira_sans_extra_condensed_bold_shared.tres",
+               "themes/fonts/rus/fira_sans_extra_condensed_italic_shared.tres" } },
+    { "rus", { "themes/fonts/rus/fira_sans_extra_condensed_regular_shared.tres",
+               "themes/fonts/rus/fira_sans_extra_condensed_bold_shared.tres",
+               "themes/fonts/rus/fira_sans_extra_condensed_italic_shared.tres" } },
+    { "tha", { "themes/fonts/tha/cs_chat_thai_ui_shared.tres", "themes/fonts/tha/cs_chat_thai_ui_shared.tres",
+               "themes/fonts/tha/cs_chat_thai_ui_shared.tres" } },
+    { "zhs", { "themes/fonts/zhs/noto_sans_mono_cjksc_regular_shared.tres",
+               "themes/fonts/zhs/source_han_serif_sc_bold_shared.tres",
+               "themes/fonts/zhs/source_han_serif_sc_medium_shared.tres" } },
+    { "zht", { "themes/fonts/zht/noto_sans_mono_cjktc_regular_shared.tres",
+               "themes/fonts/zht/source_han_serif_tc_bold_shared.tres",
+               "themes/fonts/zht/source_han_serif_tc_medium_shared.tres" } },
+};
+
+static FontRes* font_res(const char* path) {
+    SceneLibrary* lib = SceneLibrary::current();
+    Resource* r = lib ? lib->ext(path) : NULL;
+    return r && r->kind == Resource::RES_FONT ? (FontRes*)r : NULL;
+}
+
+/* Godot's system font fallback, which the game leans on for the language
+ * picker's native names: the languages' regular fonts, tried in turn. */
+static void install_global_fallbacks() {
+    static bool done = false;
+    if (done || !SceneLibrary::current()) return;
+    done = true;
+    std::vector<const FontRes*> fonts;
+    for (size_t i = 0; i < sizeof(LOCALE_FONTS) / sizeof(LOCALE_FONTS[0]); ++i) {
+        FontRes* f = font_res(LOCALE_FONTS[i].fonts[0]);
+        bool have = false;
+        for (size_t k = 0; k < fonts.size(); ++k) have = have || fonts[k] == f;
+        if (f && !have) fonts.push_back(f);
+    }
+    FontLibrary::set_global_fallbacks(fonts);
+}
+
+/* type: 0 regular, 1 bold, 2 italic; NULL when the language keeps the
+ * theme's fonts. */
+static FontRes* locale_font(int type) {
+    const std::string& lang = Loc::language();
+    for (size_t i = 0; i < sizeof(LOCALE_FONTS) / sizeof(LOCALE_FONTS[0]); ++i)
+        if (lang == LOCALE_FONTS[i].lang) return font_res(LOCALE_FONTS[i].fonts[type]);
+    return NULL;
+}
+
+static void substitute_font(Control* c, int type, const char* theme_font) {
+    FontRes* f = locale_font(type);
+    if (f) c->override_resources[std::string("fonts/") + theme_font] = f;
+}
+
 /* ---- MegaLabel ---- */
 
 class MegaLabelScript : public ScriptBehavior {
@@ -181,7 +250,11 @@ public:
         if ((v = l->get_extra("MinFontSize"))) min_ = v->i(8);
         if ((v = l->get_extra("MaxFontSize"))) max_ = v->i(100);
     }
-    virtual void ready(Node*) { adjust(); }
+    virtual void ready(Node*) {
+        install_global_fallbacks();
+        substitute_font(label_, 0, "font");
+        adjust();
+    }
     virtual void resized(Control*) {
         /* SetTextAutoSize: a new text is fitted again too. */
         if (!adjusted_ || fabsf(last_size_.x - label_->size.x) > 0.01f || fabsf(last_size_.y - label_->size.y) > 0.01f ||
@@ -250,6 +323,11 @@ public:
         if (l->fit_content) enabled_ = false; /* "not compatible with Fit Content" */
     }
     virtual void ready(Node*) {
+        install_global_fallbacks();
+        substitute_font(rtl_, 0, "normal_font");
+        substitute_font(rtl_, 1, "bold_font");
+        substitute_font(rtl_, 2, "italics_font");
+        rtl_->invalidate();
         if (rtl_->bbcode) {
             rtl_->custom_effects.clear();
             for (int i = 0; MEGA_EFFECTS[i]; ++i) rtl_->custom_effects.push_back(MEGA_EFFECTS[i]);

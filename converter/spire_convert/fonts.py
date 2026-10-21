@@ -82,6 +82,27 @@ def fetch_godot():
 # numbers, typed text) and the replacement character.
 BASE_RANGES = [(0x20, 0x7E), (0xFFFD, 0xFFFD)]
 
+# The language picker's native names (NLanguageDropdown._languageCodeToName):
+# drawn through the languages' fonts even when the language is not chosen
+# (the game leans on Godot's system font fallback for them).
+LANGUAGE_NAMES = ("English 中文 繁體中文 Deutsch Español (Latinoamérica) Français Bahasa Indonesia Italiano "
+                  "日本語 한국어 Polski Português Brasileiro Русский Español (Castellano) ไทย Türkçe")
+
+
+def font_chars(font_path, chars, chosen, all_langs):
+    """The characters to export for one font: a language folder's font
+    (fonts/jpn/...) serves its language, so it gets the chosen characters
+    only when the language is chosen, else just the native names; every
+    other font gets the chosen characters (None: all)."""
+    parts = font_path.split("/")
+    # FontManager: Polish draws with the Russian folder's fonts
+    serves = {"rus": {"rus", "pol"}}.get(parts[1], {parts[1]}) if len(parts) > 2 else set()
+    if chars is not None and len(parts) > 2 and parts[1] in all_langs and not (serves & set(chosen)):
+        return "".join(sorted(set(LANGUAGE_NAMES + " ")))
+    if chars is not None:
+        return "".join(sorted(set(chars) | set(LANGUAGE_NAMES)))
+    return chars
+
 
 def _strings(v, out):
     if isinstance(v, str):

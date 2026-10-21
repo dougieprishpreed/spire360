@@ -1,7 +1,9 @@
 /* NSettingsScreen (scenes/screens/settings_screen.tscn) from the pause menu
  * or the main menu, with the logic's settings answer:
  *
- * - General: screen shake (a paginator), fast mode, phobia mode, the run
+ * - General: the language (NLanguageDropdown: A opens the list, up / down
+ *   and A pick one; greyed in a run), screen shake (a paginator), fast
+ *   mode, phobia mode, the run
  *   timer, hand card numbers, long press confirmations, skip intro logo,
  *   text effects (tickboxes), Credits and Reset to Default (a
  *   confirmation first);
@@ -11,9 +13,8 @@
  * Up / down move between the lines, left / right change a paginator or a
  * slider, A ticks or presses, LB / RB change the tab, B goes back. Each
  * change is a set_setting command; its toast shows as the game's do. The
- * Graphics and Input tabs, the language, multiplayer, background and data
- * upload lines are the PC's and stay hidden (the console is fullscreen,
- * with a pad). */
+ * Graphics and Input tabs, multiplayer, background and data upload lines
+ * are the PC's and stay hidden (the console is fullscreen, with a pad). */
 #ifndef SPIRE_SETTINGS_SCREEN_H
 #define SPIRE_SETTINGS_SCREEN_H
 
@@ -42,7 +43,7 @@ public:
     virtual void frame(double dt);
 
 private:
-    enum Kind { TICKBOX, PAGINATOR, SLIDER, BUTTON };
+    enum Kind { TICKBOX, PAGINATOR, SLIDER, BUTTON, DROPDOWN };
     struct Line {
         Kind kind;
         const char* key;   /* the setting (or the button's action) */
@@ -57,6 +58,10 @@ private:
     void show_tab(int tab);
     void toast(const std::string& text);
     std::string change(Line& l, int step);
+    /* NDropdown: the language list */
+    void open_dropdown();
+    void close_dropdown();
+    void focus_item(int i);
     SceneLibrary* lib_;
     Json settings_;
     Node* root_;
@@ -72,6 +77,12 @@ private:
     Node* confirm_node_;
     CreditsScreen* credits_;
     Node* credits_node_;
+    Control* dropdown_;
+    bool dropdown_open_, language_enabled_;
+    std::vector<Control*> items_;
+    std::vector<std::string> codes_;
+    int item_focus_;
+    float scroll_, scroll_target_, scroll_limit_;
     TweenSet tweens_;
 };
 

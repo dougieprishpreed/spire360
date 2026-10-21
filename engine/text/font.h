@@ -59,6 +59,13 @@ public:
     ~FontLibrary();
     FontFace* face(const std::string& name);
     FontFace* face_for(const FontRes* font); /* NULL if none */
+    /* The font that draws cp for font: font itself, else the first of its
+     * fallbacks (FontVariation -> base -> FontFile's, depth first) that has
+     * it, else the first global fallback that has it (Godot's system
+     * fallback; here the languages' fonts); font when none has it. */
+    const FontRes* font_with(const FontRes* font, u32 cp);
+    /* The global fallbacks, in the order they are tried. */
+    static void set_global_fallbacks(const std::vector<const FontRes*>& fonts);
     static FontLibrary* current();          /* the one the scene system uses */
     static void set_current(FontLibrary* lib);
 

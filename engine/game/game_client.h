@@ -128,6 +128,8 @@ public:
      * (NAudioManager.Set*Vol: the value squared), the screen shake. */
     const Json& settings() const { return settings_; }
     int settings_version() const { return settings_version_; }
+    /* Bumped when the settings answer brings another language (Loc follows). */
+    int language_version() const { return language_version_; }
     void request_settings();
     /* A query for the logic outside the decisions (settings): no answer
      * is waited for. */
@@ -181,7 +183,7 @@ private:
     Node* piles_node_;
     MapScreen* map_view_;
     Json settings_;
-    int settings_version_;
+    int settings_version_, language_version_;
     SettingsScreen* settings_screen_;
     Node* settings_node_;
     CompendiumScreen* compendium_;

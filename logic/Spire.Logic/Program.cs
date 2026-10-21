@@ -166,20 +166,20 @@ internal static class Program
                     Protocol.Str(cmd, "character", "Ironclad")!,
                     Protocol.Int(cmd, "ascension", 0),
                     Protocol.Str(cmd, "seed"),
-                    Protocol.Str(cmd, "lang", "en")!);
+                    Protocol.Str(cmd, "lang"));
 
             case "start_game_run":
                 return sim.StartGameRun(
                     Protocol.Str(cmd, "character", "Ironclad")!,
                     Protocol.Int(cmd, "ascension", 0),
                     Protocol.Str(cmd, "seed"),
-                    Protocol.Str(cmd, "lang", "en")!);
+                    Protocol.Str(cmd, "lang"));
 
             case "profiles":
                 return sim.Profiles();
 
             case "select_profile":
-                return sim.SelectProfile(Protocol.Int(cmd, "profile", 0), Protocol.Str(cmd, "lang", "en")!);
+                return sim.SelectProfile(Protocol.Int(cmd, "profile", 0), Protocol.Str(cmd, "lang"));
 
             case "main_menu":
                 return sim.MainMenu();
@@ -188,7 +188,7 @@ internal static class Program
                 return sim.SetUnlockAll(cmd.TryGetProperty("on", out var on) && on.ValueKind == JsonValueKind.True);
 
             case "continue_run":
-                return sim.ContinueRun(Protocol.Str(cmd, "lang", "en")!);
+                return sim.ContinueRun(Protocol.Str(cmd, "lang"));
 
             case "abandon_run":
                 return sim.AbandonSavedRun();
@@ -221,7 +221,7 @@ internal static class Program
                 return sim.RevealEpoch(Protocol.Str(cmd, "epoch") ?? "");
 
             case "characters":
-                return sim.Characters(Protocol.Str(cmd, "lang", "en")!);
+                return sim.Characters(Protocol.Str(cmd, "lang"));
 
             case "action":
                 return sim.ExecuteAction(Protocol.Str(cmd, "action") ?? "", Protocol.Args(cmd));
@@ -241,7 +241,7 @@ internal static class Program
                 }
                 if (saveJson == null)
                     return new Dictionary<string, object?> { ["type"] = "error", ["message"] = "Provide 'path' or 'json' for load_save" };
-                return sim.LoadSave(saveJson, Protocol.Str(cmd, "lang", "en")!);
+                return sim.LoadSave(saveJson, Protocol.Str(cmd, "lang"));
             }
 
             case "get_map":

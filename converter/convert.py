@@ -606,15 +606,11 @@ def cmd_build(a):
                 chars = fontconv.charset(src, files, set(a.languages.split(",")))
                 print(f"  fonts: {len(chars)} characters for {a.languages}", flush=True)
             # Fonts in a language's folder (fonts/jpn/..., fonts/rus/...) serve
-            # that language only: no glyphs unless it is chosen.
+            # that language: its glyphs only when it is chosen.
             all_langs = {f.split("/")[1] for f in files if f.startswith("localization/") and f.count("/") >= 2}
 
             def font_chars(p):
-                parts = p.split("/")
-                if chars is not None and len(parts) > 2 and parts[1] in all_langs \
-                        and parts[1] not in a.languages.split(","):
-                    return ""
-                return chars
+                return fontconv.font_chars(p, chars, set(a.languages.split(",")), all_langs)
 
             with concurrent.futures.ThreadPoolExecutor(max(1, min(jobs, 4))) as ex:
                 futs = {ex.submit(fontconv.export, godot, raw, font_chars(p)): p for p, raw in font_jobs}
@@ -726,6 +722,51 @@ def cmd_respine(a):
     print(f"{len(names)} entries, {redone} skeletons converted again -> {a.pack_out}")
 
 
+def cmd_refont(a):
+    """A copy of a built pack with its fonts exported again for other
+    languages (--languages): every other entry is copied as it is."""
+    godot = fontconv.find_godot(a.godot)
+    if not godot:
+        raise SystemExit("refont: no Godot 4.5.1 (--godot, $SPIRE_GODOT or `convert.py fetch-godot`)")
+    src = open_source(a.pack)
+    res = resources.Resources(src)
+    files = src.list()
+    old = s3p.Reader(a.pack_in)
+    fonts = sorted(n for n in old.entries if old.type(n) == s3p.TYPE_FONT)
+    pages = {n for n in old.entries if "#page" in n and n.split("#page")[0] in fonts}
+    langs = set(a.languages.split(","))
+    chars = None if a.languages == "all" else fontconv.charset(src, files, langs)
+    all_langs = {f.split("/")[1] for f in files if f.startswith("localization/") and f.count("/") >= 2}
+    print(f"{len(fonts)} fonts, {len(chars) if chars else 'all'} characters for {a.languages}", flush=True)
+    names = sorted(old.entries, key=lambda n: old.entries[n][1])  # payload order
+    sizes = {}
+    import concurrent.futures
+    with s3p.Writer(a.pack_out, old.game_version, old.flags) as w:
+        for n in names:
+            if n in fonts or n in pages:
+                continue
+            h, off, size, t, fl, crc = old.entries[n]
+            w.add(n, t, old.read(n), fl)
+        old.close()
+
+        def job(p):
+            raw = "default" if p == fontconv.DEFAULT_FONT_NAME else src.read(res.resolve(p))
+            return fontconv.export(godot, raw, fontconv.font_chars(p, chars, langs, all_langs))
+
+        with concurrent.futures.ThreadPoolExecutor(max(1, a.jobs)) as ex:
+            futs = {ex.submit(job, p): p for p in fonts}
+            for fut in concurrent.futures.as_completed(futs):
+                p = futs[fut]
+                info, pgs = fut.result()
+                total = 0
+                for name, type_, payload in fontconv.payloads(p, info, pgs):
+                    w.add(name, type_, payload)
+                    total += len(payload)
+                sizes[p] = total
+                print(f"  {p}: {len(info['glyphs'])} glyphs, {len(pgs)} pages, {total / 1048576:.1f} MB", flush=True)
+    print(f"fonts {sum(sizes.values()) / 1048576:.1f} MB -> {a.pack_out}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -760,6 +801,13 @@ def main():
     audio_parser.add_argument('pack')
     audio_parser.add_argument('out')
     audio_parser.add_argument('--vgmstream')
+    rf = sub.add_parser("refont", help="copy a built pack with its fonts exported again for other languages")
+    rf.add_argument("pack")
+    rf.add_argument("pack_in")
+    rf.add_argument("pack_out")
+    rf.add_argument("--languages", default="eng", help="eng,deu,jpn,... or all (every glyph: gigabytes)")
+    rf.add_argument("--godot", help="Godot 4.5.1 binary")
+    rf.add_argument("--jobs", type=int, default=3, help="fonts exported at once")
     rs = sub.add_parser("respine", help="copy a built pack with its Spine skeletons converted again")
     rs.add_argument("pack")
     rs.add_argument("pack_in")
@@ -768,7 +816,7 @@ def main():
     a = ap.parse_args()
     try:
         {"survey": cmd_survey, "texture": cmd_texture, "bundle": cmd_bundle, "build": cmd_build, "audio": cmd_audio,
-         "respine": cmd_respine,
+         "respine": cmd_respine, "refont": cmd_refont,
          "fetch-godot": lambda _a: print(f"godot: {fontconv.fetch_godot()}")}[a.cmd](a)
     except KeyboardInterrupt:
         sys.exit(1)

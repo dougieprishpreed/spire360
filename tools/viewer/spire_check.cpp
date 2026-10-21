@@ -639,7 +639,9 @@ int main(int argc, char** argv) {
                 for (size_t e = 0; e < es.size(); ++e)
                     if (format("e%d", es[e]["combat_id"].i()) == hp_who) {
                         present = true;
-                        matched = ((Label*)hp_label)->text == format("%d/%d", es[e]["hp"].i(), es[e]["max_hp"].i());
+                        /* InfiniteWithoutNumbers hides the numbers (left as they were) */
+                        matched = !((Label*)hp_label)->visible ||
+                                  ((Label*)hp_label)->text == format("%d/%d", es[e]["hp"].i(), es[e]["max_hp"].i());
                     }
                 (void)max_hp;
                 if (present && !matched) fprintf(stderr, "%s response %d: %s\n", argv[file], responses, hp_who.c_str());

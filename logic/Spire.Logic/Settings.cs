@@ -3,6 +3,7 @@
 // through SaveManager as the screen's controls do. Presentation only: the
 // run's logic never reads them back here.
 
+using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Settings;
 
@@ -11,6 +12,22 @@ namespace Spire.Logic;
 public partial class RunDriver
 {
     private bool _settingsLoaded;
+
+    /// <summary>The language the logic speaks: a command's "lang", else the
+    /// settings' (SettingsSave.Language; null: English). LocManager is set up
+    /// again when it changes (LocManager.SetLanguage, without Godot's files).</summary>
+    private void ApplyLanguage(string? lang)
+    {
+        if (lang == null)
+        {
+            EnsureSettings();
+            lang = SaveManager.Instance.SettingsSave?.Language;
+            if (lang == null || !LocManager.Languages.Contains(lang)) lang = "eng";
+        }
+        string before = _loc.GameLanguage;
+        _loc.Lang = lang;
+        if (_loc.GameLanguage != before) LocSetup.InitLocManager(_loc);
+    }
 
     private void EnsureSettings()
     {
@@ -53,6 +70,9 @@ public partial class RunDriver
             ["long_press"] = prefs?.IsLongPressEnabled ?? false,
             ["text_effects"] = prefs?.TextEffectsEnabled ?? true,
             ["skip_intro"] = settings?.SkipIntroLogo ?? false,
+            // NLanguageDropdown: LocManager.Languages, the current one
+            ["language"] = _loc.GameLanguage,
+            ["languages"] = LocManager.Languages,
             ["master"] = settings?.VolumeMaster ?? 0.5f,
             ["bgm"] = settings?.VolumeBgm ?? 0.5f,
             ["sfx"] = settings?.VolumeSfx ?? 0.5f,
@@ -82,6 +102,17 @@ public partial class RunDriver
             case "bestiary_actions": if (prefs != null) prefs.IsBestiaryActionsPreferred = b; break;
             case "text_effects": if (prefs != null) prefs.TextEffectsEnabled = b; break;
             case "skip_intro": pref = false; if (settings != null) settings.SkipIntroLogo = b; break;
+            case "language":
+            {
+                // NLanguageDropdown.OnDropdownItemSelected (not in a run: the
+                // dropdown is greyed there)
+                pref = false;
+                string? code = value.ValueKind == System.Text.Json.JsonValueKind.String ? value.GetString() : null;
+                if (code == null || !LocManager.Languages.Contains(code)) return Error("Unknown language " + code);
+                if (settings != null) settings.Language = code;
+                ApplyLanguage(code);
+                break;
+            }
             case "master": pref = false; if (settings != null) settings.VolumeMaster = Math.Clamp(f, 0f, 1f); break;
             case "bgm": pref = false; if (settings != null) settings.VolumeBgm = Math.Clamp(f, 0f, 1f); break;
             case "sfx": pref = false; if (settings != null) settings.VolumeSfx = Math.Clamp(f, 0f, 1f); break;

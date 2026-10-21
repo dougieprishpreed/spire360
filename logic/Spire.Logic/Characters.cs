@@ -9,11 +9,11 @@ namespace Spire.Logic;
 
 public partial class RunDriver
 {
-    public Dictionary<string, object?> Characters(string lang = "en")
+    public Dictionary<string, object?> Characters(string? lang = null)
     {
         try
         {
-            _loc.Lang = lang;
+            ApplyLanguage(lang);
             EnsureModelDbInitialized();
             var list = new List<Dictionary<string, object?>>();
             foreach (var c in ModelDb.AllCharacters)

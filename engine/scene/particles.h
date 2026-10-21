@@ -3,8 +3,11 @@
  * GPUParticles2D runs the same simulation with its ParticleProcessMaterial
  * mapped as Godot's CPUParticles2D::convert_from_particles does (plus the
  * material's alpha curve). GPU particles' random sequence differs from
- * Godot's shader one; the distributions are the same. Not ported:
- * turbulence, collision, sub-emitters, attractors, trails. */
+ * Godot's shader one; the distributions are the same. Collision: GPU
+ * particles whose material has a collision mode bounce off (or vanish on)
+ * the LightOccluder2D polygons of their tree, Godot's canvas SDF taken
+ * exactly from the polygons. Not ported: turbulence, sub-emitters,
+ * attractors, trails. */
 #ifndef SPIRE_PARTICLES_H
 #define SPIRE_PARTICLES_H
 
@@ -52,6 +55,11 @@ public:
     Texture2DRes* texture;
     Vec2 direction, gravity, emission_rect_extents;
     float spread, emission_sphere_radius;
+    /* ParticleProcessMaterial collision (0 none, 1 rigid, 2 hide on
+     * contact) and GPUParticles2D's collision_base_size */
+    int collision_mode;
+    float collision_friction, collision_bounce, collision_base_size;
+    bool collision_use_scale;
     Color color;
     float pmin[P_MAX], pmax[P_MAX];
     CurveData curves[P_MAX], scale_x, scale_y, alpha_curve;
@@ -79,10 +87,26 @@ private:
     };
     void step(double dt);
     void apply_process_material(Resource* m);
+    void collide(Particle& p, const Xform2D& g);
     std::vector<Particle> particles_;
     double time_, frame_remainder_;
     u32 cycle_;
     bool started_;
+};
+
+/* LightOccluder2D: no lights in the game, so it draws nothing; its polygon
+ * is what colliding GPU particles bounce off (Godot's canvas SDF). */
+class LightOccluder2D : public Node2D {
+public:
+    LightOccluder2D();
+    virtual ~LightOccluder2D();
+    std::vector<Vec2> polygon;
+    bool sdf_collision;
+    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+    /* The canvas SDF at a global point of root's tree: the distance to the
+     * nearest occluder (< 0 inside one), *normal the outward direction.
+     * False when the tree has none. */
+    static bool sdf(const Node* root, const Vec2& p, float* dist, Vec2* normal);
 };
 
 } /* namespace spire */

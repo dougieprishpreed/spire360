@@ -96,6 +96,9 @@ static const char* const CLASS_PARENTS[][2] = {
     { "PointLight2D", "Light2D" },
     { "DirectionalLight2D", "Light2D" },
     { "LightOccluder2D", "Node2D" },
+    /* spine-godot's slot meshes, saved empty in some scenes (the runtime
+     * makes its own): nothing to draw */
+    { "SpineMesh2D", "Node2D" },
     { "BackBufferCopy", "Node2D" },
     { "VisibleOnScreenNotifier2D", "Node2D" },
     { "Parallax2D", "Node2D" },

@@ -22,6 +22,7 @@ namespace spire {
 class Node;
 class Node2D;
 class Control;
+class CanvasItem;
 class SceneLibrary;
 class SpineSprite;
 
@@ -91,6 +92,15 @@ public:
     /* Each frame (the screen's root calls it): the cards' moves, the
      * reticles' and nameplates' tweens, the arrow. */
     void process(double dt);
+    /* NEndTurnButton with long press confirmation: pressed starts the hold,
+     * releasing cancels it (NEndTurnLongPressBar). */
+    void hold_end_turn(bool pressed, bool held);
+    /* The bar filled (0.5 s held) since last asked: the turn is to end. */
+    bool take_end_turn_long_press() {
+        bool done = long_press_done_;
+        long_press_done_ = false;
+        return done;
+    }
     /* After build: what happened since the decision before (its "steps"),
      * played back over the room as the game shows it: the creatures'
      * animations, the effects (VfxCmd), damage numbers, deaths. */
@@ -215,6 +225,8 @@ private:
     virtual bool side_center(bool enemies, Vec2* out);
     virtual Node* back_box();
     virtual Node* take_visuals(const std::string& who);
+    virtual Node* visuals_of(const std::string& who);
+    virtual bool origin_of(const std::string& who, Vec2* out);
     struct Cue {
         double at;
         int kind;
@@ -277,6 +289,15 @@ private:
         bool exhaust; /* at the end, NCardExhaustVfx takes it (no fade) */
     };
     std::vector<MovingCard> moving_cards_;
+    /* dead monsters that do not fade: hidden at "at" once nothing delays them */
+    struct DelayedHide {
+        CanvasItem* visuals;
+        double at;
+    };
+    std::vector<DelayedHide> delayed_hides_;
+    /* NEndTurnLongPressBar */
+    bool long_press_on_, long_press_ready_, long_press_done_;
+    double long_press_t_, long_press_fade_;
 };
 
 } /* namespace spire */

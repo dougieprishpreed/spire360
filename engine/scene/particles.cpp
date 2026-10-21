@@ -198,7 +198,8 @@ Particles2D::Particles2D(bool is_gpu)
       split_scale(false), amount(8), fixed_fps(is_gpu ? 30 : 0), draw_order(0), emission_shape(0), lifetime(1),
       preprocess(0), speed_scale(1), explosiveness(0), randomness(0), lifetime_randomness(0), seed(0), texture(NULL),
       direction(1, 0), gravity(is_gpu ? Vec2(0, -9.8f) : Vec2(0, 980)), emission_rect_extents(1, 1), spread(45),
-      emission_sphere_radius(1), time_(0), frame_remainder_(0), cycle_(0), started_(false) {
+      emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0), collision_base_size(1),
+      collision_use_scale(false), time_(0), frame_remainder_(0), cycle_(0), started_(false) {
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
 }
@@ -216,6 +217,7 @@ bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (key == "fixed_fps") fixed_fps = v.i();
     else if (key == "fract_delta") fractional_delta = v.b(true);
     else if (key == "local_coords") local_coords = v.b();
+    else if (key == "collision_base_size") collision_base_size = jv_float(v, 1);
     else if (key == "draw_order") draw_order = v.i();
     else if (key == "seed") seed = (u32)v.num();
     else if (key == "texture") {
@@ -282,6 +284,10 @@ void Particles2D::apply_process_material(Resource* m) {
     if (p.has("gravity") && p["gravity"]["v"].size() >= 2)
         gravity = Vec2(jv_float(p["gravity"]["v"][(size_t)0]), jv_float(p["gravity"]["v"][1]));
     lifetime_randomness = jv_float(p["lifetime_randomness"]);
+    collision_mode = p["collision_mode"].i();
+    collision_friction = jv_float(p["collision_friction"]);
+    collision_bounce = jv_float(p["collision_bounce"]);
+    collision_use_scale = p["collision_use_scale"].b();
     for (int i = 0; i < P_MAX; ++i) {
         std::string n = PARAM_NAMES_GPU[i];
         if (p.has((n + "_min").c_str())) pmin[i] = jv_float(p[(n + "_min").c_str()]);
@@ -346,8 +352,49 @@ void Particles2D::process(double dt) {
     }
 }
 
+/* particles.glsl's 2D SDF collision and ParticleProcessMaterial's
+ * response, in the canvas (g: the node's global transform; the particles
+ * live in its local space). */
+void Particles2D::collide(Particle& p, const Xform2D& g) {
+    const Node* root = this;
+    while (root->parent) root = root->parent;
+    Vec2 pos = g.xform(p.xform.origin);
+    float d;
+    Vec2 n;
+    if (!LightOccluder2D::sdf(root, pos, &d, &n)) return;
+    float size = collision_base_size;
+    if (collision_use_scale) {
+        Vec2 sx = g.basis_xform(p.xform.x), sy = g.basis_xform(p.xform.y);
+        size *= (sqrtf(sx.x * sx.x + sx.y * sx.y) + sqrtf(sy.x * sy.x + sy.y * sy.y) + 1.0f) / 3.0f;
+    } else {
+        size *= sqrtf(g.y.x * g.y.x + g.y.y * g.y.y);
+    }
+    d -= size;
+    if (d >= 0) return;
+    if (collision_mode == 2) {
+        p.active = false;
+        return;
+    }
+    /* back to local space (the inverse basis) */
+    float det = g.x.x * g.y.y - g.y.x * g.x.y;
+    if (det == 0) return;
+    Vec2 v = g.basis_xform(p.velocity);
+    float response = n.x * v.x + n.y * v.y;
+    float bounce_edge = 2.0f / clampf(collision_bounce + 1.0f, 1.0f, 2.0f);
+    float trigger = fabsf(response) >= bounce_edge ? 1.0f : 0.0f;
+    pos = pos + n * -d;
+    v = v - n * response;
+    v = v * (1.0f - clampf(collision_friction, 0.0f, 1.0f));
+    v = v - n * (response * collision_bounce * trigger);
+    Vec2 lp = pos - g.origin;
+    p.xform.origin = Vec2((g.y.y * lp.x - g.y.x * lp.y) / det, (g.x.x * lp.y - g.x.y * lp.x) / det);
+    p.velocity = Vec2((g.y.y * v.x - g.y.x * v.y) / det, (g.x.x * v.y - g.x.y * v.x) / det);
+}
+
 void Particles2D::step(double p_delta) {
     p_delta *= speed_scale;
+    bool colliding = gpu && collision_mode != 0;
+    Xform2D g = colliding ? global_transform() : Xform2D();
     int pcount = (int)particles_.size();
     double prev_time = time_;
     time_ += p_delta;
@@ -469,6 +516,10 @@ void Particles2D::step(double p_delta) {
                 float damp = tc[P_DAMPING] * lerpf(pmin[P_DAMPING], pmax[P_DAMPING], rand_from_seed(s));
                 float nl = l - damp * (float)local_delta;
                 p.velocity = nl < 0 || l == 0 ? Vec2() : p.velocity * (nl / l);
+            }
+            if (colliding) {
+                collide(p, g);
+                if (!p.active) continue;
             }
             float base_angle = tc[P_ANGLE] * lerpf(pmin[P_ANGLE], pmax[P_ANGLE], p.angle_rand);
             base_angle += p.custom[1] * (float)lifetime * tc[P_ANGULAR_VELOCITY] *
@@ -677,6 +728,89 @@ void Particles2D::draw(Canvas& c) {
     }
     if (img) c.draw_triangles(img, v, uv, col, idx);
     else c.draw_colored_triangles(v, idx, col);
+}
+
+/* ---- LightOccluder2D ---- */
+
+static std::vector<LightOccluder2D*>& occluders() {
+    static std::vector<LightOccluder2D*> all;
+    return all;
+}
+
+LightOccluder2D::LightOccluder2D() : sdf_collision(true) { occluders().push_back(this); }
+
+LightOccluder2D::~LightOccluder2D() {
+    std::vector<LightOccluder2D*>& all = occluders();
+    for (size_t i = 0; i < all.size(); ++i)
+        if (all[i] == this) {
+            all.erase(all.begin() + (long)i);
+            break;
+        }
+}
+
+bool LightOccluder2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "occluder") {
+        polygon.clear();
+        Resource* r = ctx.resource(v);
+        if (r && r->props) {
+            const Json& a = (*r->props)["polygon"]["v"];
+            for (size_t i = 0; i + 1 < a.size(); i += 2) polygon.push_back(Vec2(jv_float(a[i]), jv_float(a[i + 1])));
+        }
+    } else if (key == "sdf_collision") {
+        sdf_collision = v.b(true);
+    } else {
+        return Node2D::set(key, v, ctx);
+    }
+    return true;
+}
+
+bool LightOccluder2D::sdf(const Node* root, const Vec2& p, float* dist, Vec2* normal) {
+    std::vector<LightOccluder2D*>& all = occluders();
+    bool found = false;
+    float best = 0;
+    Vec2 best_n;
+    for (size_t o = 0; o < all.size(); ++o) {
+        LightOccluder2D* oc = all[o];
+        size_t n = oc->polygon.size();
+        if (!oc->sdf_collision || n < 3 || !oc->is_visible_in_tree()) continue;
+        const Node* r = oc;
+        while (r->parent) r = r->parent;
+        if (r != root) continue;
+        /* the polygon filled (crossings), the distance to its nearest edge */
+        Xform2D g = oc->global_transform();
+        bool inside = false;
+        float near2 = -1;
+        Vec2 near;
+        for (size_t i = 0, j = n - 1; i < n; j = i++) {
+            Vec2 a = g.xform(oc->polygon[j]), b = g.xform(oc->polygon[i]);
+            if ((b.y > p.y) != (a.y > p.y) && p.x < (a.x - b.x) * (p.y - b.y) / (a.y - b.y) + b.x) inside = !inside;
+            Vec2 ab = b - a, ap = p - a;
+            float l2 = ab.x * ab.x + ab.y * ab.y;
+            float t = l2 > 0 ? clampf((ap.x * ab.x + ap.y * ab.y) / l2, 0.0f, 1.0f) : 0.0f;
+            Vec2 q = a + ab * t;
+            float d2 = (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y);
+            if (near2 < 0 || d2 < near2) {
+                near2 = d2;
+                near = q;
+            }
+        }
+        float d = sqrtf(near2);
+        Vec2 dn = d > 0 ? (p - near) / d : Vec2(0, -1);
+        if (inside) {
+            d = -d;
+            dn = Vec2(-dn.x, -dn.y);
+        }
+        if (!found || d < best) {
+            found = true;
+            best = d;
+            best_n = dn;
+        }
+    }
+    if (found) {
+        *dist = best;
+        *normal = best_n;
+    }
+    return found;
 }
 
 } /* namespace spire */

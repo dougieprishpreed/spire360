@@ -432,14 +432,13 @@ bool SpSkeletonData::load(const u8* data, size_t size, const SpAtlas* atl, std::
         o.color = r.color();
         o.has_dark = r.flag();
         if (o.has_dark) {
-            r.f32();
-            r.f32();
-            r.f32();
-            note(unsupported, "dark colour");
+            /* drawn with the light colour: a visible dark colour is a gap
+             * (the game's are black, or 0.02 grey on Inklet's shadow) */
+            float dr = r.f32(), dg = r.f32(), db = r.f32();
+            if (dr > 0.05f || dg > 0.05f || db > 0.05f) note(unsupported, "dark colour");
         }
         o.attachment = r.str();
         o.blend = r.u8v();
-        if (o.blend == SP_BLEND_SCREEN) note(unsupported, "screen blend (drawn additive)");
         if (o.bone < 0 || o.bone >= (int)bones.size()) {
             if (error) *error = "slot bone out of range";
             return false;

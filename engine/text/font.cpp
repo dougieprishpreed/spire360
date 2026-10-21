@@ -167,4 +167,30 @@ FontFace* FontLibrary::face_for(const FontRes* font) {
     return root->file.empty() ? NULL : face(root->file);
 }
 
+static std::vector<const FontRes*> g_global_fallbacks;
+
+void FontLibrary::set_global_fallbacks(const std::vector<const FontRes*>& fonts) { g_global_fallbacks = fonts; }
+
+static const FontRes* chain_with(FontLibrary* lib, const FontRes* font, u32 cp, int depth) {
+    if (!font || depth > 8) return NULL;
+    FontFace* f = lib->face_for(font);
+    if (f && f->glyph_for(cp)) return font;
+    for (const FontRes* r = font; r; r = r->base)
+        for (size_t i = 0; i < r->fallbacks.size(); ++i) {
+            const FontRes* x = chain_with(lib, r->fallbacks[i], cp, depth + 1);
+            if (x) return x;
+        }
+    return NULL;
+}
+
+const FontRes* FontLibrary::font_with(const FontRes* font, u32 cp) {
+    const FontRes* x = chain_with(this, font, cp, 0);
+    if (x) return x;
+    for (size_t i = 0; i < g_global_fallbacks.size(); ++i) {
+        FontFace* f = face_for(g_global_fallbacks[i]);
+        if (f && f->glyph_for(cp)) return g_global_fallbacks[i];
+    }
+    return font;
+}
+
 } /* namespace spire */

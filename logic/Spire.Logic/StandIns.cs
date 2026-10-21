@@ -50,15 +50,60 @@ internal static class StandIns
     /// (its calls are redirected to the hook anyway).</summary>
     private static T Blank<T>() => (T)RuntimeHelpers.GetUninitializedObject(typeof(T));
 
+    private static readonly ConditionalWeakTable<Creature, MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals> VisualsFor = new();
+    private static readonly ConditionalWeakTable<object, Creature> VisualsOf = new();
+    private static readonly ConditionalWeakTable<object, Creature> BodyOf = new();
+
     static StandIns()
     {
-        // NCombatRoom.Background / NBestiary.Layout's %KaiserCrab
-        // (NKaiserCrabBossBackground, which Crusher and Rocket drive).
         Godot.Node.Resolve = (node, path, type) =>
-            (ReferenceEquals(node, _background) || ReferenceEquals(node, _layout)) && path == "%KaiserCrab" &&
-            type == typeof(NKaiserCrabBossBackground)
-                ? _kaiserCrab ??= Blank<NKaiserCrabBossBackground>()
-                : null;
+        {
+            // NCombatRoom.Background / NBestiary.Layout's %KaiserCrab
+            // (NKaiserCrabBossBackground, which Crusher and Rocket drive).
+            if ((ReferenceEquals(node, _background) || ReferenceEquals(node, _layout)) && path == "%KaiserCrab" &&
+                type == typeof(NKaiserCrabBossBackground))
+                return _kaiserCrab ??= Blank<NKaiserCrabBossBackground>();
+            // a creature's body: its special nodes
+            if (BodyOf.TryGetValue(node, out var c)) return Special(c, "body:" + path, type.FullName ?? "");
+            return null;
+        };
+    }
+
+    // NCreature.GetSpecialNode<T>(path): the scripts the game's code calls on
+    // a creature's special nodes, as stand-ins named "<who>#<path>" (Steps
+    // passes the name for the receiver; the client finds the node).
+    private static readonly Dictionary<string, Func<object>> SpecialClasses = new()
+    {
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NKinPriestBeamVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NKinPriestBeamVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NDecimillipedeSegmentVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NDecimillipedeSegmentVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Animation.NDecimillipedeSegmentDriver).FullName!] =
+            () => Blank<MegaCrit.Sts2.Core.Nodes.Animation.NDecimillipedeSegmentDriver>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NMyteVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NMyteVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NSnappingJaxfruitVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSnappingJaxfruitVfx>(),
+        [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NFlyconidSporesVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NFlyconidSporesVfx>(),
+    };
+    private static readonly Dictionary<string, object> Specials = new();
+    private static readonly ConditionalWeakTable<object, string> SpecialNames = new();
+    private static readonly ConditionalWeakTable<Creature, Godot.Node2D> Bodies = new();
+
+    private static object? Special(Creature c, string path, string typeName)
+    {
+        if (!SpecialClasses.TryGetValue(typeName, out var make)) return null;
+        var key = Steps.Who(c) + "#" + path;
+        if (!Specials.TryGetValue(key, out var o))
+        {
+            o = make();
+            Specials[key] = o;
+            SpecialNames.AddOrUpdate(o, key);
+        }
+        return o;
+    }
+
+    /// <summary>The name of a special node's stand-in ("e3#Visuals/Beam").</summary>
+    public static bool TrySpecial(object? o, out string name)
+    {
+        name = "";
+        return o != null && SpecialNames.TryGetValue(o, out name!);
     }
 
     /// <summary>The hook's answer for a redirected UI call, or null.</summary>
@@ -68,8 +113,31 @@ internal static class StandIns
         var sep = id.LastIndexOf("::", StringComparison.Ordinal);
         if (sep < 0) return null;
         var method = id[(sep + 2)..];
+        var typeArg = "";
+        var lt = method.IndexOf('<');
+        if (lt >= 0)
+        {
+            typeArg = method[(lt + 1)..^1];
+            method = method[..lt];
+        }
         try
         {
+            // NCreature.GetSpecialNode<T>(name): a stand-in of T for a script the game calls
+            if (method == "GetSpecialNode" && a.Length > 1 && a[0] is NCreature sn && Creatures.TryGetValue(sn, out var sc) &&
+                a[1] is string spath)
+                return Special(sc, spath, typeArg);
+            // NCreature.Visuals.GetCurrentBody(): a body node standing for the creature's
+            // (its GetNode<T>(path) gives the special node "<who>#body:<path>")
+            if (method == "get_Visuals" && a.Length > 0 && a[0] is NCreature vn && Creatures.TryGetValue(vn, out var vc))
+                return VisualsFor.GetValue(vc, cr =>
+                {
+                    var v = new MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals();
+                    VisualsOf.AddOrUpdate(v, cr);
+                    return v;
+                });
+            if (method == "GetCurrentBody" && a.Length > 0 && a[0] is MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals cv &&
+                VisualsOf.TryGetValue(cv, out var bc))
+                return Bodies.GetValue(bc, cr => { var b = new Godot.Node2D(); BodyOf.AddOrUpdate(b, cr); return b; });
             if (InBestiary)
             {
                 if (id.EndsWith("NBestiary::get_Instance", StringComparison.Ordinal)) return _bestiary ??= Blank<NBestiary>();

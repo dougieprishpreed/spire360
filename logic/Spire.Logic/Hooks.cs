@@ -126,6 +126,7 @@ internal static partial class Hooks
         Bridge.Register("testmode.game_flow.is_on", _ => Driver?.GameFlow != true && TestMode.IsOn);
         // Presentation-only sites (testmode.presentation.is_off): always off.
         Bridge.Register("testmode.presentation.is_off", _ => true);
+        Bridge.Register("testmode.presentation.is_on", _ => false);
         // RunManager.OnEnded(isVictory): how the run ended.
         Spire.HookBridge.Hooks.RegisterAfter("run.ended", (a, r) =>
         {

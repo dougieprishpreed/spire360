@@ -10,6 +10,86 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha push, part 6 (2026-10-20): creature effects, special nodes
+
+Pushing is on now: commit and `git push origin claude/peaceful-ritchie-zgh7h5`
+(Windows git has the user's login). Still no pull requests and no XDK
+build until the alpha RC.
+
+- All 52 spine-event scripts on creature visuals run (`creature_vfx.cpp`):
+  the characters' four, 31 as data (VFX_TABLES: ops on nodes for "ready",
+  "event:<name>", "start", "start!<anim>", "start=<anim>"; restart / emit /
+  stop / show / hide / clear a trail / fire the beam / put a bone at the
+  target) and the rest as ports (Axebot, Kaiser Crab boss, Soul Fysh,
+  Vantom, Sewer Clam, Oil Spill, Living Gas, Entomancer, Waterfall Giant,
+  Aeon Glass, Amalgam, Cubex Construct with NLaserVfx, Ceremonial Beast,
+  Decimillipede segment, Test Subject, Vine Shambler vines) plus
+  NKinPriestBeamVfx and NDecimillipedeSegmentDriver. Every node path is
+  checked against the scenes: `python tools/check_vfx_paths.py` (exit 0).
+- Special nodes: the patcher appends a generic call's type arguments to
+  its hook id; StandIns answers NCreature.GetSpecialNode<T> (and
+  Visuals.GetCurrentBody().GetNode<T>) with a stand-in of the script class
+  named "<who>#<path>" ("body:<path>"), which Steps passes as the call's
+  first argument; the client's `special_node_call` finds the node in the
+  creature's visuals and runs the port (VfxAnchors::visuals_of /
+  origin_of). TestMode guards that are presentation only now read off /
+  on there: Myte.ToxicMove, SnappingJaxfruit.EnergyOrb, Flyconid's two
+  spore moves, Creature.GetCreatureNode (testmode.presentation.is_on).
+  Left guarded: DecimillipedeSegment.AnimSegmentsAttack (it instantiates
+  the rocks scene in the logic), so the segments' AttackShake and rocks
+  play only in the Bestiary.
+- Death delay: a dead monster that does not fade is hidden only once no
+  IDeathDelayer in its visuals holds it (`death_delayed`: the Ceremonial
+  Beast's death particles), at most 10 s later.
+- Long press confirmation (settings `long_press`): Y held fills the end turn
+  bar (0.5 s, NEndTurnLongPressBar) and then ends the turn; letting go
+  drains it.
+- Intro logo (`logo_screen.cpp`, NLogoAnimation): before the title unless
+  `data/user/settings.save` has `skip_intro_logo` (read at start-up through
+  `Loc::data_path`). Fade in, a second, the logo dropping in with its sound,
+  the background to teal, fade out; A/B cut it short. SpineSprite::bounds()
+  sizes it (a third of the screen). `spire_play --menu` lets it play out
+  before the first press; `--shots-at F1,F2,...` saves those frames.
+- spire_check: a health bar label hidden by InfiniteWithoutNumbers counts as
+  settled (the full encounters replay flagged the Waterfall Giant's stale
+  numbers); the encounters replay is clean again.
+- Particle collision: LightOccluder2D is a node now (no lights in the
+  game: it is only the floor GPU particles hit). Particles whose
+  ParticleProcessMaterial has `collision_mode` 1 bounce off the occluder
+  polygons of their tree (signed distance to the filled polygons, radius
+  `collision_base_size`, the material's friction / bounce response as
+  Godot's shader does it); mode 2 hides them on contact. Seen on the coin
+  explosions, treasure room, blood wall, rock shatter, sandy / slime
+  impacts.
+- SpineMesh2D: the 30-36 empty slot meshes saved in the rest-site and
+  character-select scenes load as plain Node2D (spine-godot makes its own
+  at run time; these draw nothing).
+- Spine dark colour and screen blend checked against the game's 164
+  skeletons: dark colours are black except Inklet's shadow (0.02 grey), so
+  drawing the light colour is exact enough; the two screen-blend skeletons
+  (Neow, the Defect's select) sit in scenes that give them a Mix
+  screen_material, which we already honour. Neither is noted as a gap now.
+- Language setting: the settings' first line is NLanguageDropdown again
+  (A opens the list of LocManager.Languages in their own words, a warning
+  icon under 90% translated from `data/localization/completion.json`;
+  greyed in a run). Picking one sends `set_setting language`; the logic
+  saves SettingsSave.Language and sets LocManager up again
+  (`ApplyLanguage`; commands without "lang" use the saved language,
+  English when none, so traces are unchanged). The client follows the
+  settings answer (`Loc::set_language`, English per missing key) and
+  MenuFlow rebuilds the title and the settings screen (NGame.Relocalize).
+  At start-up both read `data/user/settings.save`. MegaLabel /
+  MegaRichTextLabel swap in the FontManager fonts for jpn, kor, pol / rus,
+  tha, zhs, zht; the shaper falls back per character to a font's
+  fallbacks, then to the languages' regular fonts (Godot's system fallback,
+  which the native names in the picker need).
+- Fonts per language: `convert.py refont <pck> <pack-in> <pack-out>
+  --languages eng,deu,...` re-exports only the fonts. A language folder's
+  fonts (fonts/jpn/..., fonts/rus/ also for Polish) get that language's
+  characters only when it is chosen, else just the native names.
+- Not done: Godot nodes the game moves itself (bone nodes tweened by
+  Tunneler, KinFollower, ...).
+
 ## Alpha push, part 5 (2026-10-20): spine events
 
 Paused here at the user's request. Validation: `spire_check` on new16

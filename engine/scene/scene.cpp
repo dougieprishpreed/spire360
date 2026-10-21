@@ -429,6 +429,7 @@ static Node* new_node(const std::string& type) {
     if (type == "Line2D") return new Line2D();
     if (type == "CPUParticles2D") return new Particles2D(false);
     if (type == "GPUParticles2D") return new Particles2D(true);
+    if (type == "LightOccluder2D") return new LightOccluder2D();
     if (type == "AnimationPlayer") return new AnimationPlayer();
     if (type == "SpineSprite") return new SpineSprite();
     if (type == "SpineBoneNode") return new SpineFollowNode(false);
@@ -470,7 +471,7 @@ static bool is_native(const std::string& type) {
            type == "RichTextLabel" || type == "Sprite2D" || type == "MeshInstance2D" || type == "SubViewport" || type == "SubViewportContainer" || type == "AnimatedSprite2D" || type == "CanvasGroup" || type == "Line2D" ||
            type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Range" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
-           type == "GPUParticles2D" || type == "AnimationPlayer" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||
+           type == "GPUParticles2D" || type == "LightOccluder2D" || type == "SpineMesh2D" || type == "AnimationPlayer" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||
            type == "Control";
 }
 

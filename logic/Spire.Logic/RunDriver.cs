@@ -71,11 +71,11 @@ public partial class RunDriver
     private IReadOnlyList<IReadOnlyList<CardModel>>? _pendingBundles;
     private TaskCompletionSource<IEnumerable<CardModel>>? _pendingBundleTcs;
 
-    public Dictionary<string, object?> StartRun(string character, int ascension = 0, string? seed = null, string lang = "en")
+    public Dictionary<string, object?> StartRun(string character, int ascension = 0, string? seed = null, string? lang = null)
     {
         try
         {
-            _loc.Lang = lang;
+            ApplyLanguage(lang);
             EnsureModelDbInitialized();
             if (_runState != null)
                 EndRun();
@@ -372,11 +372,11 @@ public partial class RunDriver
     }
 
     // ─── Game actions ───
-    public Dictionary<string, object?> LoadSave(string saveJson, string lang = "en")
+    public Dictionary<string, object?> LoadSave(string saveJson, string? lang = null)
     {
         try
         {
-            _loc.Lang = lang;
+            ApplyLanguage(lang);
             EnsureModelDbInitialized();
 
             Log("Loading save file...");

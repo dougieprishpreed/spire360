@@ -15,7 +15,9 @@
  * profiles, timeline, character select, the run's pause menu), one each
  * time the screen has been idle a second, saving menu_KK.png after each;
  * --menu-hold N waits N extra seconds before the first press. Once the
- * buttons are used up, a run that has started plays by itself.
+ * buttons are used up, a run that has started plays by itself. The intro
+ * logo (unless the settings skip it) plays out before the first press;
+ * --shots-at F1,F2,... saves those frames (60 a second) as frame_FFFF.png.
  *
  * --settle: frames each new screen runs before its shot (default 60: a
  * second; fewer catch the effects the decision's cues start).
@@ -179,6 +181,7 @@ int main(int argc, char** argv) {
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
     std::vector<unsigned> pad_script;
+    std::vector<int> shots_at;
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
@@ -188,6 +191,14 @@ int main(int argc, char** argv) {
             menu = true;
         }
         else if (strcmp(argv[i], "--menu-hold") == 0 && i + 1 < argc) menu_hold = atof(argv[++i]);
+        else if (strcmp(argv[i], "--shots-at") == 0 && i + 1 < argc) {
+            /* menu frames (60 a second) to save as frame_NNNN.png */
+            for (const char* c = argv[++i]; *c;) {
+                shots_at.push_back(atoi(c));
+                while (*c && *c != ',') ++c;
+                if (*c) ++c;
+            }
+        }
         else if (strcmp(argv[i], "--audio-wav") == 0 && i + 1 < argc) audio_wav = argv[++i];
         else if (strcmp(argv[i], "--character") == 0 && i + 1 < argc) character = argv[++i];
         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = argv[++i];
@@ -276,7 +287,8 @@ int main(int argc, char** argv) {
         bool autoplay = false;
         for (int frame = 0; frame < 60 * 60 * 30; ++frame) {
             PadState pad;
-            bool settled = !game.busy() && idle >= 60;
+            /* the intro logo plays out untouched */
+            bool settled = !game.busy() && !flow.in_logo() && idle >= 60;
             if (hold > 0 && settled) {
                 hold -= 1.0 / 60.0;
                 settled = false;
@@ -284,6 +296,7 @@ int main(int argc, char** argv) {
             if (settled && at < pad_script.size()) {
                 pad.pressed = pad.held = pad_script[at++];
                 idle = 0;
+                quiet = 0; /* the last screen is shot once its press has settled */
             } else if (at >= pad_script.size() && flow.in_run() && !autoplay) {
                 game.set_auto_play(auto_seed);
                 autoplay = true;
@@ -303,8 +316,15 @@ int main(int argc, char** argv) {
             tree.process(1.0 / 60.0);
             audio.update(1.0 / 60.0);
             tree.layout(1);
-            ++idle;
-            if (flow.in_run() || flow.starting() || game.busy()) quiet = 0;
+            if (!flow.in_logo()) ++idle;
+            for (size_t s = 0; s < shots_at.size(); ++s)
+                if (shots_at[s] == frame) {
+                    sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
+                    tree.render(canvas);
+                    sw.end();
+                    write_png(format("%s/frame_%04d.png", out_dir.c_str(), frame).c_str(), sw.framebuffer());
+                }
+            if (flow.in_run() || flow.starting() || game.busy() || flow.in_logo()) quiet = 0;
             else ++quiet;
             /* A shot of the first settled menu, then 45 frames after each
              * press. */

@@ -457,9 +457,23 @@
       "method": "get_IsOff",
       "in_types": [
         "MegaCrit.Sts2.Core.Models.PotionModel::OnUseWrapper",
-        "MegaCrit.Sts2.Core.Commands.CreatureCmd::Heal"
+        "MegaCrit.Sts2.Core.Commands.CreatureCmd::Heal",
+        "MegaCrit.Sts2.Core.Models.Monsters.Myte::ToxicMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.SnappingJaxfruit::EnergyOrb",
+        "MegaCrit.Sts2.Core.Models.Monsters.Flyconid::VulnerableSporesMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.Flyconid::FrailSporesMove"
       ],
-      "note": "Presentation the game skips in TestMode, with no effect on the rules: the potion thrown from the player to its target (NItemThrowVfx, then a 0.5 s wait) and the rest site's healing cross. TestMode reads off there in every run, so it reaches the steps as cues (the UI calls stay redirected)."
+      "note": "Presentation the game skips in TestMode, with no effect on the rules: the potion thrown from the player to its target (NItemThrowVfx, then a 0.5 s wait), the rest site's healing cross, and the monsters' calls on their special nodes (the Myte's and Snapping Jaxfruit's targets, the Flyconid's spore kind). TestMode reads off there in every run, so it reaches the steps as cues (the UI calls stay redirected)."
+    },
+    {
+      "id": "testmode.presentation.is_on",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
+      "method": "get_IsOn",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetCreatureNode"
+      ],
+      "note": "Creature.GetCreatureNode returns null in TestMode; in every run here it reaches the UI stand-ins (NCombatRoom.GetCreatureNode, NBestiary.GetCreatureNode), so the monsters' calls on their creature nodes become cues. Presentation only: the nodes are stand-ins whose calls are redirected."
     },
     {
       "id": "run.ended",

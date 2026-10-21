@@ -304,6 +304,27 @@ void SpineSprite::follow_bones() {
     }
 }
 
+Rect2 SpineSprite::bounds() {
+    if (!ensure()) return Rect2(0, 0, 0, 0);
+    const SpSkeleton& s = *skel_;
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    std::vector<float> w;
+    for (size_t n = 0; n < s.draw_order.size(); ++n) {
+        const SpSlot& slot = s.slots[s.draw_order[n]];
+        const SpAttachment* a = slot.attachment;
+        if (!a || (a->type != SP_ATT_REGION && a->type != SP_ATT_MESH) || !s.bones[slot.data->bone].active) continue;
+        s.world_vertices(slot, w);
+        for (size_t i = 0; i + 1 < w.size(); i += 2) {
+            x0 = minf(x0, w[i]);
+            y0 = minf(y0, w[i + 1]);
+            x1 = maxf(x1, w[i]);
+            y1 = maxf(y1, w[i + 1]);
+        }
+    }
+    if (x1 < x0) return Rect2(0, 0, 0, 0);
+    return Rect2(x0, y0, x1 - x0, y1 - y0);
+}
+
 void SpineSprite::draw(Canvas& c) {
     if (!ensure()) return;
     BlendMode item_blend = c.blend();
@@ -403,7 +424,7 @@ void SpineSprite::draw(Canvas& c) {
             switch (slot.data->blend) {
             case SP_BLEND_ADDITIVE: c.set_blend(BLEND_ADD); break;
             case SP_BLEND_MULTIPLY: c.set_blend(BLEND_MUL); break;
-            case SP_BLEND_SCREEN: c.set_blend(BLEND_ADD); break; /* not exact (no screen blend yet) */
+            case SP_BLEND_SCREEN: c.set_blend(BLEND_ADD); break; /* not exact; the game's screen slots all have a material */
             default: c.set_blend(item_blend); break;
             }
         }

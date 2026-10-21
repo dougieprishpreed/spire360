@@ -31,6 +31,7 @@
 #include "treasure_screen.h"
 #include "crystal_sphere_screen.h"
 #include "logic_link.h"
+#include "loc.h"
 
 #include <stdio.h>
 
@@ -251,7 +252,7 @@ GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
-      settings_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
+      settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
       confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {}
 
@@ -442,6 +443,10 @@ void GameClient::update(const PadState& pad) {
         return;
     }
     if (waiting_ || decision_.is_null()) return;
+    if (combat_ && combat_->take_end_turn_long_press()) {
+        send(action("end_turn"));
+        return;
+    }
     if (combat_ && combat_->busy()) return;
     if (room_ && room_->busy()) return;
     if (ported_ && ported_->busy()) return;
@@ -939,6 +944,9 @@ void GameClient::combat_input(const PadState& pad) {
                     break;
                 }
         }
+    } else if (client_settings()["long_press"].b()) {
+        /* Long press confirmation: Y held until the bar fills */
+        combat_->hold_end_turn((pad.pressed & PadState::Y) != 0, (pad.held & PadState::Y) != 0);
     } else if (pad.pressed & PadState::Y) {
         send(action("end_turn"));
     }
@@ -1058,6 +1066,12 @@ void GameClient::send_query(const std::string& command) {
 
 void GameClient::apply_settings(const Json& s) {
     settings_ = s;
+    /* LocManager.SetLanguage: the logic's language is the client's */
+    const std::string& lang = s["language"].str();
+    if (!lang.empty() && lang != Loc::language()) {
+        Loc::set_language(lang);
+        ++language_version_;
+    }
     set_client_settings(s);
     set_rtl_text_effects(s["text_effects"].b(true));
     if (combat_) combat_->refresh_hand_indices();
