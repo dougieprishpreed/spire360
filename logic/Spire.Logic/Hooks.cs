@@ -218,6 +218,52 @@ internal static partial class Hooks
                     new Dictionary<string, object?> { ["op"] = "set_animation", ["name"] = "_tracks/head_stop_reading", ["loop"] = false, ["track"] = 1 },
                     new Dictionary<string, object?> { ["op"] = "add_animation", ["name"] = "_tracks/head_normal", ["loop"] = true, ["delay"] = 0.5, ["track"] = 1 });
         });
+        // The Sovereign Blade's node (see patches.json blade.*): which blades
+        // exist is kept here, per combat.
+        Bridge.Register("blade.forge_vfx", a =>
+        {
+            if (a.Length < 2 || a[0] is not Player player || a[1] is not CardModel card) return null;
+            var combat = player.Creature?.CombatState;
+            if (combat == null) return null;
+            if (!ReferenceEquals(combat, _bladesCombat))
+            {
+                _blades.Clear();
+                _bladesCombat = combat;
+            }
+            var original = card.DupeOf ?? card;
+            bool isNew = _blades.Add(original);
+            SfxCmd.Play(isNew ? "event:/sfx/characters/regent/regent_forge" : "event:/sfx/characters/regent/regent_refine");
+            BladeCue("forge", original, "damage", card.DynamicVars.Damage.IntValue, "flames", isNew);
+            if (isNew)
+            {
+                // the blades share the orbit evenly
+                var blades = player.PlayerCombatState!.AllCards
+                    .Where(c => !c.IsDupe && (c.Pile == null || c.Pile.Type != PileType.Exhaust))
+                    .OfType<MegaCrit.Sts2.Core.Models.Cards.SovereignBlade>().ToList();
+                for (int i = 0; i < blades.Count; i++)
+                    if (_blades.Contains(blades[i])) BladeCue("orbit", blades[i], "progress", (float)i / blades.Count);
+            }
+            return null;
+        });
+        Spire.HookBridge.Hooks.RegisterBefore("blade.play", a =>
+            _bladeTarget = a.Length > 2 && a[2] is CardPlay play ? play.Target : null);
+        Bridge.Register("blade.attack_node", a =>
+        {
+            if (a.Length > 1 && a[1] is CardModel card && _blades.Contains(card.DupeOf ?? card))
+            {
+                // OnPlay: Seeking Edge aims at the first hittable enemy
+                bool seeking = card.GetType().GetProperty("HasSeekingEdge", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(card) is true;
+                var target = seeking ? card.CombatState?.HittableEnemies.FirstOrDefault() : _bladeTarget;
+                if (target != null) BladeCue("attack", card.DupeOf ?? card, "target", Steps.Who(target));
+            }
+            return null;
+        });
+        Bridge.Register("blade.remove_node", a =>
+        {
+            if (a.Length > 1 && a[1] is CardModel card && _blades.Remove(card.DupeOf ?? card))
+                BladeCue("remove", card.DupeOf ?? card);
+            return null;
+        });
         // Trial.Accept's new portrait: cleared, the accused's VFX, trial_started.
         Spire.HookBridge.Hooks.RegisterBefore("event.trial_portrait", a =>
         {
@@ -353,6 +399,17 @@ internal static partial class Hooks
     }
 
     private static readonly Queue<int> _architectParts = new();
+    private static readonly HashSet<CardModel> _blades = new();
+    private static object? _bladesCombat;
+    private static Creature? _bladeTarget;
+
+    /// <summary>A Sovereign Blade cue: op, the blade's card, then key / value pairs.</summary>
+    private static void BladeCue(string op, CardModel card, params object?[] kv)
+    {
+        var cue = new Dictionary<string, object?> { ["t"] = "blade", ["op"] = op, ["card"] = Steps.IdOf(card) };
+        for (int i = 0; i + 1 < kv.Length; i += 2) cue[(string)kv[i]!] = kv[i + 1];
+        Steps.Cue(cue);
+    }
 
     private static void HeadCue(Creature who, params Dictionary<string, object?>[] ops) =>
         Steps.Cue(new Dictionary<string, object?> { ["t"] = "anim", ["who"] = Steps.Who(who), ["name"] = "Head", ["wait"] = 0, ["play"] = ops.ToList() });

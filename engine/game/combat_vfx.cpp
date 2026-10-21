@@ -1866,7 +1866,7 @@ bool is_combat_vfx_call(const std::string& call) {
     if (call == "NCombatRoom.PlaySplashVfx") return true;
     std::string cls = class_of(call);
     if (call == "NSleepingVfx.Stop" || call == "NDoomOverlayVfx.GetOrCreate" || call == "PlayerHurtVignetteHelper.Play" ||
-        call == "NSpeechBubbleVfx.Create")
+        call == "NSpeechBubbleVfx.Create" || call == "NThoughtBubbleVfx.Create")
         return true;
     if (call.compare(cls.size(), std::string::npos, ".Create") != 0 && call.find(".Create") == std::string::npos)
         return false;
@@ -1941,16 +1941,94 @@ void bubble_hsv(const std::string& color, float* h, float* s, float* v) {
 /* NSpeechBubbleVfx.Create(text, speaker, seconds, color): at the visuals'
  * %TalkPos, else above the centre (3/8 of the hitbox) and 3/4 of its width
  * to the speaker's front; the enemies' bubbles open to the left. */
-void spawn_speech_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnchors& anchors) {
-    VfxCreature c;
-    if (args.size() < 2) return;
-    const std::string& who = args[1].str();
-    if (!anchors.creature(who, &c)) return;
-    Vec2 at = c.center + Vec2(0, -c.hitbox.size.y * 0.5f * 0.75f);
-    at.x += c.enemy ? -c.hitbox.size.x * 0.75f : c.hitbox.size.x * 0.75f;
+/* GetCreatureSpeechPosition (speech and thought bubbles): the visuals'
+ * %TalkPos, else above the centre (3/8 of the hitbox) and 3/4 of its width
+ * to the speaker's front. */
+bool speech_position(const std::string& who, VfxAnchors& anchors, VfxCreature* c, Vec2* at) {
+    if (!anchors.creature(who, c)) return false;
+    *at = c->center + Vec2(0, -c->hitbox.size.y * 0.5f * 0.75f);
+    at->x += c->enemy ? -c->hitbox.size.x * 0.75f : c->hitbox.size.x * 0.75f;
     Node* visuals = anchors.visuals_of(who);
     Node* talk = visuals ? visuals->find_unique("TalkPos") : NULL;
-    if (talk && talk->is_canvas_item()) at = ((CanvasItem*)talk)->global_transform().origin;
+    if (talk && talk->is_canvas_item()) *at = ((CanvasItem*)talk)->global_transform().origin;
+    return true;
+}
+
+/* NThoughtBubbleVfx: grows 0.75 -> 1 (0.25 s, Back Out) as it fades in
+ * (0.25 s, Cubic Out), its text flying in (0.4 s); after max(seconds, 1) it
+ * fades out (0.4 s, Sine Out) and goes. Without seconds it stays until the
+ * speaker's next thought. */
+class ThoughtBubble : public ScriptBehavior {
+public:
+    ThoughtBubble(Control* root, RichTextLabel* label, const std::string& who, double seconds)
+        : who(who), t_(0), out_at_(seconds < 0 ? 1e9 : (seconds > 1 ? seconds : 1)), out_(false) {
+        root->modulate.a = 0;
+        tweens_.tween(&root->modulate.a, 1, 0.25f, TRANS_CUBIC, EASE_OUT);
+        tweens_.tween_from(&root->scale, Vec2(0.75f, 0.75f), Vec2(1, 1), 0.25f, TRANS_BACK, EASE_OUT);
+        if (label) tweens_.tween_from(&label->visible_ratio, 0, 1, 0.4f);
+    }
+    std::string who;
+    void go_away(Node* n) {
+        if (out_) return;
+        out_ = true;
+        out_at_ = t_;
+        tweens_.kill(&((CanvasItem*)n)->modulate.a);
+        tweens_.tween(&((CanvasItem*)n)->modulate.a, 0, 0.4f, TRANS_SINE, EASE_OUT);
+    }
+    virtual void process(Node* n, double dt) {
+        t_ += dt;
+        tweens_.update(dt);
+        if (!out_ && t_ >= out_at_) go_away(n);
+        if (out_ && t_ >= out_at_ + 0.4 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    TweenSet tweens_;
+    double t_, out_at_;
+    bool out_;
+};
+
+void spawn_thought_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnchors& anchors) {
+    VfxCreature c;
+    Vec2 at;
+    if (args.size() < 2 || !speech_position(args[1].str(), anchors, &c, &at)) return;
+    for (size_t i = 0; i < box->children.size(); ++i) {
+        Node* old = box->children[i];
+        if (old->script == "res://src/Core/Nodes/Vfx/NThoughtBubbleVfx.cs" && old->behavior && !old->queued_for_deletion() &&
+            ((ThoughtBubble*)old->behavior)->who == args[1].str())
+            ((ThoughtBubble*)old->behavior)->go_away(old);
+    }
+    Node* fx = instance(lib, "scenes/vfx/vfx_thought_bubble.tscn");
+    if (!fx || !fx->is_control()) {
+        delete fx;
+        return;
+    }
+    Control* root = (Control*)fx;
+    Node* container = fx->find_unique("Container");
+    Node* tail = fx->find_unique("Tail");
+    Node* text = fx->find_unique("Text");
+    hide(fx->find_unique("Image"));
+    if (c.enemy) {
+        if (container && container->is_control()) {
+            Control* k = (Control*)container;
+            float w = k->offset[SIDE_RIGHT] - k->offset[SIDE_LEFT];
+            k->set_position(Vec2(-w - k->offset[SIDE_LEFT], k->offset[SIDE_TOP]));
+        }
+        if (tail && tail->is_node2d()) ((Node2D*)tail)->scale = Vec2(-1, 1);
+    }
+    set_label(text, format("[center][fly_in offset_x=%d offset_y=40]%s[/fly_in][/center]", c.enemy ? 30 : -30,
+                           args[(size_t)0].str().c_str()));
+    double seconds = args.size() > 2 && args[2].is_number() ? args[2].num() : -1;
+    delete fx->behavior;
+    fx->behavior = new ThoughtBubble(root, text && text->type == "RichTextLabel" ? (RichTextLabel*)text : NULL, args[1].str(), seconds);
+    box->add_child(fx);
+    root->set_position(at);
+}
+
+void spawn_speech_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnchors& anchors) {
+    VfxCreature c;
+    Vec2 at;
+    if (args.size() < 2 || !speech_position(args[1].str(), anchors, &c, &at)) return;
     /* one line at a time: a bubble kept until the next goes now */
     for (size_t i = 0; i < box->children.size(); ++i) {
         Node* old = box->children[i];
@@ -2003,6 +2081,10 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     if (!box) return true;
     if (call == "NSpeechBubbleVfx.Create") {
         spawn_speech_bubble(lib, box, args, anchors);
+        return true;
+    }
+    if (call == "NThoughtBubbleVfx.Create") {
+        spawn_thought_bubble(lib, box, args, anchors);
         return true;
     }
     Args a(args);

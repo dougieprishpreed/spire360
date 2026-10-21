@@ -5,6 +5,7 @@
 #include "loc.h"
 #include "../audio/game_audio.h"
 #include "ui_util.h"
+#include "sovereign_blade.h"
 #include "top_bar.h"
 
 #include "../scene/controls.h"
@@ -2112,6 +2113,12 @@ void CombatScreen::apply_state(const Json& ch) {
     Creature* c = creature_for(ch["who"].str());
     if (type == "card") { move_card(ch); return; }
     if (type == "relic_flash") { flash_relic(ch); return; }
+    if (type == "blade") {
+        VfxCreature t;
+        bool aimed = ch["target"].is_string() && creature(ch["target"].str(), &t);
+        sovereign_blade_cue(lib_, player_.node, ch, aimed ? &t.center : NULL);
+        return;
+    }
     if (type == "power_flash") { flash_power(ch); return; }
     if (type == "orb_activate") { activate_orb(ch); return; }
     if (type == "orbs" && ch["orbs"].is_array()) {
@@ -2477,6 +2484,16 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_SCRIPTED && ScreenShake::get().cue(c.data["call"].str(), c.data["args"])) return;
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NGame.DoHitStop") {
+        /* NHitStop.EaseForStrength / SecondsForDuration */
+        const std::string& strength = c.data["args"][(size_t)0].str();
+        const std::string& duration = c.data["args"][1].str();
+        TweenTrans trans = strength == "VeryWeak" ? TRANS_CIRC : strength == "Weak" ? TRANS_SINE
+                         : strength == "Medium" ? TRANS_QUAD : strength == "Strong" ? TRANS_QUART : TRANS_EXPO;
+        float seconds = duration == "Short" ? 0.15f : duration == "Normal" ? 0.3f : duration == "Long" ? 0.6f : 2.0f;
+        SceneTree::hit_stop(seconds, trans);
+        return;
+    }
     double crab_waits;
     if (c.kind == CUE_SCRIPTED && kaiser_crab_call(c.data["call"].str(), c.data["args"], &crab_waits)) return;
     if (c.kind == CUE_SCRIPTED && special_node_call(c.data["call"].str(), c.data["args"], *this)) return;
@@ -2682,7 +2699,8 @@ void CombatScreen::play_steps(const Json& steps) {
                                         ch["call"].str() == "NCreature.StartReviveAnim" ||
                                         ch["call"].str() == "NCreature.PerformIntent" ||
                                         ch["call"].str() == "NCreature.RefreshIntents" ||
-                                        ch["call"].str().compare(0, 12, "NGame.Screen") == 0)) {
+                                        ch["call"].str().compare(0, 12, "NGame.Screen") == 0 ||
+                                        ch["call"].str() == "NGame.DoHitStop")) {
                 /* The game's scripted effects (combat_vfx). */
                 c.kind = CUE_SCRIPTED;
                 c.data = ch;

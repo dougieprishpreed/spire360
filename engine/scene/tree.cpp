@@ -4,6 +4,7 @@
 #include "controls.h"
 #include "script.h"
 #include "shaders.h"
+#include "tween.h"
 #include "viewport.h"
 
 #include <algorithm>
@@ -101,10 +102,32 @@ static void flush_deleted(Node* n) {
     }
 }
 
+float SceneTree::time_scale_ = 1, SceneTree::hit_stop_t_ = 0, SceneTree::hit_stop_len_ = 0;
+int SceneTree::hit_stop_trans_ = 0;
+
+void SceneTree::hit_stop(float seconds, int trans) {
+    time_scale_ = 0.1f;
+    hit_stop_t_ = 0;
+    hit_stop_len_ = seconds > 0 ? seconds : 0.01f;
+    hit_stop_trans_ = trans;
+}
+
 void SceneTree::process(double dt) {
-    g_shader_time += dt;
-    process_node(&root_, dt);
+    double t = dt * time_scale_;
+    g_shader_time += t;
+    process_node(&root_, t);
     flush_deleted(&root_);
+    /* NHitStop.HitStopTask: the next frame's scale from the real time gone */
+    if (hit_stop_len_ > 0) {
+        hit_stop_t_ += (float)dt;
+        if (hit_stop_t_ > hit_stop_len_) {
+            time_scale_ = 1;
+            hit_stop_len_ = 0;
+        } else {
+            float k = tween_interpolate((TweenTrans)hit_stop_trans_, EASE_IN, hit_stop_t_ / hit_stop_len_, 0, 1, 1);
+            time_scale_ = 0.1f + k * 0.9f < 1 ? 0.1f + k * 0.9f : 1.0f;
+        }
+    }
 }
 
 static Rect2 xform_rect(const Xform2D& xf, const Rect2& r) {

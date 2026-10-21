@@ -632,6 +632,10 @@ internal sealed class Patcher
         var t = scope[..sep];
         var m = scope[(sep + 2)..];
         if (type.FullName == t) return method.Name == m;
+        // its state machine (<m>d__N), or its lambdas (<m>b__N) in a closure
+        // class (<>c, <>c__DisplayClassN)
+        if (type.FullName.StartsWith(t + "/<>c", StringComparison.Ordinal))
+            return method.Name.StartsWith("<" + m + ">", StringComparison.Ordinal);
         return type.FullName.StartsWith(t + "/<" + m + ">", StringComparison.Ordinal);
     }
 

@@ -354,6 +354,40 @@
       "note": "Trial.Accept: RemoveNodesOnPortrait, the accused's VFX on the portrait at (292, 68), SetPortrait(trial_started). The node and texture do not exist headless; recorded as an event_portrait cue."
     },
     {
+      "id": "blade.forge_vfx",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.ForgeCmd",
+      "method": "PlayCombatRoomForgeVfx",
+      "optional": true,
+      "note": "The Sovereign Blade orbiting the player is a node the game finds under the creature (SovereignBlade.GetVfxNode); headless there is none, so every forge looked like a new blade. The adapter keeps which blades exist and records blade cues (forge, orbit) with the forge / refine sound."
+    },
+    {
+      "id": "blade.play",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Cards.SovereignBlade",
+      "method": "OnPlay",
+      "optional": true,
+      "note": "The play's target, for the blade's attack (blade.attack_node)."
+    },
+    {
+      "id": "blade.attack_node",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Models.Cards.SovereignBlade",
+      "method": "GetVfxNode",
+      "in_types": [ "MegaCrit.Sts2.Core.Models.Cards.SovereignBlade::OnPlay" ],
+      "optional": true,
+      "note": "SovereignBlade.OnPlay's BeforeDamage: the blade (vfxNode.Attack) flies at the target. Recorded as a blade attack cue; the call still finds no node."
+    },
+    {
+      "id": "blade.remove_node",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Models.Cards.SovereignBlade",
+      "method": "GetVfxNode",
+      "in_types": [ "MegaCrit.Sts2.Core.Models.Cards.SovereignBlade::RemoveSovereignBladeNode" ],
+      "optional": true,
+      "note": "The blade goes (RemoveSovereignBlade: exhausted, transformed). Recorded as a blade remove cue."
+    },
+    {
       "id": "relic.flashed",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Entities.Players.Player",

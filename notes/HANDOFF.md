@@ -98,11 +98,25 @@ parts 2 and 3 above it).
   Trial's accused (`event_portrait` cue from `event.trial_portrait`) is
   kept for the event's later pages, like the mirror and the rain
   (GameClient::collect_room_cues).
+- Thought bubbles (NThoughtBubbleVfx, "I don't have enough cards to
+  draw.", the bosses' lines); hit-stop (NGame.DoHitStop: the scene tree's
+  time scale at 0.1 easing back over 0.15-0.6 s of real time,
+  `SceneTree::hit_stop`).
+- The Regent's Sovereign Blade (`engine/game/sovereign_blade.cpp`,
+  NSovereignBladeVfx): headless SovereignBlade.GetVfxNode finds no node,
+  so ForgeCmd.PlayCombatRoomForgeVfx is redirected (the adapter keeps
+  which blades exist: forge vs refine sound, flames on a new one, the
+  shared orbit) and the card's GetVfxNode calls in OnPlay's BeforeDamage
+  and RemoveSovereignBladeNode record blade attack / remove cues. The
+  client's blade orbits, grows with its damage, glows and sparks, dives
+  at the target with its trail and slash, and shrinks away.
+- Patcher: an in_types "Type::Method" scope now also covers the method's
+  lambdas (<m>b__N in <>c / <>c__DisplayClassN), as its notes said.
+- NCreature.SetAnimationTrigger cues duplicate the anim cues of
+  CreatureCmd.TriggerAnim (not a gap).
 - Still open: NPowerUpVfx's 3D layer, the enchant emboss, and recorded ui
   calls the client does not handle yet (from a survey of every trace's
-  ui cues, work/ui_calls.txt): NThoughtBubbleVfx.Create (1013 calls),
-  NCreature.SetAnimationTrigger (1804), NGame.DoHitStop (108),
-  NSovereignBladeVfx.Create / Forge (Regent), NGainEpochVfx, the form
+  ui cues, work/ui_calls.txt): NGainEpochVfx, the form
   VFX classes (NDemonFormVfx, NVoidFormVfx, NSerpentFormVfx,
   NReaperFormVfx, NEchoFormVfx), NHorizontalLinesVfx,
   NCreature.TrackBlockStatus, DisableInteractionForDeath,
