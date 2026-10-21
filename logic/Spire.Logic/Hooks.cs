@@ -218,6 +218,18 @@ internal static partial class Hooks
                     new Dictionary<string, object?> { ["op"] = "set_animation", ["name"] = "_tracks/head_stop_reading", ["loop"] = false, ["track"] = 1 },
                     new Dictionary<string, object?> { ["op"] = "add_animation", ["name"] = "_tracks/head_normal", ["loop"] = true, ["delay"] = 0.5, ["track"] = 1 });
         });
+        // Trial.Accept's new portrait: cleared, the accused's VFX, trial_started.
+        Spire.HookBridge.Hooks.RegisterBefore("event.trial_portrait", a =>
+        {
+            if (a.Length < 2 || a[0] == null || a[1] is not string vfx) return;
+            var image = a[0]!.GetType().GetProperty("TrialStartedPath", BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null) as string;
+            static string Res(string p) => p.StartsWith("res://") ? p.Substring(6) : p;
+            Steps.Cue(new Dictionary<string, object?>
+            {
+                ["t"] = "event_portrait", ["vfx"] = Res(vfx), ["at"] = new List<object?> { 292, 68 },
+                ["image"] = image != null ? Res(image) : null,
+            });
+        });
         // The events' room effects added in OnRoomEnter (see patches.json).
         Spire.HookBridge.Hooks.RegisterAfter("event.room_vfx.mirror", (a, r) =>
             Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NMirrorVfx.Create", ["args"] = new List<object?>() }));

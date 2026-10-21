@@ -93,6 +93,11 @@ parts 2 and 3 above it).
   (2 looping), not a leak.
 - Test runs (`start_run`) report game over without victory after WinRun:
   only game-flow runs (`start_game_run`) record RunManager.OnEnded.
+- Event portraits: the event's own VFX (scenes/vfx/events/<id>_vfx, 38
+  events) on the portrait at EventModel.VfxOffset (InitializeVisuals);
+  Trial's accused (`event_portrait` cue from `event.trial_portrait`) is
+  kept for the event's later pages, like the mirror and the rain
+  (GameClient::collect_room_cues).
 - Still open: NPowerUpVfx's 3D layer, the enchant emboss.
 
 ## Alpha push, part 8 (2026-10-21): effect shaders, card flights

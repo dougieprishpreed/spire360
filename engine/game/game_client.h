@@ -181,6 +181,8 @@ private:
     bool event_finishing_;        /* finishing_ waits for the event's room */
     std::vector<std::string> room_vfx_; /* the event room's own effects (ui calls) */
     std::string room_vfx_event_;
+    Json event_portrait_;                /* the event's portrait as a page set it */
+    void collect_room_cues(const Json& decision);
     Json transition_pending_;
     std::vector<std::string> queued_; /* sent after the logic's "ready" */
     Json answer_;

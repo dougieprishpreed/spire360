@@ -32,6 +32,9 @@ public:
     virtual std::string input(const PadState& pad);
     virtual void frame(double dt);
     void set_combat(CombatScreen* combat) { combat_ = combat; }
+    /* Before build: the portrait an earlier page of the event put in place
+     * (an event_portrait cue: Trial's accused), null for the event's own. */
+    void set_room_portrait(const Json& cue) { room_portrait_ = cue; }
     /* Transfer the visual-only room across event pages or into the fight. */
     CombatScreen* take_combat();
     /* What a choice did to the event's room, before the screen after it;
@@ -61,6 +64,7 @@ private:
     SceneLibrary* lib_;
     CombatScreen* combat_;
     Json decision_;
+    Json room_portrait_;
     std::vector<Option> options_;
     int focus_;
     bool enabled_; /* the options take the pad */

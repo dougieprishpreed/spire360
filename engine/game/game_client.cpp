@@ -541,7 +541,9 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
         return n;
     }
     if (rt == "Event" && !last_event_.is_null()) {
-        behind_ = new EventScreen(lib_);
+        EventScreen* event = new EventScreen(lib_);
+        event->set_room_portrait(event_portrait_);
+        behind_ = event;
         Node* n = behind_->build(last_event_, &err);
         if (!n) {
             delete behind_;
@@ -725,9 +727,16 @@ void GameClient::show(const Json& d) {
             ported_ = NULL;
         }
     }
+    if (kind == "event_choice") collect_room_cues(d);
+    else if (kind == "map_select") {
+        room_vfx_.clear();
+        room_vfx_event_.clear();
+        event_portrait_ = Json();
+    }
     if (kind == "event_choice") {
         last_event_ = d;
         EventScreen* event = new EventScreen(lib_);
+        event->set_room_portrait(event_portrait_);
         if (event_room) { event->set_combat(room_); room_ = NULL; }
         ported_ = event;
         screen_ = ported_->build(d, &err);
@@ -855,24 +864,8 @@ void GameClient::show(const Json& d) {
     /* What the choice did outside a fight (the fights play their own). */
     if (!in_fight && kind != "game_over") play_room_cues(lib_, screen_, d);
     /* NEventRoom's own effects (OnRoomEnter) stay for all its pages. */
-    if (kind == "event_choice") {
-        if (d["event_id"].str() != room_vfx_event_) {
-            room_vfx_.clear();
-            room_vfx_event_ = d["event_id"].str();
-        }
-        const Json& steps = d["steps"];
-        for (size_t i = 0; i < steps.size(); ++i)
-            for (size_t k = 0; k < steps[i].size(); ++k) {
-                const std::string& call = steps[i][k]["call"].str();
-                if (steps[i][k]["t"].str() == "ui" && (call == "NMirrorVfx.Create" || call == "NRainVfx.Create") &&
-                    std::find(room_vfx_.begin(), room_vfx_.end(), call) == room_vfx_.end())
-                    room_vfx_.push_back(call);
-            }
+    if (kind == "event_choice")
         for (size_t i = 0; i < room_vfx_.size(); ++i) add_room_vfx(lib_, screen_, room_vfx_[i]);
-    } else {
-        room_vfx_.clear();
-        room_vfx_event_.clear();
-    }
     potions_.attach(screen_, d["player"]);
     tree_->root()->add_child(screen_);
     if (deck_previews_) {
@@ -884,6 +877,26 @@ void GameClient::show(const Json& d) {
         tree_->root()->remove_child(transition_); tree_->root()->add_child(transition_);
     }
     refresh_plain_screen();
+}
+
+/* An event's own effects (OnRoomEnter's) and its portrait as a page set
+ * it: NEventRoom keeps them for the event's later pages. */
+void GameClient::collect_room_cues(const Json& d) {
+    if (d["event_id"].str() != room_vfx_event_) {
+        room_vfx_.clear();
+        event_portrait_ = Json();
+        room_vfx_event_ = d["event_id"].str();
+    }
+    const Json& steps = d["steps"];
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& c = steps[i][k];
+            const std::string& call = c["call"].str();
+            if (c["t"].str() == "event_portrait") event_portrait_ = c;
+            else if (c["t"].str() == "ui" && (call == "NMirrorVfx.Create" || call == "NRainVfx.Create") &&
+                     std::find(room_vfx_.begin(), room_vfx_.end(), call) == room_vfx_.end())
+                room_vfx_.push_back(call);
+        }
 }
 
 void GameClient::clear_screen() {

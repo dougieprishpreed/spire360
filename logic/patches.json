@@ -346,6 +346,14 @@
       "note": "NEventRoom's VfxContainer gets NRainVfx.Create() (as the mirror). Recorded as its ui cue."
     },
     {
+      "id": "event.trial_portrait",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Events.Trial",
+      "method": "AddVfxAnchoredToPortrait",
+      "optional": true,
+      "note": "Trial.Accept: RemoveNodesOnPortrait, the accused's VFX on the portrait at (292, 68), SetPortrait(trial_started). The node and texture do not exist headless; recorded as an event_portrait cue."
+    },
+    {
       "id": "relic.flashed",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Entities.Players.Player",

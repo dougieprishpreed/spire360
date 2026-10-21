@@ -161,6 +161,25 @@ Node* EventScreen::build_default(const Json& d) {
         bool alt = client_settings()["phobia_mode"].b() && lib_->ext(phobia) != NULL;
         set_texture(lib_, lay->find_unique("Portrait"), alt ? phobia : "images/events/" + id + ".png");
     }
+    /* InitializeVisuals: the event's own VFX (scenes/vfx/events/<id>_vfx)
+     * on the portrait at EventModel.VfxOffset; or what a page put there
+     * since (RemoveNodesOnPortrait, AddVfxAnchoredToPortrait, SetPortrait) */
+    Node* portrait = lay->find_unique("Portrait");
+    std::string vfx = id.empty() ? std::string() : "scenes/vfx/events/" + id + "_vfx.tscn";
+    Vec2 vfx_at(268, 49);
+    if (room_portrait_.is_object()) {
+        if (room_portrait_["image"].is_string()) set_texture(lib_, portrait, room_portrait_["image"].str());
+        vfx = room_portrait_["vfx"].str();
+        vfx_at = Vec2((float)room_portrait_["at"][(size_t)0].num(), (float)room_portrait_["at"][1].num());
+    }
+    std::string err;
+    Node* fx = portrait && !vfx.empty() ? lib_->instantiate(vfx, &err) : NULL;
+    if (fx && fx->is_node2d()) {
+        ((Node2D*)fx)->position = vfx_at;
+        portrait->add_child(fx);
+    } else {
+        delete fx;
+    }
 
     /* AnimateIn (from SetDescription, after the setup's wait): the title
      * fades in after 0.5 s; the description 0.25 s later, typed out. */
