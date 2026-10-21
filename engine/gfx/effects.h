@@ -305,6 +305,15 @@ enum EffectId {
      * (movingTex, waterTex, both repeat; p4p5 TIME * scrollSpeed). No
      * vertex colour. */
     EFFECT_WATERFALL_WATER = 56,
+    /* shaders/colorize_addblend.tres (blend_add): rgb p0..2 * TEXTURE.rgb
+     * when p3 != 0 (MultiplyVsAdd), else p0..2 + TEXTURE.rgb; alpha COLOR's
+     * (vertex times texel). */
+    EFFECT_COLORIZE_ADD = 57,
+    /* vfx_ui_epoch_unlock_chains_shader: mix(TEXTURE, p0..3, p4) with
+     * TEXTURE's alpha times mix(1, smoothstep(p6, p6 + p7, tex0(UV).r), p5),
+     * times the vertex colour (p0..3 bright_color, p4 bright_enabled, p5
+     * erosion_enabled, p6 erosion_base, p7 erosion_offset). */
+    EFFECT_EPOCH_CHAINS = 58,
     EFFECT_COUNT
 };
 

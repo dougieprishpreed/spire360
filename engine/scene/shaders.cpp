@@ -350,8 +350,11 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.id = EFFECT_LUT_COLOR;
         e.p[0] = param(m, "use_r_as_alpha", 0.0f);
         e.tex[0] = effect_texture(c, m, "lut");
-    } else if (s == "images/vfx/simple_noise_flat_shader.tres" || s == "images/vfx/simple_noise_add_shader.tres") {
-        bool two = s == "images/vfx/simple_noise_flat_shader.tres";
+    } else if (s == "images/vfx/simple_noise_flat_shader.tres" || s == "images/vfx/simple_noise_add_shader.tres" ||
+               s == "inline:de17fd3cee97c1a1") {
+        /* inline:de17fd3cee97c1a1: the Necrobinder's own copy of the flat
+         * two-noise one (the same parameters) */
+        bool two = s != "images/vfx/simple_noise_add_shader.tres";
         e.id = EFFECT_SIMPLE_NOISE;
         Vec2 st = shader_param_vec2(m, "Step", Vec2(0, 0));
         Vec2 s1 = shader_param_vec2(m, "mask_scale", Vec2(1, 1)), p1 = shader_param_vec2(m, "mask_panning", Vec2(2, 3));
@@ -611,6 +614,25 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "movingTex");
         e.tex[1] = effect_texture(c, m, "waterTex");
         e.repeat = 3;
+    } else if (s == "shaders/colorize_addblend.tres") {
+        Color k = param_color(m, "Color", Color(1, 1, 1, 1));
+        e.id = EFFECT_COLORIZE_ADD;
+        e.p[0] = k.r;
+        e.p[1] = k.g;
+        e.p[2] = k.b;
+        e.p[3] = param(m, "MultiplyVsAdd", 1.0f) != 0.0f ? 1.0f : 0.0f;
+    } else if (s == "shaders/vfx/ui/vfx_ui_epoch_unlock_chains_shader.gdshader") {
+        Color k = param_color(m, "bright_color", Color(0, 0, 0, 0));
+        e.id = EFFECT_EPOCH_CHAINS;
+        e.p[0] = k.r;
+        e.p[1] = k.g;
+        e.p[2] = k.b;
+        e.p[3] = k.a;
+        e.p[4] = param(m, "bright_enabled", 0.0f);
+        e.p[5] = param(m, "erosion_enabled", 0.0f);
+        e.p[6] = param(m, "erosion_base", 0.0f);
+        e.p[7] = param(m, "erosion_offset", 1.0f);
+        e.tex[0] = effect_texture(c, m, "erosion_texture");
     } else if (s == "shaders/vfx/poison/vfx_poison_skull_shader.gdshader") {
         e.id = EFFECT_POISON_SKULL;
         Vec2 sp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
@@ -1636,6 +1658,10 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/grand_finale/vfx_grand_finale_spotlight_darken_shader.gdshader") {
         *out = BLEND_SUB;
+        return true;
+    }
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/colorize_addblend.tres") {
+        *out = BLEND_ADD;
         return true;
     }
     if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/vfx_doom_flame_shader.tres") {

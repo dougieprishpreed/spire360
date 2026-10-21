@@ -1096,6 +1096,33 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_COLORIZE_ADD: {
+        float t[4] = { 1, 1, 1, 1 };
+        if (tex) sample(tex->img, u, v, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) {
+            float tk = t[k] * ia;
+            out[k] = clampf(e.p[3] != 0 ? e.p[k] * tk : e.p[k] + tk, 0, 1) * a;
+        }
+        out[3] = a;
+        return;
+    }
+    case EFFECT_EPOCH_CHAINS: {
+        float t[4] = { 1, 1, 1, 1 }, er[4];
+        if (tex) sample(tex->img, u, v, flags, t);
+        effect_texel(e, 0, u, v, er);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float erv = smoothstepf(e.p[6], e.p[6] + e.p[7], er[3] > 0 ? er[0] / er[3] : 0.0f);
+        erv = 1 + (erv - 1) * e.p[5];
+        float a = clampf(t[3] * erv * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) {
+            float c0 = t[k] * ia;
+            out[k] = clampf((c0 + (e.p[k] - c0) * e.p[4]) * col[k], 0, 1) * a;
+        }
+        out[3] = a;
+        return;
+    }
     case EFFECT_POISON_SKULL: {
         float d[4] = { 1, 1, 1, 1 }, t[4] = { 1, 1, 1, 1 }, l[4];
         if (tex) sample(tex->img, u + e.p[0], v + e.p[1], flags, d);

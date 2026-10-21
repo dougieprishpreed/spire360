@@ -705,6 +705,24 @@ float4 ps_e56(VsOut i) : COLOR {
     return float4(saturate(float3(g_p1.z, g_p1.w, g_p2.x) * mv + w.rgb) * a, a);
 }
 
+// 57: colorize_addblend: the texture times (or plus) the colour, drawn
+// additive.
+float4 ps_e57(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float a = saturate(t.a * i.color.a);
+    float3 rgb = g_p0.w != 0.0 ? g_p0.rgb * t.rgb : g_p0.rgb + t.rgb;
+    return float4(saturate(rgb) * a, a);
+}
+
+// 58: vfx_ui_epoch_unlock_chains: the chains brightened and eroded.
+float4 ps_e58(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float er = smoothstep(g_p1.z, g_p1.z + g_p1.w, tex2D(g_e0, i.uv).r);
+    er = lerp(1.0, er, g_p1.y);
+    float a = saturate(t.a * er * i.color.a);
+    return float4(saturate(lerp(t.rgb, g_p0.rgb, g_p1.x) * i.color.rgb) * a, a);
+}
+
 // 21: Blur (a card portrait), both passes at once: 7 x 7 Gaussian taps.
 float4 ps_e21(VsOut i) : COLOR {
     float w[7] = { 0.0702, 0.1311, 0.1907, 0.2160, 0.1907, 0.1311, 0.0702 };
