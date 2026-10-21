@@ -609,8 +609,15 @@ def cmd_build(a):
             # that language: its glyphs only when it is chosen.
             all_langs = {f.split("/")[1] for f in files if f.startswith("localization/") and f.count("/") >= 2}
 
+            by_lang = None if chars is None else {
+                lang: fontconv.charset(src, files, {lang}) for lang in a.languages.split(",")}
+
             def font_chars(p):
-                return fontconv.font_chars(p, chars, set(a.languages.split(",")), all_langs)
+                return fontconv.font_chars(p, chars, set(a.languages.split(",")), all_langs, by_lang)
+
+            langs_doc = {"languages": fontconv.languages_with_glyphs(
+                all_langs if a.languages == "all" else a.languages.split(","), all_langs)}
+            add("spire/languages.json", s3p.TYPE_SCENE, json.dumps(langs_doc).encode("utf-8"))
 
             with concurrent.futures.ThreadPoolExecutor(max(1, min(jobs, 4))) as ex:
                 futs = {ex.submit(fontconv.export, godot, raw, font_chars(p)): p for p, raw in font_jobs}
@@ -737,13 +744,14 @@ def cmd_refont(a):
     langs = set(a.languages.split(","))
     chars = None if a.languages == "all" else fontconv.charset(src, files, langs)
     all_langs = {f.split("/")[1] for f in files if f.startswith("localization/") and f.count("/") >= 2}
+    by_lang = None if chars is None else {lang: fontconv.charset(src, files, {lang}) for lang in langs}
     print(f"{len(fonts)} fonts, {len(chars) if chars else 'all'} characters for {a.languages}", flush=True)
     names = sorted(old.entries, key=lambda n: old.entries[n][1])  # payload order
     sizes = {}
     import concurrent.futures
     with s3p.Writer(a.pack_out, old.game_version, old.flags) as w:
         for n in names:
-            if n in fonts or n in pages:
+            if n in fonts or n in pages or n == "spire/languages.json":
                 continue
             h, off, size, t, fl, crc = old.entries[n]
             w.add(n, t, old.read(n), fl)
@@ -751,7 +759,7 @@ def cmd_refont(a):
 
         def job(p):
             raw = "default" if p == fontconv.DEFAULT_FONT_NAME else src.read(res.resolve(p))
-            return fontconv.export(godot, raw, fontconv.font_chars(p, chars, langs, all_langs))
+            return fontconv.export(godot, raw, fontconv.font_chars(p, chars, langs, all_langs, by_lang))
 
         with concurrent.futures.ThreadPoolExecutor(max(1, a.jobs)) as ex:
             futs = {ex.submit(job, p): p for p in fonts}
@@ -764,6 +772,8 @@ def cmd_refont(a):
                     total += len(payload)
                 sizes[p] = total
                 print(f"  {p}: {len(info['glyphs'])} glyphs, {len(pgs)} pages, {total / 1048576:.1f} MB", flush=True)
+        doc = {"languages": fontconv.languages_with_glyphs(all_langs if a.languages == "all" else langs, all_langs)}
+        w.add("spire/languages.json", s3p.TYPE_SCENE, json.dumps(doc).encode("utf-8"))
     print(f"fonts {sum(sizes.values()) / 1048576:.1f} MB -> {a.pack_out}")
 
 

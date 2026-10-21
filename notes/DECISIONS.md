@@ -212,3 +212,24 @@ trace tools move to the game's flow with a new baseline.
 
 Spire360 sends no metrics, leaderboard or achievement uploads
 (`metrics.*`, `daily.UploadScore` patches).
+
+## D15. Languages: per-language glyphs, repacked pages; CJK not yet
+
+The language setting works for every language whose glyphs the pack holds
+(the converter's --languages, recorded in `spire/languages.json`; the
+picker offers only those). Each language folder's fonts (fonts/jpn/...,
+fonts/rus/ also for Polish) get only that language's characters, plus the
+picker's native names; Godot's glyph-cache pages are packed again into
+512 px pages, which leaves text pixel-identical.
+
+Measured (2026-10-20): English alone and the eleven Latin / Cyrillic / Thai
+languages together cost 81 MB of font pages (about 29 KB a glyph: 85 px
+MSDF cells). CJK is 1,200 (Korean) to 2,500 (Chinese) characters a
+language in up to three fonts: 35-75 MB a font, 100-220 MB a language, and
+the console keeps every page it has drawn from. So the packs leave CJK out
+for now.
+
+Would change with: font pages that are freed when unused (an LRU of the
+MSDF pages) and smaller CJK cells (MSDF rendered at a lower msdf_size for
+the CJK fonts, checked against the game at text sizes); then build the
+pack with --languages all of them.

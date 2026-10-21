@@ -15,7 +15,7 @@
 //   redirect               body = return (T)Hooks.Invoke(id, new object[] { this?, args... })
 //   call_after             before every ret: Hooks.After(id, new object[] { this?, args... }, result)
 //   replace_calls          every call to the target method anywhere in the assembly
-//                          becomes (T)Hooks.Invoke(id, new object[] { args... })
+//                          becomes (T)Hooks.Invoke(id, new object[] { this?, args... })
 //   strip_bodies           every non-constructor method of Godot-derived types in
 //                          the given namespaces throws NotSupportedException("headless: ...")
 //   redirect_calls_into    every call from code outside the given namespaces to a
@@ -571,8 +571,8 @@ internal sealed class Patcher
                         continue;
                     if (spec.Params != null && !ParamsMatch(target, spec.Params))
                         continue;
-                    if (target.HasThis)
-                        throw new InvalidOperationException($"replace_calls only supports static targets ({target.FullName})");
+                    if (target.HasThis && target.DeclaringType.IsValueType)
+                        throw new InvalidOperationException($"replace_calls supports no value-type receivers ({target.FullName})");
                     if (!changed)
                     {
                         body.SimplifyMacros();
@@ -615,10 +615,17 @@ internal sealed class Patcher
 
     private void ReplaceCallSite(MethodDefinition caller, Instruction call, MethodReference target, string id)
     {
-        // Arguments are on the stack. Store them to fresh locals (last first),
-        // then build the object[] and call Hooks.Invoke.
+        // Arguments are on the stack (an instance call's receiver under them).
+        // Store them to fresh locals (last first), then build the object[]
+        // (the receiver first) and call Hooks.Invoke.
         var il = caller.Body.GetILProcessor();
         var locals = new List<VariableDefinition>();
+        if (target.HasThis)
+        {
+            var self = new VariableDefinition(_module.TypeSystem.Object);
+            caller.Body.Variables.Add(self);
+            locals.Add(self);
+        }
         foreach (var p in target.Parameters)
         {
             var pt = ResolveGenericArg(p.ParameterType, target);

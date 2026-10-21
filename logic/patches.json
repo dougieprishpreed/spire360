@@ -466,14 +466,25 @@
       "note": "Presentation the game skips in TestMode, with no effect on the rules: the potion thrown from the player to its target (NItemThrowVfx, then a 0.5 s wait), the rest site's healing cross, and the monsters' calls on their special nodes (the Myte's and Snapping Jaxfruit's targets, the Flyconid's spore kind). TestMode reads off there in every run, so it reaches the steps as cues (the UI calls stay redirected)."
     },
     {
+      "id": "vfx.scene_at_screen",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Assets.AssetCache",
+      "method": "GetScene",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment::AnimSegmentsAttack"
+      ],
+      "note": "DecimillipedeSegment.AnimSegmentsAttack plays its rocks the way VfxCmd.PlayFullScreenInCombat does (the scene at the screen's centre in the combat VFX container), written out in the move. The scene lookup becomes the same 'vfx at screen' cue; it returns null as the asset cache does headless."
+    },
+    {
       "id": "testmode.presentation.is_on",
       "action": "replace_calls",
       "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
       "method": "get_IsOn",
       "in_types": [
-        "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetCreatureNode"
+        "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetCreatureNode",
+        "MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment::AnimSegmentsAttack"
       ],
-      "note": "Creature.GetCreatureNode returns null in TestMode; in every run here it reaches the UI stand-ins (NCombatRoom.GetCreatureNode, NBestiary.GetCreatureNode), so the monsters' calls on their creature nodes become cues. Presentation only: the nodes are stand-ins whose calls are redirected."
+      "note": "Creature.GetCreatureNode returns null in TestMode; in every run here it reaches the UI stand-ins (NCombatRoom.GetCreatureNode, NBestiary.GetCreatureNode), so the monsters' calls on their creature nodes become cues. DecimillipedeSegment.AnimSegmentsAttack: the segments' AttackShake (special nodes) and the rocks scene (its asset is null headless, so nothing is made in the logic) before a 0.5 s wait. Presentation only: the nodes are stand-ins whose calls are redirected."
     },
     {
       "id": "run.ended",

@@ -30,6 +30,13 @@ class FontChars(unittest.TestCase):
         got = fonts.font_chars("fonts/rus/FiraSansExtraCondensed-Regular.ttf", "ąęł", {"pol"}, LANGS)
         self.assertIn("ł", got)
 
+    def test_language_font_gets_only_its_language(self):
+        by_lang = {"jpn": "\u65e5\u672c", "zhs": "\u4e2d\u6587\u8fd9"}
+        got = fonts.font_chars("fonts/zhs/SourceHanSerifSC-Bold.otf", "x\u65e5\u672c\u4e2d\u6587\u8fd9",
+                               {"jpn", "zhs"}, LANGS, by_lang)
+        self.assertIn("\u8fd9", got)
+        self.assertNotIn("x", got)
+
     def test_all_characters(self):
         self.assertIsNone(fonts.font_chars("fonts/kreon_regular.ttf", None, {"eng"}, LANGS))
 

@@ -1,5 +1,6 @@
 #include "settings_screen.h"
 
+#include "../core/pack.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "confirm_popup.h"
@@ -362,6 +363,27 @@ std::string SettingsScreen::change(Line& l, int step) {
     return std::string();
 }
 
+/* The languages the pack's fonts can draw (the converter's
+ * spire/languages.json, from its --languages); English for a pack without
+ * it. */
+static bool pack_has_language(SceneLibrary* lib, const std::string& code) {
+    static Json doc;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        std::vector<u8> raw;
+        if (lib && lib->pack() && lib->pack()->read("spire/languages.json", raw) && !raw.empty()) {
+            std::string err;
+            doc = Json::parse((const char*)&raw[0], raw.size(), &err);
+        }
+    }
+    const Json& l = doc["languages"];
+    if (!l.size()) return code == "eng";
+    for (size_t i = 0; i < l.size(); ++i)
+        if (l[i].str() == code) return true;
+    return false;
+}
+
 /* NLanguageDropdown.PopulateOptions + NDropdown.OpenDropdown: an item per
  * language (a warning icon when under 90% translated), the first focused. */
 void SettingsScreen::open_dropdown() {
@@ -383,6 +405,10 @@ void SettingsScreen::open_dropdown() {
             continue;
         }
         std::string code = langs[i].str();
+        if (!pack_has_language(lib_, code)) {
+            delete item;
+            continue;
+        }
         std::string text = language_name(code);
         if (language_completion(code) < 0.9f) text = "[img]res://images/ui/language_warning.png[/img]" + text;
         set_label(item->get_node("RichLabel"), text);

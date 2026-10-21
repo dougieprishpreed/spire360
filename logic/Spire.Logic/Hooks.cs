@@ -127,6 +127,19 @@ internal static partial class Hooks
         // Presentation-only sites (testmode.presentation.is_off): always off.
         Bridge.Register("testmode.presentation.is_off", _ => true);
         Bridge.Register("testmode.presentation.is_on", _ => false);
+        // A move's own PlayFullScreenInCombat: the scene at the screen's centre
+        Bridge.Register("vfx.scene_at_screen", a =>
+        {
+            var path = a.OfType<string>().FirstOrDefault();
+            if (path != null)
+            {
+                const string root = "res://scenes/";
+                if (path.StartsWith(root)) path = path.Substring(root.Length);
+                if (path.EndsWith(".tscn")) path = path.Substring(0, path.Length - 5);
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = path, ["at"] = "screen" });
+            }
+            return null;
+        });
         // RunManager.OnEnded(isVictory): how the run ended.
         Spire.HookBridge.Hooks.RegisterAfter("run.ended", (a, r) =>
         {

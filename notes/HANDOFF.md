@@ -83,10 +83,23 @@ build until the alpha RC.
   tha, zhs, zht; the shaper falls back per character to a font's
   fallbacks, then to the languages' regular fonts (Godot's system fallback,
   which the native names in the picker need).
-- Fonts per language: `convert.py refont <pck> <pack-in> <pack-out>
-  --languages eng,deu,...` re-exports only the fonts. A language folder's
-  fonts (fonts/jpn/..., fonts/rus/ also for Polish) get that language's
-  characters only when it is chosen, else just the native names.
+- Fonts per language (DECISIONS D15): `convert.py refont <pck> <pack-in>
+  <pack-out> --languages eng,deu,...` re-exports only the fonts, each
+  language folder's fonts with that language's characters only (else just
+  the native names), the pages packed again, and writes
+  `spire/languages.json` (the picker shows only those; English for older
+  packs). Test pack: `work/pack-lang/pack.s3p` (eng, deu, esp, fra, ind,
+  ita, pol, ptb, rus, spa, tha, tur; fonts 81 MB) with its `data/` copied
+  beside it. CJK is left out until font pages can be freed (D15).
+- Decimillipede segments attack in combat: AnimSegmentsAttack reads
+  TestMode off; the segments' AttackShake comes as special-node cues and
+  its rocks as the same "vfx at screen" cue as PlayFullScreenInCombat
+  (`vfx.scene_at_screen`: replace_calls now takes instance targets, the
+  receiver first).
+- spire_play: give the logic its data folder inside --logic
+  (`--logic "SPIRE_DATA=work/x dotnet ..."`); SPIRE_DATA set in front of
+  spire_play no longer reaches it, and the logic then uses the repo's
+  `data/` (git-ignored dev saves; keep its settings.save language null).
 - Not done: Godot nodes the game moves itself (bone nodes tweened by
   Tunneler, KinFollower, ...).
 
