@@ -73,6 +73,55 @@ static Resource* sub_of(Resource* r, const char* key) {
     return lib ? lib->resolve((*r->props)[key], r->file) : NULL;
 }
 
+void packed_bytes(const Json& v, std::vector<u8>& out); /* controls.cpp */
+
+/* An ImageTexture's Image as texels of 4 floats, row by row (missing
+ * channels 0, alpha 1): the float formats the editor's "create emission
+ * points" writes, RGB8 / RGBA8 for colours. Empty when it is not one. */
+static void image_texels(Resource* texture, std::vector<float>& out) {
+    out.clear();
+    Resource* image = texture && texture->type == "ImageTexture" ? sub_of(texture, "image") : NULL;
+    if (!image || !image->props) return;
+    const Json& d = (*image->props)["data"];
+    const std::string& f = d["format"].str();
+    int w = d["width"].i(), h = d["height"].i(), ch = 0, bytes = 4;
+    if (f == "RFloat") ch = 1;
+    else if (f == "RGFloat") ch = 2;
+    else if (f == "RGBFloat") ch = 3;
+    else if (f == "RGBAFloat") ch = 4;
+    else if (f == "RGB8" || f == "RGBA8") {
+        ch = f == "RGB8" ? 3 : 4;
+        bytes = 1;
+    }
+    std::vector<u8> raw;
+    packed_bytes(d["data"], raw);
+    size_t n = w > 0 && h > 0 ? (size_t)w * (size_t)h : 0;
+    if (!ch || n == 0 || raw.size() < n * ch * bytes) {
+        log_warn("particles: emission texture image %s %dx%d not read", f.c_str(), w, h);
+        return;
+    }
+    out.resize(n * 4);
+    for (size_t i = 0; i < n; ++i)
+        for (int k = 0; k < 4; ++k) {
+            float x = k == 3 ? 1.0f : 0.0f;
+            if (k < ch) {
+                const u8* q = &raw[(i * ch + k) * bytes];
+                if (bytes == 1) {
+                    x = q[0] / 255.0f;
+                } else {
+                    u32 u = (u32)q[0] | ((u32)q[1] << 8) | ((u32)q[2] << 16) | ((u32)q[3] << 24);
+                    memcpy(&x, &u, 4);
+                }
+            }
+            out[i * 4 + k] = x;
+        }
+}
+
+/* texelFetch(texture, (point % w, point / w)): texel `point` of the rows */
+static const float* emission_texel(const std::vector<float>& texels, int point) {
+    return point >= 0 && (size_t)point * 4 + 3 < texels.size() ? &texels[(size_t)point * 4] : NULL;
+}
+
 bool CurveData::from(Resource* r, CurveData& out) {
     out.points.clear();
     if (!r || !r->props) return false;
@@ -251,7 +300,8 @@ Particles2D::Material::Material()
       scale_over_velocity_max(5), inherit_velocity_ratio(0), damping_as_friction(false), turbulence(false),
       turb_strength(1), turb_scale(0), turb_speed_random(0.2f), turb_influence_min(0.1f), turb_influence_max(0.1f),
       turb_displacement_min(0), turb_displacement_max(0), amount_ratio(1), interp_to_end(0), sub_mode(0),
-      sub_at_end(1), sub_at_collision(1), sub_at_start(1), sub_interval(0.25f), sub_keep_velocity(false) {
+      sub_at_end(1), sub_at_collision(1), sub_at_start(1), sub_interval(0.25f), sub_keep_velocity(false),
+      point_count(0) {
     for (int i = 0; i < 3; ++i) {
         direction[i] = i == 0 ? 1.0f : 0.0f;
         emission_box[i] = shape_scale[i] = 1;
@@ -368,6 +418,10 @@ void Particles2D::apply_process_material(Resource* m) {
     }
     vec3_of(p, "emission_shape_offset", mat.shape_offset);
     vec3_of(p, "emission_shape_scale", mat.shape_scale);
+    image_texels(sub_of(m, "emission_point_texture"), mat.points);
+    image_texels(sub_of(m, "emission_normal_texture"), mat.normals);
+    image_texels(sub_of(m, "emission_color_texture"), mat.colors);
+    mat.point_count = p["emission_point_count"].i(1);
     vec3_of(p, "velocity_pivot", mat.velocity_pivot);
     vec3_of(p, "emission_ring_axis", mat.ring_axis);
     if (p.has("emission_ring_height")) mat.ring_height = jv_float(p["emission_ring_height"], 1);
@@ -777,7 +831,15 @@ void Particles2D::gpu_start(Particle& p, u32 number, const Emission* from) {
     d.life = (float)(1.0 - lifetime_randomness * rand_from_seed(s));
     d.color = color;
     if (color_initial_ramp.valid()) d.color = d.color * color_initial_ramp.at(rand_from_seed(s));
-    if (emission_shape == 4 || emission_shape == 5) rand_from_seed(s); /* emission_texture_position */
+    bool points = emission_shape == 4 || emission_shape == 5;
+    d.emission_texture_position = points ? rand_from_seed(s) : 0.0f;
+    /* the point (min(count - 1, position * count)), its colour texel */
+    int point = (int)(d.emission_texture_position * (float)mat.point_count);
+    if (point > mat.point_count - 1) point = mat.point_count - 1;
+    if (points && !mat.colors.empty()) {
+        const float* t = emission_texel(mat.colors, point);
+        if (t) d.color = d.color * Color(t[0], t[1], t[2], t[3]);
+    }
     /* calculate_initial_dynamics_params */
     d.angle = lerpf(pmin[P_ANGLE], pmax[P_ANGLE], rand_from_seed(s));
     d.angular_velocity = lerpf(pmin[P_ANGULAR_VELOCITY], pmax[P_ANGULAR_VELOCITY], rand_from_seed(s));
@@ -823,6 +885,9 @@ void Particles2D::gpu_start(Particle& p, u32 number, const Emission* from) {
         pos[2] = emission_sphere_radius * sz * f;
     } else if (emission_shape == 3) {
         for (int k = 0; k < 3; ++k) pos[k] = (rand_from_seed(s) * 2.0f - 1.0f) * mat.emission_box[k];
+    } else if (points) {
+        const float* t = emission_texel(mat.points, point);
+        for (int k = 0; k < 3; ++k) pos[k] = t ? t[k] : 0.0f;
     } else if (emission_shape == 6) {
         float rc = maxf(0.001f, mat.ring_radius);
         float top = maxf(rc - tanf((90.0f - mat.ring_cone_angle) * 0.017453293f) * mat.ring_height, 0.0f);
@@ -876,6 +941,12 @@ void Particles2D::gpu_start(Particle& p, u32 number, const Emission* from) {
     p.xform = emission_;
     p.xform.origin = emission_.xform(Vec2(pos[0], pos[1]));
     Vec2 v = spread_direction(s, mat.direction, spread) * d.initial_velocity;
+    if (emission_shape == 5 && !mat.normals.empty()) {
+        /* DIRECTED_POINTS (disable_z): VELOCITY.xy = mat2(n.xy, n.yx *
+         * (1, -1)) * VELOCITY.xy */
+        const float* n = emission_texel(mat.normals, point);
+        if (n) v = Vec2(n[0] * v.x + n[1] * v.y, n[1] * v.x - n[0] * v.y);
+    }
     p.velocity = emission_.basis_xform(v) + emitter_velocity_ * mat.inherit_velocity_ratio;
     p.vz = 0;
 }

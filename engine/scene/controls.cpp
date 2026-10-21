@@ -805,12 +805,18 @@ static int b64_value(char ch) {
     return -1;
 }
 
-/* A PackedByteArray as the converter writes it: {"v": ["<base64>"]}
- * (node3d.cpp too). */
+/* A PackedByteArray as the converter writes it: {"v": ["<base64>"]}, or
+ * {"v": [byte, ...]} inside an Image's data (node3d.cpp, particles.cpp
+ * too). */
 void packed_bytes(const Json& v, std::vector<u8>& out);
 void packed_bytes(const Json& v, std::vector<u8>& out) {
     out.clear();
     const Json& a = v["v"];
+    if (a.size() > 0 && !a[(size_t)0].is_string()) {
+        out.reserve(a.size());
+        for (size_t i = 0; i < a.size(); ++i) out.push_back((u8)a[i].i());
+        return;
+    }
     std::string s = a.size() > 0 && a[(size_t)0].is_string() ? a[(size_t)0].str() : std::string();
     u32 acc = 0;
     int bits = 0;

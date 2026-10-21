@@ -115,6 +115,10 @@ public:
         int sub_mode, sub_at_end, sub_at_collision, sub_at_start;
         float sub_interval;
         bool sub_keep_velocity;
+        /* EMISSION_SHAPE_POINTS / DIRECTED_POINTS: the point, normal and
+         * colour textures' texels (4 floats each, row by row) */
+        std::vector<float> points, normals, colors;
+        int point_count;
         Material();
     };
     Material mat;
@@ -133,7 +137,7 @@ private:
      * (process() draws the same ones each frame); seed: the sequence
      * after them. */
     struct Drawn {
-        float scale, hue_rotation, anim_speed, anim_offset, life;
+        float scale, hue_rotation, anim_speed, anim_offset, life, emission_texture_position;
         Color color;
         float angle, angular_velocity, initial_velocity, directional, radial, orbit, turb_influence;
         float linear_accel, radial_accel, tangent_accel, damping;

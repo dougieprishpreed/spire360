@@ -52,8 +52,16 @@ parts 2 and 3 above it).
   transform i / sections of trail_lifetime ago from a short per-particle
   history. Checked on the dagger spray (tapered red streaks behind the
   daggers).
-- Not ported: emission point textures (4 scenes), attractors, fixed-fps
-  interpolation.
+- Emission points (EMISSION_SHAPE_POINTS / DIRECTED_POINTS: the Regent's
+  death explosion, Sovereign Blade's yellow dots, Ceremonial Beast, Test
+  Subject): the ImageTexture's inline Image (RGFloat and the other float
+  formats, RGB8 / RGBA8 colours; the converter keeps its bytes as a number
+  list, which packed_bytes reads now) as texels; emission_texture_position
+  drawn after the initial colour ramp picks the point (its position, its
+  colour texel; directed points turn the velocity by the normal texel,
+  disable_z's mat2). Seen on the blade in a Regent replay
+  (`work/bladeplay.sh`, new33 regent-2 screen 66).
+- Not ported: attractors, fixed-fps interpolation.
 - Forms: Echo Form's copy had no skeleton (the body was looked up as the
   first SpineSprite under the visuals, which is the form's own copier);
   it is NCreatureVisuals' %Visuals now. All five forms render: Demon's
@@ -79,9 +87,9 @@ parts 2 and 3 above it).
   the left, 3 s per toast already up): from a response's steps (the
   logic gives the class name, "Ironclad2Epoch"; ModelDb's id rule makes
   IRONCLAD2_EPOCH) over every screen (the global layer), and from the
-  game over screen's score-bar unlock. Not checked on screen yet: the
-  first toast in `work/coverage-instr/acts/run_00_ironclad.jsonl` is at
-  screen 321 (`work/epoch.sh`, ~13 min).
+  game over screen's score-bar unlock. Seen on screen: the first toast
+  in `work/coverage-instr/acts/run_00_ironclad.jsonl` at screen 321
+  (`work/epoch.sh`, ~13 min; the portrait in its chains at the left).
 - Osty: NCreature.TrackBlockStatus (Osty's health bar takes the block
   outline and colour while its summoner has block, no number of its own),
   NCombatRoom.ShakeOstyIfDead (NCreature.AnimShake on each Osty card:
