@@ -31,6 +31,10 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
     /* SettingsSave.Language (LocManager.Initialize); English when none */
     const Json saved = Loc::settings_save();
     if (saved["language"].is_string()) Loc::set_language(saved["language"].str());
+    /* NGame: the saved volumes before the first sound (SettingsSave's 0.5
+     * each when there is no file); the logic's settings answer follows */
+    GameClient::apply_volumes(lib, saved["volume_master"].f(0.5f), saved["volume_bgm"].f(0.5f),
+                              saved["volume_sfx"].f(0.5f), saved["volume_ambience"].f(0.5f));
     /* NGame.LaunchMainMenu: the logo first unless the settings skip it */
     if (!LogoScreen::skip_intro()) {
         std::string err;

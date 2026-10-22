@@ -1116,6 +1116,15 @@ void GameClient::combat_input(const PadState& pad) {
 
 /* NTopBarPauseButton (the pause hotkey): the pause menu over the run, in
  * NCapstoneContainer. Screens where Start means back keep it. */
+/* NCapstoneContainer: the run's overlays (pause menu, settings, the
+ * compendium, the pile and map views) are in a canvas layer over the room,
+ * so nothing of it (a raised hand card, its tips) draws over them */
+void GameClient::add_capstone(Node* n) {
+    if (!n) return;
+    if (n->is_canvas_item()) ((CanvasItem*)n)->z_index = 100;
+    tree_->root()->add_child(n);
+}
+
 void GameClient::open_pause() {
     std::string err;
     pause_ = new PauseMenu(lib_);
@@ -1128,7 +1137,7 @@ void GameClient::open_pause() {
     }
     /* NCapstoneSubmenuStack.ShowScreen. */
     if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/pause_open");
-    tree_->root()->add_child(pause_node_);
+    add_capstone(pause_node_);
 }
 
 void GameClient::close_pause() {
@@ -1175,7 +1184,7 @@ bool GameClient::pause_input(const PadState& pad) {
         std::string err;
         confirm_ = new ConfirmPopup(lib_);
         confirm_node_ = confirm_->build(&err);
-        if (confirm_node_) tree_->root()->add_child(confirm_node_);
+        if (confirm_node_) add_capstone(confirm_node_);
         else {
             log_warn("abandon popup: %s", err.c_str());
             delete confirm_;
@@ -1187,7 +1196,7 @@ bool GameClient::pause_input(const PadState& pad) {
         Json s = settings_;
         s.set("in_run", Json::make_bool(true));
         settings_node_ = settings_screen_->build(s, &err);
-        if (settings_node_) tree_->root()->add_child(settings_node_);
+        if (settings_node_) add_capstone(settings_node_);
         else {
             log_warn("settings: %s", err.c_str());
             delete settings_screen_;
@@ -1198,7 +1207,7 @@ bool GameClient::pause_input(const PadState& pad) {
         compendium_ = new CompendiumScreen(lib_);
         compendium_node_ = compendium_->build(lower(decision_["player"]["character"].str()), &err);
         if (compendium_node_) {
-            tree_->root()->add_child(compendium_node_);
+            add_capstone(compendium_node_);
             send_query(CompendiumScreen::first_query());
         } else {
             log_warn("compendium: %s", err.c_str());
@@ -1226,6 +1235,15 @@ void GameClient::send_query(const std::string& command) {
     if (link_) link_->send(command);
 }
 
+void GameClient::apply_volumes(SceneLibrary* lib, float master, float bgm, float sfx, float ambience) {
+    if (!lib || !lib->audio()) return;
+    AudioEvents& e = lib->audio()->events();
+    e.bus_volume("bus:/", master * master);
+    e.bus_volume("bus:/Music", bgm * bgm);
+    e.bus_volume("bus:/SFX", sfx * sfx);
+    e.bus_volume("bus:/Ambience", ambience * ambience);
+}
+
 void GameClient::apply_settings(const Json& s) {
     settings_ = s;
     /* LocManager.SetLanguage: the logic's language is the client's */
@@ -1238,14 +1256,7 @@ void GameClient::apply_settings(const Json& s) {
     set_rtl_text_effects(s["text_effects"].b(true));
     if (combat_) combat_->refresh_hand_indices();
     ++settings_version_;
-    if (lib_->audio()) {
-        AudioEvents& e = lib_->audio()->events();
-        float m = s["master"].f(0.5f), b = s["bgm"].f(0.5f), x = s["sfx"].f(0.5f), a = s["ambience"].f(0.5f);
-        e.bus_volume("bus:/", m * m);
-        e.bus_volume("bus:/Music", b * b);
-        e.bus_volume("bus:/SFX", x * x);
-        e.bus_volume("bus:/Ambience", a * a);
-    }
+    apply_volumes(lib_, s["master"].f(0.5f), s["bgm"].f(0.5f), s["sfx"].f(0.5f), s["ambience"].f(0.5f));
     /* NScreenshakePaginator.GetShakeMultiplier */
     static const float shake[5] = { 0, 0.5f, 1, 2, 4 };
     int k = s["screenshake"].i(2);
@@ -1301,7 +1312,7 @@ void GameClient::open_piles(const Json& msg) {
         piles_ = NULL;
         return;
     }
-    tree_->root()->add_child(piles_node_);
+    add_capstone(piles_node_);
 }
 
 void GameClient::close_piles() {
@@ -1327,7 +1338,7 @@ void GameClient::open_map_view(const Json& msg) {
         map_view_ = NULL;
         return;
     }
-    tree_->root()->add_child(piles_node_);
+    add_capstone(piles_node_);
 }
 
 /* The pile screens' input while one is open, or the buttons that open

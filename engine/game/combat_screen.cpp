@@ -2705,10 +2705,19 @@ void CombatScreen::play_steps(const Json& steps) {
     next_cue_ = 0;
     cue_t_ = 0;
     double t = 0;
-    /* A new round in the steps: the enemies' turn came first (its banner,
-     * then their actions), the player's turn banner at the new round. */
+    /* The turn banners where the logic's cues put them (CombatManager:
+     * NEnemyTurnBanner.Create / NPlayerTurnBanner.Create, each followed by
+     * its CustomScaledWait); a trace without those cues: the enemies' turn
+     * came first (its banner, then their actions), the player's turn banner
+     * at the new round. */
+    bool cued_banners = false;
+    for (size_t i = 0; i < steps.size() && !cued_banners; ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k)
+            if (steps[i][k]["t"].str() == "ui" && (steps[i][k]["call"].str() == "NEnemyTurnBanner.Create" ||
+                                                   steps[i][k]["call"].str() == "NPlayerTurnBanner.Create"))
+                cued_banners = true;
     bool new_round = false;
-    for (size_t i = 0; i < steps.size() && !new_round; ++i)
+    for (size_t i = 0; i < steps.size() && !new_round && !cued_banners; ++i)
         for (size_t k = 0; k < steps[i].size(); ++k)
             if (steps[i][k]["t"].str() == "round") new_round = true;
     if (new_round) {
@@ -2722,7 +2731,7 @@ void CombatScreen::play_steps(const Json& steps) {
     }
     for (size_t i = 0; i < steps.size(); ++i) {
         const Json& step = steps[i];
-        for (size_t k = 0; k < step.size(); ++k)
+        for (size_t k = 0; k < step.size() && !cued_banners; ++k)
             if (step[k]["t"].str() == "round") {
                 Cue b;
                 b.kind = CUE_BANNER;
@@ -2738,7 +2747,12 @@ void CombatScreen::play_steps(const Json& steps) {
             Cue c;
             c.at = t;
             c.amount = 0;
-            if (type == "sfx" || (type == "ui" && (ch["call"].str().find("Audio") != std::string::npos ||
+            if (type == "ui" && (ch["call"].str() == "NEnemyTurnBanner.Create" || ch["call"].str() == "NPlayerTurnBanner.Create")) {
+                c.kind = CUE_BANNER;
+                c.name = ch["call"].str() == "NEnemyTurnBanner.Create" ? "enemy" : "player";
+                c.amount = ch["args"].size() > 0 ? ch["args"][(size_t)0].i() : 0;
+                cues_.push_back(c);
+            } else if (type == "sfx" || (type == "ui" && (ch["call"].str().find("Audio") != std::string::npos ||
                                                     ch["call"].str().find("Music") != std::string::npos))) {
                 c.kind = CUE_AUDIO; c.data = ch; cues_.push_back(c);
             } else if (type == "anim") {

@@ -1,4 +1,5 @@
 #include "scroll_area.h"
+#include "ui_util.h"
 
 #include "../scene/node.h"
 
@@ -53,24 +54,6 @@ void ScrollArea::focus(Control* c) {
     float lim = limit_bottom();
     float hi = lim > 0 ? lim : 0, lo = lim < 0 ? lim : 0;
     target_ = v < lo ? lo : (v > hi ? hi : v);
-}
-
-/* MathHelper.SmoothDamp */
-static float smooth_damp(float current, float target, float* velocity, float smooth_time, float dt) {
-    if (dt <= 0) return current;
-    smooth_time = smooth_time > 0.0001f ? smooth_time : 0.0001f;
-    float omega = 2.0f / smooth_time, x = omega * dt;
-    float e = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
-    float change = current - target, original = target;
-    target = current - change;
-    float temp = (*velocity + omega * change) * dt;
-    *velocity = (*velocity - omega * temp) * e;
-    float out = target + (change + temp) * e;
-    if ((original - current > 0.0f) == (out > original)) {
-        out = original;
-        *velocity = (out - original) / dt;
-    }
-    return out;
 }
 
 void ScrollArea::frame(double dt) {

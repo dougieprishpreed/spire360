@@ -34,6 +34,7 @@ using MegaCrit.Sts2.Core.TestSupport;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Multiplayer.Serialization;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
 using MegaCrit.Sts2.Core.Unlocks;
 
 namespace Spire.Logic;
@@ -281,13 +282,16 @@ internal static partial class Hooks
             Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NMirrorVfx.Create", ["args"] = new List<object?>() }));
         Spire.HookBridge.Hooks.RegisterAfter("event.room_vfx.rain", (a, r) =>
             Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NRainVfx.Create", ["args"] = new List<object?>() }));
-        Spire.HookBridge.Hooks.RegisterAfter("anim.trigger", (a, r) =>
+        // CreatureCmd.TriggerAnim(creature, trigger, waitTime): the trigger as
+        // it starts; its pacing is the CustomScaledWait it ends with (a "wait"
+        // step after this one), so the cue itself waits for nothing.
+        Spire.HookBridge.Hooks.RegisterBefore("anim.trigger", a =>
         {
             if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)
                 Steps.Cue(new Dictionary<string, object?>
                 {
                     ["t"] = "anim", ["who"] = Steps.Who(c), ["name"] = name,
-                    ["wait"] = a.Length > 2 && a[2] is float w ? w : 0f,
+                    ["wait"] = 0f,
                     // what the creature's CreatureAnimator plays for it
                     ["play"] = Animators.Trigger(c, name),
                 });
@@ -338,6 +342,17 @@ internal static partial class Hooks
         Bridge.Register("task.delay", a =>
         {
             Steps.Wait(a.Length > 0 ? WaitMs(a[0]) : 0, "delay");
+            return Task.CompletedTask;
+        });
+        // Cmd.CustomScaledWait(fast, standard, ignoreCombatEnd, ct): skipped
+        // headless (NonInteractiveMode under TestMode), so its pacing (0.8 s
+        // after each turn banner, ...) is recorded here as the game would wait.
+        Bridge.Register("cmd.custom_scaled_wait", a =>
+        {
+            var mode = SaveManager.Instance.PrefsSave?.FastMode ?? FastModeType.Normal;
+            bool ignoreEnd = a.Length > 2 && a[2] is bool b && b;
+            if (mode != FastModeType.Instant && (ignoreEnd || !CombatManager.Instance.IsEnding))
+                Steps.Wait(WaitMs(mode == FastModeType.Fast ? (a.Length > 0 ? a[0] : null) : (a.Length > 1 ? a[1] : null)), "cmd");
             return Task.CompletedTask;
         });
 

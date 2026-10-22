@@ -10,6 +10,78 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha RC Xenia test 1 (2026-10-22): the user's findings and the fixes
+
+The first RC build (logic 10-22, pack `work/pack-lang`) ran in Xenia; the
+user's report and `spire360.txt` / `xenia.log`, item by item:
+
+- Menu music looping a few seconds, then gone once the profile loaded:
+  event:/music/menu_update is a 4.5 s timeline whose unlocked (async) box
+  plays one of the four menu themes while the playhead loops 4.0 -> 2.0.
+  A zero-length jump deleted every box child and re-armed every box, so
+  the theme restarted (a new SmartRandom pick) every 2 s. Now an async
+  box's instrument whose region holds the destination keeps playing (FMOD's
+  rule); `spire_audio_check --fixtures` has the case (asyncjump: 1 voice;
+  10 before). The saved volumes now apply before the first sound
+  (MenuFlow reads settings.save: GameClient::apply_volumes, squared as
+  NAudioManager); before, the buses played at full volume until the
+  logic's settings answer (~8 s in Xenia), then dropped to the default
+  0.5^2 x 0.5^2 (the game's own default level).
+- Settings sliders at 50% drawn at 0%: the handle was placed from the
+  bar's size before layout (0). NSlider._Process: each frame, SmoothDamp
+  (0.05 s, the helper now in ui_util) to the value, at Size.X * value /
+  max.
+- The compendium "missing everything": its buttons' icons were set to
+  images/packed/main_menu/submenu_icon_*.png, which the game does not
+  have (NShortSubmenuButton.GetImagePath only uses an existing one); the
+  scene's icons now stay.
+- The focused hand card over the pause menu: the run's overlays (pause,
+  its popup, settings, compendium, the pile and map views) go in a
+  capstone layer (z 100, GameClient::add_capstone), as NCapstoneContainer.
+- End of turn jumbled (the hand not discarded first, banners out of
+  order): the logic took its state snapshot only after each continuation,
+  and headless the whole end of turn (discard, enemy turn, next turn,
+  draw) is one continuation, so every card move came after all the cues,
+  draws before discards. Steps.FlushChanges now records the changes since
+  the last snapshot before each UI cue, cue and wait (a cheap fingerprint
+  of round, energy, piles, HP, block, powers decides whether to take
+  one). Cmd.CustomScaledWait (0.8 s after each turn banner, the end of
+  every CreatureCmd.TriggerAnim, 79 call sites) skipped itself headless
+  (NonInteractiveMode under TestMode); the new cmd.custom_scaled_wait
+  patch records it as the game's FastMode would wait, and anim.trigger
+  is now a call_before cue with no wait of its own (the scaled wait
+  follows it). The client puts the turn banners where the logic's
+  NEnemyTurnBanner / NPlayerTurnBanner cues are (older traces: the
+  synthesized ones). Seeded traces: differences 0 (traces/new35);
+  spire_check on new31 and new35: 0 failures. Checked on a replay
+  (`work/endturn.sh`): the leftover hand flies to the discard pile under
+  "Enemy Turn", the enemy acts, "Player Turn", the new hand is drawn.
+- The Defend card "highlighted for the enemy's intent" and in front of its
+  neighbour: as the game, every playable card glows (NHandCardHolder.
+  UpdateCard: cyan, gold or red) and the pad's focused card is raised in
+  front (NPlayerHand.AnimEnable focuses the last index at the turn's
+  start). Not changed.
+- Slowdown at attacks: per frame on PC (spire_play now prints it, as the
+  console's log) audio was 1.4 ms of ~2 ms, worst 14 ms; 83% of it the
+  event players re-reading the banks' JSON every 64 frames. The players
+  now cache what they read each tick (kind, box / transition times and
+  keys, the bus chain, Random modulator draws, conditions without a map):
+  the output is byte-identical (`work/wavrun.sh`, a recorded replay) and
+  audio is 0.70 ms. The console then mixes on its own thread (hardware
+  thread 4: GameAudio::start_thread; engine/core/thread.{h,cpp}; locks in
+  GameAudio, AudioEvents and around Pack's shared file; 8 buffers queued),
+  so the frame loop no longer pays for it; `spire_play --audio-thread`
+  runs it muted on PC. Master, sfx and ambience banks are parsed at start
+  (sfx.bank alone is 63 ms on PC, a hitch at the first attack before).
+- Startup wait for the profile: the menus already ask for it at once
+  (MenuFlow's constructor); the time is the logic's own start-up under
+  emulation (first answer 7.9 s, main menu 17.9 s). Not changed yet.
+- Volume "reset at the start of the fight": no code path found that sets
+  the buses again in a run; combat music has more layers (Progress).
+  Waiting for the next test.
+- Next console build: the logic changed (build_logic all stages,
+  logic_lib recompiles) and the engine; the pack is unchanged.
+
 ## Alpha push, part 10 (2026-10-21): GPU particles, the forms, FTUEs, 3D
 
 - GPUParticles2D now runs Godot 4.5.1's ParticleProcessMaterial shader on

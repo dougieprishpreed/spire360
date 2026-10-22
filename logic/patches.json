@@ -147,6 +147,14 @@
       "note": "UI animation delays. Completes at once (no scene tree) and records a 'wait' cue with the duration, which the presentation uses for pacing (sts2-cli: PatchCmdWait)."
     },
     {
+      "id": "cmd.custom_scaled_wait",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.Cmd",
+      "method": "CustomScaledWait",
+      "all_overloads": true,
+      "note": "The fast / standard wait (the turn banners' 0.8 s, ...). It skips itself headless (NonInteractiveMode under TestMode); the hook records the wait the game's FastMode setting would make."
+    },
+    {
       "id": "talk.play",
       "action": "return_default",
       "type": "MegaCrit.Sts2.Core.Commands.TalkCmd",
@@ -405,11 +413,11 @@
     },
     {
       "id": "anim.trigger",
-      "action": "call_after",
+      "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Commands.CreatureCmd",
       "method": "TriggerAnim",
       "optional": true,
-      "note": "Records a creature's animation trigger (Attack, Cast, Hit, ...)."
+      "note": "Records a creature's animation trigger (Attack, Cast, Hit, ...) as it starts; the wait that ends TriggerAnim (CustomScaledWait) is recorded after it."
     },
     {
       "id": "sfx.play",

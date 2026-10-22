@@ -157,6 +157,24 @@ void set_label(Node* n, const std::string& text) {
 
 Xform2D inverse(const Xform2D& t) { return t.affine_inverse(); }
 
+/* MathHelper.SmoothDamp */
+float smooth_damp(float current, float target, float* velocity, float smooth_time, float dt) {
+    if (dt <= 0) return current;
+    smooth_time = smooth_time > 0.0001f ? smooth_time : 0.0001f;
+    float omega = 2.0f / smooth_time, x = omega * dt;
+    float e = 1.0f / (1.0f + x + 0.48f * x * x + 0.235f * x * x * x);
+    float change = current - target, original = target;
+    target = current - change;
+    float temp = (*velocity + omega * change) * dt;
+    *velocity = (*velocity - omega * temp) * e;
+    float out = target + (change + temp) * e;
+    if ((original - current > 0.0f) == (out > original)) {
+        out = original;
+        *velocity = (out - original) / dt;
+    }
+    return out;
+}
+
 unsigned chaotic_rand() {
     static unsigned state = 0;
     if (!state) state = ((unsigned)time(NULL) * 2654435761u) ^ (unsigned)clock() ^ 0x9E3779B9u;

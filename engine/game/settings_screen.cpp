@@ -101,6 +101,8 @@ void SettingsScreen::add(int tab, Node* panel, const char* line, const char* con
     x.control = control_of(c);
     x.reticle = c ? find_named(c, "SelectionReticle") : NULL;
     x.tab = tab;
+    x.handle = x.handle_velocity = 0;
+    x.handle_set = false;
     hide(x.reticle);
     lines_.push_back(x);
 }
@@ -252,19 +254,14 @@ void SettingsScreen::refresh() {
             int k = settings_[l.key].i(2);
             set_label(l.control->find_unique("Label"), k >= 0 && k < 5 ? Loc::get("settings_ui", shakes[k]) : std::string(">:P"));
         } else if (l.kind == SLIDER) {
-            /* NSlider: the handle at value / max across the bar */
+            /* the handle follows in frame() (NSlider._Process); it starts
+             * at the value (SetValueWithoutAnimation in _Ready) */
             float v = settings_[l.key].f(0.5f);
             int pct = (int)floorf(v * 100.0f + 0.5f);
             set_label(l.control->get_node("SliderValue"), format("%d%%", pct));
-            Node* slider = l.control->get_node("Slider");
-            Control* handle = control_of(slider ? slider->find_unique("Handle") : NULL);
-            Control* sc = control_of(slider);
-            if (handle && sc) {
-                float w = handle->offset[SIDE_RIGHT] - handle->offset[SIDE_LEFT];
-                float x = sc->size.x * (float)pct / 100.0f - w * 0.5f;
-                handle->anchor[SIDE_LEFT] = handle->anchor[SIDE_RIGHT] = 0;
-                handle->offset[SIDE_LEFT] = x;
-                handle->offset[SIDE_RIGHT] = x + w;
+            if (!l.handle_set) {
+                l.handle = v * 100.0f;
+                l.handle_set = true;
             }
         } else if (l.kind == BUTTON) {
             Node* label = find_named(l.control, "Label");
@@ -546,6 +543,23 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
 
 void SettingsScreen::frame(double dt) {
     tweens_.update(dt);
+    /* NSlider._Process / UpdateHandlePosition: the handle glides to the
+     * value (SmoothDamp, 0.05 s) and sits at Size.X * value / max, centred
+     * (the bar's size now that it is laid out) */
+    for (size_t i = 0; i < lines_.size(); ++i) {
+        Line& l = lines_[i];
+        if (l.kind != SLIDER || !l.control || !l.handle_set) continue;
+        l.handle = smooth_damp(l.handle, settings_[l.key].f(0.5f) * 100.0f, &l.handle_velocity, 0.05f, (float)dt);
+        Node* slider = l.control->get_node("Slider");
+        Control* handle = control_of(slider ? slider->find_unique("Handle") : NULL);
+        Control* sc = control_of(slider);
+        if (!handle || !sc) continue;
+        float w = handle->offset[SIDE_RIGHT] - handle->offset[SIDE_LEFT];
+        float x = sc->size.x * l.handle / 100.0f - w * 0.5f;
+        handle->anchor[SIDE_LEFT] = handle->anchor[SIDE_RIGHT] = 0;
+        handle->offset[SIDE_LEFT] = x;
+        handle->offset[SIDE_RIGHT] = x + w;
+    }
     if (dropdown_open_ && scroll_ != scroll_target_) {
         /* NDropdownContainer.UpdateScrollPosition: 15 a second towards the
          * target; the scrollbar's train follows */

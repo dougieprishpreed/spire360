@@ -25,6 +25,7 @@ namespace Spire.Logic;
 internal static class Steps
 {
     private static Snapshot? _last;
+    private static long _lastPrint;
     private static readonly List<List<Dictionary<string, object?>>> _steps = new();
     private static readonly ConditionalWeakTable<object, StrongBox<int>> _ids = new();
     private static int _nextId = 1;
@@ -126,8 +127,76 @@ internal static class Steps
             Intercept(type + "." + method, outArgs);
             return;
         }
+        FlushChanges();
         if (_pendingUi.Count < 500)
             _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });
+    }
+
+    /// <summary>
+    /// The state changes since the last snapshot, ahead of a UI cue: one
+    /// continuation can run a whole phase (the end of a turn discards the
+    /// hand, plays the enemies' turn, starts the next turn and draws), and
+    /// the game shows each change where it happens among its cues. A cheap
+    /// fingerprint decides whether a snapshot is worth taking.
+    /// </summary>
+    private static void FlushChanges()
+    {
+        if (!Enabled || _last == null || _player == null) return;
+        Player? player;
+        try { player = _player(); }
+        catch { return; }
+        long print = Fingerprint(player);
+        if (print == _lastPrint) return;
+        Snapshot? now;
+        try { now = Take(player); }
+        catch { return; }
+        if (now == null) return;
+        var diff = Diff(_last, now);
+        if (diff.Count > 0 && _pendingUi.Count < 500) _pendingUi.AddRange(diff);
+        _last = now;
+        _lastPrint = print;
+    }
+
+    /// <summary>Round, energy, stars, gold, the piles' sizes and each
+    /// creature's HP, block and powers, folded together.</summary>
+    private static long Fingerprint(Player? player)
+    {
+        if (player == null || !CombatManager.Instance.IsInProgress) return 0;
+        var state = CombatManager.Instance.DebugOnlyGetState();
+        if (state == null) return 0;
+        long h = 17;
+        void Mix(long v) => h = unchecked(h * 31 + v);
+        Mix(state.RoundNumber);
+        Mix(player.Gold);
+        var pcs = player.PlayerCombatState;
+        if (pcs != null)
+        {
+            Mix(Convert.ToInt32(pcs.Energy));
+            Mix(Convert.ToInt32(pcs.Stars));
+            Mix(pcs.Hand?.Cards?.Count ?? -1);
+            Mix(pcs.DrawPile?.Cards?.Count ?? -1);
+            Mix(pcs.DiscardPile?.Cards?.Count ?? -1);
+        }
+        void Creature(Creature? c)
+        {
+            if (c == null) return;
+            Mix(c.CurrentHp);
+            Mix(c.MaxHp);
+            Mix(c.Block);
+            Mix(c.IsAlive ? 1 : 0);
+            try
+            {
+                if (c.Powers != null)
+                    foreach (var p in c.Powers)
+                        if (p != null) Mix(Convert.ToInt32(p.Amount) + 7);
+            }
+            catch { }
+        }
+        Creature(player.Creature);
+        Creature(player.Osty);
+        if (state.Enemies != null)
+            foreach (var e in state.Enemies) Creature(e);
+        return h;
     }
 
     /// <summary>
@@ -149,6 +218,7 @@ internal static class Steps
     public static void Cue(Dictionary<string, object?> cue)
     {
         if (!Enabled || !RecordUi) return;
+        FlushChanges();
         if (_pendingUi.Count < 500) _pendingUi.Add(cue);
     }
 
@@ -175,6 +245,7 @@ internal static class Steps
     public static void Wait(int ms, string source)
     {
         if (!Enabled || !RecordUi || ms <= 0) return;
+        FlushChanges();
         if (_pendingUi.Count < 500)
             _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "wait", ["ms"] = ms, ["src"] = source });
     }
@@ -201,6 +272,7 @@ internal static class Steps
                 _pendingUi.Clear();
             }
             _last = null;
+            _lastPrint = 0;
             return;
         }
         if (_last != null && _steps.Count < MaxStepsPerResponse)
@@ -214,6 +286,7 @@ internal static class Steps
             if (diff.Count > 0) _steps.Add(diff);
         }
         _last = now;
+        _lastPrint = Fingerprint(_player());
     }
 
     /// <summary>Steps recorded since the previous call, or null if none.</summary>

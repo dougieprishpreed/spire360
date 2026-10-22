@@ -40,6 +40,9 @@ Vec2 offset_size(const Control* c);
 Color hex(unsigned rgb);
 /* Rng.Chaotic: a different number every time (seeded from the clock). */
 unsigned chaotic_rand();
+/* MathHelper.SmoothDamp: current towards target over about smooth_time
+ * seconds; *velocity carries over from frame to frame. */
+float smooth_damp(float current, float target, float* velocity, float smooth_time, float dt);
 /* Godot's Transform2D.affine_inverse. */
 Xform2D inverse(const Xform2D& t);
 /* NHoverTipSet's text tip (scenes/ui/hover_tip.tscn): a title (none:

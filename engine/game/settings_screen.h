@@ -51,6 +51,9 @@ private:
         Control* control;  /* the tickbox / paginator / slider / button */
         Node* reticle;
         int tab;
+        /* NSlider: the handle's value (0..100) gliding to the setting's */
+        float handle, handle_velocity;
+        bool handle_set;
     };
     void add(int tab, Node* panel, const char* line, const char* control, Kind kind, const char* key);
     void refresh();

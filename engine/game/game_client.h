@@ -153,6 +153,10 @@ public:
      * is waited for. */
     void send_query(const std::string& command);
     void apply_settings(const Json& s);
+    void add_capstone(Node* n);
+    /* NAudioManager.SetMasterVol / SetBgmVol / SetSfxVol / SetAmbienceVol:
+     * the settings' volumes (0..1), squared, on the buses */
+    static void apply_volumes(SceneLibrary* lib, float master, float bgm, float sfx, float ambience);
 private:
     bool settings_input(const PadState& pad);
     /* An FTUE over the run (NModalContainer): it takes the input until it

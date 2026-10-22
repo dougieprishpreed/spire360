@@ -1,5 +1,6 @@
 #include "compendium_screen.h"
 
+#include "../core/pack.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "card_library_screen.h"
@@ -63,9 +64,10 @@ Node* CompendiumScreen::build(const std::string& character, std::string* error) 
         if (!title) title = find_named(b, "Label");
         set_label(title, Loc::get("main_menu_ui", (std::string(all[i].loc) + ".title").c_str()));
         set_label(find_named(b, "Description"), Loc::get("main_menu_ui", (std::string(all[i].loc) + ".description").c_str()));
-        if (i < 4)
-            set_texture(lib_, find_named(b, "Icon"),
-                        std::string("images/packed/main_menu/submenu_icon_") + lower(all[i].loc) + ".png");
+        /* NShortSubmenuButton.GetImagePath: only when the image exists (the
+         * game has none of these: the scene's icons stay) */
+        std::string icon = std::string("images/packed/main_menu/submenu_icon_") + lower(all[i].loc) + ".png";
+        if (i < 4 && lib_->pack() && lib_->pack()->find(icon.c_str())) set_texture(lib_, find_named(b, "Icon"), icon);
         hide(b->get_node("Lock"));
         Button bt;
         bt.node = b;
