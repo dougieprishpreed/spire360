@@ -2,6 +2,7 @@
 #ifndef SPIRE_PACK_H
 #define SPIRE_PACK_H
 
+#include "thread.h"
 #include "base.h"
 
 #include <stdio.h>
@@ -60,6 +61,8 @@ public:
 
 private:
     FILE* f_;
+    /* read / read_head seek and read f_: the audio thread reads too */
+    mutable Mutex lock_;
     std::string path_;
     u32 flags_;
     std::string game_version_;

@@ -20,13 +20,14 @@ struct AudioOutput::Impl {
     IXAudio2* engine;
     IXAudio2MasteringVoice* master;
     IXAudio2SourceVoice* source;
-    float buffers[8][512];
+    float buffers[16][512];
     unsigned cursor;
+    unsigned queue;
 #if !defined(_XBOX)
     HMODULE library;
     bool com_initialized;
 #endif
-    Impl() : engine(NULL), master(NULL), source(NULL), cursor(0) {
+    Impl() : engine(NULL), master(NULL), source(NULL), cursor(0), queue(4) {
 #if !defined(_XBOX)
         library = NULL;
         com_initialized = false;
@@ -97,7 +98,7 @@ int AudioOutput::demand() const {
     if (!impl_) return 0;
     XAUDIO2_VOICE_STATE state;
     impl_->source->GetState(&state, 0);
-    return state.BuffersQueued < 4 ? 256 : 0;
+    return state.BuffersQueued < impl_->queue ? 256 : 0;
 #else
     return 0;
 #endif
@@ -105,7 +106,7 @@ int AudioOutput::demand() const {
 bool AudioOutput::submit(const float* data, int frames) {
 #if defined(SPIRE_XAUDIO_OUTPUT)
     if (!data || frames != 256 || !demand()) return false;
-    float* buffer = impl_->buffers[impl_->cursor % 8];
+    float* buffer = impl_->buffers[impl_->cursor % 16];
     memcpy(buffer, data, 512 * sizeof(float));
     XAUDIO2_BUFFER packet;
     memset(&packet, 0, sizeof(packet));
@@ -117,6 +118,13 @@ bool AudioOutput::submit(const float* data, int frames) {
 #else
     (void)data; (void)frames;
     return false;
+#endif
+}
+void AudioOutput::set_queue(int buffers) {
+#if defined(SPIRE_XAUDIO_OUTPUT)
+    if (impl_) impl_->queue = buffers < 1 ? 1 : buffers > 15 ? 15 : (unsigned)buffers;
+#else
+    (void)buffers;
 #endif
 }
 u64 AudioOutput::played_frames() const {

@@ -4,6 +4,7 @@
 #define SPIRE_GAME_AUDIO_H
 #include "events.h"
 #include "output.h"
+#include "../core/thread.h"
 #include <map>
 #include <stdio.h>
 namespace spire {
@@ -12,6 +13,9 @@ public:
     explicit GameAudio(const Pack* pack);
     ~GameAudio();
     bool open_output(bool muted = false);
+    /* The device fed from its own thread (the console's hardware thread
+     * hw_thread); update() then does nothing. After open_output. */
+    bool start_thread(int hw_thread);
     bool record(const char* path);
     void update(double seconds);
     void cue(const Json& cue);
@@ -39,6 +43,11 @@ private:
     double clock_, remainder_;
     FILE* recording_;
     u32 recorded_frames_;
+    /* cues from the game's thread, the mix on the audio thread */
+    Mutex lock_;
+    Thread thread_;
+    volatile bool stopping_;
+    static void thread_main(void* self);
 };
 }
 #endif

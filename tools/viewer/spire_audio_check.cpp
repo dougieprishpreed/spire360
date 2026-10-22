@@ -72,6 +72,13 @@ static int fixture_cases(const Pack& pack) {
     if (audio.started_voices() - scattered != 42 || data[1968] != 0.25f) {
         fprintf(stderr, "FAIL infinite scatterer scheduling: %.0f spawns, sample %.6f\n", (double)(audio.started_voices() - scattered), data[1968]); ++failures;
     }
+    /* the playhead jumps back inside an async box: its sound is not restarted */
+    audio.stop_all();
+    u64 before_jump = audio.started_voices(); audio.play("event:/test/asyncjump"); audio.render(&data[0], 1000);
+    if (audio.started_voices() - before_jump != 1 || data[1998] != 0.25f) {
+        fprintf(stderr, "FAIL async box across a jump: %.0f voices started, sample %.6f\n",
+                (double)(audio.started_voices() - before_jump), data[1998]); ++failures;
+    }
     printf("audio: synthetic event timing, layers, playlists, nested events, conditions, bank selection, loops and streams: %d failures\n", failures);
     return failures;
 }

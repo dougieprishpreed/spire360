@@ -100,6 +100,7 @@ const char* Pack::name_of(const PackEntry* e) const {
 
 bool Pack::read(const PackEntry* e, std::vector<u8>& out) const {
     if (!e || !f_) return false;
+    ScopedLock lock(lock_);
     out.resize(e->size);
     if (!seek64(f_, e->offset)) return false;
     return e->size == 0 || fread(&out[0], 1, e->size, f_) == e->size;
@@ -107,6 +108,7 @@ bool Pack::read(const PackEntry* e, std::vector<u8>& out) const {
 
 bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
     if (!e || !f_) return false;
+    ScopedLock lock(lock_);
     if (len > e->size) len = e->size;
     out.resize(len);
     if (!seek64(f_, e->offset)) return false;

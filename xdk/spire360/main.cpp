@@ -182,6 +182,9 @@ void __cdecl main() {
     GameAudio audio(&pack);
     lib->set_audio(&audio);
     if (!audio.open_output()) logf("audio: XAudio2 output unavailable");
+    /* The mix on hardware thread 4 (core 2): the frame loop keeps core 0,
+     * the logic core 1 */
+    else if (!audio.start_thread(4)) logf("audio: no audio thread (mixed in the frame loop)");
     audio.menu();
     FontLibrary* fonts = new FontLibrary(&pack);
     FontLibrary::set_current(fonts);

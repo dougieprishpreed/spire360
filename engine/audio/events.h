@@ -14,6 +14,8 @@ public:
     ~AudioEvents();
     bool available() const;
     void prefer_bank(const std::string& bank);
+    /* A bank parsed now (its first event would parse it mid-game). */
+    void preload(const std::string& bank);
     u32 play(const std::string& path, float volume = 1, const Json& parameters = Json());
     void parameter(u32 instance, const std::string& name, float value);
     void parameter_label(u32 instance, const std::string& name, const std::string& label);

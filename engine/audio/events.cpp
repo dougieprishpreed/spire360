@@ -1,6 +1,7 @@
 #include "events.h"
 #include "mixer.h"
 #include "../core/pack.h"
+#include "../core/thread.h"
 #include <math.h>
 #include <string.h>
 
@@ -70,16 +71,59 @@ struct AudioEvents::Impl {
         std::map<std::string, float> values;
         std::map<std::string, float> targets;
         std::map<std::string, bool> enabled;
-        std::map<std::string, float> random_volume, random_pitch;
+        /* A Random modulator's value, drawn the first time it is read */
+        struct Randoms {
+            std::vector<float> value;
+            std::vector<char> drawn;
+        };
+        Randoms def_randoms;
         std::map<std::string, bool> transitions;
+        /* What every tick reads, taken from the bank's (unchanging) data
+         * once: the node's kind and whether it has modulators or controls;
+         * an event's boxes and transitions (times, keys); the bus chain (on
+         * the first levels(), when the original looked it up). */
+        enum Kind { K_OTHER, K_WAVEFORM, K_MULTI, K_EVENT, K_COMMAND, K_SCATTERER, K_SILENCE };
+        int kind;
+        bool def_props;
+        double end_at;
+        std::vector<double> box_at, box_end;
+        std::vector<char> box_locked;
+        std::vector<std::string> box_keys;
+        std::vector<double> tr_at, tr_end;
+        std::vector<std::string> tr_keys;
+        struct BusStep {
+            const Json* bus;
+            std::string id;
+            float volume, pitch;
+            bool props;
+            Randoms randoms;
+        };
+        std::vector<BusStep> chain;
+        bool chain_ready;
         Player(Impl* s, Bank* b, const Json* d, bool e, Player* ctx, const std::string& k)
             : system(s), bank(b), def(d), context(ctx), event(e), started(false), done(false), first(true), releasing(false),
               voice(0), age(0), pos(0), delay(0), cutoff(-1), release_at(0), release_time(0), next_spawn(0), volume(1), pitch(1),
               gain_db(0), pitch_st(0), bridge_start(0), fade_in(0), bridge(NULL), fade_curves(NULL), fade_owner(NULL),
               fade_start(0), source_timeline(-1), destination_started(false), transition_release(false),
-              repeats(0), selected(-1), spawn_count(0), key(k) {
+              repeats(0), selected(-1), spawn_count(0), key(k), kind(K_OTHER), def_props(false), end_at(0),
+              chain_ready(false) {
             ++bank->references;
             if (event) {
+                end_at = (*def)["end"].num();
+                const Json& boxes = (*def)["boxes"];
+                for (size_t i = 0; i < boxes.size(); ++i) {
+                    double at = boxes[i]["at"].num();
+                    box_at.push_back(at);
+                    box_end.push_back(at + boxes[i]["length"].num());
+                    box_locked.push_back(boxes[i]["locked"].b() ? 1 : 0);
+                    box_keys.push_back("box:" + format("%u", (unsigned)i));
+                }
+                const Json& trans = (*def)["transitions"];
+                for (size_t i = 0; i < trans.size(); ++i) {
+                    tr_at.push_back(trans[i]["at"].num());
+                    tr_end.push_back(trans[i]["end"].num());
+                    tr_keys.push_back(format("%u", (unsigned)i));
+                }
                 const Json& params = (*def)["parameters"];
                 for (size_t i = 0; i < params.size(); ++i) {
                     const std::string& n = params[i].str();
@@ -90,6 +134,11 @@ struct AudioEvents::Impl {
                 repeats = (*def)["loops"].i();
                 delay = s->range((*def)["delay"][(size_t)0].f(), (*def)["delay"][1].f());
                 gain_db = (*def)["volume"].f(); pitch_st = (*def)["pitch"].f();
+                const std::string& k_name = (*def)["kind"].str();
+                kind = k_name == "waveform" ? K_WAVEFORM : k_name == "multi" ? K_MULTI : k_name == "event" ? K_EVENT
+                     : k_name == "command" ? K_COMMAND : k_name == "scatterer" ? K_SCATTERER : k_name == "silence" ? K_SILENCE
+                     : K_OTHER;
+                def_props = (*def)["mods"].size() > 0 || (*def)["controls"].size() > 0;
             }
         }
         ~Player() { clear(0); if (voice) system->mixer.stop(voice); --bank->references; }
@@ -125,24 +174,29 @@ struct AudioEvents::Impl {
             for (size_t i = 0; i < children.size(); ++i) children[i].player->set_parameter(name, value);
         }
         bool matches(const Json& conditions) const {
-            if (!conditions.size()) return true;
-            /* Repeated ranges of the same parameter are alternatives. */
-            std::map<std::string, bool> matches;
-            for (size_t i = 0; i < conditions.size(); ++i) {
+            size_t n = conditions.size();
+            if (!n) return true;
+            /* Repeated ranges of the same parameter are alternatives: each
+             * parameter needs one of its ranges */
+            for (size_t i = 0; i < n; ++i) {
                 const std::string& name = conditions[i][(size_t)0].str();
+                bool seen = false;
+                for (size_t j = 0; j < i && !seen; ++j) seen = conditions[j][(size_t)0].str() == name;
+                if (seen) continue;
                 float value = parameter(name);
-                bool hit = value + EPS >= conditions[i][1].num() && value <= conditions[i][2].num() + EPS;
-                matches[name] = matches[name] || hit;
+                bool hit = false;
+                for (size_t j = i; j < n && !hit; ++j)
+                    if (conditions[j][(size_t)0].str() == name)
+                        hit = value + EPS >= conditions[j][1].num() && value <= conditions[j][2].num() + EPS;
+                if (!hit) return false;
             }
-            for (std::map<std::string, bool>::const_iterator i = matches.begin(); i != matches.end(); ++i)
-                if (!i->second) return false;
             return true;
         }
         double timeline_position() const {
             if (source_timeline >= 0 && fade_owner) return source_timeline + fade_owner->age - fade_start;
             return event ? pos : context ? context->timeline_position() : age;
         }
-        void properties(const Json& d, const std::string& owner, float& db, float& st) {
+        void properties(const Json& d, Randoms& randoms, float& db, float& st) {
             float db_mod = 0, st_mod = 0;
             const Json& mods = d["mods"];
             for (size_t i = 0; i < mods.size(); ++i) {
@@ -151,14 +205,17 @@ struct AudioEvents::Impl {
                 if (property != 0 && property != 1) continue;
                 float value = 0;
                 if (m["kind"].str() == "Random") {
-                    std::map<std::string, float>& cache = property == 0 ? random_volume : random_pitch;
-                    std::string id = owner + format(":%u", (unsigned)i);
-                    if (cache.find(id) == cache.end()) {
+                    if (randoms.drawn.size() < mods.size()) {
+                        randoms.drawn.resize(mods.size(), 0);
+                        randoms.value.resize(mods.size(), 0);
+                    }
+                    if (!randoms.drawn[i]) {
                         /* Studio's normalized pitch randomizer spans 48 semitones. */
                         float amount = m["amount"].f() * (property == 1 ? 0.48f : 0.8f);
-                        cache[id] = system->range(-amount, amount);
+                        randoms.value[i] = system->range(-amount, amount);
+                        randoms.drawn[i] = 1;
                     }
-                    value = cache[id];
+                    value = randoms.value[i];
                 } else if (m["kind"].str() == "ADSR") {
                     double t = age - delay, a = m["attackTime"].num() / 1000,
                            h = m["holdTime"].num() / 1000, dec = m["decayTime"].num() / 1000;
@@ -178,34 +235,52 @@ struct AudioEvents::Impl {
             }
             db += db_mod; st += st_mod;
         }
-        void buses(const std::string& bus, float& db, float& st, int depth = 0) {
-            if (depth > 24) return;
-            const Json* b = &bank->doc["buses"].get(bus);
-            if (b->is_null() && bank->name != "Master.bank") {
-                Bank* master = system->load("Master.bank");
-                if (master) b = &master->doc["buses"].get(bus);
+        void build_chain() {
+            chain_ready = true;
+            std::string bus = (*def)["bus"].str();
+            for (int depth = 0; depth <= 24; ++depth) {
+                const Json* b = &bank->doc["buses"].get(bus);
+                if (b->is_null() && bank->name != "Master.bank") {
+                    Bank* master = system->load("Master.bank");
+                    if (master) b = &master->doc["buses"].get(bus);
+                }
+                if (b->is_null()) return;
+                BusStep step;
+                step.bus = b;
+                step.id = bus;
+                step.volume = (*b)["volume"].f();
+                step.pitch = (*b)["pitch"].f();
+                step.props = (*b)["mods"].size() > 0 || (*b)["controls"].size() > 0;
+                chain.push_back(step);
+                bus = (*b)["parent"].str();
             }
-            if (b->is_null()) return;
-            float bus_db = (*b)["volume"].f(), bus_pitch = (*b)["pitch"].f();
-            properties(*b, bus, bus_db, bus_pitch);
-            db += bus_db; st += bus_pitch;
+        }
+        /* The bus chain's volume and pitch (and their modulators), and a
+         * transition's fade curve on each bus */
+        void chain_levels(float& db, float& st) {
+            if (!chain_ready) build_chain();
             const Player* fade = this;
             while (fade && !fade->fade_curves) fade = fade->context;
-            if (fade && fade->fade_owner) {
-                const Json& points = fade->fade_curves->get(bus);
-                if (points.size()) {
-                    float gain = curve_value(points, fade->fade_owner->age - fade->fade_start, 1);
-                    db += gain > 0 ? (float)(20 * log10(gain)) : -80;
+            for (size_t i = 0; i < chain.size(); ++i) {
+                const BusStep& step = chain[i];
+                float bus_db = step.volume, bus_pitch = step.pitch;
+                if (step.props) properties(*step.bus, chain[i].randoms, bus_db, bus_pitch);
+                db += bus_db; st += bus_pitch;
+                if (fade && fade->fade_owner) {
+                    const Json& points = fade->fade_curves->get(step.id);
+                    if (points.size()) {
+                        float gain = curve_value(points, fade->fade_owner->age - fade->fade_start, 1);
+                        db += gain > 0 ? (float)(20 * log10(gain)) : -80;
+                    }
                 }
             }
-            buses((*b)["parent"].str(), db, st, depth + 1);
         }
         void levels(float& gain, float& ratio) {
             float db = gain_db, st = pitch_st;
             if (!event) {
-                properties(*def, key, db, st);
-                buses((*def)["bus"].str(), db, st);
-            } else buses((*def)["bus"].str(), db, st);
+                if (def_props) properties(*def, def_randoms, db, st);
+                chain_levels(db, st);
+            } else chain_levels(db, st);
             gain *= volume * db_gain(db); ratio *= pitch * pitch_ratio(st);
             if (fade_in > 0) gain *= clampf((float)((age - delay) / fade_in), 0, 1);
             if (releasing && release_time > 0 && !transition_release) gain *= clampf(1 - (float)((age - release_at) / release_time), 0, 1);
@@ -281,8 +356,7 @@ struct AudioEvents::Impl {
                 double destination_at = (*bridge)["length"].num() - (*bridge)["lead_out"].num();
                 if (!destination_started && elapsed + EPS >= destination_at) {
                     pos = (*bridge)["to"].num(); destination_started = true;
-                    const Json& boxes = (*def)["boxes"];
-                    for (size_t k = 0; k < boxes.size(); ++k) enabled["box:" + format("%u", (unsigned)k)] = false;
+                    for (size_t k = 0; k < box_keys.size(); ++k) enabled[box_keys[k]] = false;
                 }
                 if (elapsed + EPS >= (*bridge)["length"].num()) bridge = NULL;
                 else if (!destination_started) return;
@@ -291,15 +365,27 @@ struct AudioEvents::Impl {
              * at their exact timeline offset, including pickups and tails. */
             for (size_t i = 0; allow_transitions && i < trans.size(); ++i) {
                 const Json& t = trans[i];
-                std::string id = format("%u", (unsigned)i);
-                bool inside = pos + EPS >= t["at"].num() && pos <= t["end"].num() + EPS && matches(t["conditions"]);
+                const std::string& id = tr_keys[i];
+                bool inside = pos + EPS >= tr_at[i] && pos <= tr_end[i] + EPS && matches(t["conditions"]);
                 if (!inside) { transitions[id] = false; continue; }
                 if (transitions[id] || quantized(t) > pos + EPS) continue;
                 transitions[id] = true;
                 if (system->random() * 100 >= t["chance"].num(100)) continue;
                 double destination = t["to"].num();
                 if (fabs(destination - pos) < EPS) continue;
+                /* A jump into the region of an async (unlocked) instrument
+                 * that is playing leaves it playing (menu_update loops its
+                 * playhead inside the box of the theme it picked) */
+                std::vector<int> kept;
                 for (size_t k = 0; k < children.size();) {
+                    if (children[k].box >= 0 && t["length"].num() <= EPS) {
+                        size_t b = (size_t)children[k].box;
+                        if (!box_locked[b] && destination + EPS >= box_at[b] && destination < box_end[b] - EPS) {
+                            kept.push_back(children[k].box);
+                            ++k;
+                            continue;
+                        }
+                    }
                     if (children[k].box >= 0) {
                         if (t["length"].num() > EPS) {
                             Player* source = children[k].player;
@@ -319,9 +405,10 @@ struct AudioEvents::Impl {
                 if (t["length"].num() > EPS) {
                     bridge = &t; bridge_start = age; destination_started = false;
                 } else pos = destination;
-                const Json& event_boxes = (*def)["boxes"];
-                for (size_t k = 0; k < event_boxes.size(); ++k) enabled["box:" + format("%u", (unsigned)k)] = false;
-                transitions.clear(); transitions[id] = true;
+                for (size_t k = 0; k < box_keys.size(); ++k) enabled[box_keys[k]] = false;
+                for (size_t k = 0; k < kept.size(); ++k) enabled[box_keys[(size_t)kept[k]]] = true;
+                std::string jumped = id;
+                transitions.clear(); transitions[jumped] = true;
                 const Json& bridge_boxes = t["boxes"];
                 for (size_t k = 0; k < bridge_boxes.size(); ++k) {
                     Player* p = instrument(bridge_boxes[k]["id"].str());
@@ -338,11 +425,11 @@ struct AudioEvents::Impl {
             const Json& boxes = (*def)["boxes"];
             for (size_t i = 0; i < boxes.size(); ++i) {
                 const Json& box = boxes[i];
-                bool inside = pos + EPS >= box["at"].num() && pos < box["at"].num() + box["length"].num() - EPS;
-                std::string id = "box:" + format("%u", (unsigned)i);
+                bool inside = pos + EPS >= box_at[i] && pos < box_end[i] - EPS;
+                const std::string& id = box_keys[i];
                 if (inside && !enabled[id]) {
                     size_t before = children.size();
-                    add_instrument(box["id"].str(), (int)i, box["locked"].b() ? pos - box["at"].num() : 0);
+                    add_instrument(box["id"].str(), (int)i, box_locked[i] ? pos - box_at[i] : 0);
                     if (bridge && children.size() > before) {
                         Player* destination = children.back().player;
                         if ((*bridge)["destination_fades"].size()) {
@@ -382,8 +469,7 @@ struct AudioEvents::Impl {
             if (event) event_tick();
             else if (!started) {
                 started = true;
-                const std::string& kind = (*def)["kind"].str();
-                if (kind == "waveform") {
+                if (kind == K_WAVEFORM) {
                     const Json& sample = (*def)["sample"];
                     float gain = 1, ratio = 1; levels(gain, ratio);
                     double offset = (*def)["offset"].num() + (*def)["seek"].num() + pos;
@@ -404,8 +490,8 @@ struct AudioEvents::Impl {
                             system->warned[p] = true;
                         }
                     } else ++system->voices_started;
-                } else if (kind == "multi") select();
-                else if (kind == "event") {
+                } else if (kind == K_MULTI) select();
+                else if (kind == K_EVENT) {
                     const std::string& id = (*def)["event"].str();
                     Bank* b = bank;
                     const Json* e = &b->doc["events"].get(id);
@@ -416,12 +502,12 @@ struct AudioEvents::Impl {
                         for (size_t i = 0; i < params.keys().size(); ++i) p->values[params.keys()[i]] = params.get(params.keys()[i]).f();
                         children.push_back(Child(p, -1, id));
                     } else { ++system->errors; done = true; }
-                } else if (kind == "command") {
+                } else if (kind == K_COMMAND) {
                     if ((*def)["command"].i() == 2 && context) context->set_parameter((*def)["target"].str(), (*def)["value"].f());
                     done = true;
                 }
             }
-            if (!event && (*def)["kind"].str() == "scatterer" && age + EPS >= next_spawn + delay) {
+            if (!event && kind == K_SCATTERER && age + EPS >= next_spawn + delay) {
                 int limit = (*def)["count"].i(-1);
                 if ((limit < 0 || spawn_count < limit) && children.size() < (size_t)(*def)["polyphony"].i(1)) { select(); ++spawn_count; }
                 next_spawn = age - delay + system->range((*def)["spawn"][(size_t)0].f(), (*def)["spawn"][1].f());
@@ -429,9 +515,9 @@ struct AudioEvents::Impl {
             for (size_t i = 0; i < children.size();) {
                 Child& c = children[i];
                 if (event && c.box >= 0) {
-                    const Json& box = (*def)["boxes"][(size_t)c.box];
-                    if (pos + EPS >= box["at"].num() + box["length"].num() &&
-                        (box["locked"].b() || (*c.player->def)["flags"].i() & 1)) c.player->release(c.player->release_length());
+                    size_t b = (size_t)c.box;
+                    if (pos + EPS >= box_end[b] && (box_locked[b] || (*c.player->def)["flags"].i() & 1))
+                        c.player->release(c.player->release_length());
                 }
                 c.player->tick(depth + 1);
                 if (c.player->done) { delete c.player; children.erase(children.begin() + i); }
@@ -442,17 +528,16 @@ struct AudioEvents::Impl {
                 else { float gain = 1, ratio = 1; levels(gain, ratio); system->mixer.volume(voice, gain); system->mixer.pitch(voice, ratio); }
             }
             if (!event && started && !voice && children.empty()) {
-                const std::string& kind = (*def)["kind"].str();
-                if (kind == "multi" && (repeats < 0 || repeats > 0) && !releasing) {
+                if (kind == K_MULTI && (repeats < 0 || repeats > 0) && !releasing) {
                     if (repeats > 0) --repeats;
                     select();
                     if (!children.empty()) children.back().player->tick(depth + 1);
-                } else if (kind == "scatterer") {
+                } else if (kind == K_SCATTERER) {
                     if ((*def)["count"].i() > 0 && spawn_count >= (*def)["count"].i()) done = true;
-                } else if (kind == "silence") done = age >= delay + (*def)["duration"].num();
+                } else if (kind == K_SILENCE) done = age >= delay + (*def)["duration"].num();
                 else done = true;
             }
-            if (event && !bridge && !first && children.empty() && pos + EPS >= (*def)["end"].num()) done = true;
+            if (event && !bridge && !first && children.empty() && pos + EPS >= end_at) done = true;
         }
         void advance(double seconds) {
             age += seconds;
@@ -480,7 +565,7 @@ struct AudioEvents::Impl {
             if (delay > age + EPS) next = mind(next, delay - age);
             if (releasing && release_at + release_time > age + EPS) next = mind(next, release_at + release_time - age);
             if (cutoff > age + EPS) next = mind(next, cutoff - age);
-            if (!event && (*def)["kind"].str() == "scatterer" && next_spawn + delay > age + EPS)
+            if (!event && kind == K_SCATTERER && next_spawn + delay > age + EPS)
                 next = mind(next, next_spawn + delay - age);
             if (voice) {
                 double remaining = system->mixer.remaining(voice);
@@ -493,17 +578,16 @@ struct AudioEvents::Impl {
                     if (end > age + EPS) next = mind(next, end - age);
                     if (destination > age + EPS) next = mind(next, destination - age);
                 }
-                const Json& boxes = (*def)["boxes"];
-                for (size_t i = 0; i < boxes.size(); ++i) {
-                    double a = boxes[i]["at"].num(), b = a + boxes[i]["length"].num();
+                for (size_t i = 0; i < box_at.size(); ++i) {
+                    double a = box_at[i], b = box_end[i];
                     if (a > pos + EPS) next = mind(next, a - pos);
                     if (b > pos + EPS) next = mind(next, b - pos);
                 }
                 const Json& tr = (*def)["transitions"];
-                for (size_t i = 0; i < tr.size(); ++i) {
-                    double a = tr[i]["at"].num();
+                for (size_t i = 0; i < tr_at.size(); ++i) {
+                    double a = tr_at[i];
                     if (a > pos + EPS) next = mind(next, a - pos);
-                    else if (pos <= tr[i]["end"].num() + EPS && matches(tr[i]["conditions"])) {
+                    else if (pos <= tr_end[i] + EPS && matches(tr[i]["conditions"])) {
                         double q = quantized(tr[i]); if (q > pos + EPS) next = mind(next, q - pos);
                     }
                 }
@@ -526,6 +610,8 @@ struct AudioEvents::Impl {
     std::map<std::string, bool> warned;
     u64 voices_started;
     bool described; /* the voices listed once they ran out */
+    /* the game's thread (cues) and the audio thread (render) */
+    Mutex lock;
     Impl(const Pack* p, u32 rate) : pack(p), mixer(p, rate), rng(0x3a97bc25u), next_id(1), errors(0), missing(0), voices_started(0), described(false) {
         read_json(pack, "audio/runtime.json", index);
     }
@@ -570,9 +656,20 @@ struct AudioEvents::Impl {
 
 AudioEvents::AudioEvents(const Pack* pack, u32 rate) : impl_(new Impl(pack, rate)) {}
 AudioEvents::~AudioEvents() { delete impl_; }
-bool AudioEvents::available() const { return impl_->index["version"].i() == 1; }
-void AudioEvents::prefer_bank(const std::string& bank) { impl_->preferred = bank; }
+bool AudioEvents::available() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->index["version"].i() == 1;
+}
+void AudioEvents::preload(const std::string& bank) {
+    ScopedLock lock(impl_->lock);
+    impl_->load(bank);
+}
+void AudioEvents::prefer_bank(const std::string& bank) {
+    ScopedLock lock(impl_->lock);
+    impl_->preferred = bank;
+}
 u32 AudioEvents::play(const std::string& path, float volume, const Json& params) {
+    ScopedLock lock(impl_->lock);
     if (path.empty() || impl_->roots.size() >= 128) return 0;
     Impl::Bank* bank = impl_->bank_for(path);
     const Json* def = NULL;
@@ -611,24 +708,43 @@ u32 AudioEvents::play(const std::string& path, float volume, const Json& params)
     return id;
 }
 void AudioEvents::parameter(u32 id, const std::string& name, float value) {
+    ScopedLock lock(impl_->lock);
     if (impl_->roots.count(id)) impl_->roots[id]->set_parameter(name, value);
 }
 void AudioEvents::parameter_label(u32 id, const std::string& name, const std::string& label) {
+    ScopedLock lock(impl_->lock);
     if (!impl_->roots.count(id)) return;
     Impl::Player* p = impl_->roots[id];
     const Json& labels = p->bank->doc["parameters"].get(name)["labels"];
     for (size_t i = 0; i < labels.size(); ++i) if (labels[i].str() == label) { p->set_parameter(name, (float)i); return; }
 }
-void AudioEvents::global_parameter(const std::string& name, float value) { impl_->globals[name] = value; }
-void AudioEvents::pitch(u32 id, float ratio) { if (impl_->roots.count(id)) impl_->roots[id]->pitch = ratio; }
+void AudioEvents::global_parameter(const std::string& name, float value) {
+    ScopedLock lock(impl_->lock);
+    impl_->globals[name] = value;
+}
+void AudioEvents::pitch(u32 id, float ratio) {
+    ScopedLock lock(impl_->lock);
+    if (impl_->roots.count(id)) impl_->roots[id]->pitch = ratio;
+}
 void AudioEvents::stop(u32 id, double fade) {
+    ScopedLock lock(impl_->lock);
     if (!impl_->roots.count(id)) return;
     Impl::Player* p = impl_->roots[id]; p->detach(fade); delete p; impl_->roots.erase(id);
 }
-void AudioEvents::stop_all(double fade) { impl_->stop_all(fade); }
-bool AudioEvents::playing(u32 id) const { return impl_->roots.count(id) != 0; }
-void AudioEvents::bus_volume(const std::string& path, float volume) { impl_->volumes[path] = maxf(volume, 0); }
+void AudioEvents::stop_all(double fade) {
+    ScopedLock lock(impl_->lock);
+    impl_->stop_all(fade);
+}
+bool AudioEvents::playing(u32 id) const {
+    ScopedLock lock(impl_->lock);
+    return impl_->roots.count(id) != 0;
+}
+void AudioEvents::bus_volume(const std::string& path, float volume) {
+    ScopedLock lock(impl_->lock);
+    impl_->volumes[path] = maxf(volume, 0);
+}
 void AudioEvents::render(float* out, int frames) {
+    ScopedLock lock(impl_->lock);
     if (!out || frames <= 0) return;
     int cursor = 0;
     while (cursor < frames) {
@@ -648,11 +764,32 @@ void AudioEvents::render(float* out, int frames) {
     }
     impl_->collect_banks();
 }
-size_t AudioEvents::active_voices() const { return impl_->mixer.active_voices(); }
-size_t AudioEvents::active_events() const { return impl_->roots.size(); }
-unsigned AudioEvents::failures() const { return impl_->errors; }
-unsigned AudioEvents::missing_events() const { return impl_->missing; }
-u64 AudioEvents::started_voices() const { return impl_->voices_started; }
-double AudioEvents::timeline(u32 id) const { return impl_->roots.count(id) ? impl_->roots[id]->pos : -1; }
-float AudioEvents::parameter_value(u32 id, const std::string& name) const { return impl_->roots.count(id) ? impl_->roots[id]->parameter(name) : 0; }
+size_t AudioEvents::active_voices() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->mixer.active_voices();
+}
+size_t AudioEvents::active_events() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->roots.size();
+}
+unsigned AudioEvents::failures() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->errors;
+}
+unsigned AudioEvents::missing_events() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->missing;
+}
+u64 AudioEvents::started_voices() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->voices_started;
+}
+double AudioEvents::timeline(u32 id) const {
+    ScopedLock lock(impl_->lock);
+    return impl_->roots.count(id) ? impl_->roots[id]->pos : -1;
+}
+float AudioEvents::parameter_value(u32 id, const std::string& name) const {
+    ScopedLock lock(impl_->lock);
+    return impl_->roots.count(id) ? impl_->roots[id]->parameter(name) : 0;
+}
 }

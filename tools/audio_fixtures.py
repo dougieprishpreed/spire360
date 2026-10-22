@@ -25,6 +25,7 @@ def build(path):
     for key in ('a', 'b', 'quiet'):
         nodes[key]['bus'] = 'track'
     nodes['tiny'] = wave('tiny.wav'); nodes['tiny']['sample']['frames'] = 1
+    nodes['long'] = wave('long.wav'); nodes['long']['sample']['frames'] = 4800
     nodes['scatter'] = dict(kind='scatterer', mode='PlaySequential', count=-1, polyphony=1,
                             spawn=[0.0005, 0.0005], entries=[dict(guid='tiny', weight=1)])
 
@@ -50,6 +51,10 @@ def build(path):
             conditions=[], source_fades={'track': [[0, 1, 0, 0], [0.002, 0, 0, 0]]},
             destination_fades={'track': [[0, 0, 0, 0], [0.002, 1, 0, 0]]})])
     events['scatter'] = event(['scatter'])
+    # an async (unlocked) box whose playhead loops inside it: the sound plays on
+    events['asyncjump'] = dict(triggered=[], parameter_instruments=[], end=0.01,
+        boxes=[dict(id='long', at=0, length=0.01, locked=False)],
+        transitions=[dict(at=0.004, end=0.004, to=0.002, chance=100, conditions=[])])
     program = dict(parameters={'intensity': dict(minimum=0, maximum=2, defaultValue=0),
                                'ramp': dict(minimum=0, maximum=1, defaultValue=0, seekSpeed=2, seekSpeedDown=1)},
                    nodes=nodes, buses={'track': dict(parent='', volume=0, pitch=0)}, events=events)
@@ -63,7 +68,8 @@ def build(path):
         blob('audio/runtime.json', dict(version=1, events=index, paths={}))
         blob('audio/runtime/Master.bank.json', program)
         blob('audio/runtime/other.bank.json', other)
-        for name, value, frames in [('a.wav', 8192, 480), ('b.wav', -8192, 480), ('tiny.wav', 8192, 1)]:
+        for name, value, frames in [('a.wav', 8192, 480), ('b.wav', -8192, 480), ('tiny.wav', 8192, 1),
+                                    ('long.wav', 8192, 4800)]:
             raw = struct.pack(f'<{frames}h', *([value] * frames))
             writer.add(name, s3p.TYPE_AUDIO, struct.pack('<4sI4s4sIHHIIHH4sI', b'RIFF', len(raw)+36,
                 b'WAVE', b'fmt ', 16, 1, 1, 48000, 96000, 2, 16, b'data', len(raw)) + raw)

@@ -15,6 +15,9 @@ public:
     bool active() const { return impl_ != NULL; }
     /* One 256-frame buffer may be submitted for each positive demand(). */
     int demand() const;
+    /* Buffers kept queued (4 by default, at most 15): more absorb a slow
+     * render (the audio thread). */
+    void set_queue(int buffers);
     bool submit(const float* stereo, int frames);
     u64 played_frames() const;
 private:

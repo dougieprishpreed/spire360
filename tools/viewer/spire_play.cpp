@@ -58,6 +58,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -195,6 +196,38 @@ static void parse_pad(const std::string& list, std::vector<unsigned>& out) {
     }
 }
 
+/* Where a frame's time goes (the console's "per frame" log): the scene's
+ * process, the audio, the layout; averages and the worst frame. */
+struct FrameTimes {
+    double sum[3], worst[3];
+    long frames;
+    FrameTimes() : frames(0) {
+        for (int i = 0; i < 3; ++i) sum[i] = worst[i] = 0;
+    }
+};
+
+static double now_ms() {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+
+static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
+    double t0 = now_ms();
+    tree.process(1.0 / 60.0);
+    double t1 = now_ms();
+    audio.update(1.0 / 60.0);
+    double t2 = now_ms();
+    tree.layout(1);
+    double t3 = now_ms();
+    double part[3] = { t1 - t0, t2 - t1, t3 - t2 };
+    for (int i = 0; i < 3; ++i) {
+        ft.sum[i] += part[i];
+        if (part[i] > ft.worst[i]) ft.worst[i] = part[i];
+    }
+    ++ft.frames;
+}
+
 static bool save_text(const std::string& path, const std::string& text) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
@@ -210,7 +243,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::string logic_cmd, character = "Ironclad", seed = "spire360", audio_wav;
-    bool audio_device = false, menu = false, seed_given = false;
+    bool audio_device = false, audio_thread = false, menu = false, seed_given = false;
     double menu_hold = 0;
     const char* replay = NULL;
     int steps = 40;
@@ -226,6 +259,7 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
+        else if (strcmp(argv[i], "--audio-thread") == 0) audio_thread = true; /* the console's audio thread, muted unless --audio */
         else if (strcmp(argv[i], "--menu") == 0) menu = true;
         else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
             replay = argv[++i];
@@ -288,7 +322,8 @@ int main(int argc, char** argv) {
     SceneLibrary lib(&pack);
     GameAudio audio(&pack);
     if (audio.events().available()) lib.set_audio(&audio);
-    if (audio_device && !audio.open_output()) fprintf(stderr, "spire_play: audio output unavailable\n");
+    if ((audio_device || audio_thread) && !audio.open_output(!audio_device)) fprintf(stderr, "spire_play: audio output unavailable\n");
+    else if (audio_thread && !audio.start_thread(-1)) fprintf(stderr, "spire_play: no audio thread\n");
     if (!audio_wav.empty() && !audio.record(audio_wav.c_str())) { fprintf(stderr, "spire_play: cannot record audio\n"); return 1; }
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
@@ -412,6 +447,7 @@ int main(int argc, char** argv) {
     }
     if (pad_script.empty() || pad_after > 0) game.set_auto_play(auto_seed);
     size_t pad_at = 0;
+    FrameTimes frame_times;
     game.start_run(character, seed);
     if (hp > 0) game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
     int shown = 0, idle = 0, frame_n = 0;
@@ -432,9 +468,7 @@ int main(int argc, char** argv) {
              * their moves and tweens). */
             tree.layout();
             for (int f = 0; f < 30; ++f) {
-                tree.process(1.0 / 60.0);
-                audio.update(1.0 / 60.0);
-                tree.layout(1);
+                run_frame(tree, audio, frame_times);
             }
             sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
             tree.render(canvas);
@@ -446,9 +480,7 @@ int main(int argc, char** argv) {
              * a second for the intro animations), then save it. */
             tree.layout();
             for (int f = 0; f < settle; ++f) {
-                tree.process(1.0 / 60.0);
-                audio.update(1.0 / 60.0);
-                tree.layout(1);
+                run_frame(tree, audio, frame_times);
                 if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
                     /* the steps after that screen as they play */
                     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -480,9 +512,7 @@ int main(int argc, char** argv) {
         } else {
             /* Time goes on while waiting (a fight's last blow plays before
              * the screen after it). */
-            tree.process(1.0 / 60.0);
-            audio.update(1.0 / 60.0);
-            tree.layout(1);
+            run_frame(tree, audio, frame_times);
             if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
                 /* the steps after that screen as they play */
                 sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -498,6 +528,11 @@ int main(int argc, char** argv) {
         }
     }
     printf("%d screens\n", shown);
+    if (frame_times.frames > 0)
+        printf("per frame (%ld): process %.3f ms (worst %.2f), audio %.3f ms (worst %.2f), layout %.3f ms (worst %.2f)\n",
+               frame_times.frames, frame_times.sum[0] / frame_times.frames, frame_times.worst[0],
+               frame_times.sum[1] / frame_times.frames, frame_times.worst[1], frame_times.sum[2] / frame_times.frames,
+               frame_times.worst[2]);
     if (audio.events().available()) printf("audio: %.0f voices started, %u absent event calls, %u decoder failures\n",
         (double)audio.events().started_voices(), audio.events().missing_events(), audio.events().failures());
     return 0;
