@@ -17,8 +17,10 @@
            /TP (everything as C++), which gives file-scope consts internal
            linkage and breaks the C runtime and translated code. -->
       <CompileAs>Default</CompileAs>
-      <!-- /MP: one compiler process per core (translated code is many files). -->
+      <!-- /MP: one compiler process per core (translated code is many files);
+           SPIRE_JOBS in the environment caps it (/MPn: build_light.cmd). -->
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ProcessorNumber Condition="'$(SPIRE_JOBS)' != ''">$(SPIRE_JOBS)</ProcessorNumber>
       <WarningLevel>Level3</WarningLevel>
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>

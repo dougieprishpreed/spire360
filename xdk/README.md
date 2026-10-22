@@ -43,6 +43,13 @@ msbuild xdk\hello\hello.vcxproj /p:Configuration=Release /p:Platform="Xbox 360"
 (Do not run `vsvars32.bat` in the same prompt: it puts the x86 `cl` ahead of
 the XDK's PowerPC `cl`, which breaks the probe.)
 
+`xdk\build_light.cmd` takes the same arguments but runs at most two
+compiler processes at a time (`set SPIRE_JOBS=3` first for another cap)
+instead of one per core, so the PC stays usable during the build.
+logic_lib's longest file is one compiler process either way. Switching
+between the two scripts changes the compiler command line, so logic_lib
+compiles in full once.
+
 Each XEX lands in `xdk\<project>\Release\`. If a build fails, send the log.
 Library names in `xdk/common/spire360.props` (`xinput2.lib`, `xaudio2.lib`,
 ...) and the project keyword are best guesses from the XDK's conventions and
