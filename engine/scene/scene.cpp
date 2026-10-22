@@ -479,6 +479,9 @@ static bool is_native(const std::string& type) {
            type == "Node" || type == "Node2D" ||
            type == "Container" || type == "BoxContainer" || type == "Range" || type == "Marker2D" || type == "BackBufferCopy" || type == "CPUParticles2D" ||
            type == "GPUParticles2D" || type == "LightOccluder2D" || type == "SpineMesh2D" || type == "Path2D" || type == "PathFollow2D" || type == "AnimationPlayer" || type == "SpineSprite" || type == "SpineBoneNode" || type == "SpineSlotNode" ||
+           /* node3d.cpp; GPUParticles3D only as a Node3D: the power-up
+            * scenes' rings are hidden and their beam never emits */
+           type == "Node3D" || type == "Camera3D" || type == "MeshInstance3D" || type == "GPUParticles3D" ||
            type == "Control";
 }
 

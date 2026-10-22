@@ -296,7 +296,7 @@ static int curve_values(int type) {
     }
 }
 
-static bool read_timeline(SpReader& r, SpTimeline& tl, std::vector<std::string>& unsupported) {
+static bool read_timeline(SpReader& r, SpTimeline& tl) {
     tl.type = r.u8v();
     int cv = curve_values(tl.type);
     if (cv) {
@@ -304,7 +304,6 @@ static bool read_timeline(SpReader& r, SpTimeline& tl, std::vector<std::string>&
         tl.target = r.i32();
         r.floats(tl.keys);
         read_curves(r, tl, cv);
-        if (tl.type == SPT_RGBA2 || tl.type == SPT_RGB2) note(unsupported, "dark colour timelines");
         return !r.bad();
     }
     switch (tl.type) {
@@ -432,10 +431,10 @@ bool SpSkeletonData::load(const u8* data, size_t size, const SpAtlas* atl, std::
         o.color = r.color();
         o.has_dark = r.flag();
         if (o.has_dark) {
-            /* drawn with the light colour: a visible dark colour is a gap
-             * (the game's are black, or 0.02 grey on Inklet's shadow) */
-            float dr = r.f32(), dg = r.f32(), db = r.f32();
-            if (dr > 0.05f || dg > 0.05f || db > 0.05f) note(unsupported, "dark colour");
+            /* not drawn, as spine-godot (see spine.h) */
+            r.f32();
+            r.f32();
+            r.f32();
         }
         o.attachment = r.str();
         o.blend = r.u8v();
@@ -597,7 +596,7 @@ bool SpSkeletonData::load(const u8* data, size_t size, const SpAtlas* atl, std::
         o.timelines.reserve(n);
         for (u32 k = 0; k < n && !r.bad(); ++k) {
             SpTimeline tl;
-            if (!read_timeline(r, tl, unsupported)) {
+            if (!read_timeline(r, tl)) {
                 if (error) *error = format("animation %s: bad timeline (type %d)", o.name.c_str(), tl.type);
                 return false;
             }

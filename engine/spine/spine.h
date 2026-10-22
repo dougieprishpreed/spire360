@@ -11,8 +11,9 @@
  * Files: spine_data.cpp (loading), spine_anim.cpp (timelines, animation
  * state), spine_skeleton.cpp (world transforms, update order, IK /
  * transform / path / physics constraints, vertices), spine_clip.cpp
- * (clipping attachments). Not done: dark-colour tinting (drawn with the
- * light colour; the game's dark colours are black or next to it), the
+ * (clipping attachments). Dark colours (setup and two-colour timelines)
+ * are read but not drawn: spine-godot only exposes them to scripts (its
+ * meshes carry the light colour alone). Not done: the
  * screen blend mode without a screen_material (drawn additive; the game's
  * two screen-blend skeletons, Neow and the Defect's select, sit in scenes
  * that give them a Mix material). */

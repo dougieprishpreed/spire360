@@ -71,6 +71,18 @@ parts 2 and 3 above it).
   failures; Ironclad, Defect and Regent won, Silent ran 2439 screens, the
   Necrobinder fell to the Knight Gang on floor 43 (the random play's long
   fight). Absent audio calls are the known content mismatches.
+- Gaps sweep after part 10 (`work/gaps10.sh`: traces/new21 and all 85
+  work/coverage-anim encounters, 8959 decisions, 4 h 42 min): left are the
+  absent audio events and Aeonglass's stale RaySlot. Three more content
+  mismatches showed up, absent from the installed bank like Vine Shambler
+  and Slithering Strangler: Crusher's `kaiser_crab_attack_slam` (the bank
+  has the left / right slams), Rocket's and Fake Merchant's default
+  `<id>_attack` (MonsterModel.AttackSfx). Keep them visible. The 3D nodes
+  were still noted as unsupported (scene.cpp's is_native list) and the
+  Spine dark colours (setup and two-colour timelines) were noted as gaps,
+  but libspine_godot has no shader or dark tint at all (its dark colours
+  are only script properties), so drawing the light colour is the game's
+  look: both notes are gone (`work/gaps11.sh` on the two traces: 0 gaps).
 - Forms: Echo Form's copy had no skeleton (the body was looked up as the
   first SpineSprite under the visuals, which is the form's own copier);
   it is NCreatureVisuals' %Visuals now. All five forms render: Demon's
