@@ -41,6 +41,7 @@ for src in sys.argv[1:]:
             f.write(f'>> "%~3{name}_ps.h" echo #include "{name}_ps_e{i}.h"\n')
         table = ", ".join(f"g_ps_e{i}" if i in ids else "0" for i in range(max(ids) + 1))
         table = table.replace("g_ps_e0", "0", 1) if 0 not in ids else table
-        f.write(f'>> "%~3{name}_ps.h" echo static const BYTE* const g_effect_ps[] = {{ {table} }};\n')
+        # void: the XDK's fxc writes the bytecode as DWORD arrays, others as BYTE
+        f.write(f'>> "%~3{name}_ps.h" echo static const void* const g_effect_ps[] = {{ {table} }};\n')
         f.write(f'>> "%~3{name}_ps.h" echo static const int g_effect_ps_count = {max(ids) + 1};\n')
     print(cmd)
