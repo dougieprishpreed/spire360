@@ -87,7 +87,7 @@ void SceneTree::process_node(Node* n, double dt) {
     if (n->queued_for_deletion()) return;
     if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
     if (n->behavior) n->behavior->process(n, dt);
-    n->process(dt);
+    if (n->flags & NF_PROCESS) n->process(dt);
     for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
 }
 
@@ -117,7 +117,10 @@ void SceneTree::process(double dt) {
     double t = dt * time_scale_;
     g_shader_time += t;
     process_node(&root_, t);
-    flush_deleted(&root_);
+    if (Node::frees_pending > 0) {
+        Node::frees_pending = 0;
+        flush_deleted(&root_);
+    }
     /* NHitStop.HitStopTask: the next frame's scale from the real time gone */
     if (hit_stop_len_ > 0) {
         hit_stop_t_ += (float)dt;

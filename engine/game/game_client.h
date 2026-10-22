@@ -79,6 +79,7 @@ public:
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
     /* Auto play answers only the decisions before the until-th (0: all). */
     void set_auto_play_until(int until) { auto_until_ = until; }
+    bool auto_playing() const { return auto_ && (auto_until_ <= 0 || decisions_ < auto_until_); }
     /* The seed of runs started from the menus ("": the game's own; tests) */
     void set_run_seed(const std::string& seed) { run_seed_ = seed; }
     const std::string& run_seed() const { return run_seed_; }
@@ -115,6 +116,8 @@ private:
     void choose_automatically();
     void handle_input(const PadState& pad);
     void combat_input(const PadState& pad);
+    bool play_queue_open() const;
+    const Json* hand_card(int holder) const;
     Node* plain_screen(const Json& d);
     void refresh_plain_screen();
     void start_room_transition();

@@ -76,6 +76,9 @@ public:
     /* MegaSprite.GetGlobalBoneTransform's origin, in the sprite's
      * coordinates; false without that bone. */
     bool bone_position(const std::string& bone, Vec2* out);
+    /* MegaBone.SetRotation: a bone's local rotation (degrees) from code,
+     * kept over the animations each frame. */
+    void set_bone_rotation(const std::string& bone, float degrees) { bone_rotation_[bone] = degrees; }
 
 private:
     bool ensure();
@@ -96,6 +99,7 @@ private:
     std::vector<SpineFollowNode*> slot_nodes_; /* draw(): the slot nodes with materials, by slot */
     std::vector<float> cpos_, cuv_;
     std::vector<int> ctris_;
+    std::map<std::string, float> bone_rotation_;
 };
 
 /* spine-godot's SpineBoneNode / SpineSlotNode, children of a SpineSprite:

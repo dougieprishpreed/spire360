@@ -52,6 +52,7 @@ private:
         bool locked, will_kill;
         float v;           /* the hsv shader's v */
         float slide, slid; /* AnimateIn's x offset, and what is applied */
+        Json tips;         /* Option.HoverTips */
     };
     Node* build_default(const Json& d);
     Node* build_ancient(const Json& d);
@@ -75,6 +76,11 @@ private:
     bool sparring_;
     float spar_at_;
     TweenSet tweens_;
+    /* the focused option's tips: left of it, right of it in a combat
+     * layout (NEventOptionButton.OnFocus) */
+    TipFollower tips_;
+    Node* root_;
+    bool combat_layout_;
 
     /* Ancient layout. */
     bool ancient_;

@@ -2,6 +2,7 @@
 #include "inspect_screens.h"
 #include "card_view.h"
 #include "loc.h"
+#include "screen_shake.h"
 #include "top_bar.h"
 
 #include "../scene/animation.h"
@@ -34,8 +35,8 @@ static void play_idle_all(Node* n) {
 
 ShopScreen::ShopScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), inspect_card_(NULL), inspect_relic_(NULL), inspect_node_(NULL), inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL),
-      back_button_(NULL), focus_(-1), open_(false), start_open_(false), start_index_(0), slots_closed_top_(0),
-      slots_open_top_(0), slots_height_(0) {}
+      back_button_(NULL), focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), slots_closed_top_(0),
+      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0) {}
 
 std::string ShopScreen::focused_kind() const {
     return focus_ >= 0 && focus_ < (int)slots_list_.size() ? slots_list_[(size_t)focus_].kind : std::string();
@@ -177,7 +178,14 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
         back_button_ = ctl(inventory_, "BackButton");
         show_glyph(lib_, back_button_ ? find_named(back_button_, "HotkeyIcon") : NULL, "b");
         if (back_button_) back_button_->visible = false;
-        hide(inventory_->get_node("MerchantHandContainer"));
+        /* NMerchantHand._Ready: the "default" animation where the scene
+         * puts it (off the top) */
+        Node* hand = inventory_->get_node("MerchantHandContainer");
+        hand_ = hand && hand->type == "SpineSprite" ? (SpineSprite*)hand : NULL;
+        if (hand_) {
+            hand_->set_animation("default", true, 0);
+            hand_start_ = hand_target_ = hand_->position;
+        }
         hide(inventory_->find_unique("Dialogue"));
         if (slots_) {
             /* Its top-left at y -1000 (closed) or 80 (open); anchored at the
@@ -251,6 +259,7 @@ void ShopScreen::close_inventory() {
     open_ = false;
     if (back_button_) back_button_->visible = false;
     focus_slot(-1);
+    stop_hand(0); /* NMerchantInventory.Close */
     if (backstop_) tweens_.tween(&backstop_->modulate.a, 0.0f, 0.8f, TRANS_SINE, EASE_IN_OUT);
     if (slots_) {
         tweens_.tween(&slots_->offset[SIDE_TOP], slots_closed_top_, 0.5f, TRANS_CUBIC, EASE_OUT);
@@ -268,13 +277,15 @@ void ShopScreen::focus_slot(int i) {
         Control* o = slots_list_[(size_t)focus_].node;
         tweens_.tween(&o->scale, Vec2(SMALL_SCALE, SMALL_SCALE), 0.5f, TRANS_EXPO, EASE_OUT);
         o->z_index = 0;
+        stop_hand(2); /* OnMerchantHandUnhovered */
     }
     focus_ = i;
     if (i < 0 || i >= (int)slots_list_.size()) return;
+    point_hand(i); /* OnMerchantHandHovered */
     Control* n = slots_list_[(size_t)i].node;
     tweens_.kill(&n->scale);
     n->scale = Vec2(HOVER_SCALE, HOVER_SCALE);
-    n->z_index = 1;
+    n->z_index = behind_ ? 0 : 1;
 }
 
 Vec2 ShopScreen::slot_centre(const Slot& s) const {
@@ -389,9 +400,36 @@ std::string ShopScreen::input(const PadState& pad) {
     return std::string();
 }
 
+void ShopScreen::point_hand(int slot) {
+    hand_slot_ = slot;
+    hand_linger_ = -1;
+}
+
+void ShopScreen::stop_hand(double linger) {
+    hand_slot_ = -1;
+    hand_linger_ = linger;
+}
+
 void ShopScreen::frame(double dt) {
     tweens_.update(dt);
     proceed_.frame(dt);
+    if (hand_ && inventory_) {
+        /* NMerchantHand._Process: towards the slot (its origin) with a
+         * Perlin wobble, lerped at 4 per second; the wrist turns -10..10
+         * degrees with its place across the rug */
+        if (hand_slot_ >= 0 && hand_slot_ < (int)slots_list_.size())
+            hand_target_ = inverse(inventory_->global_transform()).xform(slot_centre(slots_list_[(size_t)hand_slot_]));
+        else if (hand_linger_ >= 0 && (hand_linger_ -= dt) <= 0) {
+            hand_linger_ = -1;
+            hand_target_ = hand_start_;
+        }
+        hand_t_ += dt;
+        Vec2 wobble(fbm((float)hand_t_ * 0.1f, 1.0f, 0) + 0.4f, fbm((float)(hand_t_ + 0.25) * 0.1f, 1.0f, 0) - 0.5f);
+        Vec2 to = hand_target_ + wobble * 100.0f;
+        hand_->position = hand_->position + (to - hand_->position) * (float)(dt * 4.0);
+        float w = (hand_->position.x - inventory_->size.x * 0.5f - 50.0f) * 0.01f;
+        hand_->set_bone_rotation("rotate_me", -10.0f + 20.0f * w);
+    }
 }
 
 } /* namespace spire */

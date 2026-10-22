@@ -27,7 +27,9 @@ struct PropCtx {
     Resource* resource(const Json& v) const;
 };
 
-enum NodeFlags { NF_CANVAS_ITEM = 1, NF_CONTROL = 2, NF_NODE2D = 4, NF_CONTAINER = 8, NF_CANVAS_LAYER = 16 };
+/* NF_PROCESS: the class has a process() of its own (the tree calls no
+ * other node's). */
+enum NodeFlags { NF_CANVAS_ITEM = 1, NF_CONTROL = 2, NF_NODE2D = 4, NF_CONTAINER = 8, NF_CANVAS_LAYER = 16, NF_PROCESS = 32 };
 
 class Node {
 public:
@@ -57,7 +59,12 @@ public:
      * sibling is not a child */
     void add_child_before(Node* child, Node* sibling);
     /* Godot's QueueFree: removed after this frame's process traversal. */
-    void queue_free() { queued_free_ = true; }
+    void queue_free() {
+        queued_free_ = true;
+        ++frees_pending;
+    }
+    /* Nodes queued since the tree last removed them (none: no sweep). */
+    static int frees_pending;
     bool queued_for_deletion() const { return queued_free_; }
     int index() const;
     /* "a/b", "..", "%Unique", "%Unique/child" */
@@ -148,6 +155,12 @@ public:
     void add_theme_font_size_override(const std::string& name, int size);
     void add_theme_constant_override(const std::string& name, int value);
     std::map<std::string, Json> code_overrides; /* storage for the above */
+    /* theme_constant's answers (layout asks for the same few each frame),
+     * kept until anything they depend on may have changed: theme_generation
+     * moves on with the tree's shape, a theme or an override set. */
+    static unsigned theme_generation;
+    unsigned constants_gen_;
+    std::vector<std::pair<std::string, int> > constants_;
 
     /* Layout state (Godot's pos_cache / size_cache). */
     Vec2 position, size;

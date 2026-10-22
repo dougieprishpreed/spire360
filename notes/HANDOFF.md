@@ -10,6 +10,98 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha RC Xenia test 2 (2026-10-22): the user's findings and the fixes
+
+The second Xenia build (`logs.zip`: `spire360.txt`, `xenia.log`); the
+user's report, item by item:
+
+- Combat start: the logic took the fight's first snapshot only after the
+  whole start ran (one continuation), so the start's cues (the 1 s
+  CustomScaledWait, the turn's 0.8 s, energy, the draws, start-of-combat
+  relics such as Gorget's plating) went to the response after the first
+  action (the potion in the report). Steps.FlushChanges now takes the
+  fight's baseline at its first cue (CombatManager's music update, before
+  StartTurn). The first combat decision carries those steps; the client
+  builds the room from CombatScreen::before_steps (the hand without the
+  drawn cards, the counters, HP and block at their first values) and plays
+  them; the hand deals in from the draw pile.
+- Mashing A / navigating while effects play (NCardPlayQueue): the hand
+  takes input while the steps run once the player's turn has started in
+  them (NPlayerHand.AreCardActionsAllowed: no pending round / player turn
+  banner cue; GameClient::play_queue_open). A card played meanwhile waits
+  in NCardPlayQueue's place (left of the play pile, 0.8 / (i+2)) and
+  flies when its play's cues come; a response that arrives while the last
+  one plays is appended to the same timeline (play_steps keeps the
+  remaining cues; each SYNC carries its own decision). The hand's cards
+  are matched to the decision's by Steps id while the two differ. The
+  start banner no longer holds the pad for 2.6 s. `spire_play --mash`
+  tests it (presses every --mash-every frames, whatever plays).
+- Music before the logo: main.cpp no longer starts it (MenuFlow::show_title
+  does).
+- Compendium "does nothing": the buttons never showed focus. Ported
+  NShortSubmenuButton / NCompendiumBottomButton.OnFocus (scale 1.02 / 1.05,
+  BgPanel's hsv v + 0.2 in 0.05 s, back in 0.3 s). Also fixed a crash on
+  leaving it with a sub-screen open (the screens freed after their nodes).
+- "Press I to inspect": the card reward screen took %InspectPrompt out of
+  its scene before setting the glyph, so %HotkeyIcon was not found and the
+  scene's keyboard key ("|") showed. Set first; the moved nodes are
+  disowned from the freed scene.
+- Status cards an enemy gives (Slimed): CardCmd.PreviewCardPileAdd in a
+  fight was not recorded (combat piles were skipped). Now a deck_card cue
+  with "pile"; the combat timeline plays it (DeckPreviews::play_cue): the
+  card in the middle row for its time, then NCardFlyVfx to that pile.
+- Power gains showed nothing (Tremble's Vulnerable): NCreature.
+  OnPowerIncreased's NPowerAppliedVfx (big icon, the title rising green or
+  falling red) and the buff / debuff burst are ported; the logic records
+  power_vfx at Creature.InvokePowerModified (patch power.modified; not
+  silent, ShouldPlayVfx).
+- Shrink Beetle: the base scale was derived after ScaleTo had set the new
+  factor (shrinking did nothing, the restore doubled the player). Fixed
+  order (CombatScreen::scale_base).
+- Shop: the card removal's slot drew over the removal grid (z 1 behind an
+  overlay; ShopScreen::set_behind). NMerchantHand ported: the hand follows
+  the focused slot with its Perlin wobble, the wrist bone turning
+  (SpineSprite::set_bone_rotation), back to its start 2 s after.
+- Enchant selection (Sown): NDeckEnchantSelectScreen's description panel
+  (icon, title, text) was hidden; the logic now sends it
+  ("enchantment_screen", dropped by trace_compare). Event options now
+  carry their HoverTips ("tips") and show them left of the focused option
+  (right in a combat layout), as NEventOptionButton.OnFocus.
+- Potions: the focused slot shows its tips under it (POTION_SLOT's when
+  empty) with a slosh; the logic sends each potion's tips. The top bar in
+  a fight takes the new potions at once (RemoveBeforeUse), HP and gold
+  still from before the steps.
+- Floor 9's death cut short: the rewards' aftermath hid every enemy,
+  including ones still in AnimDie. Dying ones are left to their own fade.
+- Treasure: the chest replayed its opening on the next stage (each stage
+  rebuilds the room); an open chest starts at its animations' ends.
+- Rest site: option.DoLocalPostSelectVfx is UI-side, so the logic records
+  a rest_vfx cue at RestSiteSynchronizer.AfterPlayerOptionChosen (the
+  option, the smith's cards, the CustomScaledWait). Heal: the sleep jingle
+  (sleep.tres picks one of three) and blanket sounds, NRestSmokeVfx, the
+  room darkening to 0.1 and back (NDesaturateTransitionVfx's brightness;
+  its saturation and contrast are not ported); the proceed arrow after the
+  wait. Smith: NCardSmithVfx (three hammer blows, card_smith.mp3, sparks,
+  shakes), then the card flies to the deck. The smith path is untested
+  (no seeded run smiths).
+- Not changed: every playable card glows cyan (NHandCardHolder.UpdateCard,
+  NCardHighlight.playableColor); gold only for the 15 cards with a
+  ShouldGlowGoldInternal (Defend has none). Pets draw in front of the
+  player, as PositionPlayersAndPets / AddCreature order them.
+- Performance (Xenia: ~7 ms process + 13 ms draw in fights, over the 16.7
+  ms frame): D3D9Renderer caches the device state apply_state sets
+  (textures, samplers, blend and scissor states, shader, constants by
+  register runs), so a batch sends only what changed (forget_state after
+  any direct device call). The tree calls process() only on classes with
+  one (NF_PROCESS) and sweeps freed nodes only when some were queued.
+  Control::theme_constant memoizes per control until theme_generation
+  moves (tree shape, themes, overrides). The console log now prints the
+  update time, the worst frame and how many frames went over 16.7 ms.
+- Checks: seeded traces new39, differences 0; spire_check on new38: 1,421
+  responses, 0 failures, 0 decoder failures; strict C++98 on the changed
+  files; d3d9check rc 0. Next console build: logic (all stages, logic_lib
+  recompiles), engine; the pack is unchanged.
+
 ## Alpha RC Xenia test 1 (2026-10-22): the user's findings and the fixes
 
 The first RC build (logic 10-22, pack `work/pack-lang`) ran in Xenia; the

@@ -3,6 +3,7 @@
 #include "../core/pack.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
+#include "../scene/shaders.h"
 #include "card_library_screen.h"
 #include "collection_screen.h"
 #include "stats_screen.h"
@@ -73,6 +74,12 @@ Node* CompendiumScreen::build(const std::string& character, std::string* error) 
         bt.node = b;
         bt.key = all[i].key;
         bt.shown = all[i].shown;
+        Node* bg = b->get_node("BgPanel");
+        bt.bg = bg && bg->is_canvas_item() ? (CanvasItem*)bg : NULL;
+        bt.v = bt.bg ? shader_param(bt.bg->material, "v", 1.0f) : 1.0f;
+        if (bt.bg) bt.bg->shader_params["v"] = bt.v;
+        /* NShortSubmenuButton 1.02, NCompendiumBottomButton 1.05 */
+        bt.focus_scale = i < 4 ? 1.02f : 1.05f;
         set_visible(b, bt.shown);
         all_.push_back(bt);
         if (bt.shown) buttons_.push_back(bt);
@@ -86,12 +93,19 @@ void CompendiumScreen::focus(int i) {
     if (buttons_.empty()) return;
     if (i < 0) i = 0;
     if (i >= (int)buttons_.size()) i = (int)buttons_.size() - 1;
+    int was = focus_;
     focus_ = i;
     for (size_t k = 0; k < buttons_.size(); ++k) {
-        /* NShortSubmenuButton.OnFocus: 1.02 */
-        Control* b = buttons_[k].node;
-        tweens_.tween(&b->scale, (int)k == i ? Vec2(1.02f, 1.02f) : Vec2(1, 1), 0.05f);
-        set_visible(find_named(b, "SelectionReticle"), (int)k == i);
+        /* OnFocus: the scale up and the panel's v 0.2 brighter in 0.05 s;
+         * OnUnfocus: back in 0.3 s (the scale CubicOut) */
+        Button& bt = buttons_[k];
+        bool on = (int)k == i;
+        if (!on && (int)k != was && bt.node->scale.x == 1) continue;
+        float sc = on ? bt.focus_scale : 1.0f;
+        float dur = on ? 0.05f : 0.3f;
+        if (on) tweens_.tween(&bt.node->scale, Vec2(sc, sc), dur);
+        else tweens_.tween(&bt.node->scale, Vec2(sc, sc), dur, TRANS_CUBIC, EASE_OUT);
+        if (bt.bg) tweens_.tween(&bt.bg->shader_params["v"], on ? bt.v + 0.2f : bt.v, dur);
     }
 }
 
@@ -122,6 +136,14 @@ void CompendiumScreen::set_answer(const Json& msg) {
     if (msg["type"].str() == "compendium") {
         /* OnSubmenuOpened: Run History once a run ended, the Bestiary once a
          * monster was beaten (NBestiary.CanBeShown) */
+        for (size_t i = 0; i < buttons_.size(); ++i) {
+            tweens_.kill(&buttons_[i].node->scale);
+            buttons_[i].node->scale = Vec2(1, 1);
+            if (buttons_[i].bg) {
+                tweens_.kill(&buttons_[i].bg->shader_params["v"]);
+                buttons_[i].bg->shader_params["v"] = buttons_[i].v;
+            }
+        }
         buttons_.clear();
         for (size_t i = 0; i < all_.size(); ++i) {
             if (!strcmp(all_[i].key, "history")) all_[i].shown = msg["run_history"].b();
@@ -168,6 +190,7 @@ CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::strin
                 root_->add_child(sub_node_);
                 *cmd = library_->first_query();
             } else {
+                log_warn("card library: %s", err.c_str());
                 delete library_;
                 library_ = NULL;
             }
@@ -178,6 +201,7 @@ CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::strin
                 root_->add_child(sub_node_);
                 *cmd = collection_->query();
             } else {
+                log_warn("collection: %s", err.c_str());
                 delete collection_;
                 collection_ = NULL;
             }

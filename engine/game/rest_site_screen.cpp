@@ -1,8 +1,11 @@
 #include "rest_site_screen.h"
+#include "deck_previews.h"
 #include "loc.h"
+#include "../audio/game_audio.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
+#include "../scene/particles.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
 
@@ -15,7 +18,7 @@ static Control* as_control(Node* n) { return n && n->is_control() ? (Control*)n 
 
 RestSiteScreen::RestSiteScreen(SceneLibrary* lib)
     : lib_(lib), choices_screen_(NULL), description_(NULL), lighting_(NULL), focus_(-1), start_focus_(0),
-      done_(false), passive_(false), chosen_(false) {}
+      done_(false), passive_(false), chosen_(false), t_(0), proceed_at_(-1), smoke_(NULL) {}
 
 /* NRestSiteButton per option (Create, Reload): the icon (OptionId's
  * images/ui/rest_site/option_<id>.png), the title; a disabled option
@@ -61,6 +64,9 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
     character_boxes_.clear();
     character_spines_.clear();
     tweens_.clear();
+    t_ = 0;
+    proceed_at_ = -1;
+    smoke_ = NULL;
     focus_ = -1;
     chosen_ = false;
     Node* room = instance(lib_, "scenes/rooms/rest_site_room.tscn");
@@ -137,7 +143,9 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
             choices_screen_->modulate.a = 0;
         }
         extinguish();
-        if (!passive_) proceed_.enable(!after_choice);
+        double wait = after_choice && !passive_ ? post_select(room, d["steps"]) : 0;
+        if (wait > 0) proceed_at_ = wait;
+        else if (!passive_) proceed_.enable(!after_choice);
     }
     room->add_child(frame_driver(this));
     shake_target_ = room->is_control() ? (Control*)room : NULL; /* NRestSiteRoom */
@@ -218,9 +226,55 @@ std::string RestSiteScreen::input(const PadState& pad) {
     return std::string();
 }
 
+/* HealRestSiteOption: PlayRestSiteHealSfx, NRestSmokeVfx (its clouds at
+ * the screen's middle), NDesaturateTransitionVfx (the world environment
+ * to brightness 0.1 in 1 s, held 1 s, back in 1 s: here the room's
+ * colour). SmithRestSiteOption: NCardSmithVfx over the screens. */
+double RestSiteScreen::post_select(Node* room, const Json& steps) {
+    const Json* cue = NULL;
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k)
+            if (steps[i][k]["t"].str() == "rest_vfx") cue = &steps[i][k];
+    if (!cue) return 0;
+    const std::string& option = (*cue)["option"].str();
+    if (option == "HEAL") {
+        if (lib_->audio()) {
+            /* sleep.tres: an AudioStreamRandomizer of the three jingles */
+            lib_->audio()->ui(format("STS_SleepJingle_1%c_NewMix_v1.mp3", "abc"[chaotic_rand() % 3]));
+            lib_->audio()->ui("SOTE_SFX_SleepBlanket_v1.mp3");
+        }
+        smoke_ = instance(lib_, "scenes/vfx/rest_smoke_vfx.tscn");
+        if (smoke_) {
+            if (smoke_->is_node2d()) ((Node2D*)smoke_)->position = Vec2(960, 540);
+            Node* clouds = smoke_->get_node("Clouds");
+            if (clouds && (clouds->type == "GPUParticles2D" || clouds->type == "CPUParticles2D")) ((Particles2D*)clouds)->emitting = true;
+            room->add_child(smoke_);
+        }
+        if (room->is_canvas_item()) {
+            CanvasItem* r = (CanvasItem*)room;
+            tween_color(tweens_, &r->modulate, Color(0.1f, 0.1f, 0.1f, 1), 1.0f);
+            tween_color(tweens_, &r->modulate, Color(1, 1, 1, 1), 1.0f, TRANS_LINEAR, EASE_IN_OUT, 2.0f);
+        }
+    } else if (option == "SMITH" && DeckPreviews::current()) {
+        Json c = *cue;
+        c.set("op", Json::make_string("smith"));
+        DeckPreviews::current()->play_cue(c, decision_["player"]["character"].str());
+    }
+    return (*cue)["wait"].num(0);
+}
+
 void RestSiteScreen::frame(double dt) {
+    t_ += dt;
     tweens_.update(dt);
     proceed_.frame(dt);
+    if (proceed_at_ >= 0 && t_ >= proceed_at_) {
+        proceed_at_ = -1;
+        proceed_.enable();
+    }
+    if (smoke_ && t_ >= 4.0) {
+        smoke_->queue_free();
+        smoke_ = NULL;
+    }
 }
 
 } /* namespace spire */

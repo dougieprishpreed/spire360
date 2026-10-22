@@ -140,6 +140,8 @@ bool godot_is_a(const std::string& cls, const char* base) {
 
 /* ---- Node ---- */
 
+int Node::frees_pending = 0;
+
 Node::Node() : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), flags(0), queued_free_(false) {}
 
 Node::~Node() {
@@ -148,13 +150,17 @@ Node::~Node() {
     for (size_t i = 0; i < children.size(); ++i) delete children[i];
 }
 
+unsigned Control::theme_generation = 1;
+
 void Node::add_child(Node* child) {
+    ++Control::theme_generation;
     if (child->parent) child->parent->remove_child(child);
     child->parent = this;
     children.push_back(child);
 }
 
 void Node::add_child_before(Node* child, Node* sibling) {
+    ++Control::theme_generation;
     if (child->parent) child->parent->remove_child(child);
     child->parent = this;
     for (size_t i = 0; i < children.size(); ++i)
@@ -166,6 +172,7 @@ void Node::add_child_before(Node* child, Node* sibling) {
 }
 
 void Node::remove_child(Node* child) {
+    ++Control::theme_generation;
     for (size_t i = 0; i < children.size(); ++i) {
         if (children[i] == child) {
             children.erase(children.begin() + i);
@@ -347,7 +354,8 @@ void Control::begin_layout_pass() { ++g_layout_pass; }
 
 Control::Control()
     : grow_h(GROW_END), grow_v(GROW_END), size_flags_h(SIZE_FILL), size_flags_v(SIZE_FILL), stretch_ratio(1),
-      rotation(0), scale(1, 1), clip_contents(false), mouse_filter(0), focus_mode(0), theme(NULL), min_pass_(0) {
+      rotation(0), scale(1, 1), clip_contents(false), mouse_filter(0), focus_mode(0), theme(NULL), constants_gen_(0),
+      min_pass_(0) {
     flags |= NF_CONTROL;
     for (int i = 0; i < 4; ++i) {
         anchor[i] = 0;
@@ -385,10 +393,14 @@ bool Control::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     else if (key == "layout_mode" || key == "anchors_preset" || key == "layout_direction") {
         /* Editor bookkeeping: the anchors and offsets are stored explicitly. */
     } else if (key == "theme") {
+        ++theme_generation;
         Resource* r = ctx.resource(v);
         theme = r && r->kind == Resource::RES_THEME ? (ThemeRes*)r : NULL;
-    } else if (key == "theme_type_variation") theme_type_variation = v.str();
-    else if (key.compare(0, 15, "theme_override_") == 0) {
+    } else if (key == "theme_type_variation") {
+        ++theme_generation;
+        theme_type_variation = v.str();
+    } else if (key.compare(0, 15, "theme_override_") == 0) {
+        ++theme_generation;
         std::string k = key.substr(15); /* "colors/font_color" */
         if (k.compare(0, 6, "fonts/") == 0 || k.compare(0, 7, "styles/") == 0 || k.compare(0, 6, "icons/") == 0) {
             Resource* r = ctx.resource(v);
@@ -570,8 +582,16 @@ Color Control::theme_color(const char* name) {
 }
 
 int Control::theme_constant(const char* name) {
+    if (constants_gen_ != theme_generation) {
+        constants_gen_ = theme_generation;
+        constants_.clear();
+    }
+    for (size_t i = 0; i < constants_.size(); ++i)
+        if (constants_[i].first == name) return constants_[i].second;
     const Json* v = theme_value("constants", name);
-    return v ? v->i() : 0;
+    int value = v ? v->i() : 0;
+    constants_.push_back(std::make_pair(std::string(name), value));
+    return value;
 }
 
 /* The font size when the lookup ends at a theme's default_font_size. */
@@ -629,6 +649,7 @@ void Control::add_theme_font_size_override(const std::string& name, int size) {
 }
 
 void Control::add_theme_constant_override(const std::string& name, int value) {
+    ++theme_generation;
     std::string k = "constants/" + name;
     Json& j = code_overrides[k];
     j = Json::make_number(value);

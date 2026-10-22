@@ -8,6 +8,7 @@
 #define SPIRE_POTION_MENU_H
 
 #include "run_screen.h"
+#include "ui_util.h"
 
 namespace spire {
 
@@ -45,6 +46,7 @@ private:
     bool enabled_[2];
     Mode mode_;
     int slot_, button_, target_;
+    TipFollower tips_; /* the focused potion's (NPotionHolder.OnFocus) */
 };
 
 } /* namespace spire */

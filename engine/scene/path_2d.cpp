@@ -102,7 +102,9 @@ Vec2 Path2D::sample_baked(float offset, float* rotation) {
 }
 
 PathFollow2D::PathFollow2D()
-    : progress(0), progress_ratio(0), h_offset(0), v_offset(0), rotates(true), loop(true), use_ratio(false) {}
+    : progress(0), progress_ratio(0), h_offset(0), v_offset(0), rotates(true), loop(true), use_ratio(false) {
+    flags |= NF_PROCESS;
+}
 
 bool PathFollow2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     if (key == "progress") {

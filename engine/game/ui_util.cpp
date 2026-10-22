@@ -82,6 +82,7 @@ void TipFollower::show_for_card(SceneLibrary* lib, Node* parent, Control* holder
     if (!tips_) return;
     owner_ = holder;
     card_ = true;
+    below_ = left_ = false;
     tips_->z_index = 10;
     tips_->modulate.a = 0; /* placed on the next frame, after the layout */
     parent->add_child(tips_);
@@ -94,10 +95,21 @@ void TipFollower::show_for_control(SceneLibrary* lib, Node* parent, Control* own
     if (!tips_) return;
     owner_ = owner;
     card_ = false;
+    below_ = left_ = false;
     extra_ = extra_x;
     tips_->z_index = 10;
     tips_->modulate.a = 0; /* placed on the next frame, after the layout */
     parent->add_child(tips_);
+}
+
+void TipFollower::show_below(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
+    show_for_control(lib, parent, owner, tips);
+    below_ = tips_ != NULL;
+}
+
+void TipFollower::show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
+    show_for_control(lib, parent, owner, tips);
+    left_ = tips_ != NULL;
 }
 
 void TipFollower::hide() {
@@ -115,6 +127,23 @@ void TipFollower::frame() {
     float s = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
     Vec2 c = xf.origin;
     float w = tips_->size.x, h = tips_->size.y;
+    if (left_) {
+        float x = c.x - w, y = c.y;
+        if (x < 0) x = 0;
+        if (y + h > 1080.0f) y = 1080.0f - h;
+        tips_->set_position(Vec2(x, y));
+        tips_->modulate.a = 1;
+        return;
+    }
+    if (below_) {
+        /* then CorrectHorizontalOverflow / CorrectVerticalOverflow */
+        float x = c.x, y = c.y + owner_->size.y * s * 1.5f;
+        if (x + w > 1920.0f) x = 1920.0f - w;
+        if (y + h > 1080.0f) y = 1080.0f - h;
+        tips_->set_position(Vec2(x, y));
+        tips_->modulate.a = 1;
+        return;
+    }
     if (!card_) {
         /* SetAlignment, then CorrectVerticalOverflow */
         float x = c.x > 1920.0f * 0.75f ? c.x - w : c.x + owner_->size.x * s;

@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Map;
@@ -145,6 +146,26 @@ internal static partial class Hooks
         {
             if (a.Length > 0 && a[0] is PowerModel pw && pw.Owner != null && pw.ShouldPlayVfx)
                 Steps.Cue(new Dictionary<string, object?> { ["t"] = "power_flash", ["power"] = pw.Id.Entry, ["who"] = Steps.Who(pw.Owner) });
+        });
+        // Creature.InvokePowerModified(power, change, silent): PowerIncreased
+        // (a rise, or a fall of a counter that may go negative), which
+        // NCreature.OnPowerIncreased shows unless silent: NPowerAppliedVfx
+        // (ShouldPlayVfx) with the buff or debuff burst, by the type at the
+        // new amount.
+        Spire.HookBridge.Hooks.RegisterBefore("power.modified", a =>
+        {
+            if (a.Length < 4 || a[1] is not PowerModel pw || a[2] is not int change || a[3] is not bool silent) return;
+            if (silent || pw.Owner == null || !CombatManager.Instance.IsInProgress || !pw.ShouldPlayVfx) return;
+            bool rise = change > 0 || (pw.StackType == PowerStackType.Counter && pw.AllowNegative && change < 0);
+            if (!rise) return;
+            string id = pw.Id.Entry.ToLowerInvariant();
+            Steps.Cue(new Dictionary<string, object?>
+            {
+                ["t"] = "power_vfx", ["power"] = pw.Id.Entry, ["who"] = Steps.Who(pw.Owner),
+                ["title"] = SafeTitle(pw),
+                ["icon"] = "images/powers/" + id + ".png", ["beta_icon"] = "images/powers/beta/" + id + ".png",
+                ["buff"] = pw.GetTypeForAmount(pw.Amount) == PowerType.Buff,
+            });
         });
         // Deck changes outside combat: what NRun.GlobalUi's preview containers
         // show (TestMode returns before the UI, so they are recorded here).
@@ -433,9 +454,24 @@ internal static partial class Hooks
 
     /// <summary>CardCmd.PreviewInternal's checks: a card in a pile, not while the
     /// combat ends; the combat piles' previews are the fight's.</summary>
+    private static string SafeTitle(PowerModel pw)
+    {
+        try { return pw.Title.GetFormattedText(); }
+        catch { return pw.Id.Entry; }
+    }
+
     private static void PreviewCue(string op, CardModel card, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style, float time)
     {
-        if (card.Pile == null || card.Pile.Type.IsCombatPile() || CombatManager.Instance.IsEnding) return;
+        if (card.Pile == null || CombatManager.Instance.IsEnding) return;
+        if (card.Pile.Type.IsCombatPile())
+        {
+            // NCombatRoom.Ui's preview containers, then NCardFlyVfx to that
+            // pile (a status card an enemy gives, ...); the hand's own
+            // holders show cards that come into it
+            if (card.Pile.Type == PileType.Hand || card.Pile.Type == PileType.Play) return;
+            DeckCue(op, card, null, style, time, card.Pile.Type.ToString().ToLowerInvariant());
+            return;
+        }
         DeckCue(op, card, null, style, time);
     }
     private static CardModel? _transformedFrom;
@@ -443,10 +479,11 @@ internal static partial class Hooks
     /// <summary>A deck_card cue: op (add, show, remove, upgrade, transform,
     /// enchant), the card's view, the original's for a transform, the preview
     /// style and time when the game gives them.</summary>
-    private static void DeckCue(string op, CardModel card, CardModel? from, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? style, float time)
+    private static void DeckCue(string op, CardModel card, CardModel? from, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle? style, float time, string? pile = null)
     {
         if (Driver == null) return;
         var cue = new Dictionary<string, object?> { ["t"] = "deck_card", ["op"] = op, ["card"] = Driver.DeckCardView(card) };
+        if (pile != null) cue["pile"] = pile;
         if (from != null) cue["from"] = Driver.DeckCardView(from);
         if (style != null) cue["style"] = style.ToString();
         if (time > 0) cue["time"] = time;

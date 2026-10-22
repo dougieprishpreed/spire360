@@ -185,7 +185,7 @@ void __cdecl main() {
     /* The mix on hardware thread 4 (core 2): the frame loop keeps core 0,
      * the logic core 1 */
     else if (!audio.start_thread(4)) logf("audio: no audio thread (mixed in the frame loop)");
-    audio.menu();
+    /* the menu music starts with the main menu, after the logo (MenuFlow) */
     FontLibrary* fonts = new FontLibrary(&pack);
     FontLibrary::set_current(fonts);
     Canvas canvas(&renderer, &pack);
@@ -200,8 +200,8 @@ void __cdecl main() {
     MenuFlow* flow = new MenuFlow(lib, tree, game, pack.game_version());
     tree->layout();
     unsigned prev = 0;
-    double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, wait_start = 0;
-    int frames = 0, shown = 0;
+    double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, acc_update = 0, worst = 0, wait_start = 0;
+    int frames = 0, shown = 0, slow = 0;
     for (;;) {
         XINPUT_STATE xs;
         ZeroMemory(&xs, sizeof(xs));
@@ -222,6 +222,7 @@ void __cdecl main() {
             logf("gamma ramp %s", gamma ? "on" : "off");
             pad.pressed &= ~PadState::Y;
         }
+        double u0 = now_ms();
         {
             bool was_busy = game->busy();
             bool was_starting = flow->starting();
@@ -244,6 +245,7 @@ void __cdecl main() {
         }
 
         double t = now_ms();
+        double update_ms = t - u0;
         double dt = (t - last) / 1000.0;
         last = t;
         /* Where a frame's time goes: process + layout, building the draw
@@ -262,11 +264,19 @@ void __cdecl main() {
         acc_ms += f1 - f0;
         acc_draw += f2 - f1;
         acc_present += f3 - f2;
+        acc_update += update_ms;
+        /* the frame's work before Present (a frame over 16.7 ms misses a
+         * vertical blank) */
+        double work = update_ms + (f2 - f0);
+        if (work > worst) worst = work;
+        if (work > 16.7) ++slow;
         if (++frames == 600) {
-            logf("per frame: %.2f ms process + layout, %.2f ms draw, %.2f ms present; %ld draw calls", acc_ms / frames,
-                 acc_draw / frames, acc_present / frames, renderer.draw_calls());
-            frames = 0;
-            acc_ms = acc_draw = acc_present = 0;
+            logf("per frame: %.2f ms update, %.2f ms process + layout, %.2f ms draw, %.2f ms present; %ld draw calls; "
+                 "worst %.1f ms, %d of %d over 16.7 ms",
+                 acc_update / frames, acc_ms / frames, acc_draw / frames, acc_present / frames, renderer.draw_calls(), worst,
+                 slow, frames);
+            frames = slow = 0;
+            acc_ms = acc_draw = acc_present = acc_update = worst = 0;
         }
     }
     delete flow;

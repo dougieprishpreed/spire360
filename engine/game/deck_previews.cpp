@@ -1,6 +1,7 @@
 #include "deck_previews.h"
 #include "card_view.h"
 #include "combat_vfx.h"
+#include "screen_shake.h"
 #include "ui_util.h"
 
 #include "../audio/game_audio.h"
@@ -264,6 +265,21 @@ public:
             set_pos(c->children[(size_t)i], mid + Vec2(x0 + (CARD_W + 25) * (float)col, y0 + (CARD_H + 25) * (float)row));
         }
     }
+    /* PileType.Draw / Discard / Exhaust.GetTargetPosition: the combat UI's
+     * pile button's centre. */
+    Vec2 pile_position(const std::string& pile) {
+        const char* name = pile == "draw" ? "DrawPile" : pile == "exhaust" ? "ExhaustPile" : "DiscardPile";
+        Node* root = layer_node ? layer_node->parent : NULL;
+        for (size_t i = 0; root && i < root->children.size(); ++i) {
+            Node* ui = find_named(root->children[i], "CombatUi");
+            Node* p = ui ? find_named(ui, name) : NULL;
+            if (p && p->is_control()) {
+                Control* c = (Control*)p;
+                return c->global_transform().xform(c->size * 0.5f);
+            }
+        }
+        return pile == "draw" ? Vec2(80, 1000) : Vec2(1840, 1000);
+    }
     /* PileType.Deck.GetTargetPosition: the top bar's deck button. */
     Vec2 deck_position() {
         Node* root = layer_node ? layer_node->parent : NULL;
@@ -319,13 +335,17 @@ void Preview::start_flight() {
     phase_ = 0;
     ftime_ = 0;
     from_ = global_origin(card_);
-    to_ = layer_->deck_position();
+    const std::string& pile = cue_["pile"].str();
+    to_ = pile.empty() ? layer_->deck_position() : layer_->pile_position(pile);
     float offset = chaotic_range(100, 400);
     speed_ = chaotic_range(1.1f, 1.25f);
     accel_ = chaotic_range(2, 2.5f);
     arc_ = to_.y < 540.0f ? -500.0f : 500.0f + offset;
     dur_ = chaotic_range(1, 1.75f);
-    if (layer_->lib->audio()) layer_->lib->audio()->ui("event:/sfx/ui/cards/card_movement_B_into_deck");
+    if (layer_->lib->audio())
+        layer_->lib->audio()->ui(pile.empty() ? "event:/sfx/ui/cards/card_movement_B_into_deck"
+                                 : pile == "draw" ? "event:/sfx/ui/cards/card_movement_B_into_draw"
+                                                  : "event:/sfx/ui/cards/card_movement_B_into_discard");
     /* NCardTrailVfx._Ready: its sprites fade in and shrink, the card to 0.75 */
     trail_ = layer_->character.empty() ? NULL : instance(layer_->lib, "scenes/vfx/card_trail_" + layer_->character + ".tscn");
     if (trail_ && layer_->trails) {
@@ -502,6 +522,48 @@ public:
         grow_in(card_);
     }
     virtual bool step(float) { return t_ >= 1.75f; }
+};
+
+/* NCardSmithVfx.PlayAnimation(cards) in GlobalUi's CardPreviewContainer
+ * (the rest site's smith): the card grows in (0.25 s), card_smith.mp3, then
+ * three hammer blows (the scene's Spark1-3 particles, a weak short shake at
+ * 180 +-10 degrees, the card swinging to 20, -10, 5 degrees, Elastic Out
+ * 0.15 s) at 0.25, 0.5 and 0.75 s; it flies to its pile 0.5 s after the
+ * last. */
+class SmithPreview : public Preview {
+public:
+    SmithPreview(Layer* l, const Json& cue, const Json& card) : Preview(l, cue), blows_(0) {
+        root_ = instance(l->lib, "scenes/vfx/vfx_card_smith.tscn");
+        card_ = root_ ? new_card(card) : NULL;
+        Node* box = root_ ? root_->find_unique("CardContainer") : NULL;
+        if (!card_ || !box) {
+            delete card_;
+            delete root_;
+            root_ = NULL;
+            card_ = NULL;
+            return;
+        }
+        box->add_child(card_);
+        l->add(BOX_ROW, root_);
+        grow_in(card_);
+    }
+    virtual bool step(float) {
+        static const float DEGREES[3] = { 20, -10, 5 };
+        while (blows_ < 3 && t_ >= 0.25f * (float)(blows_ + 1)) {
+            if (blows_ == 0 && layer_->lib->audio()) layer_->lib->audio()->ui("card_smith.mp3");
+            Node* spark = root_ ? root_->get_node(format("Spark%d", blows_ + 1)) : NULL;
+            for (size_t i = 0; spark && i < spark->children.size(); ++i)
+                if (spark->children[i]->type == "GPUParticles2D" || spark->children[i]->type == "CPUParticles2D")
+                    ((Particles2D*)spark->children[i])->restart();
+            ScreenShake::get().shake("Weak", "Short", 180.0f + chaotic_range(-10, 10));
+            if (card_) tweens_.tween(&card_->rotation, DEGREES[blows_] * PI_F / 180.0f, 0.15f, TRANS_ELASTIC, EASE_OUT);
+            ++blows_;
+        }
+        return t_ >= 1.25f;
+    }
+
+private:
+    int blows_;
 };
 
 /* NCardTransformVfx with NCardTransformShineVfx: the original grows in;
@@ -704,7 +766,15 @@ int box_of(const std::string& style) {
 
 } /* namespace */
 
-DeckPreviews::DeckPreviews(SceneLibrary* lib) : lib_(lib), layer_(NULL) {}
+static DeckPreviews* g_current = NULL;
+
+DeckPreviews::DeckPreviews(SceneLibrary* lib) : lib_(lib), layer_(NULL) { g_current = this; }
+
+DeckPreviews::~DeckPreviews() {
+    if (g_current == this) g_current = NULL;
+}
+
+DeckPreviews* DeckPreviews::current() { return g_current; }
 
 Node* DeckPreviews::layer() {
     if (layer_) return layer_;
@@ -737,23 +807,27 @@ Node* DeckPreviews::layer() {
 }
 
 void DeckPreviews::play(const Json& steps, const std::string& character) {
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k)
+            if (steps[i][k]["t"].str() == "deck_card" && !steps[i][k]["pile"].is_string()) play_cue(steps[i][k], character);
+}
+
+void DeckPreviews::play_cue(const Json& c, const std::string& character) {
     Layer* l = layer_ ? (Layer*)layer_->behavior : NULL;
     if (!l) return;
     l->character = lower(character);
-    for (size_t i = 0; i < steps.size(); ++i)
-        for (size_t k = 0; k < steps[i].size(); ++k) {
-            const Json& c = steps[i][k];
-            if (c["t"].str() != "deck_card") continue;
-            const std::string& op = c["op"].str();
-            int box = box_of(c["style"].str());
-            Preview* p = NULL;
-            if (op == "add" || op == "show") p = new AddPreview(l, c, box);
-            else if (op == "remove") p = new RemovePreview(l, c);
-            else if (op == "upgrade") p = new UpgradePreview(l, c, box);
-            else if (op == "transform") p = new TransformPreview(l, c, box);
-            else if (op == "enchant") p = new EnchantPreview(l, c);
-            if (p) l->previews.push_back(p);
-        }
+    const std::string& op = c["op"].str();
+    int box = box_of(c["style"].str());
+    Preview* p = NULL;
+    if (op == "add" || op == "show") p = new AddPreview(l, c, box);
+    else if (op == "remove") p = new RemovePreview(l, c);
+    else if (op == "upgrade") p = new UpgradePreview(l, c, box);
+    else if (op == "transform") p = new TransformPreview(l, c, box);
+    else if (op == "enchant") p = new EnchantPreview(l, c);
+    else if (op == "smith") {
+        for (size_t i = 0; i < c["cards"].size(); ++i) l->previews.push_back(new SmithPreview(l, c, c["cards"][i]));
+    }
+    if (p) l->previews.push_back(p);
 }
 
 void DeckPreviews::clear() {

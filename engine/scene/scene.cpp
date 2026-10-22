@@ -71,6 +71,7 @@ SceneLibrary::SceneLibrary(const Pack* pack) : pack_(pack), audio_(NULL), defaul
     owned_.push_back(default_font_);
     init_default_theme();
     g_default_theme = default_theme_;
+    ++Control::theme_generation;
     g_default_font = default_font_;
 }
 

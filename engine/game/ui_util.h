@@ -72,12 +72,17 @@ void setup_inspect_prompt(SceneLibrary* lib, Node* prompt);
  * card's centre). The tips are nodes of the screen's tree. */
 class TipFollower {
 public:
-    TipFollower() : tips_(NULL), owner_(NULL), card_(true), extra_(0) {}
+    TipFollower() : tips_(NULL), owner_(NULL), card_(true), below_(false), left_(false), extra_(0) {}
     void show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips);
     /* NHoverTipSet.CreateAndShow(owner, tips, GetHoverTipAlignment(owner))
      * with SetFollowOwner: right of the owner, or left of it past 3/4 of
      * the screen; extra_x: SetExtraFollowOffset's x. */
     void show_for_control(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips, float extra_x = 0);
+    /* HoverTipAlignment.Center set at the owner's position plus 1.5 of its
+     * height down (NPotionHolder.OnFocus). */
+    void show_below(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
+    /* HoverTipAlignment.Left: the tips' right edge at the owner's left. */
+    void show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
     void hide();
     /* Each frame (after the layout). */
     void frame();
@@ -85,7 +90,7 @@ public:
 private:
     Control* tips_;
     Control* owner_;
-    bool card_;
+    bool card_, below_, left_;
     float extra_;
 };
 

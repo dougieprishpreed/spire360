@@ -49,6 +49,9 @@ private:
         std::string description;
     };
     void make_options(Node* room, const Json& options, bool animate_in);
+    /* option.DoLocalPostSelectVfx (the logic's rest_vfx cue); its wait in
+     * seconds (the proceed arrow comes after it) */
+    double post_select(Node* room, const Json& steps);
     void focus(int i);
     void unfocus(int i);
     void extinguish();
@@ -64,6 +67,8 @@ private:
     int focus_, start_focus_;
     bool done_, passive_, chosen_;
     TweenSet tweens_;
+    double t_, proceed_at_; /* -1: none */
+    Node* smoke_;           /* NRestSmokeVfx, freed after 4 s */
 };
 
 } /* namespace spire */

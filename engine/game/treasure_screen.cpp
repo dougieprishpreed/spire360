@@ -27,8 +27,9 @@ TreasureScreen::TreasureScreen(SceneLibrary* lib)
 
 /* NTreasureButton.Setup: the act's skeleton and skin, "animation" (the
  * opening) waiting at its start (time scale 0), "shine_fade" after it.
- * Opened: played (AnimOut / AnimIn set the time scale back to 1). */
-void TreasureScreen::setup_chest(const Json& chest, bool opened) {
+ * Opening: played (AnimOut / AnimIn set the time scale back to 1); open
+ * since a stage before (the room stays in the game): at their ends. */
+void TreasureScreen::setup_chest(const Json& chest, bool opened, bool opening) {
     if (!chest_visual_ || !chest.is_object()) return;
     Resource* r = lib_->ext(strip_res(chest["skeleton"].str()));
     if (!r || r->kind != Resource::RES_SPINE_DATA) {
@@ -38,6 +39,12 @@ void TreasureScreen::setup_chest(const Json& chest, bool opened) {
     chest_visual_->set_data(lib_, (SpineDataRes*)r);
     /* Focused while closed: the outline skin (UpdateChestSkin(true)). */
     chest_visual_->set_skin(chest[opened ? "skin" : "skin_outline"].str());
+    if (opened && !opening) {
+        if (chest_visual_->set_animation("animation", false, 0)) chest_visual_->set_track_fraction(0, 1);
+        if (chest_visual_->set_animation("shine_fade", false, 1)) chest_visual_->set_track_fraction(1, 1);
+        chest_visual_->time_scale = 1;
+        return;
+    }
     if (chest_visual_->set_animation("animation", false, 0)) {
         SpAnimationState* st = chest_visual_->animation_state();
         SpSkeleton* sk = chest_visual_->skeleton();
@@ -97,7 +104,7 @@ Node* TreasureScreen::build(const Json& d, std::string* error) {
     chest_visual_ = NULL;
     Node* cv = chest_ ? chest_->find_unique("ChestVisual") : NULL;
     if (cv && cv->type == "SpineSprite") chest_visual_ = (SpineSprite*)cv;
-    setup_chest(d["chest"], !closed);
+    setup_chest(d["chest"], !closed, opening);
     if (chest_) {
         Node* hotkey = chest_->find_unique("HotkeyIcon");
         if (closed) show_glyph(lib_, hotkey, "a");

@@ -47,6 +47,7 @@ namespace spire {
 class RoomTransition : public Control {
 public:
     explicit RoomTransition(SceneLibrary* lib) : phase(0), elapsed(0), initial_y(-2564), gradient_height(2280) {
+        flags |= NF_PROCESS;
         name = "RoomTransition";
         z_index = 4096;
         visible = false;
@@ -269,11 +270,11 @@ GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
 
 GameClient::~GameClient() {
     close_ftue();
+    delete compendium_; /* before its node: its open screen's node is under it */
     if (compendium_node_) {
         if (compendium_node_->parent) compendium_node_->parent->remove_child(compendium_node_);
         delete compendium_node_;
     }
-    delete compendium_;
     if (settings_node_) {
         if (settings_node_->parent) settings_node_->parent->remove_child(settings_node_);
         delete settings_node_;
@@ -496,12 +497,33 @@ void GameClient::update(const PadState& pad) {
         if (!ftue_instead(action("end_turn"))) send(action("end_turn"));
         return;
     }
-    if (combat_ && combat_->busy()) return;
+    bool queue = play_queue_open();
+    if (combat_ && combat_->busy() && !queue) return;
     if (room_ && room_->busy()) return;
     if (ported_ && ported_->busy()) return;
-    if (check_ftues(pad) || ftue_) return;
-    if (auto_ && (auto_until_ <= 0 || decisions_ < auto_until_)) choose_automatically();
+    if (!queue && (check_ftues(pad) || ftue_)) return;
+    if (!queue && auto_ && (auto_until_ <= 0 || decisions_ < auto_until_)) choose_automatically();
     else handle_input(pad);
+}
+
+/* NCardPlayQueue: while the last command's steps still play, the hand
+ * takes the next plays (NPlayerHand.AreCardActionsAllowed: from the start
+ * of the player's turn in them). Auto play waits for the steps. */
+bool GameClient::play_queue_open() const {
+    return combat_ && combat_->busy() && !auto_playing() && !waiting_ && decision_["decision"].str() == "combat_play" &&
+           combat_->accepts_play();
+}
+
+/* The decision's card for hand holder i (by Steps id: while steps play,
+ * the hand shown and the decision's may differ); NULL: not in the logic's
+ * hand any more. */
+const Json* GameClient::hand_card(int holder) const {
+    int id = combat_ ? combat_->card_id(holder) : -1;
+    const Json& hand = decision_["hand"];
+    for (size_t i = 0; id >= 0 && i < hand.size(); ++i)
+        if (hand[i]["instance_id"].i(-2) == id) return &hand[i];
+    if (id < 0 && holder >= 0 && holder < (int)hand.size()) return &hand[(size_t)holder];
+    return NULL;
 }
 
 /* The finished Crystal Sphere under its rewards (behind_), changing from
@@ -569,6 +591,7 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
         /* The card removal: over the shop, its inventory open. */
         ShopScreen* sh = new ShopScreen(lib_);
         sh->set_state(true, "removal", 0);
+        sh->set_behind();
         behind_ = sh;
         Node* n = behind_->build(last_shop_, &err);
         if (!n) {
@@ -616,8 +639,13 @@ void GameClient::show(const Json& d) {
         combat_->update_decision(d);
         Node* old_bar = screen_->get_node("TopBarLayer");
         if (old_bar) { screen_->remove_child(old_bar); delete old_bar; }
+        /* HP and gold as before the steps (their cues move them); the
+         * potions as now (PotionModel.RemoveBeforeUse empties a slot as the
+         * potion is used, a new one drops in) */
         Json bar_state = d;
-        bar_state.set("player", prev_player);
+        Json bar_player = prev_player;
+        bar_player.set("potions", d["player"]["potions"]);
+        bar_state.set("player", bar_player);
         Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
         if (bar) screen_->add_child(bar);
         potions_.attach(screen_, d["player"]);
@@ -876,7 +904,7 @@ void GameClient::show(const Json& d) {
             combat_->set_hand_focus(hand_focus_);
             combat_->set_layout_memory(&enemy_places_);
             combat_->set_previous(before);
-            screen_ = combat_->build(d, &err);
+            screen_ = combat_->build(prev_kind == "combat_play" ? d : CombatScreen::before_steps(d), &err);
         }
         if (combat_ && ftue_pending("shuffle_ftue")) combat_->watch_shuffle(true);
         if (!screen_) {
@@ -888,7 +916,10 @@ void GameClient::show(const Json& d) {
              * turn. */
             combat_->play_steps(d["steps"]);
         } else if (!continuing) {
-            /* the combat rules FTUE first, its close the start banner */
+            /* CombatManager.StartCombat: the first turn's start (its waits,
+             * energy, draws, relics) plays from the room's entry; the combat
+             * rules FTUE first, its close the start banner */
+            combat_->play_steps(d["steps"], d);
             if (ftue_pending("combat_rules_ftue")) combat_rules_wait_ = true;
             else combat_->show_start_banner();
         }
@@ -1018,14 +1049,19 @@ void GameClient::choose_automatically() {
  * the first; left / right change it), other cards show what they hit; A
  * again plays it, B puts it back. Y ends the turn. */
 void GameClient::combat_input(const PadState& pad) {
-    const Json& hand = decision_["hand"];
+    static const Json none;
     const Json& enemies = decision_["enemies"];
     int n = combat_->hand_size();
     int ne = (int)enemies.size();
-    int focus = combat_->hand_focus() < 0 ? n / 2 : combat_->hand_focus();
-    if (focus >= n) focus = n - 1;
+    int focus = combat_->focused_card();
     if (combat_->playing()) {
-        const Json& card = hand[(size_t)focus];
+        const Json* played = hand_card(focus);
+        if (!played) {
+            combat_->end_play();
+            target_ = -1;
+            return;
+        }
+        const Json& card = *played;
         bool single = card["target_type"].str() == "AnyEnemy";
         if (single && ne > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
             /* Focus moves between the targets' hitboxes (no wrap). */
@@ -1044,11 +1080,12 @@ void GameClient::combat_input(const PadState& pad) {
             const std::string& type = card["target_type"].str();
             if (single) last_target_ = enemies[(size_t)target_]["combat_id"].i(-1);
             else if (type == "AllEnemies" || type == "AllAllies") last_target_ = -1;
-            if (single)
-                send(action("play_card", format("\"card_index\":%d,\"target_index\":%d", card["index"].i(),
-                                                enemies[(size_t)target_]["index"].i())));
-            else
-                send(action("play_card", format("\"card_index\":%d", card["index"].i())));
+            std::string cmd = single ? action("play_card", format("\"card_index\":%d,\"target_index\":%d", card["index"].i(),
+                                                                  enemies[(size_t)target_]["index"].i()))
+                                     : action("play_card", format("\"card_index\":%d", card["index"].i()));
+            combat_->commit_play(combat_->busy());
+            target_ = -1;
+            send(cmd);
             /* AutoDisableCannotPlayCardFtueCheck: eight cards played */
             if (++ftue_cards_played_ == 8 && ftue_pending("cannot_play_card_ftue")) ftue_seen("cannot_play_card_ftue");
         }
@@ -1072,13 +1109,14 @@ void GameClient::combat_input(const PadState& pad) {
         combat_->focus_creatures();
         return;
     }
-    if (n > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
-        focus = (pad.pressed & PadState::LEFT) ? (focus + n - 1) % n : (focus + 1) % n;
+    if (n > 0 && focus >= 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
+        focus = combat_->next_hand_card(focus, (pad.pressed & PadState::LEFT) ? -1 : 1);
         hand_focus_ = focus;
         combat_->set_hand_focus(focus);
     }
     if ((pad.pressed & PadState::A) && focus >= 0 && focus < n) {
-        const Json& card = hand[(size_t)focus];
+        const Json* in_hand = hand_card(focus);
+        const Json& card = in_hand ? *in_hand : none;
         /* NControllerCardPlay.Start: an unplayable card stays in the hand
          * (NCardPlay.CannotPlayThisCardFtueCheck: too costly, the FTUE). */
         if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) {
@@ -1400,11 +1438,11 @@ void GameClient::handle_input(const PadState& pad) {
     if (pause_input(pad)) return;
     if (piles_input(pad)) return;
     /* The last command's effects play out first (the game takes no input
-     * while its actions run). */
-    if (combat_ && combat_->busy()) return;
+     * while its actions run), but for the hand's queued plays. */
+    if (combat_ && combat_->busy() && !play_queue_open()) return;
     const std::string& kind = decision_["decision"].str();
     if ((pad.pressed & PadState::START) && !game_over() && kind != "card_select" && kind != "card_reward" &&
-        !potions_.active() && !(combat_ && target_ >= 0)) {
+        !potions_.active() && !(combat_ && (target_ >= 0 || combat_->busy()))) {
         open_pause();
         return;
     }

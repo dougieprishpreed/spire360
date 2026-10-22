@@ -289,6 +289,7 @@ Particles2D::Particles2D(bool is_gpu)
       collision_base_size(1), collision_use_scale(false), use_fixed_seed(false), trail_enabled(false),
       trail_lifetime(0.3f), trail_sections(8), trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0),
       started_(false), has_last_origin_(false), clock_(0), sub_mode_(false) {
+    flags |= NF_PROCESS;
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
     if (gpu) seed = next_seed();

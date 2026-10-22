@@ -60,6 +60,7 @@ public partial class RunDriver
     private CardReward? _pendingCardReward;
     private bool _rewardsProcessed;
     private bool _restSiteDone; // the rest site's choice is made: only Proceed is left
+    private object? _restSync;  // the RestSiteSynchronizer whose choices are watched
     private int _goldBeforeCombat;
     private int _lastKnownHp;
     private readonly HeadlessCardSelector _cardSelector = new();
@@ -1355,6 +1356,7 @@ public partial class RunDriver
             Log($"Rest site: choosing option {optionIndex}");
             try
             {
+                WatchRestSiteChoices();
                 // Single-threaded: runs until it completes or waits on a selection.
                 Sched.Run(() => RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex));
                 if (_cardSelector.HasPending)
@@ -1663,6 +1665,7 @@ public partial class RunDriver
                 ["prompt"] = _cardSelector.PendingPromptText,
                 ["cancelable"] = _cardSelector.PendingCancelable,
                 ["manual_confirm"] = _cardSelector.PendingManualConfirm,
+                ["enchantment_screen"] = _cardSelector.PendingKind == "enchant" ? EnchantmentDescription() : null,
                 ["player"] = PlayerSummary(player),
             };
         }
@@ -2831,6 +2834,9 @@ public partial class RunDriver
                     ["relic"] = opt.Relic?.Id.Entry.ToLowerInvariant(),
                     ["relic_icon_base"] = RelicIconBase(opt.Relic),
                     ["will_kill"] = willKill,
+                    // NEventOptionButton.OnFocus: Option.HoverTips (an
+                    // enchantment's, a relic's, ...)
+                    ["tips"] = Tips(() => opt.HoverTips),
                 };
             }).ToList();
 
@@ -2955,6 +2961,65 @@ public partial class RunDriver
             ["ancient"] = ancient,
             ["combat_visuals"] = combatVisuals,
         };
+    }
+
+    // NRestSiteRoom.AfterSelectingOptionAsync: option.DoLocalPostSelectVfx
+    // once a choice went through (UI-side, so recorded here): the option, the
+    // smith's upgraded cards (NCardSmithVfx), and the CustomScaledWait that
+    // ends it (Heal 1.5 / 2.5 s, Smith 1 / 2 s).
+    private void WatchRestSiteChoices()
+    {
+        var sync = RunManager.Instance.RestSiteSynchronizer;
+        if (sync == null || ReferenceEquals(sync, _restSync)) return;
+        _restSync = sync;
+        sync.AfterPlayerOptionChosen += (option, success, _) =>
+        {
+            if (!success) return;
+            try
+            {
+                var cue = new Dictionary<string, object?> { ["t"] = "rest_vfx", ["option"] = option.OptionId };
+                float fast = 0, normal = 0;
+                if (option is HealRestSiteOption) { fast = 1.5f; normal = 2.5f; }
+                if (option is SmithRestSiteOption)
+                {
+                    fast = 1f; normal = 2f;
+                    var field = typeof(SmithRestSiteOption).GetField("_selection", BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (field?.GetValue(option) is IEnumerable<CardModel> cards)
+                        cue["cards"] = cards.Select(DeckCardView).ToList();
+                }
+                var mode = SaveManager.Instance.PrefsSave?.FastMode ?? MegaCrit.Sts2.Core.Settings.FastModeType.Normal;
+                if (mode != MegaCrit.Sts2.Core.Settings.FastModeType.Instant && normal > 0)
+                    cue["wait"] = mode == MegaCrit.Sts2.Core.Settings.FastModeType.Fast ? fast : normal;
+                Steps.Cue(cue);
+            }
+            catch (Exception ex) { Log($"rest site vfx cue: {ex.Message}"); }
+        };
+    }
+
+    // NDeckEnchantSelectScreen._Ready: the enchantment at its amount
+    // (ToMutable, RecalculateValues): its title, dynamic description and icon.
+    private Dictionary<string, object?>? EnchantmentDescription()
+    {
+        if (_cardSelector.PendingEnchantment is not { } pending) return null;
+        static string Res(string p) => p.StartsWith("res://") ? p.Substring(6) : p;
+        try
+        {
+            var e = pending.model.ToMutable();
+            e.Amount = pending.amount;
+            e.RecalculateValues();
+            return new Dictionary<string, object?>
+            {
+                ["title"] = SafeText(() => e.Title.GetFormattedText()),
+                ["description"] = SafeText(() => e.DynamicDescription.GetFormattedText()),
+                ["icon"] = Res(e.IntendedIconPath),
+                ["beta_icon"] = Res(MegaCrit.Sts2.Core.Helpers.ImageHelper.GetImagePath("enchantments/beta/" + e.Id.Entry.ToLowerInvariant() + ".png")),
+            };
+        }
+        catch (Exception ex)
+        {
+            Log($"enchantment description: {ex.Message}");
+            return null;
+        }
     }
 
     private Dictionary<string, object?> RestSiteState(RestSiteRoom restRoom)
@@ -3215,6 +3280,8 @@ public partial class RunDriver
             d["usable"] = usable;
             d["discardable"] = can;
             d["use_label"] = aimed || p.CanThrowAtAlly() ? "throw" : "drink";
+            // NPotionHolder.OnFocus: Potion.Model.HoverTips under the slot
+            d["tips"] = Tips(() => p.HoverTips);
         }
         catch (Exception ex) { Spire.Logic.Log.Warn($"potion use {p.Id}: {ex.Message}"); }
     }

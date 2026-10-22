@@ -8,6 +8,7 @@
 #include "form_vfx.h"
 #include "sovereign_blade.h"
 #include "top_bar.h"
+#include "deck_previews.h"
 
 #include "../scene/controls.h"
 #include "../scene/tree.h"
@@ -80,8 +81,9 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     visual_only_ = false;
     tips_ = NULL;
     tips_for_ = -2;
-    pending_finish_ = false;
     played_instance_ = -1;
+    play_id_ = -1;
+    hand_locked_until_ = 0;
     orb_box_ = NULL;
 }
 
@@ -809,6 +811,7 @@ CombatScreen::Holder CombatScreen::make_holder(const Json& card) {
     h.data = card;
     h.angle = h.to_angle = 0;
     h.scale = h.to_scale = 1;
+    h.queued = false;
     h.text = card["description_bbcode"].str();
     h.text_multi = card["description_multi"].is_string() ? card["description_multi"].str() : h.text;
     const Json& by = card["description_by_target"];
@@ -895,8 +898,74 @@ void CombatScreen::sync_hand(const Json& cards, bool animate) {
     holders_ = next;
     hand_ = cards;
     tips_for_ = -2;
+    track_play();
     layout_hand(!animate);
     refresh_tips();
+}
+
+/* The card being played stays the same card when holders_ changes under
+ * it (a draw, a discard from the steps still playing); gone from the hand,
+ * its play ends. */
+void CombatScreen::track_play() {
+    if (play_card_ < 0) return;
+    for (size_t i = 0; i < holders_.size(); ++i)
+        if (holders_[i].id == play_id_ && !holders_[i].queued) {
+            play_card_ = (int)i;
+            return;
+        }
+    play_card_ = -1;
+    play_id_ = -1;
+    end_play();
+}
+
+bool CombatScreen::active(const Holder& h) const { return h.node && h.node->visible && !h.queued; }
+
+int CombatScreen::next_hand_card(int from, int dir) const {
+    int n = (int)holders_.size();
+    for (int k = 1; k <= n; ++k) {
+        int i = ((from + dir * k) % n + n) % n;
+        if (active(holders_[(size_t)i])) return i;
+    }
+    return from;
+}
+
+/* NCardPlayQueue.GetPositionForQueueIndex / GetScaleForQueueIndex: left of
+ * the play pile (the screen's middle, 100 px up) by 300 * (i+1)/(i+3), at
+ * 0.8 / (i+2) of the card. */
+void CombatScreen::place_queue() {
+    for (size_t k = 0; k < queue_.size(); ++k)
+        for (size_t i = 0; i < holders_.size(); ++i) {
+            if (holders_[i].id != queue_[k]) continue;
+            Holder& h = holders_[i];
+            float u = (float)(k + 1) / (float)(k + 3);
+            Vec2 at(960.0f - 300.0f * u, 440.0f);
+            h.to_pos = hand_box_ ? inverse(hand_box_->global_transform()).xform(at) : at;
+            h.to_angle = 0;
+            h.to_scale = 0.8f / (float)(k + 2);
+            h.node->z_index = 1;
+        }
+}
+
+void CombatScreen::commit_play(bool queued) {
+    if (play_card_ < 0 || play_card_ >= (int)holders_.size()) return;
+    Holder& h = holders_[(size_t)play_card_];
+    /* where the played card goes: the enemy it aims at, else up */
+    Vec2 to(0, -500);
+    if (play_target_ >= 0 && play_target_ < (int)enemies_.size() && enemies_[(size_t)play_target_].node && hand_box_) {
+        const Creature& e = enemies_[(size_t)play_target_];
+        to = inverse(hand_box_->global_transform()).xform(e.node->global_transform().xform(e.hitbox.pos + e.hitbox.size * 0.5f));
+    }
+    played_[h.id] = to;
+    if (!queued) return;
+    h.queued = true;
+    queue_.push_back(h.id);
+    end_play();
+    place_queue();
+}
+
+bool CombatScreen::accepts_play() const {
+    return root_ && hand_box_ && !final_ && !visual_only_ && !aftermath_ && sel_mode_ == 0 && !paused_ &&
+           cue_t_ >= hand_locked_until_;
 }
 
 void CombatScreen::set_hand_focus(int index) {
@@ -945,21 +1014,21 @@ void CombatScreen::refresh_hand_indices() {
 int CombatScreen::focused_holder() const {
     int first = -1, count = 0, mid = -1;
     for (size_t i = 0; i < holders_.size(); ++i)
-        if (holders_[i].node && holders_[i].node->visible) {
+        if (active(holders_[i])) {
             if (first < 0) first = (int)i;
             ++count;
         }
     if (count == 0 || hand_unfocused_) return -1;
     int want = count / 2, k = 0;
     for (size_t i = 0; i < holders_.size(); ++i)
-        if (holders_[i].node && holders_[i].node->visible) {
+        if (active(holders_[i])) {
             if (k == want) mid = (int)i;
             ++k;
         }
     if (hand_focus_ < 0) return mid;
     int last = -1;
     for (size_t i = 0; i < holders_.size(); ++i)
-        if (holders_[i].node && holders_[i].node->visible) {
+        if (active(holders_[i])) {
             if ((int)i >= hand_focus_) return (int)i;
             last = (int)i;
         }
@@ -971,8 +1040,9 @@ void CombatScreen::layout_hand(bool snap) {
     /* NPlayerHand.RefreshLayout: the visible holders (ActiveHolders) */
     std::vector<int> act;
     for (size_t i = 0; i < holders_.size(); ++i)
-        if (holders_[i].node && holders_[i].node->visible) act.push_back((int)i);
+        if (active(holders_[i])) act.push_back((int)i);
     int n = (int)act.size();
+    place_queue();
     if (n == 0) return;
     int fh = (sel_mode_ && sel_row_) || creature_focus_ ? -1 : focused_holder();
     int focus = -1;
@@ -1041,6 +1111,7 @@ void CombatScreen::begin_play(int card, const std::string& target_type, int targ
     if (card < 0 || card >= (int)holders_.size()) return;
     end_play();
     play_card_ = card;
+    play_id_ = holders_[card].id;
     /* NCardPlay.CenterCard: the bottom centre of the screen, 3/4 size. */
     Holder& h = holders_[card];
     Vec2 centre(960.0f, 1080.0f - hitbox_height(h.node) * 0.75f / 2.0f);
@@ -1136,6 +1207,7 @@ void CombatScreen::end_play() {
     if (play_card_ >= 0) show_card_text(holders_[play_card_], holders_[play_card_].text);
     aiming_ = false;
     play_card_ = -1;
+    play_id_ = -1;
     play_target_ = -1;
     play_single_ = false;
     layout_hand();
@@ -1903,6 +1975,60 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     return root;
 }
 
+Json CombatScreen::before_steps(const Json& d) {
+    Json out = d;
+    const Json& steps = d["steps"];
+    static const char* piles[] = { "draw", "discard", "exhaust" };
+    static const char* counts[] = { "draw_pile_count", "discard_pile_count", "exhaust_pile_count" };
+    int n[3];
+    for (int p = 0; p < 3; ++p) n[p] = d[counts[p]].i();
+    std::vector<int> brought;
+    std::vector<std::string> seen;
+    Json player = d["player"];
+    Json enemies = d["enemies"];
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& ch = steps[i][k];
+            const std::string& t = ch["t"].str();
+            if (t == "card") {
+                if (ch["to"].str() == "hand" && ch["from"].str() != "hand") brought.push_back(ch["card"].i(-1));
+                for (int p = 0; p < 3; ++p) {
+                    if (ch["from"].str() == piles[p]) ++n[p];
+                    if (ch["to"].str() == piles[p]) --n[p];
+                }
+                continue;
+            }
+            bool counter = t == "energy" || t == "max_energy" || t == "stars" || t == "round";
+            bool creature = t == "hp" || t == "max_hp" || t == "block";
+            if (!counter && !creature) continue;
+            std::string key = creature ? ch["who"].str() + "." + t : t;
+            if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
+            seen.push_back(key);
+            if (counter) {
+                out.set(t, ch["from"]);
+            } else if (ch["who"].str() == "player") {
+                player.set(t, ch["from"]);
+            } else {
+                Json next = Json::make_array();
+                for (size_t e = 0; e < enemies.size(); ++e) {
+                    Json en = enemies[e];
+                    if (format("e%d", en["combat_id"].i(-1)) == ch["who"].str()) en.set(t, ch["from"]);
+                    next.append(en);
+                }
+                enemies = next;
+            }
+        }
+    out.set("player", player);
+    out.set("enemies", enemies);
+    for (int p = 0; p < 3; ++p) out.set(counts[p], Json::make_number(n[p] < 0 ? 0 : n[p]));
+    Json hand = Json::make_array();
+    const Json& cards = d["hand"];
+    for (size_t i = 0; i < cards.size(); ++i)
+        if (std::find(brought.begin(), brought.end(), cards[i]["instance_id"].i(-2)) == brought.end()) hand.append(cards[i]);
+    out.set("hand", hand);
+    return out;
+}
+
 /* NHealthBar delays the orange middleground for one second after damage,
  * then eases it to the new foreground over one second. */
 void CombatScreen::refresh_state(Creature& c, bool animate) {
@@ -1977,12 +2103,7 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
         set_visible(find_named(root_, "CombatUi"), true);
     }
     pending_ = d;
-    pending_finish_ = finishing;
     previous_ = state_;
-    played_instance_ = play_card_ >= 0 && play_card_ < (int)holders_.size() ? holders_[(size_t)play_card_].id : -1;
-    played_destination_ = Vec2(0, -500);
-    if (play_target_ >= 0 && play_target_ < (int)enemies_.size() && enemies_[(size_t)play_target_].node && hand_box_)
-        played_destination_ = inverse(hand_box_->global_transform()).xform(enemies_[(size_t)play_target_].node->global_transform().xform(enemies_[(size_t)play_target_].hitbox.pos + enemies_[(size_t)play_target_].hitbox.size * 0.5f));
     end_play();
     if (tips_) { root_->remove_child(tips_); delete tips_; tips_ = NULL; }
     tips_for_ = -2;
@@ -2064,7 +2185,8 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
             }
         }
     }
-    play_steps(d["steps"]);
+    play_steps(d["steps"], d, finishing);
+    if (!finishing) refresh_tips();
 }
 
 void CombatScreen::show_aftermath(const Json& player) {
@@ -2076,8 +2198,10 @@ void CombatScreen::show_aftermath(const Json& player) {
         refresh_state(player_, true);
         make_powers(player_, Json());
     }
-    for (size_t i = 0; i < enemies_.size(); ++i) hide(enemies_[i].node);
-    for (size_t i = 0; i < ghosts_.size(); ++i) hide(ghosts_[i].c.node);
+    for (size_t i = 0; i < enemies_.size(); ++i)
+        if (i >= enemy_who_.size() || !is_dying(enemy_who_[i])) hide(enemies_[i].node);
+    for (size_t i = 0; i < ghosts_.size(); ++i)
+        if (!is_dying(ghosts_[i].who)) hide(ghosts_[i].c.node);
 }
 
 void CombatScreen::move_card(const Json& change) {
@@ -2093,9 +2217,18 @@ void CombatScreen::move_card(const Json& change) {
     }
     int id = change["card"].i(-1);
     if (from == "hand" && to != "hand") {
+        std::map<int, Vec2>::iterator played = played_.find(id);
+        bool was_played = played != played_.end();
+        Vec2 destination = was_played ? played->second : Vec2(0, -500);
+        if (was_played) {
+            played_.erase(played);
+            played_instance_ = id;
+            std::vector<int>::iterator q = std::find(queue_.begin(), queue_.end(), id);
+            if (q != queue_.end()) queue_.erase(q);
+        }
         for (size_t i = 0; i < holders_.size(); ++i) {
             if (holders_[i].id != id) continue;
-            if (to == "exhaust" && id != played_instance_) {
+            if (to == "exhaust" && !was_played) {
                 /* CardPileCmd: from the hand, NCardExhaustQuickVfx where it is */
                 spawn_card_exhaust(lib_, exhaust_ui(), holders_[i].node, true);
                 holders_.erase(holders_.begin() + (long)i);
@@ -2104,9 +2237,9 @@ void CombatScreen::move_card(const Json& change) {
             MovingCard m;
             m.holder = holders_[i];
             m.from = m.holder.pos;
-            m.to = id == played_instance_ ? played_destination_ : Vec2(850, -70.0f);
+            m.to = was_played ? destination : Vec2(850, -70.0f);
             m.from_scale = m.holder.scale;
-            m.to_scale = id == played_instance_ ? 0.5f : 0.15f;
+            m.to_scale = was_played ? 0.5f : 0.15f;
             m.t = 0;
             m.duration = 0.4;
             /* played and exhausted: NCardExhaustVfx where it ends */
@@ -2119,6 +2252,7 @@ void CombatScreen::move_card(const Json& change) {
             holders_.erase(holders_.begin() + (long)i);
             break;
         }
+        track_play();
         Json hand = Json::make_array();
         for (size_t i = 0; i < hand_.size(); ++i)
             if (hand_[i]["instance_id"].i(-1) != id) hand.append(hand_[i]);
@@ -2141,6 +2275,7 @@ void CombatScreen::move_card(const Json& change) {
             holders_.push_back(h);
             hand_.append(cards[i]);
             layout_hand();
+            refresh_tips();
             break;
         }
     }
@@ -2159,6 +2294,20 @@ void CombatScreen::apply_state(const Json& ch) {
         return;
     }
     if (type == "power_flash") { flash_power(ch); return; }
+    if (type == "power_vfx") {
+        VfxCreature at;
+        if (vfx_box_ && creature(ch["who"].str(), &at)) {
+            std::string icon = lib_->ext(ch["icon"].str()) ? ch["icon"].str() : ch["beta_icon"].str();
+            spawn_power_applied(lib_, vfx_box_, at.center, ch["title"].str(), icon, ch["buff"].b());
+        }
+        return;
+    }
+    if (type == "deck_card") {
+        /* CardCmd.PreviewCardPileAdd in the fight (a status card an enemy
+         * gives): shown in NCombatRoom.Ui's preview row, then to its pile */
+        if (DeckPreviews::current()) DeckPreviews::current()->play_cue(ch, player_.data["character"].str());
+        return;
+    }
     if (type == "orb_activate") { activate_orb(ch); return; }
     if (type == "orbs" && ch["orbs"].is_array()) {
         sync_orbs(ch["orbs"], ch["slots"].i(), true);
@@ -2215,16 +2364,16 @@ void CombatScreen::apply_state(const Json& ch) {
     }
 }
 
-void CombatScreen::finish_state() {
-    if (pending_.is_null()) return;
-    if (pending_["player"].is_object()) {
-        player_.data = pending_["player"];
-        player_.powers = pending_finish_ ? Json() : pending_["player_powers"];
+void CombatScreen::finish_state(const Json& d, bool finishing) {
+    if (d.is_null()) return;
+    if (d["player"].is_object()) {
+        player_.data = d["player"];
+        player_.powers = finishing ? Json() : d["player_powers"];
         refresh_state(player_, true);
         make_powers(player_, player_.powers);
     }
-    if (!pending_finish_) {
-        const Json& es = pending_["enemies"];
+    if (!finishing) {
+        const Json& es = d["enemies"];
         for (size_t i = 0; i < enemies_.size() && i < es.size(); ++i) {
             Creature& c = enemies_[i];
             if (!c.node) continue;
@@ -2241,21 +2390,25 @@ void CombatScreen::finish_state() {
             refresh_state(c, true);
             make_powers(c, c.powers);
         }
-        if (osty_.node && pending_["osty"].is_object()) {
-            osty_.data = pending_["osty"];
+        if (osty_.node && d["osty"].is_object()) {
+            osty_.data = d["osty"];
             refresh_state(osty_, true);
         }
-        sync_hand(pending_["hand"], true);
-        if (state_["orbs"] != pending_["orbs"] || state_["orb_slots"] != pending_["orb_slots"])
-            sync_orbs(pending_["orbs"], pending_["orb_slots"].i(), true);
-        state_ = pending_;
+        sync_hand(d["hand"], true);
+        if (state_["orbs"] != d["orbs"] || state_["orb_slots"] != d["orb_slots"])
+            sync_orbs(d["orbs"], d["orb_slots"].i(), true);
+        state_ = d;
     } else {
         sync_hand(Json(), true);
         hide(find_named(root_, "CombatUi"));
-        state_.set("player", pending_["player"]);
+        state_.set("player", d["player"]);
     }
     refresh_counters();
-    pending_ = Json();
+    /* the last response's cards stay looked up until its own sync */
+    bool later = false;
+    for (size_t i = next_cue_; i < cues_.size(); ++i)
+        if (cues_[i].kind == CUE_SYNC) later = true;
+    if (!later) pending_ = Json();
 }
 
 /* ---- step playback ---- */
@@ -2322,11 +2475,15 @@ bool CombatScreen::side_center(bool enemies, Vec2* out) {
 
 /* NCreature.ScaleTo / SetDefaultScaleTo / OstyScaleToSize: the visuals'
  * scale eases (Sine InOut) to base * temp * default (* Osty's size). */
+void CombatScreen::scale_base(Creature& c) {
+    if (!c.visuals || !c.visuals->is_node2d() || c.scale_base.x != 0 || c.scale_base.y != 0) return;
+    c.scale_base = ((Node2D*)c.visuals)->scale * (1.0f / (c.scale_temp * c.scale_default * c.scale_osty));
+}
+
 void CombatScreen::scale_visuals(Creature& c, float duration) {
     if (!c.visuals || !c.visuals->is_node2d()) return;
     Node2D* v = (Node2D*)c.visuals;
-    if (c.scale_base.x == 0 && c.scale_base.y == 0)
-        c.scale_base = v->scale * (1.0f / (c.scale_temp * c.scale_default * c.scale_osty));
+    scale_base(c);
     float k = c.scale_temp * c.scale_default * c.scale_osty;
     tweens_.kill(&v->scale);
     if (duration <= 0) v->scale = c.scale_base * k;
@@ -2337,6 +2494,8 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
     Creature* c = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
     if (!c || !c->node) return;
     float a1 = args.size() > 1 ? (float)args[(size_t)1].num(0) : 0, a2 = args.size() > 2 ? (float)args[(size_t)2].num(0) : 0;
+    /* the unscaled size from the factors as they are, before one changes */
+    if (method == "ScaleTo" || method == "SetDefaultScaleTo" || method == "OstyScaleToSize") scale_base(*c);
     if (method == "ScaleTo") {
         c->scale_temp = a1;
         scale_visuals(*c, a2);
@@ -2420,6 +2579,7 @@ void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSpri
     else
         tweens_.tween(&cr.node->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
     if (cr.player || who.empty() || who[0] != 'e') return;
+    dying_.push_back(who);
     double wait = 0;
     SpAnimationState* st = s ? s->animation_state() : NULL;
     const SpAnimation* a = st ? st->current(0) : NULL;
@@ -2508,7 +2668,7 @@ static const char* trigger_animation(const std::string& trigger) {
 void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_AUDIO) { if (lib_->audio()) lib_->audio()->cue(c.data); return; }
     if (c.kind == CUE_STATE) { apply_state(c.data); return; }
-    if (c.kind == CUE_SYNC) { finish_state(); return; }
+    if (c.kind == CUE_SYNC) { finish_state(c.data, c.amount != 0); return; }
     if (c.kind == CUE_BANNER) {
         show_banner(c.name, c.amount);
         return;
@@ -2684,15 +2844,17 @@ void CombatScreen::show_banner(const std::string& kind, int round) {
 }
 
 void CombatScreen::show_start_banner(bool turn_banner) {
-    busy_until_ = 2.6; /* NCombatStartBanner: player turn starts here. */
+    /* NCombatStartBanner: the player's turn banner after its 2.6 s; the
+     * turn itself (the pad) starts with the logic's steps (CombatManager:
+     * CustomScaledWait(0.5, 1) after the banner, then StartTurn). */
     Cue c;
     c.kind = CUE_BANNER;
     c.amount = 1;
-    c.at = 0;
+    c.at = cue_t_;
     c.name = "start";
     add_cue(c);
     if (!turn_banner) return;
-    c.at = 2.6;
+    c.at = cue_t_ + 2.6;
     c.name = "player";
     add_cue(c);
 }
@@ -2700,11 +2862,20 @@ void CombatScreen::show_start_banner(bool turn_banner) {
 /* The steps as a timeline. CreatureCmd.TriggerAnim's pause precedes its
  * impact; VFX, damage numbers and state changes at that impact are parallel.
  * Cmd.Wait supplies the remaining pacing without an extra per-step delay. */
-void CombatScreen::play_steps(const Json& steps) {
-    cues_.clear();
-    next_cue_ = 0;
-    cue_t_ = 0;
+void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finishing) {
     double t = 0;
+    if (next_cue_ < cues_.size()) {
+        /* NCardPlayQueue: after the actions still playing */
+        cues_.erase(cues_.begin(), cues_.begin() + (long)next_cue_);
+        next_cue_ = 0;
+        t = cues_.back().at > cue_t_ ? cues_.back().at : cue_t_;
+    } else {
+        cues_.clear();
+        next_cue_ = 0;
+        cue_t_ = 0;
+        hand_locked_until_ = 0;
+    }
+    const double base = t;
     /* The turn banners where the logic's cues put them (CombatManager:
      * NEnemyTurnBanner.Create / NPlayerTurnBanner.Create, each followed by
      * its CustomScaledWait); a trace without those cues: the enemies' turn
@@ -2725,9 +2896,9 @@ void CombatScreen::play_steps(const Json& steps) {
         b.kind = CUE_BANNER;
         b.name = "enemy";
         b.amount = 0;
-        b.at = 0;
+        b.at = base;
         cues_.push_back(b);
-        t = 0.9;
+        t = base + 0.9;
     }
     for (size_t i = 0; i < steps.size(); ++i) {
         const Json& step = steps[i];
@@ -2740,6 +2911,7 @@ void CombatScreen::play_steps(const Json& steps) {
                 b.at = t + 0.3;
                 cues_.push_back(b);
                 t += 0.3;
+                if (b.at > hand_locked_until_) hand_locked_until_ = b.at;
             }
         for (size_t k = 0; k < step.size(); ++k) {
             const Json& ch = step[k];
@@ -2752,6 +2924,8 @@ void CombatScreen::play_steps(const Json& steps) {
                 c.name = ch["call"].str() == "NEnemyTurnBanner.Create" ? "enemy" : "player";
                 c.amount = ch["args"].size() > 0 ? ch["args"][(size_t)0].i() : 0;
                 cues_.push_back(c);
+                /* CombatManager.StartTurn: player actions allowed again */
+                if (c.name == "player" && t > hand_locked_until_) hand_locked_until_ = t;
             } else if (type == "sfx" || (type == "ui" && (ch["call"].str().find("Audio") != std::string::npos ||
                                                     ch["call"].str().find("Music") != std::string::npos))) {
                 c.kind = CUE_AUDIO; c.data = ch; cues_.push_back(c);
@@ -2835,14 +3009,16 @@ void CombatScreen::play_steps(const Json& steps) {
                 c.kind = CUE_STATE;
                 c.data = ch;
                 cues_.push_back(c);
+                if (type == "round" && t > hand_locked_until_) hand_locked_until_ = t;
             }
         }
     }
-    if (!pending_.is_null()) {
+    if (!sync_to.is_null()) {
         Cue sync;
         sync.kind = CUE_SYNC;
         sync.at = t;
-        sync.amount = 0;
+        sync.amount = finishing ? 1 : 0;
+        sync.data = sync_to;
         cues_.push_back(sync);
     }
     /* The pad waits for the actions (not for the banners). */

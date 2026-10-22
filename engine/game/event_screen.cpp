@@ -48,7 +48,7 @@ static std::string option_text(const Json& o) {
 
 EventScreen::EventScreen(SceneLibrary* lib)
     : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), sparring_(false), spar_at_(0),
-      ancient_(false), line_(0), laid_out_(false),
+      root_(NULL), combat_layout_(false), ancient_(false), line_(0), laid_out_(false),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
 
@@ -74,6 +74,7 @@ Node* EventScreen::build(const Json& d, std::string* error) {
     options_.clear();
     lines_.clear();
     tweens_.clear();
+    tips_.hide();
     focus_ = -1;
     enabled_ = false;
     time_ = 0;
@@ -91,6 +92,8 @@ Node* EventScreen::build(const Json& d, std::string* error) {
     root->add_child(back);
 
     bool combat = d["layout"].str() == "Combat";
+    root_ = root;
+    combat_layout_ = combat;
     Node* layout = ancient_ ? build_ancient(d) : combat ? build_combat(d) : build_default(d);
     if (!layout) {
         if (error) *error = ancient_ ? "no ancient_event_layout.tscn" : combat ? "no combat event visuals/layout" : "no default_event_layout.tscn";
@@ -222,6 +225,7 @@ void EventScreen::add_option(Node* box, const Json& o, int i, bool ancient) {
     op.will_kill = o["will_kill"].b();
     op.v = DEFAULT_V;
     op.slide = op.slid = 0;
+    op.tips = o["tips"];
     Node* text = n->find_unique("Text");
     set_label(text, option_text(o));
     Node* outline = n->get_node("Outline");
@@ -277,9 +281,12 @@ void EventScreen::focus(int i) {
         }
     }
     focus_ = i;
+    tips_.hide();
     if (i < 0 || i >= (int)options_.size()) return;
     Option& op = options_[(size_t)i];
     if (op.locked) return;
+    if (combat_layout_) tips_.show_for_control(lib_, root_, op.node, op.tips);
+    else tips_.show_left(lib_, root_, op.node, op.tips);
     op.node->pivot_offset = offset_size(op.node) * 0.5f;
     tweens_.tween(&op.node->scale, Vec2(HOVER_SCALE, HOVER_SCALE), 0.05f);
     if (op.outline) {
@@ -463,6 +470,7 @@ void EventScreen::frame(double dt) {
     float before = time_;
     time_ += (float)dt;
     tweens_.update(dt);
+    tips_.frame();
     if (sparring_ && combat_ && time_ >= spar_at_) {
         static const Json steps = spar_steps();
         combat_->play_steps(steps);

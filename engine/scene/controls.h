@@ -174,7 +174,9 @@ public:
 class AnimatedSprite2D : public Node2D {
 public:
     AnimatedSprite2D() : frame(0), progress(0), speed_scale(1), playing(false), centered(true), flip_h(false),
-                         flip_v(false) {}
+                         flip_v(false) {
+        flags |= NF_PROCESS;
+    }
     struct Frame {
         Texture2DRes* texture;
         float duration;

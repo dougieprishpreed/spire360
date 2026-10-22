@@ -32,6 +32,7 @@ DROP = {
     "description_multi", "text_bbcode", "relic", "will_kill", "event_id", "layout", "button_color",
     "title_text", "description_bbcode", "kind", "prompt", "cancelable", "manual_confirm", "upgrade_preview",
     "usage", "usable", "discardable", "use_label",
+    "enchantment_screen",  # NDeckEnchantSelectScreen's description of the enchantment
     "pets",  # the pets beside the player (their own state stays in the steps)
     "ancient_border", "ancient_text_bg", "enchantment_view", "overlay",  # a card's look (NCard)
     "death_fade", "death_padding", "death_anim_length",  # a monster's death (NCreature.AnimDie)

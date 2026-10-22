@@ -254,6 +254,11 @@ int main(int argc, char** argv) {
     float scale = 2.0f / 3.0f;
     unsigned auto_seed = 1;
     std::vector<unsigned> pad_script, run_script; /* --pad-run: in a --menu run, from --pad-after on */
+    /* --mash: auto play to the first fight, then these presses every
+     * --mash-every frames whatever is playing (queued plays); a shot every
+     * 10 frames */
+    std::vector<unsigned> mash;
+    int mash_every = 8;
     std::vector<int> shots_at;
     int frames_after = -1, frames_every = 10; /* screen after which every so many frames are saved */
     for (int i = 3; i < argc; ++i) {
@@ -297,6 +302,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--auto") == 0 && i + 1 < argc) auto_seed = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) parse_pad(argv[++i], pad_script);
         else if (strcmp(argv[i], "--pad-run") == 0 && i + 1 < argc) parse_pad(argv[++i], run_script);
+        else if (strcmp(argv[i], "--mash") == 0 && i + 1 < argc) parse_pad(argv[++i], mash);
+        else if (strcmp(argv[i], "--mash-every") == 0 && i + 1 < argc) mash_every = atoi(argv[++i]);
     }
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -450,6 +457,58 @@ int main(int argc, char** argv) {
     FrameTimes frame_times;
     game.start_run(character, seed);
     if (hp > 0) game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
+    if (!mash.empty()) {
+        game.set_auto_play(auto_seed);
+        int f = 0;
+        while (game.decision()["decision"].str() != "combat_play" && f < 60 * 900) {
+            game.update(PadState());
+            run_frame(tree, audio, frame_times);
+            ++f;
+            if (!replay) usleep(500);
+            if (!replay && link.finished()) return 1;
+        }
+        game.set_auto_play_until(game.decision_count());
+        printf("mash: the fight at frame %d, decision %d\n", f, game.decision_count());
+        size_t at = 0;
+        int last = game.decision_count();
+        double press_sum = 0, press_worst = 0, idle_sum = 0, frame_worst = 0;
+        int presses = 0, idles = 0;
+        for (int k = 0; k < (int)mash.size() * mash_every + 600; ++k) {
+            PadState pad;
+            if (k % mash_every == 0 && at < mash.size()) pad.pressed = pad.held = mash[at++];
+            double u0 = now_ms();
+            game.update(pad);
+            double u = now_ms() - u0;
+            if (pad.pressed) {
+                press_sum += u;
+                if (u > press_worst) press_worst = u;
+                ++presses;
+            } else {
+                idle_sum += u;
+                ++idles;
+            }
+            double f0 = now_ms();
+            run_frame(tree, audio, frame_times);
+            double f = now_ms() - f0 + u;
+            if (f > frame_worst) frame_worst = f;
+            if (game.decision_count() != last) {
+                last = game.decision_count();
+                printf("mash: frame %d decision %d %s\n", k, last, game.decision()["decision"].str().c_str());
+            }
+            if (pad.pressed) printf("mash: frame %d press %u busy %d (update + frame %.3f ms)\n", k, pad.pressed, game.busy() ? 1 : 0, f);
+            if (k % 10 == 0 && !no_shots) {
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
+                tree.render(canvas);
+                sw.end();
+                write_png(format("%s/mash_%04d.png", out_dir.c_str(), k).c_str(), sw.framebuffer());
+            }
+            if (!replay) usleep(500);
+        }
+        printf("mash: update %.3f ms per press (worst %.3f), %.3f ms otherwise; worst frame %.3f ms\n",
+               presses ? press_sum / presses : 0.0, press_worst, idles ? idle_sum / idles : 0.0, frame_worst);
+        fflush(stdout);
+        return 0;
+    }
     int shown = 0, idle = 0, frame_n = 0;
     while (shown < steps) {
         PadState pad;
@@ -470,10 +529,12 @@ int main(int argc, char** argv) {
             for (int f = 0; f < 30; ++f) {
                 run_frame(tree, audio, frame_times);
             }
-            sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
-            tree.render(canvas);
-            sw.end();
-            if (!no_shots) write_png(format("%s/%04d_pad_%02d.png", out_dir.c_str(), shown, (int)pad_at).c_str(), sw.framebuffer());
+            if (!no_shots) {
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                tree.render(canvas);
+                sw.end();
+                write_png(format("%s/%04d_pad_%02d.png", out_dir.c_str(), shown, (int)pad_at).c_str(), sw.framebuffer());
+            }
         }
         if (game.decision_count() != before) {
             /* A new screen: let it settle (Godot's reference: 5th frame;
@@ -489,9 +550,11 @@ int main(int argc, char** argv) {
                     write_png(format("%s/%04d_f%03d.png", out_dir.c_str(), shown, frame_n).c_str(), sw.framebuffer());
                 }
             }
-            sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
-            tree.render(canvas);
-            sw.end();
+            if (!no_shots) { /* --no-shots: no rendering (soaks, profiles) */
+                sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                tree.render(canvas);
+                sw.end();
+            }
             const std::string& kind = game.decision()["decision"].str();
             std::string base = format("%s/%04d_%s", out_dir.c_str(), shown, kind.c_str());
             if (!no_shots && !write_png((base + ".png").c_str(), sw.framebuffer()))

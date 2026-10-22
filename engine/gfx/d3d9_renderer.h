@@ -85,6 +85,23 @@ private:
     };
     void flush();
     void apply_state();
+    /* The state apply_state last gave the device, so a batch only sends
+     * what changed (a texture, mostly); forgotten whenever other code sets
+     * device state directly (a frame's start, targets, the screen passes). */
+    enum { CACHED_STAGES = 13, CACHED_CONSTANTS = 64 };
+    void forget_state();
+    void set_tex(DWORD stage, IDirect3DBaseTexture9* t);
+    void set_samp(DWORD stage, D3DSAMPLERSTATETYPE type, DWORD v);
+    void set_rs(D3DRENDERSTATETYPE type, DWORD v);
+    void set_psc(UINT reg, const float* v, UINT count);
+    IDirect3DBaseTexture9* c_tex_[CACHED_STAGES];
+    DWORD c_samp_[CACHED_STAGES][5]; /* ADDRESSU, ADDRESSV, MAGFILTER, MINFILTER, MIPFILTER */
+    IDirect3DPixelShader9* c_ps_;
+    DWORD c_rs_[4];                  /* BLENDOP, SRCBLEND, DESTBLEND, SCISSORTESTENABLE */
+    bool c_clip_known_;
+    RECT c_clip_;
+    float c_psc_[CACHED_CONSTANTS][4];
+    bool c_psc_known_[CACHED_CONSTANTS];
     bool make_group_target();
     void release_group_target();
     enum { SCREEN_LEVELS = 6 };

@@ -94,6 +94,14 @@ void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, c
  * else NCardExhaustVfx: the card moved into its viewport at its place and
  * dissolved as embers rise. ui: NCombatRoom.Ui. */
 void spawn_card_exhaust(SceneLibrary* lib, Node* ui, Node* card, bool quick);
+/* NCreature.OnPowerIncreased (a power gained or raised, not silently) at
+ * the creature's VfxSpawnPosition `at` (box: the combat VFX container):
+ * NPowerAppliedVfx, the power's big icon growing from 0.4 to 0.8 as it
+ * fades and its title rising (a buff, green) or falling (a debuff, red)
+ * 100 px from 200 px above; NPowerAppliedBuffVfx / NPowerAppliedDebuffVfx
+ * (vfx_buff_applied / vfx_debuff_applied) 200 px above, freed after 2 s. */
+void spawn_power_applied(SceneLibrary* lib, Node* box, const Vec2& at, const std::string& title, const std::string& icon,
+                         bool buff);
 
 void install_combat_vfx_scripts();
 

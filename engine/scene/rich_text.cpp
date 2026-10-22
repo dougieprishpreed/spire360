@@ -116,7 +116,9 @@ struct RichTextLabel::Para {
 RichTextLabel::RichTextLabel()
     : bbcode(false), fit_content(false), scroll_active(true), autowrap(AUTOWRAP_WORD_SMART),
       trim_flags(BREAK_TRIM_START_EDGE_SPACES | BREAK_TRIM_END_EDGE_SPACES), h_align(HALIGN_LEFT), v_align(VALIGN_TOP),
-      visible_characters(-1), visible_ratio(1.0f), elapsed_time(0), paras_(new std::vector<Para>()), laid_width_(-1) {}
+      visible_characters(-1), visible_ratio(1.0f), elapsed_time(0), paras_(new std::vector<Para>()), laid_width_(-1) {
+    flags |= NF_PROCESS;
+}
 
 RichTextLabel::~RichTextLabel() { delete paras_; }
 

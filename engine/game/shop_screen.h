@@ -32,6 +32,9 @@ public:
         start_kind_ = kind;
         start_index_ = index;
     }
+    /* Behind the card removal's selection (NOverlayStack): its focused
+     * slot is not raised over it. */
+    void set_behind() { behind_ = true; }
     bool inventory_open() const { return open_; }
     /* NMerchantRoom.OpenInventory (the merchant tip's "Got it!"), as A on
      * the merchant does */
@@ -55,6 +58,10 @@ private:
     void close_inventory();
     void focus_slot(int i);
     void focus_merchant(bool on);
+    /* NMerchantHand: PointAtTarget (follows the slot) / StopPointing (where
+     * it is for `linger` s, then back to its start) */
+    void point_hand(int slot);
+    void stop_hand(double linger);
     int nearest(int from, int dx, int dy) const;
     Vec2 slot_centre(const Slot& s) const;
     SceneLibrary* lib_;
@@ -73,11 +80,15 @@ private:
     ProceedButton proceed_;
     std::vector<Slot> slots_list_;
     int focus_;
-    bool open_, start_open_;
+    bool open_, start_open_, behind_;
     std::string start_kind_;
     int start_index_;
     float slots_closed_top_, slots_open_top_, slots_height_;
     TweenSet tweens_;
+    class SpineSprite* hand_; /* %MerchantHand's parent, in the inventory */
+    Vec2 hand_start_, hand_target_;
+    int hand_slot_;           /* the slot pointed at, -1: none */
+    double hand_linger_, hand_t_;
 };
 
 } /* namespace spire */

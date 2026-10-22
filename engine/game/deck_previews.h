@@ -41,11 +41,19 @@ class SceneLibrary;
 class DeckPreviews {
 public:
     explicit DeckPreviews(SceneLibrary* lib);
+    ~DeckPreviews();
     /* The layer (a new node the scene tree owns once the caller adds it, over
      * the screens). */
     Node* layer();
-    /* A response's deck_card cues; character: the run's (its card trail). */
+    /* A response's deck_card cues; character: the run's (its card trail).
+     * The ones to a combat pile ("pile": draw, discard, exhaust) wait for
+     * the fight's timeline (play_cue). */
     void play(const Json& steps, const std::string& character);
+    /* One deck_card cue now: a card into a combat pile flies to that pile's
+     * button (PileType.GetTargetPosition). */
+    void play_cue(const Json& cue, const std::string& character);
+    /* The run's previews (the client's), NULL before. */
+    static DeckPreviews* current();
     /* Ends every preview (leaving the run). */
     void clear();
 

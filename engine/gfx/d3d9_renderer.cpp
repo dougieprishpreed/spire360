@@ -103,6 +103,7 @@ static bool compile(const std::string& src, const char* entry, const char* targe
 
 bool D3D9Renderer::init(IDirect3DDevice9* device, std::string* error) {
     dev_ = device;
+    forget_state();
     D3DVERTEXELEMENT9 el[] = { { 0, 0, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0 },
                                { 0, 8, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 },
                                { 0, 16, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0 },
@@ -269,6 +270,7 @@ void D3D9Renderer::destroy_texture(Texture* t) {
         fire_.dist1 == t || fire_.dist2 == t || fire_.dist_mask == t)) fire_on_ = false;
     if (dev_) for (int stage = 0; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
     dirty_ = true;
+    forget_state();
     RELEASE(d->tex);
     delete d;
 }
@@ -307,6 +309,7 @@ void D3D9Renderer::begin(int width, int height, const Color& c) {
     dev_->SetVertexShaderConstantF(1, inv, 1);
     clip_on_ = false;
     dirty_ = true;
+    forget_state();
     batch_.clear();
 }
 
@@ -372,6 +375,7 @@ bool D3D9Renderer::begin_capture(int w, int h) {
     cap_w_ = w;
     cap_h_ = h;
     dirty_ = true;
+    forget_state();
     return true;
 }
 
@@ -431,6 +435,7 @@ Texture* D3D9Renderer::end_capture(Texture* reuse) {
     dev_->SetRenderTarget(0, main_rt_);
     RELEASE(main_rt_);
     dirty_ = true;
+    forget_state();
     if (!ok) {
         if (fresh) destroy_texture(t);
         return fresh ? NULL : t;
@@ -500,6 +505,7 @@ bool D3D9Renderer::begin_group(const Rect2& b) {
     dev_->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
     dev_->Clear(0, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0);
     dirty_ = true;
+    forget_state();
     return true;
 }
 
@@ -518,6 +524,7 @@ void D3D9Renderer::end_group() {
     dev_->SetRenderTarget(0, main_rt_);
     RELEASE(main_rt_);
     dirty_ = true;
+    forget_state();
 }
 
 /* ---- the screen copy ---- */
@@ -659,6 +666,7 @@ bool D3D9Renderer::screen_pass(int level) {
     float finv[4] = { 1.0f / width_, 1.0f / height_, 0, 0 };
     dev_->SetVertexShaderConstantF(1, finv, 1);
     dirty_ = true;
+    forget_state();
     screen_levels_ = level + 1;
     return true;
 }
@@ -810,30 +818,104 @@ void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, Blen
     }
 }
 
+/* ---- the device state cache ---- */
+
+static IDirect3DBaseTexture9* const UNKNOWN_TEX = (IDirect3DBaseTexture9*)1;
+static IDirect3DPixelShader9* const UNKNOWN_PS = (IDirect3DPixelShader9*)1;
+static const DWORD UNKNOWN_STATE = 0xFFFFFFFF;
+
+void D3D9Renderer::forget_state() {
+    for (int s = 0; s < CACHED_STAGES; ++s) {
+        c_tex_[s] = UNKNOWN_TEX;
+        for (int k = 0; k < 5; ++k) c_samp_[s][k] = UNKNOWN_STATE;
+    }
+    c_ps_ = UNKNOWN_PS;
+    for (int k = 0; k < 4; ++k) c_rs_[k] = UNKNOWN_STATE;
+    c_clip_known_ = false;
+    for (int r = 0; r < CACHED_CONSTANTS; ++r) c_psc_known_[r] = false;
+}
+
+void D3D9Renderer::set_tex(DWORD stage, IDirect3DBaseTexture9* t) {
+    if (stage < (DWORD)CACHED_STAGES) {
+        if (c_tex_[stage] == t) return;
+        c_tex_[stage] = t;
+    }
+    dev_->SetTexture(stage, t);
+}
+
+void D3D9Renderer::set_samp(DWORD stage, D3DSAMPLERSTATETYPE type, DWORD v) {
+    int k = type == D3DSAMP_ADDRESSU ? 0 : type == D3DSAMP_ADDRESSV ? 1 : type == D3DSAMP_MAGFILTER ? 2
+          : type == D3DSAMP_MINFILTER ? 3 : type == D3DSAMP_MIPFILTER ? 4 : -1;
+    if (k >= 0 && stage < (DWORD)CACHED_STAGES) {
+        if (c_samp_[stage][k] == v) return;
+        c_samp_[stage][k] = v;
+    }
+    dev_->SetSamplerState(stage, type, v);
+}
+
+void D3D9Renderer::set_rs(D3DRENDERSTATETYPE type, DWORD v) {
+    int k = type == D3DRS_BLENDOP ? 0 : type == D3DRS_SRCBLEND ? 1 : type == D3DRS_DESTBLEND ? 2
+          : type == D3DRS_SCISSORTESTENABLE ? 3 : -1;
+    if (k >= 0) {
+        if (c_rs_[k] == v) return;
+        c_rs_[k] = v;
+    }
+    dev_->SetRenderState(type, v);
+}
+
+/* Only the registers that differ, in runs. */
+void D3D9Renderer::set_psc(UINT reg, const float* v, UINT count) {
+    UINT i = 0;
+    while (i < count) {
+        UINT r = reg + i;
+        bool same = r < (UINT)CACHED_CONSTANTS && c_psc_known_[r] && memcmp(c_psc_[r], v + i * 4, sizeof(float) * 4) == 0;
+        if (same) {
+            ++i;
+            continue;
+        }
+        UINT j = i;
+        while (j < count) {
+            UINT rj = reg + j;
+            if (rj < (UINT)CACHED_CONSTANTS && c_psc_known_[rj] && memcmp(c_psc_[rj], v + j * 4, sizeof(float) * 4) == 0) break;
+            if (rj < (UINT)CACHED_CONSTANTS) {
+                memcpy(c_psc_[rj], v + j * 4, sizeof(float) * 4);
+                c_psc_known_[rj] = true;
+            }
+            ++j;
+        }
+        dev_->SetPixelShaderConstantF(reg + i, v + i * 4, j - i);
+        i = j;
+    }
+}
+
 void D3D9Renderer::apply_state() {
     bool group = (flags_ & DRAW_GROUP) && group_tex_ && !main_rt_;
     IDirect3DTexture9* t = tex_ && tex_->tex ? tex_->tex : white_;
     if (group && group_debug_ == 2) t = white_;
-    dev_->SetTexture(0, t);
+    set_tex(0, t);
     DWORD addr = (flags_ & DRAW_REPEAT) ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
     DWORD filt = (flags_ & DRAW_NEAREST) ? D3DTEXF_POINT : D3DTEXF_LINEAR;
-    dev_->SetSamplerState(0, D3DSAMP_ADDRESSU, addr);
-    dev_->SetSamplerState(0, D3DSAMP_ADDRESSV, addr);
-    dev_->SetSamplerState(0, D3DSAMP_MINFILTER, filt);
-    dev_->SetSamplerState(0, D3DSAMP_MAGFILTER, filt);
-    dev_->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    set_samp(0, D3DSAMP_ADDRESSU, addr);
+    set_samp(0, D3DSAMP_ADDRESSV, addr);
+    set_samp(0, D3DSAMP_MINFILTER, filt);
+    set_samp(0, D3DSAMP_MAGFILTER, filt);
+    set_samp(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
     if (group) {
-        dev_->SetTexture(1, group_tex_);
-        dev_->SetSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-        dev_->SetSamplerState(1, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-        dev_->SetSamplerState(1, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        dev_->SetSamplerState(1, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-        dev_->SetSamplerState(1, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        set_tex(1, group_tex_);
+        set_samp(1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        set_samp(1, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        set_samp(1, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        set_samp(1, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        set_samp(1, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
     } else {
         /* never sample the target being drawn */
-        dev_->SetTexture(1, NULL);
+        set_tex(1, NULL);
     }
-    dev_->SetPixelShader(effect_on_ && effect_ps_[effect_.id] ? effect_ps_[effect_.id] : ps_);
+    IDirect3DPixelShader9* shader = effect_on_ && effect_ps_[effect_.id] ? effect_ps_[effect_.id] : ps_;
+    if (shader != c_ps_) {
+        dev_->SetPixelShader(shader);
+        c_ps_ = shader;
+    }
     /* The stepped fire's textures (s3..s8): noises and distortions
      * repeat, the masks clamp; unset ones are white. */
     if (fire_on_) {
@@ -841,66 +923,70 @@ void D3D9Renderer::apply_state() {
         for (int k = 0; k < 6; ++k) {
             D3D9Texture* t = (D3D9Texture*)ft[k];
             DWORD stage = (DWORD)(3 + k);
-            dev_->SetTexture(stage, t && t->tex ? t->tex : white_);
+            set_tex(stage, t && t->tex ? t->tex : white_);
             DWORD a = (k == 2 || k == 5) ? D3DTADDRESS_CLAMP : D3DTADDRESS_WRAP;
-            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSU, a);
-            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSV, a);
-            dev_->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-            dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-            dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            set_samp(stage, D3DSAMP_ADDRESSU, a);
+            set_samp(stage, D3DSAMP_ADDRESSV, a);
+            set_samp(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            set_samp(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            set_samp(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         }
     } else if (effect_on_) {
         /* the effect's textures (s3..s7), white where unset */
         for (int k = 0; k < 5; ++k) {
             D3D9Texture* t = (D3D9Texture*)effect_.tex[k];
             DWORD stage = (DWORD)(3 + k);
-            dev_->SetTexture(stage, t && t->tex ? t->tex : white_);
+            set_tex(stage, t && t->tex ? t->tex : white_);
             DWORD a = (effect_.repeat >> k) & 1 ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
-            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSU, a);
-            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSV, a);
-            dev_->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-            dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-            dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            set_samp(stage, D3DSAMP_ADDRESSU, a);
+            set_samp(stage, D3DSAMP_ADDRESSV, a);
+            set_samp(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            set_samp(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            set_samp(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         }
-        dev_->SetTexture(8, NULL);
+        set_tex(8, NULL);
     } else {
-        for (DWORD stage = 3; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
+        for (DWORD stage = 3; stage < 9; ++stage) set_tex(stage, NULL);
     }
     /* The gradient map's lut (s2): 256x1, linear, clamped (the erosion
      * shaders' lut uses it too). */
     D3D9Texture* lut = gm_ && gm_->tex ? gm_ : (vfx_on_ && vfx_.lut ? (D3D9Texture*)vfx_.lut : NULL);
-    dev_->SetTexture(2, lut && lut->tex ? lut->tex : NULL);
+    set_tex(2, lut && lut->tex ? lut->tex : NULL);
     if (lut && lut->tex) {
-        dev_->SetSamplerState(2, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-        dev_->SetSamplerState(2, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-        dev_->SetSamplerState(2, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-        dev_->SetSamplerState(2, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-        dev_->SetSamplerState(2, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        set_samp(2, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        set_samp(2, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        set_samp(2, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        set_samp(2, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        set_samp(2, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
     }
     switch (blend_) {
     case BLEND_ADD:
-        dev_->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
-        dev_->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-        dev_->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+        set_rs(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+        set_rs(D3DRS_SRCBLEND, D3DBLEND_ONE);
+        set_rs(D3DRS_DESTBLEND, D3DBLEND_ONE);
         break;
     case BLEND_SUB:
-        dev_->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_REVSUBTRACT);
-        dev_->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-        dev_->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+        set_rs(D3DRS_BLENDOP, D3DBLENDOP_REVSUBTRACT);
+        set_rs(D3DRS_SRCBLEND, D3DBLEND_ONE);
+        set_rs(D3DRS_DESTBLEND, D3DBLEND_ONE);
         break;
     case BLEND_MUL:
-        dev_->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
-        dev_->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
-        dev_->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ZERO);
+        set_rs(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+        set_rs(D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
+        set_rs(D3DRS_DESTBLEND, D3DBLEND_ZERO);
         break;
     default:
-        dev_->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
-        dev_->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-        dev_->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        set_rs(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+        set_rs(D3DRS_SRCBLEND, D3DBLEND_ONE);
+        set_rs(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
         break;
     }
-    dev_->SetRenderState(D3DRS_SCISSORTESTENABLE, clip_on_ ? TRUE : FALSE);
-    if (clip_on_) dev_->SetScissorRect(&clip_);
+    set_rs(D3DRS_SCISSORTESTENABLE, clip_on_ ? TRUE : FALSE);
+    if (clip_on_ && !(c_clip_known_ && memcmp(&c_clip_, &clip_, sizeof(RECT)) == 0)) {
+        dev_->SetScissorRect(&clip_);
+        c_clip_ = clip_;
+        c_clip_known_ = true;
+    }
     float tw = 1, th = 1;
     if (tex_) {
         tw = (float)tex_->width;
@@ -948,12 +1034,12 @@ void D3D9Renderer::apply_state() {
         for (int k = 0; k < 4; ++k) {
             DWORD stage = (DWORD)(9 + k);
             DWORD a = k == 2 ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP;
-            dev_->SetTexture(stage, st[k]);
-            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSU, a);
-            dev_->SetSamplerState(stage, D3DSAMP_ADDRESSV, a);
-            dev_->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-            dev_->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-            dev_->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            set_tex(stage, st[k]);
+            set_samp(stage, D3DSAMP_ADDRESSU, a);
+            set_samp(stage, D3DSAMP_ADDRESSV, a);
+            set_samp(stage, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            set_samp(stage, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            set_samp(stage, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         }
         c[88] = (float)screen_.mode;
         c[89] = f;
@@ -1004,18 +1090,18 @@ void D3D9Renderer::apply_state() {
             c[93] = screen_.center[1];
         }
     } else {
-        for (DWORD stage = 9; stage < 13; ++stage) dev_->SetTexture(stage, NULL);
+        for (DWORD stage = 9; stage < 13; ++stage) set_tex(stage, NULL);
         for (int k = 88; k < 94; ++k) c[k] = 0.0f;
     }
     if (!(screen_on_ && screen_levels_ > 0 &&
           (screen_.mode == SCREEN_GLASS || screen_.mode == SCREEN_DOOM || screen_.mode == SCREEN_DISTORT)))
         c[94] = c[95] = 0.0f;
-    dev_->SetPixelShaderConstantF(0, c, 24);
-    if (effect_on_) dev_->SetPixelShaderConstantF(24, effect_.p, 4);
-    if (effect_on_ && effect_.extra_count > 0) dev_->SetPixelShaderConstantF(29, effect_.extra, (UINT)effect_.extra_count);
+    set_psc(0, c, 24);
+    if (effect_on_) set_psc(24, effect_.p, 4);
+    if (effect_on_ && effect_.extra_count > 0) set_psc(29, effect_.extra, (UINT)effect_.extra_count);
     /* c28.x: the texture holds premultiplied colours (a capture) */
     float premul[4] = { tex_ && tex_->premultiplied ? 1.0f : 0.0f, 0, 0, 0 };
-    dev_->SetPixelShaderConstantF(28, premul, 1);
+    set_psc(28, premul, 1);
     dirty_ = false;
 }
 

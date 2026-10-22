@@ -412,6 +412,14 @@
       "note": "PowerModel.Flash: only UI subscribers (NCreature's NPowerFlashVfx, NPower's icon particles). Recorded as a power_flash cue when the power would play its VFX."
     },
     {
+      "id": "power.modified",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Entities.Creatures.Creature",
+      "method": "InvokePowerModified",
+      "optional": true,
+      "note": "Creature.InvokePowerModified(power, change, silent): the PowerIncreased event NCreature.OnPowerIncreased answers with NPowerAppliedVfx (the power's big icon and title) and the buff or debuff burst. Recorded as a power_vfx cue."
+    },
+    {
       "id": "anim.trigger",
       "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Commands.CreatureCmd",

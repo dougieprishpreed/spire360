@@ -19,6 +19,7 @@ class CardLibraryScreen;
 class CollectionScreen;
 class StatsScreen;
 class RunHistoryScreen;
+class CanvasItem;
 class Control;
 class SceneLibrary;
 
@@ -42,6 +43,9 @@ private:
         Control* node;
         const char* key; /* its screen */
         bool shown;
+        CanvasItem* bg;  /* BgPanel: its hsv material's v brightens on focus */
+        float v;         /* the scene's v (_defaultV) */
+        float focus_scale;
     };
     void focus(int i);
     void close_sub();

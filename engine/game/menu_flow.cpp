@@ -150,6 +150,9 @@ void MenuFlow::embark() {
 
 /* The submenu over the title goes; the title takes the pad again. */
 void MenuFlow::close_screen() {
+    /* before the nodes: its open screen's node is under the compendium's */
+    delete compendium_;
+    compendium_ = NULL;
     if (screen_node_) {
         if (screen_node_->parent) screen_node_->parent->remove_child(screen_node_);
         delete screen_node_;

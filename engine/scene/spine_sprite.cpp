@@ -73,6 +73,7 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
 }
 
 SpineSprite::SpineSprite() : data_res(NULL), time_scale(1), lib_(NULL), skel_(NULL), custom_skin_(NULL), failed_(false) {
+    flags |= NF_PROCESS;
     for (int i = 0; i < 4; ++i) slot_material[i] = NULL;
 }
 
@@ -212,6 +213,10 @@ void SpineSprite::process(double dt) {
     state_.fired.clear();
     state_.apply(*skel_);
     drive_bones();
+    for (std::map<std::string, float>::const_iterator it = bone_rotation_.begin(); it != bone_rotation_.end(); ++it) {
+        int b = skel_->data()->find_bone(it->first);
+        if (b >= 0) skel_->bones[(size_t)b].rotation = it->second;
+    }
     skel_->update(d);
     skel_->update_world_transform(SP_PHYSICS_UPDATE);
     follow_bones();

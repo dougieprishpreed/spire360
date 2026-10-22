@@ -2,6 +2,7 @@
 #include "combat_screen.h"
 #include "loc.h"
 #include "ui_util.h"
+#include "../audio/game_audio.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -29,6 +30,7 @@ void PotionMenu::attach(Node* screen, const Json& player) {
 }
 
 void PotionMenu::detach() {
+    tips_.hide();
     holders_.clear();
     layer_ = NULL;
     popup_ = NULL; /* in the old screen's tree, deleted with it */
@@ -54,6 +56,7 @@ bool PotionMenu::open() {
 }
 
 void PotionMenu::close() {
+    tips_.hide();
     close_popup();
     if (slot_ >= 0 && slot_ < (int)holders_.size()) {
         Control* h = holders_[(size_t)slot_];
@@ -84,6 +87,19 @@ void PotionMenu::focus_slot(int s) {
     }
     Node* pot = find_named(h, "Potion");
     if (pot && pot->is_control()) ((Control*)pot)->scale = Vec2(FOCUS_SCALE, FOCUS_SCALE);
+    /* its tips under the slot (POTION_SLOT's for an empty one) and a
+     * slosh (TmpSfx.PotionSlosh, at 0.5) */
+    const Json* p = potion_at(s);
+    if (p) {
+        tips_.show_below(lib_, layer_, h, (*p)["tips"]);
+        if (lib_->audio()) lib_->audio()->ui(format("potion_slosh_%d.mp3", (int)(chaotic_rand() % 3) + 1), 0.5f);
+    } else {
+        Json tip = Json::make_array(), t;
+        t.set("title", Json::make_string(Loc::get("static_hover_tips", "POTION_SLOT.title")));
+        t.set("description", Json::make_string(Loc::get("static_hover_tips", "POTION_SLOT.description")));
+        tip.append(t);
+        tips_.show_below(lib_, layer_, h, tip);
+    }
 }
 
 /* NPotionPopup._Ready: under the slot, Use (drink / throw) and Discard,
@@ -91,6 +107,7 @@ void PotionMenu::focus_slot(int s) {
 void PotionMenu::open_popup() {
     const Json* p = potion_at(slot_);
     if (!p || !layer_) return;
+    tips_.hide();
     Node* n = instance(lib_, "scenes/potions/potion_popup.tscn");
     if (!n || !n->is_control()) {
         delete n;
@@ -139,6 +156,7 @@ void PotionMenu::focus_button(int b) {
 }
 
 std::string PotionMenu::input(const PadState& pad, CombatScreen* combat, const Json& enemies) {
+    tips_.frame();
     const Json* p = potion_at(slot_);
     if (mode_ == SLOTS) {
         int n = (int)holders_.size();
@@ -154,6 +172,7 @@ std::string PotionMenu::input(const PadState& pad, CombatScreen* combat, const J
         if (pad.pressed & PadState::B) {
             close_popup();
             mode_ = SLOTS;
+            focus_slot(slot_);
         } else if ((pad.pressed & PadState::A) && p && button_ >= 0) {
             int idx = (*p)["index"].i();
             if (button_ == 1) {

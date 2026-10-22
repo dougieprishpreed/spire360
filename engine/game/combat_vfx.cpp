@@ -1897,6 +1897,77 @@ Node* make_damage_number(SceneLibrary* lib, const Vec2& at, int amount) {
     return num;
 }
 
+namespace {
+/* NPowerAppliedVfx.StartVfx: the icon (Expo Out 1.25 s to 0.8, its alpha
+ * to 0.5 in 0.25 s then out over 1 s), the title moving 100 px (Cubic Out
+ * 1.25 s), in over 0.25 s and out over 0.75 s; freed with the icon's tween. */
+class PowerApplied : public Effect {
+public:
+    PowerApplied(bool buff, double life) : buff_(buff), life_(life) {}
+    virtual void begin(Node* n) {
+        Node* in = n->get_node("Icon");
+        Node* ln = n->get_node("Label");
+        if (in && in->is_control()) {
+            Control* icon = (Control*)in;
+            tweens_.tween_from(&icon->scale, Vec2(0.4f, 0.4f), Vec2(0.8f, 0.8f), 1.25f, TRANS_EXPO, EASE_OUT);
+            tweens_.tween(&icon->modulate.a, 0.5f, 0.25f, TRANS_SINE, EASE_OUT);
+            tweens_.tween(&icon->modulate.a, 0.0f, 1.0f, TRANS_SINE, EASE_IN, 0.25f);
+        }
+        if (ln && ln->is_control()) {
+            Control* label = (Control*)ln;
+            /* NCreature.PowerAppliedVfxPositionOffset */
+            label->offset[SIDE_TOP] -= 200;
+            label->offset[SIDE_BOTTOM] -= 200;
+            float d = buff_ ? -100.0f : 100.0f;
+            tweens_.tween(&label->offset[SIDE_TOP], label->offset[SIDE_TOP] + d, 1.25f, TRANS_CUBIC, EASE_OUT);
+            tweens_.tween(&label->offset[SIDE_BOTTOM], label->offset[SIDE_BOTTOM] + d, 1.25f, TRANS_CUBIC, EASE_OUT);
+            tweens_.tween(&label->modulate.a, 1.0f, 0.25f, TRANS_EXPO, EASE_OUT);
+            tweens_.tween_from(&label->modulate.a, 1.0f, 0.0f, 0.75f, TRANS_EXPO, EASE_IN, 0.25f);
+        }
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= life_ && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    bool buff_;
+    double life_;
+};
+
+void restart_all_particles(Node* n) {
+    if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") ((Particles2D*)n)->restart();
+    for (size_t i = 0; i < n->children.size(); ++i) restart_all_particles(n->children[i]);
+}
+} /* namespace */
+
+void spawn_power_applied(SceneLibrary* lib, Node* box, const Vec2& at, const std::string& title, const std::string& icon,
+                         bool buff) {
+    if (!box) return;
+    Node* burst = instance(lib, buff ? "scenes/vfx/ui/vfx_buff_applied.tscn" : "scenes/vfx/ui/vfx_debuff_applied.tscn");
+    if (burst && burst->is_node2d()) {
+        ((Node2D*)burst)->position = at + Vec2(0, -200);
+        restart_all_particles(burst);
+        burst->behavior = new PowerApplied(buff, 2.0);
+        box->add_child(burst);
+    } else {
+        delete burst;
+    }
+    Node* fx = instance(lib, "scenes/vfx/power_applied_vfx.tscn");
+    if (!fx || !fx->is_control()) {
+        delete fx;
+        return;
+    }
+    ((Control*)fx)->set_position(at);
+    set_texture(lib, fx->get_node("Icon"), icon);
+    set_texture(lib, fx->get_node("Icon/IconEcho"), icon);
+    Node* label = fx->get_node("Label");
+    set_label(label, title);
+    /* StsColors.green / red */
+    if (label && label->is_canvas_item()) ((CanvasItem*)label)->modulate = hex(buff ? 0x7FFF00 : 0xFF5555);
+    fx->behavior = new PowerApplied(buff, 1.25);
+    box->add_child(fx);
+}
+
 Node* vfx_exported(Node* root, const char* key) { return exported_one(root, key); }
 void vfx_exported_all(Node* root, const char* key, std::vector<Node*>& out) { exported(root, key, out); }
 void vfx_restart(Node* n) { restart(n); }

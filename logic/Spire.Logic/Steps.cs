@@ -141,11 +141,23 @@ internal static class Steps
     /// </summary>
     private static void FlushChanges()
     {
-        if (!Enabled || _last == null || _player == null) return;
+        if (!Enabled || _player == null) return;
         Player? player;
         try { player = _player(); }
         catch { return; }
         long print = Fingerprint(player);
+        if (_last == null)
+        {
+            // A fight began: its state at the first cue (CombatManager's
+            // music update, before the starting turn's draws, energy and
+            // relics) is what the changes after it are measured from; the
+            // whole start runs in one continuation.
+            if (print == 0) return;
+            try { _last = Take(player); }
+            catch { return; }
+            if (_last != null) _lastPrint = print;
+            return;
+        }
         if (print == _lastPrint) return;
         Snapshot? now;
         try { now = Take(player); }

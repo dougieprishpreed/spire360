@@ -53,6 +53,10 @@ public partial class RunDriver
         public bool PendingCancelable { get; private set; }
         public bool PendingManualConfirm { get; private set; }
         private (string kind, string? prompt, bool cancelable, bool manual)? _next;
+        // FromDeckForEnchantment's enchantment and amount (the screen's
+        // EnchantmentDescriptionContainer)
+        public (EnchantmentModel model, int amount)? PendingEnchantment { get; private set; }
+        private (EnchantmentModel model, int amount)? _nextEnchantment;
 
         /// <summary>
         /// After a CardSelectCmd entry point returns: label the selection it
@@ -78,16 +82,23 @@ public partial class RunDriver
             {
                 try { prompt = new MegaCrit.Sts2.Core.Localization.LocString("gameplay_ui", "CHOOSE_CARD_UPGRADE_HEADER").GetFormattedText(); } catch { }
             }
+            (EnchantmentModel, int)? enchantment = null;
+            if (kind == "enchant")
+                for (int i = 0; i + 1 < args.Length; ++i)
+                    if (args[i] is EnchantmentModel e && args[i + 1] is int amount)
+                        enchantment = (e, amount);
             if (HasPending)
             {
                 PendingKind = kind;
                 PendingPromptText = prompt;
                 PendingCancelable = cancelable;
                 PendingManualConfirm = manual;
+                PendingEnchantment = enchantment;
             }
             else if (result is Task t && !t.IsCompleted)
             {
                 _next = (kind, prompt, cancelable, manual);
+                _nextEnchantment = enchantment;
             }
         }
 
@@ -109,7 +120,9 @@ public partial class RunDriver
             PendingPromptText = _next?.prompt;
             PendingCancelable = _next?.cancelable ?? false;
             PendingManualConfirm = _next?.manual ?? false;
+            PendingEnchantment = _nextEnchantment;
             _next = null;
+            _nextEnchantment = null;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
             Spire.Logic.Log.Info($"Card selection pending: {optList.Count} options, select {minSelect}-{maxSelect}");
             return _pendingTcs.Task;

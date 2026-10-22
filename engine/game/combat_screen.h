@@ -16,6 +16,7 @@
 #include "combat_vfx.h"
 #include "run_screen.h"
 
+#include <algorithm>
 #include <map>
 
 namespace spire {
@@ -66,6 +67,10 @@ public:
     void set_creature_flipped(const std::string& who, bool flipped);
     /* A new node tree for the decision (the caller owns it); NULL on error. */
     Node* build(const Json& decision, std::string* error);
+    /* A fight's first decision as its steps start (CombatManager.StartTurn's
+     * draws, energy and block come in them): build from this, then play its
+     * steps. */
+    static Json before_steps(const Json& decision);
     /* NCombatRoom lives for the fight. Apply a response to that room;
      * state changes are presented when their steps reach the playhead. */
     /* After the setting changed (NGame.PhobiaModeToggled). */
@@ -76,6 +81,13 @@ public:
     /* The controller's focused card in the hand (-1: the middle one); set
      * before build, or after it to move the focus (relays the hand). */
     void set_hand_focus(int index);
+    /* The focused card (an index into the hand's holders; -1: none) and the
+     * next one left (-1) or right (+1) of holder `from`, wrapping; the cards
+     * waiting in the play queue are not in the hand. */
+    int focused_card() const { return focused_holder(); }
+    int next_hand_card(int from, int dir) const;
+    /* Steps.IdOf of the card in holder i (-1: none). */
+    int card_id(int holder) const { return holder >= 0 && holder < (int)holders_.size() ? holders_[(size_t)holder].id : -1; }
     /* No hand card focused (an FTUE has the focus): none raised, no tips. */
     void set_hand_unfocused(bool on) {
         hand_unfocused_ = on;
@@ -94,6 +106,15 @@ public:
     bool set_play_target(int enemy);
     void end_play();
     bool playing() const { return play_card_ >= 0; }
+    /* The card being played was sent to the logic (NCardPlay.TryPlayCard):
+     * where it flies when its play starts; while the last response still
+     * plays (queued), it waits in NCardPlayQueue's place, out of the hand,
+     * and the targeting ends. */
+    void commit_play(bool queued);
+    /* NPlayerHand.AreCardActionsAllowed: the hand takes plays while the
+     * steps still run, once the player's turn has started in them (not
+     * through the enemies' turn); NCardPlayQueue keeps them in order. */
+    bool accepts_play() const;
     /* A potion aimed from `from` (screen point) at the same targets; ended
      * by end_play. */
     void begin_aim(const Vec2& from, const std::string& target_type, int target);
@@ -133,7 +154,10 @@ public:
     /* After build: what happened since the decision before (its "steps"),
      * played back over the room as the game shows it: the creatures'
      * animations, the effects (VfxCmd), damage numbers, deaths. */
-    void play_steps(const Json& steps);
+    /* A response that comes while the last one still plays (a play from the
+     * queue) follows it on the same timeline. sync_to: the state the room
+     * shows once these steps are done (finishing: the fight's end). */
+    void play_steps(const Json& steps, const Json& sync_to = Json(), bool finishing = false);
     /* The fight's first turn: "Battle Start", then the player's turn
      * banner (NCombatStartBanner); without the turn banner after the
      * combat rules FTUE (NCombatRulesFtue closes into NCombatStartBanner). */
@@ -187,12 +211,17 @@ private:
         int id;                  /* Steps.IdOf(card), stable across responses */
         Json data;
         Node* card_node;
+        bool queued;             /* in NCardPlayQueue, out of the hand's layout */
     };
     void show_card_text(Holder& h, const std::string& text);
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
     void monster_death(Creature& cr, const std::string& who, class SpineSprite* s);
+    /* NCreature.AnimDie running (its own effect hides it): the room behind
+     * the rewards leaves them be */
+    std::vector<std::string> dying_;
+    bool is_dying(const std::string& who) const { return std::find(dying_.begin(), dying_.end(), who) != dying_.end(); }
 public:
     void refresh_hand_indices();
 private:
@@ -204,7 +233,10 @@ private:
     void move_card(const Json& change);
     void refresh_state(Creature& c, bool animate);
     void apply_state(const Json& change);
-    void finish_state();
+    void finish_state(const Json& d, bool finishing);
+    bool active(const Holder& h) const;
+    void place_queue();
+    void track_play();
     void refresh_counters();
     void layout_hand(bool snap = false);
     void select_reticle(Creature& c, bool on);
@@ -254,6 +286,12 @@ private:
     std::map<std::string, double> shakes_;
     TweenSet tweens_;
     int play_card_;                   /* the card being played, -1: none */
+    int play_id_;                     /* its Steps id (holders_ may change under it) */
+    /* NCardPlayQueue: the cards sent to the logic, by id: where each flies
+     * when its play starts; the queued ones in order */
+    std::map<int, Vec2> played_;
+    std::vector<int> queue_;
+    double hand_locked_until_; /* the player's turn starts there on the timeline */
     bool aiming_;                     /* a potion aimed (begin_aim) */
     Vec2 aim_from_;
     bool play_single_;                /* aiming at one enemy */
@@ -296,6 +334,7 @@ private:
     void creature_call(const std::string& method, const Json& args);
     void anim_shake(const std::string& who);
     void scale_visuals(Creature& c, float duration);
+    void scale_base(Creature& c);
     Node* root_;
     std::vector<std::string> enemy_who_;  /* "e<combat_id>" per enemies_ */
     struct Ghost {
@@ -319,10 +358,8 @@ private:
     Json hand_;
     Control* tips_;
     int tips_for_;
-    Json state_, pending_;
-    bool pending_finish_;
-    int played_instance_;
-    Vec2 played_destination_;
+    Json state_, pending_; /* pending_: the last response (its cards' and powers' data) */
+    int played_instance_;  /* the last played card that left the hand */
     struct MovingCard {
         Holder holder;
         Vec2 from, to;

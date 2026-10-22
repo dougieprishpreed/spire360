@@ -19,6 +19,13 @@ static const float HOVER_SCALE = 1.0f;
  * (top 862). */
 static const float CARD_ROW_X = 960.0f, CARD_ROW_Y = 590.0f;
 
+/* A node taken out of a scene that is then freed: its nodes no longer
+ * name that scene's root as their owner. */
+static void disown(Node* n, Node* root) {
+    if (n->owner == root) n->owner = NULL;
+    for (size_t i = 0; i < n->children.size(); ++i) disown(n->children[i], root);
+}
+
 CardRewardScreen::CardRewardScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), focus_(0), can_skip_(true), inspect_(NULL), inspect_node_(NULL) {
     root_ = NULL;
@@ -89,8 +96,10 @@ Node* CardRewardScreen::build(const Json& d, std::string* error) {
     Node* scene = instance(lib_, "scenes/screens/card_selection/card_reward_selection_screen.tscn");
     Node* prompt = scene ? scene->find_unique("InspectPrompt") : NULL;
     if (prompt) {
-        prompt->parent->remove_child(prompt);
+        /* its %HotkeyIcon is found through the scene: before it leaves */
         setup_inspect_prompt(lib_, prompt);
+        prompt->parent->remove_child(prompt);
+        disown(prompt, scene);
         ui->add_child(prompt);
     }
     delete scene;

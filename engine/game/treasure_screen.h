@@ -30,7 +30,7 @@ public:
     virtual void frame(double dt);
 
 private:
-    void setup_chest(const Json& chest, bool opened);
+    void setup_chest(const Json& chest, bool opened, bool opening);
     void show_relic(const Json& relic, bool animate);
     SceneLibrary* lib_;
     Json decision_;

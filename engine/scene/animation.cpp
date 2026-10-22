@@ -13,7 +13,9 @@ namespace spire {
 
 AnimationPlayer::AnimationPlayer()
     : lib_(NULL), file_(NULL), libraries_(NULL), anim_(NULL), time_(0), length_(1), loop_(false), playing_(false),
-      started_(false), active_(true) {}
+      started_(false), active_(true) {
+    flags |= NF_PROCESS;
+}
 
 bool AnimationPlayer::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     if (key == "libraries") {

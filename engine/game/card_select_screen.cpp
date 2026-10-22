@@ -122,7 +122,18 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
         hide(find_named(screen, "ViewUpgrades"));
         hide(screen->find_unique("CombatPiles"));
         hide(find_named(screen, "CombatPiles"));
-        hide(find_named(screen, "EnchantmentDescriptionContainer"));
+        /* NDeckEnchantSelectScreen._Ready: the enchantment's icon, title and
+         * description beside the grid */
+        const Json& ench = d["enchantment_screen"];
+        Node* ench_box = find_named(screen, "EnchantmentDescriptionContainer");
+        if (kind_ == "enchant" && ench.is_object() && ench_box) {
+            std::string icon = lib_->ext(ench["icon"].str()) ? ench["icon"].str() : ench["beta_icon"].str();
+            if (lib_->ext(icon)) set_texture(lib_, ench_box->find_unique("EnchantmentIcon"), icon);
+            set_label(ench_box->find_unique("EnchantmentTitle"), ench["title"].str());
+            set_label(ench_box->find_unique("EnchantmentDescription"), ench["description"].str());
+        } else {
+            hide(ench_box);
+        }
         set_label(screen->find_unique("BottomLabel"), d["prompt"].is_string() ? d["prompt"].str() : std::string());
 
         /* The preview containers (closed). */
