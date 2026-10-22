@@ -26,7 +26,7 @@ static const float LINE_PER_ERA = 226.0f;
 TimelineScreen::TimelineScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), slots_box_(NULL), line_(NULL), moved_(NULL), inspect_(NULL), holder_(NULL),
       backstop_(NULL), reminder_(NULL), tutorial_(NULL), tip_(NULL), unlock_(NULL), queue_at_(0), mode_(LOADING),
-      focus_(-1), pan_(0), pan_target_(0), t_(0), unlock_t_(0), closing_unlock_(false), tutorial_done_(false) {}
+      focus_(-1), pan_(0), pan_target_(0), t_(0), unlock_t_(0), inspect_ready_(0.4), closing_unlock_(false), tutorial_done_(false) {}
 
 Node* TimelineScreen::build(std::string* error) {
     tweens_.clear();
@@ -460,41 +460,49 @@ void TimelineScreen::open_inspect(const Json& e, bool revealed) {
     hide(ctl(inspect_, "EraLabel"));
     Control* fancy = ctl(inspect_, "FancyText");
     set_label(fancy, e["description"].str());
+    /* UnlockAnimation: the chains tighten (0.5 s after 0.5 s) and give
+     * (NEpochChains, the scene's 1 s); then the portrait flashes and
+     * regains its colour (1 s), the story fades in after 0.25 s (2 s) and
+     * the button comes after 1 s. Fast mode: halved, the story after 0.1 s.
+     * Not revealed: the story and the button after 0.1 s. */
+    bool fast = fast_mode();
+    float unlocked = fast ? 1.0f : 2.0f, k = fast ? 0.5f : 1.0f;
+    float button_at = revealed ? unlocked + k : 0.1f;
+    inspect_ready_ = button_at + 0.3;
     Control* info = ctl(inspect_, "UnlockInfo");
     if (info) {
         set_label(ctl(info, "Text"), e["unlock_text"].str());
         info->modulate.a = 0;
-        tweens_.tween(&info->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, revealed ? 2.0f : 0.1f);
+        tweens_.tween(&info->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, button_at);
     }
     Control* close = ctl(inspect_, "CloseButton");
     set_label(ctl(close, "CloseLabel"), Loc::get("timeline", revealed ? "EPOCH_INSPECT.continueButton" : "EPOCH_INSPECT.closeButton"));
     show_glyph(lib_, ctl(close, "HotkeyIcon"), "a");
     if (close) {
         close->modulate.a = 0;
-        tweens_.tween(&close->modulate.a, 1, 0.3f, TRANS_CUBIC, EASE_OUT, revealed ? 2.0f : 0.1f);
+        tweens_.tween(&close->modulate.a, 1, 0.3f, TRANS_CUBIC, EASE_OUT, button_at);
     }
     Control* chains = ctl(inspect_, "Chains");
     if (fancy) {
         fancy->modulate.a = 0;
-        tweens_.tween(&fancy->modulate.a, 1, revealed ? 2.0f : 0.5f, TRANS_LINEAR, EASE_IN_OUT, revealed ? 1.25f : 0.1f);
+        if (revealed) tweens_.tween(&fancy->modulate.a, 1, 2.0f * k, TRANS_LINEAR, EASE_IN_OUT, unlocked + (fast ? 0.1f : 0.25f));
+        else tweens_.tween(&fancy->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.1f);
     }
     if (revealed) {
-        /* UnlockAnimation: the portrait grey in chains; the chains give
-         * (their shard effects are not ported), the portrait flashes and
-         * regains its colour, the story types in. */
+        /* the chains' shard effects are not ported: they fade as they give */
         if (portrait) {
             portrait->shader_params["s"] = 0;
             portrait->shader_params["v"] = 0.75f;
-            tweens_.tween(&portrait->shader_params["s"], 1, 1.0f, TRANS_EXPO, EASE_OUT, 1.0f);
-            tweens_.tween(&portrait->shader_params["v"], 1, 1.0f, TRANS_EXPO, EASE_OUT, 1.0f);
+            tweens_.tween(&portrait->shader_params["s"], 1, k, TRANS_EXPO, EASE_OUT, unlocked);
+            tweens_.tween(&portrait->shader_params["v"], 1, k, TRANS_EXPO, EASE_OUT, unlocked);
         }
         if (chains) {
             set_visible(chains, true);
             chains->modulate = Color(1, 1, 1, 1);
-            tweens_.tween(&chains->modulate.a, 0, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
+            tweens_.tween(&chains->modulate.a, 0, k, TRANS_LINEAR, EASE_IN_OUT, unlocked - k);
         }
         Control* flash = ctl(inspect_, "PortraitFlash");
-        if (flash) tweens_.tween_from(&flash->modulate.a, 1, 0, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 1.0f);
+        if (flash) tweens_.tween_from(&flash->modulate.a, 1, 0, 0.5f * k, TRANS_LINEAR, EASE_IN_OUT, unlocked);
     } else {
         hide(chains);
         if (portrait) {
@@ -664,7 +672,7 @@ TimelineScreen::Action TimelineScreen::input(const PadState& pad, std::string* c
         }
         return NONE;
     case INSPECT:
-        if ((pad.pressed & (PadState::A | PadState::B)) && unlock_t_ > 0.3) {
+        if ((pad.pressed & (PadState::A | PadState::B)) && unlock_t_ > inspect_ready_) {
             if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
             close_inspect();
         }

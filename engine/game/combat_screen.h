@@ -176,6 +176,10 @@ public:
     /* The playback is running (the pad waits for it; banners do not
      * count). */
     bool busy() const { return cue_t_ < busy_until_; }
+    /* NCombatUi.ShowRewards: once the playback is done, the dying
+     * monsters' animations and a second after them (Fast: half a second;
+     * a boss, half its animation). */
+    bool rewards_ready(bool boss);
 
 private:
     struct Creature {
@@ -218,6 +222,7 @@ private:
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
     void monster_death(Creature& cr, const std::string& who, class SpineSprite* s);
+    void enable_ui(Creature& c);
     /* NCreature.AnimDie running (its own effect hides it): the room behind
      * the rewards leaves them be */
     std::vector<std::string> dying_;
@@ -368,14 +373,42 @@ private:
         bool exhaust; /* at the end, NCardExhaustVfx takes it (no fade) */
         /* 0: straight (cards that just go); 1: NCardFlyVfx to a pile (an
          * arc, speeding up, darkening and shrinking); 2: NCardFlyPowerVfx
-         * (along the swoosh path into the player) */
+         * (along the swoosh path into the player); 3: in the play pile
+         * (NCombatUi.PlayContainer) until its play sends it on */
         int kind;
         int phase;
         float speed, accel, fdur, ftime, scale_from, scale_t;
         Vec2 ctrl;
         Node* trail;       /* NCardTrailVfx following the card (owned by the tree) */
         Node* path_scene;  /* the power swoosh's scene (owned here) */
+        float from_angle;  /* degrees */
+        double mp_t;       /* NCard.AnimMultiCardPlay's time, < 0: none */
     };
+    void update_in_play(MovingCard& m, double dt);
+    MovingCard* in_play(int id);
+    Vec2 play_pile_pos() const;
+    void burn_play_pile();
+    std::vector<int> burn_ids_; /* RemoveFromCombat: burnt as they leave the hand */
+    std::map<int, Json> play_cards_; /* the cards played this fight (a power's copy) */
+    /* NCardFlyShuffleVfx: a card's silhouette from the discard pile to the
+     * draw pile */
+    struct ShuffleFly {
+        Control* node;
+        Node* trail;
+        Vec2 from, to, ctrl; /* on screen */
+        float speed, accel, duration, time;
+        int phase; /* 0 flying, 1 shrinking, 2 fading */
+    };
+    std::vector<ShuffleFly> shuffle_flies_;
+    void spawn_shuffle_fly();
+    void update_shuffle_flies(double dt);
+    Vec2 pile_center(const std::string& pile);
+    /* NCardFlyPowerVfx.GetDuration from the play pile to this player */
+    float power_fly_seconds();
+    float power_fly_seconds_; /* < 0: not measured yet */
+    std::map<std::string, double> death_end_; /* when a dying monster's animation ends (life_t_) */
+    std::map<std::string, double> fade_gone_at_; /* a fading monster's node goes then at the latest */
+    double rewards_at_;                       /* life_t_ the rewards wait for, < 0: not counting */
     void start_flight(MovingCard& m, int kind, const std::string& pile);
     /* RelicModel.Flash / PowerModel.Flash (relic_flash / power_flash cues) */
     void flash_relic(const Json& cue);
@@ -391,6 +424,7 @@ private:
     struct DelayedHide {
         CanvasItem* visuals;
         double at;
+        Control* node; /* the creature (QueueFreeSafely at AnimDie's end) */
     };
     std::vector<DelayedHide> delayed_hides_;
     /* NEndTurnLongPressBar */

@@ -85,6 +85,8 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     play_id_ = -1;
     hand_locked_until_ = 0;
     orb_box_ = NULL;
+    power_fly_seconds_ = -1;
+    rewards_at_ = -1;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -892,6 +894,8 @@ void CombatScreen::sync_hand(const Json& cards, bool animate) {
             m.exhaust = false;
             m.kind = 0;
             m.trail = m.path_scene = NULL;
+            m.from_angle = m.holder.angle;
+            m.mp_t = -1;
             moving_cards_.push_back(m);
         }
     }
@@ -949,13 +953,9 @@ void CombatScreen::place_queue() {
 void CombatScreen::commit_play(bool queued) {
     if (play_card_ < 0 || play_card_ >= (int)holders_.size()) return;
     Holder& h = holders_[(size_t)play_card_];
-    /* where the played card goes: the enemy it aims at, else up */
-    Vec2 to(0, -500);
-    if (play_target_ >= 0 && play_target_ < (int)enemies_.size() && enemies_[(size_t)play_target_].node && hand_box_) {
-        const Creature& e = enemies_[(size_t)play_target_];
-        to = inverse(hand_box_->global_transform()).xform(e.node->global_transform().xform(e.hitbox.pos + e.hitbox.size * 0.5f));
-    }
-    played_[h.id] = to;
+    /* played: to the play pile when the logic moves it there */
+    played_[h.id] = play_pile_pos();
+    play_cards_[h.id] = h.data;
     if (!queued) return;
     h.queued = true;
     queue_.push_back(h.id);
@@ -998,14 +998,18 @@ static float hitbox_height(Control* holder) {
 }
 
 /* The holders' targets; snap: there at once (a new screen). */
-/* NHandCardHolder.SetIndexLabel: each card's place in the hand above it
- * when the settings show them (PrefsSave.ShowCardIndices). */
+/* NHandCardHolder.SetIndexLabel: each card's place among the hand's
+ * active holders (NPlayerHand.RefreshLayout; a queued play is out of
+ * them) above it when the settings show them (PrefsSave.ShowCardIndices). */
 void CombatScreen::refresh_hand_indices() {
     bool show = client_settings()["card_indices"].b();
+    int n = 0;
     for (size_t i = 0; i < holders_.size(); ++i) {
         Node* label = holders_[i].node ? holders_[i].node->find_unique("HandIndex") : NULL;
-        set_label(label, format("%d", (int)i + 1));
-        set_visible(label, show);
+        bool on = active(holders_[i]);
+        if (on) ++n;
+        set_label(label, format("%d", n));
+        set_visible(label, show && on);
     }
 }
 
@@ -1345,8 +1349,13 @@ void CombatScreen::process(double dt) {
             fading_trails_.erase(fading_trails_.begin() + (long)i);
         }
     }
+    update_shuffle_flies(dt);
     for (size_t i = moving_cards_.size(); i-- > 0;) {
         MovingCard& m = moving_cards_[i];
+        if (m.kind == 3) {
+            update_in_play(m, dt);
+            continue;
+        }
         if (m.kind != 0) {
             if (!fly(m, dt)) moving_cards_.erase(moving_cards_.begin() + (long)i);
             continue;
@@ -1462,8 +1471,18 @@ void CombatScreen::process(double dt) {
     for (size_t i = delayed_hides_.size(); i-- > 0;)
         if (life_t_ >= delayed_hides_[i].at && (!death_delayed(delayed_hides_[i].visuals) || life_t_ >= delayed_hides_[i].at + 10)) {
             delayed_hides_[i].visuals->modulate.a = 0;
+            if (delayed_hides_[i].node) delayed_hides_[i].node->visible = false;
             delayed_hides_.erase(delayed_hides_.begin() + (long)i);
         }
+    /* AnimDie's end: a dying monster whose body NMonsterDeathVfx took is
+     * gone (QueueFreeSafely; the rest of it had faded) */
+    for (size_t i = 0; i < dying_.size(); ++i) {
+        Creature* c = creature_for(dying_[i]);
+        if (!c || !c->node || !c->node->visible) continue;
+        std::map<std::string, double>::iterator g = fade_gone_at_.find(dying_[i]);
+        if (c->visuals && (g == fade_gone_at_.end() || life_t_ < g->second)) continue;
+        c->node->visible = false;
+    }
     for (size_t i = banners_.size(); i-- > 0;)
         if (life_t_ >= banners_[i].until) {
             banners_[i].node->queue_free();
@@ -1877,6 +1896,10 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     next_cue_ = 0;
     cue_t_ = 0;
     busy_until_ = 0;
+    power_fly_seconds_ = -1;
+    rewards_at_ = -1;
+    death_end_.clear();
+    fade_gone_at_.clear();
     root_ = root;
     state_ = d;
     vfx_box_ = ctl(root, "CombatVfxContainer");
@@ -2216,38 +2239,79 @@ void CombatScreen::move_card(const Json& change) {
         state_.set(fields[p], Json::make_number(n < 0 ? 0 : n));
     }
     int id = change["card"].i(-1);
+    /* a card in the play pile that its play sends on (CardPileCmd.Add's
+     * tween: NCardFlyVfx to a pile, NCardExhaustVfx where it is) */
+    Vec2 back_from(0, -500);
+    bool from_play = false;
+    if (from == "none") {
+        for (size_t i = 0; i < moving_cards_.size(); ++i) {
+            MovingCard& m = moving_cards_[i];
+            if (m.kind != 3 || m.holder.id != id) continue;
+            m.holder.node->modulate = Color(1, 1, 1, 1);
+            if (to == "discard" || to == "draw") {
+                played_instance_ = id;
+                start_flight(m, 1, to);
+            } else if (to == "exhaust") {
+                spawn_card_exhaust(lib_, exhaust_ui(), m.holder.node, false);
+                moving_cards_.erase(moving_cards_.begin() + (long)i);
+            } else if (to == "hand") {
+                back_from = m.holder.pos;
+                from_play = true;
+                if (m.holder.node->parent) m.holder.node->parent->remove_child(m.holder.node);
+                delete m.holder.node;
+                moving_cards_.erase(moving_cards_.begin() + (long)i);
+            }
+            break;
+        }
+    }
     if (from == "hand" && to != "hand") {
         std::map<int, Vec2>::iterator played = played_.find(id);
         bool was_played = played != played_.end();
-        Vec2 destination = was_played ? played->second : Vec2(0, -500);
         if (was_played) {
             played_.erase(played);
             played_instance_ = id;
             std::vector<int>::iterator q = std::find(queue_.begin(), queue_.end(), id);
             if (q != queue_.end()) queue_.erase(q);
         }
+        std::vector<int>::iterator burn = std::find(burn_ids_.begin(), burn_ids_.end(), id);
+        bool burnt = burn != burn_ids_.end();
+        if (burnt) burn_ids_.erase(burn);
         for (size_t i = 0; i < holders_.size(); ++i) {
             if (holders_[i].id != id) continue;
-            if (to == "exhaust" && !was_played) {
-                /* CardPileCmd: from the hand, NCardExhaustQuickVfx where it is */
-                spawn_card_exhaust(lib_, exhaust_ui(), holders_[i].node, true);
+            if ((to == "exhaust" && !was_played) || burnt) {
+                /* CardPileCmd: from the hand, NCardExhaustQuickVfx where it
+                 * is; RemoveFromCombat, NCardExhaustVfx */
+                spawn_card_exhaust(lib_, exhaust_ui(), holders_[i].node, !burnt);
                 holders_.erase(holders_.begin() + (long)i);
                 break;
             }
             MovingCard m;
             m.holder = holders_[i];
             m.from = m.holder.pos;
-            m.to = was_played ? destination : Vec2(850, -70.0f);
             m.from_scale = m.holder.scale;
-            m.to_scale = was_played ? 0.5f : 0.15f;
+            m.from_angle = m.holder.angle;
             m.t = 0;
-            m.duration = 0.4;
+            m.mp_t = -1;
             /* played and exhausted: NCardExhaustVfx where it ends */
             m.exhaust = to == "exhaust";
             m.kind = 0;
             m.trail = m.path_scene = NULL;
-            if (to == "discard" || to == "draw") start_flight(m, 1, to);
-            else if (to == "none" && m.holder.data["type"].str() == "Power") start_flight(m, 2, to);
+            if (to == "none") {
+                /* CardPileCmd.AddDuringManualCardPlay (or Add to the play
+                 * pile): into NCombatUi.PlayContainer, at the pile's place in
+                 * the lerp time (0.25 s, Fast 0.1), upright, to 0.8 in 0.25 s */
+                m.kind = 3;
+                m.to = play_pile_pos();
+                m.to_scale = 0.8f;
+                m.duration = fast_mode() ? 0.1 : 0.25;
+                m.holder.node->z_index = 2;
+                if (!was_played) play_cards_[id] = m.holder.data;
+            } else {
+                m.to = was_played ? play_pile_pos() : Vec2(850, -70.0f);
+                m.to_scale = was_played ? 0.8f : 0.15f;
+                m.duration = was_played ? (fast_mode() ? 0.1 : 0.25) : 0.4;
+                if (to == "discard" || to == "draw") start_flight(m, 1, to);
+            }
             moving_cards_.push_back(m);
             holders_.erase(holders_.begin() + (long)i);
             break;
@@ -2258,6 +2322,10 @@ void CombatScreen::move_card(const Json& change) {
             if (hand_[i]["instance_id"].i(-1) != id) hand.append(hand_[i]);
         hand_ = hand;
         layout_hand();
+        /* its tips go with it (tips_for_ is a place in the hand: the focus
+         * there now is another card, or none) */
+        tips_for_ = -2;
+        refresh_tips();
     }
     if (to == "hand" && from != "hand") {
         const Json& cards = pending_["hand"];
@@ -2268,9 +2336,9 @@ void CombatScreen::move_card(const Json& change) {
             if (exists) break;
             Holder h = make_holder(cards[i]);
             if (!h.node) break;
-            h.pos = Vec2(from == "draw" ? -850.0f : 0.0f, from == "draw" ? -70.0f : -500.0f);
-            h.scale = 0.15f;
-            h.angle = -25;
+            h.pos = from_play ? back_from : Vec2(from == "draw" ? -850.0f : 0.0f, from == "draw" ? -70.0f : -500.0f);
+            h.scale = from_play ? 0.8f : 0.15f;
+            h.angle = from_play ? 0.0f : -25.0f;
             hand_box_->add_child(h.node);
             holders_.push_back(h);
             hand_.append(cards[i]);
@@ -2286,6 +2354,58 @@ void CombatScreen::apply_state(const Json& ch) {
     const std::string& type = ch["t"].str();
     Creature* c = creature_for(ch["who"].str());
     if (type == "card") { move_card(ch); return; }
+    if (type == "power_card") {
+        /* PlayPowerCardFlyVfx for a replay: a new card in the play pile,
+         * growing in over 0.1 s */
+        std::map<int, Json>::iterator d = play_cards_.find(ch["card"].i(-1));
+        if (d == play_cards_.end() || in_play(d->first) || !hand_box_) return;
+        Holder h = make_holder(d->second);
+        if (!h.node) return;
+        hand_box_->add_child(h.node);
+        MovingCard m;
+        m.holder = h;
+        m.from = m.to = m.holder.pos = play_pile_pos();
+        m.from_scale = 0;
+        m.to_scale = 1;
+        m.from_angle = 0;
+        m.t = 0;
+        m.duration = 0;
+        m.mp_t = -1;
+        m.exhaust = false;
+        m.kind = 3;
+        m.trail = m.path_scene = NULL;
+        h.node->z_index = 2;
+        moving_cards_.push_back(m);
+        return;
+    }
+    if (type == "power_fly") {
+        /* CardModel.PlayPowerCardFlyVfx: NCardFlyPowerVfx from the play pile */
+        MovingCard* m = in_play(ch["card"].i(-1));
+        if (m) {
+            m->holder.node->modulate = Color(1, 1, 1, 1);
+            start_flight(*m, 2, "");
+        }
+        return;
+    }
+    if (type == "multi_play") {
+        MovingCard* m = in_play(ch["card"].i(-1));
+        if (m) m->mp_t = 0;
+        return;
+    }
+    if (type == "card_burn") {
+        /* CardPileCmd.RemoveFromCombat: NCardExhaustVfx where the card is */
+        int id = ch["card"].i(-1);
+        for (size_t i = 0; i < moving_cards_.size(); ++i)
+            if (moving_cards_[i].kind == 3 && moving_cards_[i].holder.id == id) {
+                moving_cards_[i].holder.node->modulate = Color(1, 1, 1, 1);
+                spawn_card_exhaust(lib_, exhaust_ui(), moving_cards_[i].holder.node, false);
+                moving_cards_.erase(moving_cards_.begin() + (long)i);
+                return;
+            }
+        burn_ids_.push_back(id);
+        return;
+    }
+    if (type == "shuffle_fly") { spawn_shuffle_fly(); return; }
     if (type == "relic_flash") { flash_relic(ch); return; }
     if (type == "blade") {
         VfxCreature t;
@@ -2357,9 +2477,14 @@ void CombatScreen::apply_state(const Json& ch) {
         make_powers(*c, next);
         refresh_state(*c, true);
     } else if (type == "spawn" || type == "revive") {
+        std::vector<std::string>::iterator d = std::find(dying_.begin(), dying_.end(), ch["who"].str());
+        if (d != dying_.end()) dying_.erase(d);
+        death_end_.erase(ch["who"].str());
+        fade_gone_at_.erase(ch["who"].str());
         c->node->visible = true;
         tweens_.kill(&c->node->modulate.a);
         c->node->modulate.a = 1;
+        enable_ui(*c);
         play_idle(c->node);
     }
 }
@@ -2512,6 +2637,7 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
         c->node->visible = true;
         tweens_.kill(&c->node->modulate.a);
         c->node->modulate.a = 1;
+        enable_ui(*c);
         SpineSprite* s = first_spine(c->visuals);
         if (!(s && s->set_animation("revive", false, 0))) play_idle(c->node);
         else if (s->skeleton() && s->animation_state()) {
@@ -2572,12 +2698,20 @@ void CombatScreen::radial_blur(const std::string& position) {
  * stays. A monster waits for its death animation (and half a second, or
  * its DeathAnimLengthOverride without one), then fades through
  * NMonsterDeathVfx (ShouldFadeAfterDeath) or is gone. */
+/* AnimEnableUi: the state display back in 0.5 s after 0.5 s (a revive, or
+ * a creature spawned where one died). */
+void CombatScreen::enable_ui(Creature& c) {
+    Control* state = ctl(c.node, "HealthBar");
+    if (!state || state->modulate.a >= 1) return;
+    tweens_.kill(&state->modulate.a);
+    tweens_.tween(&state->modulate.a, 1.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+}
+
 void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSprite* s) {
-    Node* state = cr.node->find_unique("StateDisplay");
-    if (state && state->is_canvas_item())
-        tweens_.tween(&((CanvasItem*)state)->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
-    else
-        tweens_.tween(&cr.node->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+    /* AnimDisableUi: the state display (%HealthBar) only; the body plays
+     * its death animation */
+    Control* state = ctl(cr.node, "HealthBar");
+    if (state) tweens_.tween(&state->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
     if (cr.player || who.empty() || who[0] != 'e') return;
     dying_.push_back(who);
     double wait = 0;
@@ -2586,16 +2720,23 @@ void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSpri
     if (a) wait = minf(a->duration - maxf(st->track_time(0), 0.0f) + 0.5f, 20.0f);
     else wait = cr.data["death_anim_length"].f(0);
     if (wait < 0) wait = 0;
+    /* ShowRewards: GetCurrentAnimationTimeRemaining, else
+     * DeathAnimLengthOverride */
+    double left = a ? a->duration - maxf(st->track_time(0), 0.0f) : cr.data["death_anim_length"].f(0);
+    death_end_[who] = life_t_ + (left > 0 ? left : 0);
     bool fade = cr.data["death_fade"].is_bool() ? cr.data["death_fade"].b() : true;
     if (fade && cr.node->parent) {
         Vec2 pad(1.2f, 1.2f);
         const Json& p = cr.data["death_padding"];
         if (p.size() >= 2) pad = Vec2(p[(size_t)0].f(1.2f), p[(size_t)1].f(1.2f));
         spawn_monster_death(lib_, cr.node->parent, *this, who, wait, pad);
+        /* a body the effect found nothing to fade in goes too (after the
+         * effect's moment: it hides what it takes) */
+        fade_gone_at_[who] = life_t_ + wait + 0.5;
     } else if (cr.visuals && cr.visuals->is_canvas_item()) {
         /* freed at once (the end of its animation leaves nothing), after any
          * IDeathDelayer of it is done */
-        DelayedHide h = { (CanvasItem*)cr.visuals, life_t_ + wait };
+        DelayedHide h = { (CanvasItem*)cr.visuals, life_t_ + wait, cr.node };
         delayed_hides_.push_back(h);
     }
 }
@@ -2670,6 +2811,7 @@ void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_STATE) { apply_state(c.data); return; }
     if (c.kind == CUE_SYNC) { finish_state(c.data, c.amount != 0); return; }
     if (c.kind == CUE_BANNER) {
+        if (c.name == "enemy") burn_play_pile();
         show_banner(c.name, c.amount);
         return;
     }
@@ -3004,6 +3146,20 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                 cues_.push_back(c);
             } else if (type == "wait") {
                 double w = ch["ms"].num(0) / 1000.0;
+                const std::string& src = ch["src"].str();
+                if (src == "power_fly" && ch["scale"].is_number()) {
+                    /* NCardFlyPowerVfx.GetDuration as this room measures it */
+                    float d = power_fly_seconds();
+                    if (d > 0) w = d * ch["scale"].num(1);
+                } else if (src == "shuffle") {
+                    /* CardPileCmd.Shuffle: the next card's NCardFlyShuffleVfx,
+                     * then the wait before the one after */
+                    static Json fly;
+                    if (fly.is_null()) fly.set("t", Json::make_string("shuffle_fly"));
+                    c.kind = CUE_STATE;
+                    c.data = fly;
+                    cues_.push_back(c);
+                }
                 if (w > 0) t += w;
             } else {
                 c.kind = CUE_STATE;
@@ -3021,10 +3177,12 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
         sync.data = sync_to;
         cues_.push_back(sync);
     }
-    /* The pad waits for the actions (not for the banners). */
+    /* The pad waits for the actions (not for the banners, nor for a
+     * monster's death animation: the game goes on; the player's holds the
+     * game over). */
     busy_until_ = 0;
     for (size_t i = 0; i < cues_.size(); ++i) {
-        double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" ? 1.5 : 0.4);
+        double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" && cues_[i].who == "player" ? 1.5 : 0.4);
         if (cues_[i].kind != CUE_BANNER && cues_[i].kind != CUE_AUDIO && end > busy_until_) busy_until_ = end;
     }
 }
@@ -3061,15 +3219,8 @@ void CombatScreen::start_flight(MovingCard& m, int kind, const std::string& pile
     Xform2D to_local = inverse(hand_box_->global_transform());
     Vec2 start = hand_box_->global_transform().xform(m.holder.pos);
     if (kind == 1) {
-        /* PileType.GetTargetPosition: the pile button's centre */
-        Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
-        Node* piles = ui ? find_named(ui, "CombatPileContainer") : NULL;
-        Node* b = piles ? piles->get_node(pile == "draw" ? "DrawPile" : "DiscardPile") : NULL;
-        Vec2 end = start;
-        if (b && b->is_control()) {
-            Control* c = (Control*)b;
-            end = c->global_transform().xform(c->size * 0.5f);
-        }
+        Vec2 end = pile_center(pile);
+        if (end.x < 0) end = start;
         m.to = to_local.xform(end);
         float off = chaotic_range(100, 400);
         m.speed = chaotic_range(1.1f, 1.25f);
@@ -3691,6 +3842,215 @@ std::string CombatScreen::hand_select_input(const PadState& pad) {
         sel_pick(f);
     }
     return std::string();
+}
+
+/* ---- the play pile (NCombatUi.PlayContainer) ---- */
+
+/* PileType.Play.GetTargetPosition: the screen's middle, 100 px up (in the
+ * hand's coordinates). */
+Vec2 CombatScreen::play_pile_pos() const {
+    Vec2 at(960, 440);
+    return hand_box_ ? inverse(hand_box_->global_transform()).xform(at) : at;
+}
+
+CombatScreen::MovingCard* CombatScreen::in_play(int id) {
+    for (size_t i = 0; i < moving_cards_.size(); ++i)
+        if (moving_cards_[i].kind == 3 && moving_cards_[i].holder.id == id) return &moving_cards_[i];
+    return NULL;
+}
+
+/* A card in the play pile: AppendPlayPileLerpTween (its place in the lerp
+ * time, Cubic Out; upright; to 0.8 in 0.25 s), then NCard.AnimMultiCardPlay
+ * when it plays again: to transparent black in 0.2 s, a pause (0.2 s, Fast
+ * 0.1), back to white in 0.2 s while it grows from half its size and rises
+ * from 250 px below (0.25 s, Back Out). */
+void CombatScreen::update_in_play(MovingCard& m, double dt) {
+    m.t += dt;
+    float up = m.duration > 0 ? clampf((float)(m.t / m.duration), 0, 1) : 1;
+    float us = clampf((float)(m.t / 0.25), 0, 1);
+    Vec2 at = m.from + (m.to - m.from) * tween_interpolate(TRANS_CUBIC, EASE_OUT, up, 0, 1, 1);
+    float sc = m.from_scale + (m.to_scale - m.from_scale) * tween_interpolate(TRANS_CUBIC, EASE_OUT, us, 0, 1, 1);
+    Color mod(1, 1, 1, 1);
+    float below = 0;
+    if (m.mp_t >= 0) {
+        /* PlayPileTween.FastForwardToCompletion */
+        at = m.to;
+        sc = m.to_scale;
+        m.mp_t += dt;
+        double pause = fast_mode() ? 0.1 : 0.2;
+        if (m.mp_t < 0.2) {
+            float k = 1 - (float)(m.mp_t / 0.2);
+            mod = Color(k, k, k, k);
+        } else if (m.mp_t < 0.2 + pause) {
+            mod = Color(0, 0, 0, 0);
+        } else {
+            float b = (float)(m.mp_t - 0.2 - pause);
+            float kc = tween_interpolate(TRANS_CUBIC, EASE_OUT, clampf(b / 0.2f, 0, 1), 0, 1, 1);
+            mod = Color(kc, kc, kc, kc);
+            sc = m.to_scale * (0.5f + 0.5f * tween_interpolate(TRANS_CUBIC, EASE_OUT, clampf(b / 0.25f, 0, 1), 0, 1, 1));
+            below = 250.0f * (1 - tween_interpolate(TRANS_BACK, EASE_OUT, clampf(b / 0.25f, 0, 1), 0, 1, 1));
+            if (b >= 0.25f) {
+                m.mp_t = -1;
+                mod = Color(1, 1, 1, 1);
+            }
+        }
+    }
+    m.holder.pos = at;
+    m.holder.scale = sc;
+    place(m.holder.node, at.x, at.y + below, 0, 0);
+    m.holder.node->rotation = 0;
+    m.holder.node->scale = Vec2(sc, sc);
+    m.holder.node->modulate = mod;
+}
+
+/* Cards left in the play pile when the enemies' turn starts (a card the
+ * logic took out of combat): NCardExhaustVfx. */
+void CombatScreen::burn_play_pile() {
+    for (size_t i = moving_cards_.size(); i-- > 0;) {
+        if (moving_cards_[i].kind != 3) continue;
+        moving_cards_[i].holder.node->modulate = Color(1, 1, 1, 1);
+        spawn_card_exhaust(lib_, exhaust_ui(), moving_cards_[i].holder.node, false);
+        moving_cards_.erase(moving_cards_.begin() + (long)i);
+    }
+}
+
+/* PileType.GetTargetPosition: the pile button's centre on screen; (-1, -1)
+ * without one. */
+Vec2 CombatScreen::pile_center(const std::string& pile) {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* piles = ui ? find_named(ui, "CombatPileContainer") : NULL;
+    Node* b = piles ? piles->get_node(pile == "draw" ? "DrawPile" : "DiscardPile") : NULL;
+    if (!b || !b->is_control()) return Vec2(-1, -1);
+    Control* c = (Control*)b;
+    return c->global_transform().xform(c->size * 0.5f);
+}
+
+float CombatScreen::power_fly_seconds() {
+    if (power_fly_seconds_ >= 0) return power_fly_seconds_;
+    VfxCreature pc;
+    if (!creature("player", &pc)) return -1;
+    Node* scene = instance(lib_, "scenes/vfx/vfx_card_power_fly.tscn");
+    Node* p = scene ? scene->get_node("SwooshPath") : NULL;
+    if (p && p->type == "Path2D") {
+        Path2D* path = (Path2D*)p;
+        path->set_point_position(path->point_count() - 1, pc.center - Vec2(960, 440));
+        power_fly_seconds_ = path->baked_length() / 3000.0f + 0.05f;
+    }
+    delete scene;
+    return power_fly_seconds_;
+}
+
+bool CombatScreen::rewards_ready(bool boss) {
+    if (busy()) return false;
+    if (rewards_at_ < 0) {
+        double left = 0;
+        for (std::map<std::string, double>::const_iterator it = death_end_.begin(); it != death_end_.end(); ++it)
+            if (it->second - life_t_ > left) left = it->second - life_t_;
+        rewards_at_ = life_t_ + (fast_mode() ? (boss ? left * 0.5 : 0.5) : left + 1.0);
+    }
+    return life_t_ >= rewards_at_;
+}
+
+/* ---- NCardFlyShuffleVfx ---- */
+
+static void place_global(Control* n, const Vec2& at) {
+    Node* p = n->parent;
+    Xform2D pg = p && p->is_canvas_item() ? ((CanvasItem*)p)->global_transform() : Xform2D();
+    n->set_position(inverse(pg).xform(at));
+}
+
+/* NCardFlyShuffleVfx.Create / _Ready: from the discard pile to the draw
+ * pile on a random arc (CardPileCmd.Shuffle's next card), with the
+ * character's card trail and SfxCmd.PlayCardSwooshSfx. */
+void CombatScreen::spawn_shuffle_fly() {
+    if (!vfx_box_) return;
+    Vec2 from = pile_center("discard"), to = pile_center("draw");
+    if (from.x < 0 || to.x < 0) return;
+    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/cards/card_movement_B_into_draw");
+    Node* n = instance(lib_, "scenes/vfx/vfx_card_shuffle_fly.tscn");
+    if (!n || !n->is_control()) {
+        delete n;
+        return;
+    }
+    ShuffleFly f;
+    f.node = (Control*)n;
+    f.from = from;
+    f.to = to;
+    float off = chaotic_range(-300, 400);
+    f.speed = chaotic_range(1.1f, 1.25f);
+    f.accel = chaotic_range(2, 2.5f);
+    float arc = to.y < 540.0f ? -500.0f : 500.0f + off;
+    f.duration = chaotic_range(1, 1.75f);
+    f.ctrl = from + (to - from) * 0.5f;
+    f.ctrl.y -= arc;
+    f.time = 0;
+    f.phase = 0;
+    std::string ch = lower(player_.data["character"].str());
+    f.trail = ch.empty() ? NULL : instance(lib_, "scenes/vfx/card_trail_" + ch + ".tscn");
+    if (f.trail) {
+        vfx_box_->add_child(f.trail);
+        Node* sprites = f.trail->get_node("Sprites");
+        if (sprites && sprites->is_canvas_item()) {
+            CanvasItem* sp = (CanvasItem*)sprites;
+            sp->modulate.a = 0;
+            tweens_.tween(&sp->modulate.a, 1.0f, 1.0f, TRANS_CUBIC, EASE_OUT);
+            if (sp->is_node2d()) tweens_.tween(&((Node2D*)sp)->scale, Vec2(0.5f, 0.5f), 0.5f, TRANS_CUBIC, EASE_IN, 0.25f);
+        }
+        tweens_.tween(&f.node->modulate.a, 0.75f, 0.5f, TRANS_CUBIC, EASE_OUT);
+    }
+    vfx_box_->add_child(f.node);
+    place_global(f.node, from);
+    if (f.trail) follow(f.trail, f.node);
+    shuffle_flies_.push_back(f);
+}
+
+/* NCardFlyShuffleVfx.PlayAnim: along the arc, speeding up and turning with
+ * it; at the pile, from 0.1 of its size to nothing (the trail fades from a
+ * quarter of that), then faded out in 0.8 s. */
+void CombatScreen::update_shuffle_flies(double dt) {
+    float k = (float)dt;
+    for (size_t i = shuffle_flies_.size(); i-- > 0;) {
+        ShuffleFly& f = shuffle_flies_[i];
+        if (f.phase == 0) {
+            f.time += f.speed * k;
+            f.speed += f.accel * k;
+            if (f.time / f.duration > 1) {
+                place_global(f.node, f.to);
+                f.phase = 1;
+                f.time = 0;
+            } else {
+                Vec2 p = bezier(f.from, f.to, f.ctrl, f.time / f.duration);
+                Vec2 q = bezier(f.from, f.to, f.ctrl, (f.time + 0.05f) / f.duration);
+                place_global(f.node, p);
+                f.node->rotation = atan2f(q.y - p.y, q.x - p.x) + PI_F / 2;
+            }
+        } else if (f.phase == 1) {
+            f.time += f.speed * k;
+            float u = f.time / f.duration;
+            if (u > 0.25f && f.trail) {
+                stop_particles(f.trail);
+                Trail t = { f.trail, 0 };
+                fading_trails_.push_back(t);
+                f.trail = NULL;
+            }
+            float s = maxf(0.1f - 0.2f * u, 0);
+            f.node->scale = Vec2(s, s);
+            if (u > 1) {
+                f.phase = 2;
+                f.time = 0;
+            }
+        } else {
+            f.time += k;
+            f.node->modulate.a = maxf(1 - f.time / 0.8f, 0);
+            if (f.time >= 0.8f) {
+                if (f.node->parent) f.node->parent->remove_child(f.node);
+                delete f.node;
+                shuffle_flies_.erase(shuffle_flies_.begin() + (long)i);
+                continue;
+            }
+        }
+        if (f.trail) follow(f.trail, f.node);
+    }
 }
 
 } /* namespace spire */

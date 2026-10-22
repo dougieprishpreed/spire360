@@ -33,6 +33,11 @@
  * --hp N: the player's max HP and HP set to N once the run starts (a soak
  * that reaches the end of the run).
  *
+ * --fast: the settings' Fast mode on before the run starts (set_setting:
+ * the logic saves it in its data folder's profile prefs). Not with
+ * --replay-run (a command takes a recorded answer): replay a trace that
+ * random_runs.py --fast recorded instead; its settings answer turns it on.
+ *
  * --settle: frames each new screen runs before its shot (default 60: a
  * second; fewer catch the effects the decision's cues start).
  *
@@ -249,6 +254,7 @@ int main(int argc, char** argv) {
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
     int hp = 0;
+    bool fast = false;
     bool no_shots = false; /* --no-shots: no PNGs (soaks keep the log only) */ /* --hp: the player's max HP and HP after the start (soaks reach the end) */
     int settle = 60; /* frames before a decision's shot */
     float scale = 2.0f / 3.0f;
@@ -289,6 +295,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
         else if (strcmp(argv[i], "--no-shots") == 0) no_shots = true;
+        else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
             /* N[:EVERY] */
@@ -455,6 +462,7 @@ int main(int argc, char** argv) {
     if (pad_script.empty() || pad_after > 0) game.set_auto_play(auto_seed);
     size_t pad_at = 0;
     FrameTimes frame_times;
+    if (fast && !replay) game.request("{\"cmd\":\"set_setting\",\"name\":\"fast_mode\",\"value\":true}");
     game.start_run(character, seed);
     if (hp > 0) game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
     if (!mash.empty()) {

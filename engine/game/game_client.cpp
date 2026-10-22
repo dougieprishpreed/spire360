@@ -41,12 +41,13 @@
 
 namespace spire {
 
-/* NTransition.RoomFadeOut/RoomFadeIn, normal speed. The scene's gradient
- * sweeps down after 0.5 s while the backdrop reaches black over 0.6 s.
- * The next room then fades in over 0.8 s. */
+/* NTransition.RoomFadeOut/RoomFadeIn. The scene's gradient sweeps down
+ * after 0.5 s while the backdrop reaches black over 0.6 s; the next room
+ * then fades in over 0.8 s. Fast mode: no gradient, black after 0.3 s over
+ * 0.3 s (Quad Out), the room back in 0.3 s. */
 class RoomTransition : public Control {
 public:
-    explicit RoomTransition(SceneLibrary* lib) : phase(0), elapsed(0), initial_y(-2564), gradient_height(2280) {
+    explicit RoomTransition(SceneLibrary* lib) : phase(0), elapsed(0), fast(false), initial_y(-2564), gradient_height(2280) {
         flags |= NF_PROCESS;
         name = "RoomTransition";
         z_index = 4096;
@@ -68,21 +69,23 @@ public:
     }
     int phase; /* 0 idle, 1 waiting to exchange rooms, 2 revealing the new room */
     double elapsed;
+    bool fast;
     float initial_y, gradient_height;
     Vec2 fill_from, fill_to;
     GradientData gradient;
-    void start_out() { phase = 1; elapsed = 0; visible = true; }
-    void start_in() { phase = 2; elapsed = 0; visible = true; }
-    bool ready() const { return phase == 1 && elapsed >= 1.1; }
+    void start_out() { phase = 1; elapsed = 0; visible = true; fast = fast_mode(); }
+    void start_in() { phase = 2; elapsed = 0; visible = true; fast = fast_mode(); }
+    bool ready() const { return phase == 1 && elapsed >= (fast ? 0.6 : 1.1); }
     virtual void process(double dt) {
         if (phase == 0) return;
         elapsed += dt;
-        if (phase == 2 && elapsed >= 0.8) { phase = 0; visible = false; }
+        if (phase == 2 && elapsed >= (fast ? 0.3 : 0.8)) { phase = 0; visible = false; }
     }
     virtual void draw(Canvas& canvas) {
         if (!phase) return;
-        float progress = clampf((float)((elapsed - 0.5) / 0.6), 0, 1);
-        if (phase == 1 && gradient.valid()) {
+        float progress = fast ? tween_interpolate(TRANS_QUAD, EASE_OUT, clampf((float)((elapsed - 0.3) / 0.3), 0, 1), 0, 1, 1)
+                              : clampf((float)((elapsed - 0.5) / 0.6), 0, 1);
+        if (phase == 1 && !fast && gradient.valid()) {
             float y = initial_y * (1 - progress);
             std::vector<Vec2> vertices;
             std::vector<Color> colors;
@@ -104,7 +107,7 @@ public:
             }
             canvas.draw_colored_triangles(vertices, indices, colors);
         }
-        float alpha = phase == 1 ? progress : clampf(1 - (float)(elapsed / 0.8), 0, 1);
+        float alpha = phase == 1 ? progress : clampf(1 - (float)(elapsed / (fast ? 0.3 : 0.8)), 0, 1);
         canvas.draw_rect(Rect2(0, 0, 1920, 1080), Color(0, 0, 0, alpha));
     }
 };
@@ -485,6 +488,9 @@ void GameClient::update(const PadState& pad) {
         /* The killing blow is playing: then the decision after it. */
         if ((room_ && room_->busy()) || (combat_ && combat_->busy())) return;
         if (event_finishing_ && ported_ && ((EventScreen*)ported_)->room_playing()) return;
+        if (combat_ && finishing_["decision"].str() == "rewards" &&
+            !combat_->rewards_ready(finishing_["context"]["room_type"].str() == "Boss"))
+            return;
         event_finishing_ = false;
         Json d = finishing_;
         finishing_ = Json();
@@ -855,6 +861,7 @@ void GameClient::show(const Json& d) {
     }
     if (kind == "map_select") {
         ported_ = new MapScreen(lib_);
+        ((MapScreen*)ported_)->set_map_ftue_seen(!ftue_pending("map_select_ftue"));
         screen_ = ported_->build(d, &err);
         if (!screen_) {
             log_warn("map screen: %s", err.c_str());

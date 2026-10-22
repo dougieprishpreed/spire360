@@ -605,8 +605,15 @@ int main(int argc, char** argv) {
                             if (d["enemies"][e]["combat_id"].i(-1) == id) present = true;
                         if (present) continue; /* revived or still part of the encounter */
                         Node* node = find_named(old_room, format("CombatEnemy_%d", id).c_str());
+                        /* NCreature.AnimDie: gone after its death animation
+                         * and NMonsterDeathVfx (the game goes on meanwhile) */
+                        for (int f = 0; f < 25 * 60 && node && node->is_control() && ((Control*)node)->visible &&
+                                        ((Control*)node)->modulate.a >= 0.01f; ++f) {
+                            tree.process(1.0 / 60.0);
+                            tree.layout(1);
+                        }
                         check(!node || !node->is_control() || !((Control*)node)->visible || ((Control*)node)->modulate.a < 0.01f,
-                              "dead enemy remained visible after its response finished");
+                              "dead enemy remained visible 25 s after its death");
                         ++death_checks;
                     }
             }

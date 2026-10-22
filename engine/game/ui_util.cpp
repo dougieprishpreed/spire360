@@ -23,6 +23,8 @@ bool capstone_open() { return g_capstone_open; }
 void set_capstone_open(bool open) { g_capstone_open = open; }
 void set_client_settings(const Json& s) { g_client_settings = s; }
 
+bool fast_mode() { return g_client_settings["fast_mode"].b(); }
+
 std::string lower(std::string s) {
     for (size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
     return s;

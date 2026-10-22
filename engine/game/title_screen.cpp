@@ -6,6 +6,7 @@
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/text_nodes.h"
+#include "screen_shake.h"
 
 namespace spire {
 
@@ -58,6 +59,9 @@ Node* TitleScreen::build(const std::string& version, std::string* error) {
     Node* bg = menu_->get_node("MainMenuBg");
     logo_ = bg ? find_named(bg, "Logo") : NULL;
     menu_->add_child(frame_driver(this));
+    /* NMainMenu: the screen shake's target (a change of the setting shakes
+     * it) */
+    if (menu_->is_control()) menu_->add_child(make_shake_driver((Control*)menu_));
     covered_ = false;
     submenu_ = false;
     /* The buttons wait for the profile's menu (NMainMenu reads the

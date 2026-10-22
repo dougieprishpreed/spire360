@@ -56,6 +56,9 @@ Control* make_tip_set(SceneLibrary* lib, const Json& tips);
  * and SettingsSave), for the screens that follow them; null before. */
 const Json& client_settings();
 void set_client_settings(const Json& s);
+/* PrefsSave.FastMode is Fast (the settings' Fast mode tickbox): the game's
+ * screens take their shorter times. */
+bool fast_mode();
 /* A capstone screen (pause, settings, deck or piles) or the map is open
  * over the run: NRunTimer shows then. */
 bool capstone_open();

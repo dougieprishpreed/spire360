@@ -10,6 +10,98 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Settings review (2026-10-22): Fast mode, the game's own pacing, defaults
+
+The user tests with a new profile (PrefsSave defaults: Fast mode off, i.e.
+FastModeType.Normal) and asked for both speeds and every setting to work
+as in the game. The game's FastModeType: Normal (default), Fast (the
+settings' tickbox), Instant (dev console only; NGame turns it into Fast at
+start-up, as SelectProfile now does). Fast mode only changes presentation
+times: random_runs.py --fast traces (set_setting before the run) compare
+equal to Normal ones once its settings lines are dropped.
+
+- The logic now records the pacing the game takes from its UI layer,
+  which TestMode leaves out (each a wait cue; trace_compare drops steps):
+  - CardPileCmd.Add awaits the cards' tween (GetTweenForCardsChangingPiles
+    returns none in TestMode): patch card.pile_tween records its time (a
+    draw 0.25 s, Fast 0.1; into the play pile 0.25 s; exhausted from a pile
+    lerp + 0.5 s, Fast 0.2; to discard / draw: callbacks, 0).
+  - Shuffle's per-card waits (min(0.045, 0.8 / n), card.shuffle +
+    card.shuffle_tween) before its CustomScaledWait(0.2, 0.5).
+  - OnPlayWrapper's minimum play time: CustomScaledWait(0.15 - elapsed,
+    0.3 - elapsed) measured with Time.GetTicksMsec; headless elapsed was 0,
+    so every play waited the whole 0.3 s on top of its effects (a Defend
+    took 0.55 s instead of 0.3). time.play_clock gives it Steps.ClockMs
+    (the waits recorded so far).
+  - NCreature.PerformIntent's CustomScaledWait(0.25, 0.4) before each
+    enemy acts (the 'ui' prefix hook).
+  - Replays (CurrentPlayIndex > 0, card.play_index): a multi_play cue and
+    AnimMultiCardPlay's CustomScaledWait(0.4, 0.5).
+  - Powers: AddDuringManualCardPlay's 0.25 s to the play pile
+    (card.manual_play_tween), then PlayPowerCardFlyVfx (card.power_fly
+    redirect: headless FindOnTable found no card, so the original waited
+    0.8 s for a new one): a power_fly cue and its wait (the swoosh path's
+    duration, which the client measures: "scale" 1 / Fast 0.2); a power's
+    replay shows a copy (power_card cue) after CustomScaledWait(0.1, 0.8).
+  - RemoveFromCombat on a card in the hand or the play pile: card_burn cue.
+  Per play, Normal / Fast: Strike 350 / 175 ms, Defend 300 / 150, Bash 600
+  / 275, Inflame 1050 / 460; an end turn to the next hand about 5.7 / 3 s
+  (banners, intents, the enemy's moves, the shuffle, five draws).
+- The play pile (NCombatUi.PlayContainer): a played card now goes to the
+  screen's middle 100 px up in the lerp time (0.25 s, Fast 0.1), upright,
+  to 0.8 in 0.25 s, and stays there while its effects play; then
+  NCardFlyVfx to its pile, NCardExhaustVfx where it is, or the power's
+  swoop (power_fly). It used to fly at its target and fade in 0.4 s.
+  AnimMultiCardPlay on a replay. Cards still there when the enemies' turn
+  starts burn. NCardFlyShuffleVfx: each shuffled card's silhouette flies
+  from the discard pile to the draw pile with the character's trail. Not
+  shown yet: a card exhausted from the draw / discard pile (it flies to
+  the play pile first) and one autoplayed from the draw pile (Havoc,
+  Mayhem): the client has no view of draw pile cards.
+- A hand card's tips stayed on screen after the card left the hand (the
+  end of turn's discard): tips_for_ is a place in the hand, now rebuilt
+  whenever a card leaves it.
+- Deaths (the user's floor 9 report, test 2): monster_death looked for a
+  "StateDisplay" node to fade (AnimDisableUi); the creature scene's state
+  display is %HealthBar, so the fallback faded the whole creature 0.5 s
+  after its death: the body vanished during its death animation and came
+  back for NMonsterDeathVfx's dissolve. Now only %HealthBar fades; a revive
+  or a spawn brings it back (AnimEnableUi, CombatScreen::enable_ui). The
+  creature node goes at AnimDie's end (QueueFreeSafely): when the effect
+  takes the body, at the delayed hide for one that does not fade, or half
+  a second after the effect's moment if it found nothing to take
+  (fade_gone_at_). spire_check's "dead enemy remained visible" now allows
+  that time (25 s) instead of the response's end.
+- Rewards (NCombatUi.ShowRewards): after the dying monsters' remaining
+  animation + 1 s (Fast: 0.5 s; a boss, half its animation)
+  (CombatScreen::rewards_ready). A monster's death no longer holds the pad
+  1.5 s (the game goes on; the player's death still does).
+- Fast mode in the UI (fast_mode() from the logic's settings answer): the
+  room transition (no gradient; black after 0.3 s in 0.3 s; back in 0.3 s),
+  the map's travel (0.3 s) and, once the map's FTUE was seen, no map rise
+  at an act's start (only NActBanner), the event layout's and options'
+  AnimateIn, the epoch unlock (now timed as the game's: the chains give at
+  2 s, Fast 1 s; the button only then).
+- Other settings checked against the game: screen shake's multipliers (the
+  paginator now shakes Medium on a change, the main menu is the shake's
+  target there), card indices number the active holders only, run timer,
+  long press (the end turn button only), text effects, phobia mode, skip
+  intro, volumes (squared, as NAudioManager and NDebugAudioManager). The
+  settings' hover tips (FASTMODE_DESCRIPTION, ...) show on mouse hover
+  only in the game, so not on the pad.
+- Tools: random_runs.py --fast; spire_play --fast (live logic only: in
+  --replay-run the recorded answers stand in for the logic, and a replayed
+  --fast trace's settings answer turns the client's Fast mode on).
+- Checks: seeded traces new41, differences 0; fast41 (Ironclad, Silent)
+  equal to new41 without its settings lines; whole runs wait about half as
+  long in Fast mode (50-52%). spire_check on new41: 1,421 responses, 0
+  failures, 0 decoder failures (the same 4 absent events as before).
+  Frames checked at both speeds (work/pace2, pace4): Inflame's play and
+  swoop, a shuffle, a replay (Setup Strike), a kill to its rewards (3.2 s
+  Normal, 1.1 s Fast). Strict C++98 on the changed files. Next console
+  build: logic (all stages: patches.json changed), engine; the pack is
+  unchanged.
+
 ## Alpha RC Xenia test 2 (2026-10-22): the user's findings and the fixes
 
 The second Xenia build (`logs.zip`: `spire360.txt`, `xenia.log`); the

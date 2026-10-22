@@ -197,6 +197,10 @@ public partial class RunDriver
             if (SaveManager.Instance.CurrentProfileId != id) SaveManager.Instance.SwitchProfileId(id);
             _profileId = id;
             SaveManager.Instance.InitPrefsData();
+            // NGame's start-up: Instant (a console command's) is Fast outside the editor
+            var prefs = SaveManager.Instance.PrefsSave;
+            if (prefs != null && prefs.FastMode == MegaCrit.Sts2.Core.Settings.FastModeType.Instant)
+                prefs.FastMode = MegaCrit.Sts2.Core.Settings.FastModeType.Fast;
             SaveManager.Instance.InitProgressData();
             Log($"Profile {id}: {SaveManager.Instance.Progress.NumberOfRuns} runs, {SaveManager.Instance.Progress.Epochs.Count} epochs");
             return MainMenu();

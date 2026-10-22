@@ -104,7 +104,8 @@ static std::string outline_name(const std::string& type, const std::string& room
 
 MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1), next_tick_(0), current_col_(-1), current_row_(-1),
     opening_(0), travel_t_(-1), marker_(NULL), map_ctl_(NULL), scroll_(0), scroll_to_(0), scroll_lo_(0), scroll_hi_(0),
-    scroll_step_(1), act_anim_(-1), act_delay_(1), act_duration_(3), banner_(NULL), banner_end_(0) {
+    scroll_step_(1), act_anim_(-1), act_delay_(1), act_duration_(3), map_ftue_seen_(false), travel_time_(0.8), banner_(NULL),
+    banner_end_(0) {
     start_point_ = NULL;
 }
 
@@ -420,21 +421,23 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     }
 
     /* The act's first map (not one opened from the top bar): the map
-     * rises in (StartOfActAnim) under NActBanner. The first act begins
-     * after Neow, at floor 1. */
+     * rises in (StartOfActAnim) under NActBanner; in Fast mode, once the
+     * map's FTUE was seen, it is at the act's start at once under the
+     * banner. The first act begins after Neow, at floor 1. */
     act_anim_ = -1;
     banner_ = NULL;
     bool view = d["type"].str() == "map_view";
     bool neow = d["act"].i(1) == 1 && d["context"]["ancient"].str() == "NEOW";
     if (!view && d["floor"].i(-1) == (neow ? 1 : 0)) {
         /* _mapAnimStartDelay / _mapAnimDuration; NActBanner's hold */
-        bool fast = client_settings()["fast_mode"].b();
+        bool fast = fast_mode();
         act_delay_ = fast ? 0.5 : 1.0;
         act_duration_ = fast ? 1.5 : 3.0;
         float hold = fast ? 0.5f : 2.0f;
-        act_anim_ = 0;
-        scroll_ = scroll_to_ = 1800;
-        map_ctl->offset[SIDE_TOP] = map_ctl->offset[SIDE_BOTTOM] = 1800;
+        bool rise = !fast || !map_ftue_seen_;
+        act_anim_ = rise ? 0 : -1;
+        scroll_ = scroll_to_ = rise ? 1800 : -600;
+        map_ctl->offset[SIDE_TOP] = map_ctl->offset[SIDE_BOTTOM] = scroll_;
         Node* banner = instance(lib_, "scenes/ui/act_banner.tscn");
         if (banner) {
             root->add_child(banner);
@@ -521,6 +524,7 @@ std::string MapScreen::input(const PadState& pad) {
 void MapScreen::begin_travel(int col, int row) {
     if (travel_t_ >= 0) return;
     travel_t_ = 0;
+    travel_time_ = fast_mode() ? 0.3 : 0.8;
     next_tick_ = 0;
     travel_ticks_.clear();
     for (size_t i = 0; i < paths_.size(); ++i)
@@ -563,12 +567,12 @@ void MapScreen::frame(double dt) {
     if (travel_t_ >= 0) {
         double before = travel_t_;
         travel_t_ += dt;
-        while (next_tick_ < travel_ticks_.size() && travel_t_ >= 0.8 * (double)(next_tick_ + 1) / (double)travel_ticks_.size()) {
+        while (next_tick_ < travel_ticks_.size() && travel_t_ >= travel_time_ * (double)(next_tick_ + 1) / (double)travel_ticks_.size()) {
             Control* tick = travel_ticks_[next_tick_++];
             tick->modulate = hex(0x241F1A); /* StsColors.pathDotTraveled */
             tweens_.tween_from(&tick->scale, Vec2(1.7f, 1.7f), Vec2(1.2f, 1.2f), 0.4f, TRANS_CUBIC, EASE_OUT);
         }
-        if (marker_ && before < 0.8 && travel_t_ >= 0.8) {
+        if (marker_ && before < travel_time_ && travel_t_ >= travel_time_) {
             marker_->visible = true;
             place_from_centre(marker_, marker_to_, Vec2(40, 40));
             tweens_.tween_from(&marker_->scale, Vec2(0, 1), Vec2(1, 1), 0.2f);

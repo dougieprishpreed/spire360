@@ -28,6 +28,9 @@ public:
         return opening_ < 0.45 || travel_t_ >= 0 || (act_anim_ >= 0 && act_anim_ < act_delay_ + act_duration_ * 0.25);
     }
     void begin_travel(int col, int row);
+    /* NMapScreen.Open: the act's map rises in unless Fast mode is on and
+     * the map's FTUE was seen (set before build) */
+    void set_map_ftue_seen(bool seen) { map_ftue_seen_ = seen; }
     /* The act's opening scroll over (NMapScreen.InitMapPrompt's moment) */
     bool settled() const { return !busy() && act_anim_ < 0 && fabsf(scroll_ - scroll_to_) <= 0.1f; }
     /* NMapScreen: a press during the rise ends it (DisableInputVeryBriefly) */
@@ -77,6 +80,8 @@ private:
      * Expo InOut); input before a quarter of it is ignored, after it ends
      * it. -1: not playing. NActBanner over it, freed at banner_end_. */
     double act_anim_, act_delay_, act_duration_; /* Fast mode: 0.5 s, 1.5 s */
+    bool map_ftue_seen_;
+    double travel_time_; /* TravelToMapCoord's ticks: 0.8 s, Fast mode 0.3 s */
     Node* banner_;
     double banner_end_;
     Vec2 marker_to_;

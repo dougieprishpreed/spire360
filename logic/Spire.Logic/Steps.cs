@@ -254,12 +254,19 @@ internal static class Steps
     }
 
     /// <summary>A pacing delay the game asked for (Cmd.Wait / Task.Delay).</summary>
-    public static void Wait(int ms, string source)
+    /// <summary>The presentation's clock: every wait recorded so far, in ms
+    /// (what Time.GetTicksMsec would have moved on in the game).</summary>
+    public static long ClockMs;
+
+    public static void Wait(int ms, string source, double? scale = null)
     {
+        if (ms > 0) ClockMs += ms;
         if (!Enabled || !RecordUi || ms <= 0) return;
         FlushChanges();
-        if (_pendingUi.Count < 500)
-            _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "wait", ["ms"] = ms, ["src"] = source });
+        if (_pendingUi.Count >= 500) return;
+        var cue = new Dictionary<string, object?> { ["t"] = "wait", ["ms"] = ms, ["src"] = source };
+        if (scale != null) cue["scale"] = scale;
+        _pendingUi.Add(cue);
     }
 
     /// <summary>Called after each queued continuation.</summary>

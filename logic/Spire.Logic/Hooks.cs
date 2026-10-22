@@ -370,10 +370,91 @@ internal static partial class Hooks
         // after each turn banner, ...) is recorded here as the game would wait.
         Bridge.Register("cmd.custom_scaled_wait", a =>
         {
+            ScaledWait(a.Length > 0 ? a[0] : null, a.Length > 1 ? a[1] : null, a.Length > 2 && a[2] is bool b && b);
+            return Task.CompletedTask;
+        });
+
+        // The pacing the game takes from its UI, which TestMode leaves out.
+        // CardModel.OnPlayWrapper's minimum play time (CustomScaledWait(0.15 -
+        // elapsed, 0.3 - elapsed)) measures Time.GetTicksMsec: the waits
+        // recorded since the play started.
+        Bridge.Register("time.play_clock", _ => (ulong)Steps.ClockMs);
+        // CardPileCmd.Add awaits its cards' tween (GetTweenForCardsChangingPiles,
+        // null in TestMode): the time it would take.
+        Bridge.Register("card.pile_tween", a =>
+        {
+            if (a.Length > 0 && a[0] is IEnumerable<CardPileAddResult> results)
+                Steps.Wait(CardTweenMs(results), "card");
+            return ((Godot.Tween?)null, false);
+        });
+        // CardPileCmd.Shuffle: each card of the discard pile flies to the draw
+        // pile (NCardFlyShuffleVfx) min(0.045, 0.8 / n) s after the one before.
+        Spire.HookBridge.Hooks.RegisterBefore("card.shuffle", a =>
+        {
+            _shuffleStepMs = 0;
+            if (a.Length > 1 && a[1] is Player p && !CombatManager.Instance.IsOverOrEnding)
+            {
+                int n = PileType.Discard.GetPile(p).Cards.Count;
+                if (n > 0) _shuffleStepMs = (int)(Math.Min(0.045f, 0.8f / n) * 1000);
+            }
+        });
+        Bridge.Register("card.shuffle_tween", _ =>
+        {
+            Steps.Wait(_shuffleStepMs, "shuffle");
+            return ((Godot.Tween?)null, false);
+        });
+        // CardPileCmd.AddDuringManualCardPlay: a power card waits for its move
+        // to the play pile (the 0.25 s scale to 0.8) before it flies.
+        Bridge.Register("card.manual_play_tween", a =>
+        {
+            if (a.Length > 2 && a[2] is CardModel card && card.Type == CardType.Power) Steps.Wait(250, "card");
+            return MegaCrit.Sts2.Core.Hooks.Hook.AfterCardChangedPiles((IRunState)a[0]!, (ICombatState?)a[1], (CardModel)a[2]!,
+                (PileType)a[3]!, (AbstractModel?)a[4]);
+        });
+        // CardPileCmd.RemoveFromCombat(cards, skipVisuals): a card in the hand or
+        // the play pile (not a power played there) burns away where it is
+        // (NCardExhaustVfx); FindOnTable finds no other.
+        Spire.HookBridge.Hooks.RegisterBefore("card.remove_from_combat", a =>
+        {
+            if (a.Length < 2 || a[0] is not IEnumerable<CardModel> cards || a[1] is true) return;
+            if (!CombatManager.Instance.IsInProgress) return;
+            foreach (var c in cards.ToList())
+            {
+                var pile = c.Pile?.Type;
+                if (pile == PileType.Hand || (pile == PileType.Play && c.Type != CardType.Power))
+                    Steps.Cue(new Dictionary<string, object?> { ["t"] = "card_burn", ["card"] = Steps.IdOf(c) });
+            }
+        });
+        // CardModel.OnPlayWrapper's replays (CurrentPlayIndex = i > 0, not a
+        // power): NCard.AnimMultiCardPlay in the play pile, then
+        // CustomScaledWait(0.4, 0.5).
+        Spire.HookBridge.Hooks.RegisterBefore("card.play_index", a =>
+        {
+            if (a.Length < 2 || a[0] is not CardModel card || a[1] is not int i || i <= 0 || card.Type == CardType.Power) return;
+            if (!CombatManager.Instance.IsInProgress) return;
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "multi_play", ["card"] = Steps.IdOf(card) });
+            ScaledWait(0.4f, 0.5f);
+        });
+        // CardModel.PlayPowerCardFlyVfx: the card in the play pile swoops into
+        // its owner (NCardFlyPowerVfx), then CustomScaledWait(duration * 0.2,
+        // duration); a replay flies a new copy after CustomScaledWait(0.1, 0.8).
+        // The duration is the swoosh path's length at 3000 px/s, which the
+        // presentation measures; the wait carries the usual one and its scale.
+        Bridge.Register("card.power_fly", a =>
+        {
+            if (a.Length < 1 || a[0] is not CardModel card) return Task.CompletedTask;
+            if (card.CurrentPlayIndex > 0)
+            {
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "power_card", ["card"] = Steps.IdOf(card) });
+                ScaledWait(0.1f, 0.8f);
+            }
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "power_fly", ["card"] = Steps.IdOf(card) });
             var mode = SaveManager.Instance.PrefsSave?.FastMode ?? FastModeType.Normal;
-            bool ignoreEnd = a.Length > 2 && a[2] is bool b && b;
-            if (mode != FastModeType.Instant && (ignoreEnd || !CombatManager.Instance.IsEnding))
-                Steps.Wait(WaitMs(mode == FastModeType.Fast ? (a.Length > 0 ? a[0] : null) : (a.Length > 1 ? a[1] : null)), "cmd");
+            if (mode != FastModeType.Instant && !CombatManager.Instance.IsEnding)
+            {
+                double scale = mode == FastModeType.Fast ? 0.2 : 1.0;
+                Steps.Wait((int)(PowerFlySeconds * scale * 1000), "power_fly", scale);
+            }
             return Task.CompletedTask;
         });
 
@@ -383,6 +464,9 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterPrefix("ui", (id, a) =>
         {
             Steps.Ui(id, a);
+            // NCreature.PerformIntent (CombatManager.ExecuteEnemyTurn awaits it
+            // before each enemy acts): the intents hide, CustomScaledWait(0.25, 0.4).
+            if (id.EndsWith("NCreature::PerformIntent", StringComparison.Ordinal)) ScaledWait(0.25f, 0.4f);
             // The events' NCardEnchantVfx.Create(card): the enchanted card's view.
             if (id.EndsWith("NCardEnchantVfx::Create", StringComparison.Ordinal) && a.Length > 0 && a[0] is CardModel enchanted)
                 DeckCue("enchant", enchanted, null, null, 0);
@@ -401,6 +485,53 @@ internal static partial class Hooks
             if (play.Target == null) return Task.CompletedTask;
             return NeutralizeSafe(card, ctx, play);
         });
+    }
+
+    /// <summary>Cmd.CustomScaledWait as the game waits it: the fast or the
+    /// standard time by PrefsSave.FastMode, none in Instant or (unless
+    /// ignoreCombatEnd) while the combat ends.</summary>
+    private static void ScaledWait(object? fast, object? standard, bool ignoreCombatEnd = false)
+    {
+        var mode = SaveManager.Instance.PrefsSave?.FastMode ?? FastModeType.Normal;
+        if (mode != FastModeType.Instant && (ignoreCombatEnd || !CombatManager.Instance.IsEnding))
+            Steps.Wait(WaitMs(mode == FastModeType.Fast ? fast : standard), "cmd");
+    }
+
+    private static int _shuffleStepMs;
+
+    /// <summary>NCardFlyPowerVfx.GetDuration with the play pile and the
+    /// player where they usually are (the swoosh path's baked length / 3000,
+    /// + 0.05).</summary>
+    private const double PowerFlySeconds = 0.55;
+
+    /// <summary>How long CardPileCmd's tween for these pile changes runs
+    /// (GetTweenForCardsChangingPiles, AppendPileLerpTween): a card coming
+    /// into the hand grows in over the lerp time; one going to the play pile
+    /// takes its 0.25 s scale; one exhausted from another pile flies to the
+    /// play pile and waits there (0.5 s, Fast 0.2); the rest fly off in
+    /// callbacks the tween does not wait for. The cards run in parallel.</summary>
+    private static int CardTweenMs(IEnumerable<CardPileAddResult> results)
+    {
+        var mode = SaveManager.Instance.PrefsSave?.FastMode ?? FastModeType.Normal;
+        if (CombatManager.Instance.IsEnding) return 0;
+        float lerp = mode switch { FastModeType.Instant => 0.01f, FastModeType.Fast => 0.1f, _ => 0.25f };
+        float hold = mode switch { FastModeType.Instant => 0.01f, FastModeType.Fast => 0.2f, _ => 0.5f };
+        float longest = 0;
+        foreach (var r in results)
+        {
+            if (!r.success) continue;
+            var to = r.cardAdded.Pile?.Type;
+            var from = r.oldPile?.Type;
+            float t = to switch
+            {
+                PileType.Hand => from.HasValue ? lerp : 0,
+                PileType.Play => Math.Max(lerp, 0.25f),
+                PileType.Exhaust => from.HasValue && from != PileType.Hand && from != PileType.Play ? lerp + hold : 0,
+                _ => 0,
+            };
+            longest = Math.Max(longest, t);
+        }
+        return (int)Math.Round(longest * 1000);
     }
 
     private static int WaitMs(object? arg) => arg switch

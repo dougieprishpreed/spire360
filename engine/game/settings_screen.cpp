@@ -6,6 +6,7 @@
 #include "confirm_popup.h"
 #include "credits_screen.h"
 #include "loc.h"
+#include "screen_shake.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -347,6 +348,11 @@ std::string SettingsScreen::change(Line& l, int step) {
         if (k > 4) k = 0;
         settings_.set(l.key, Json::make_number(k));
         refresh();
+        /* NScreenshakePaginator.OnIndexChanged: the new multiplier, then a
+         * Medium trauma to feel it */
+        static const float shake[5] = { 0, 0.5f, 1, 2, 4 };
+        ScreenShake::get().set_multiplier(shake[k]);
+        ScreenShake::get().trauma("Medium");
         return format("{\"cmd\":\"set_setting\",\"name\":\"%s\",\"value\":%d}", l.key, k);
     }
     if (l.kind == SLIDER && step != 0) {

@@ -138,9 +138,12 @@ Node* EventScreen::build_combat(const Json& d) {
     Node* desc = lay->find_unique("EventDescription");
     set_label(desc, d["description_bbcode"].is_string() ? d["description_bbcode"].str() : d["description"].str());
     if (desc && desc->type == "RichTextLabel") {
+        /* AnimateIn (Fast mode: 0.45 s, in 0.5 s) */
         RichTextLabel* r = (RichTextLabel*)desc;
-        tweens_.tween_from(&r->modulate.a, 0, 1, 1.0f, TRANS_LINEAR, EASE_IN_OUT, SETUP_WAIT + 0.75f);
-        tweens_.tween_from(&r->visible_ratio, 0, 1, 1.0f, TRANS_SINE, EASE_OUT, SETUP_WAIT + 0.75f);
+        bool fast = fast_mode();
+        float delay = SETUP_WAIT + (fast ? 0.45f : 0.75f), time = fast ? 0.5f : 1.0f;
+        tweens_.tween_from(&r->modulate.a, 0, 1, time, TRANS_LINEAR, EASE_IN_OUT, delay);
+        tweens_.tween_from(&r->visible_ratio, 0, 1, time, TRANS_SINE, EASE_OUT, delay);
     }
     hide(lay->find_unique("SharedEventLabel"));
     Node* options = lay->find_unique("OptionsContainer");
@@ -185,18 +188,21 @@ Node* EventScreen::build_default(const Json& d) {
     }
 
     /* AnimateIn (from SetDescription, after the setup's wait): the title
-     * fades in after 0.5 s; the description 0.25 s later, typed out. */
+     * fades in after 0.5 s (in 0.5 s); the description 0.25 s later, typed
+     * out in 1 s. Fast mode: 0.2 s, 0.25 s, 0.5 s. */
+    bool fast = fast_mode();
     Node* title = lay->find_unique("Title");
     set_label(title, d["title_text"].is_string() ? d["title_text"].str() : d["event_name"].str());
-    if (CanvasItem* t = item(title)) tweens_.tween_from(&t->modulate.a, 0, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, SETUP_WAIT + 0.5f);
+    if (CanvasItem* t = item(title))
+        tweens_.tween_from(&t->modulate.a, 0, 1, fast ? 0.25f : 0.5f, TRANS_LINEAR, EASE_IN_OUT, SETUP_WAIT + (fast ? 0.2f : 0.5f));
     Node* desc = lay->find_unique("EventDescription");
     set_label(desc, d["description_bbcode"].is_string() ? d["description_bbcode"].str() : d["description"].str());
     if (desc && desc->type == "RichTextLabel") {
         RichTextLabel* r = (RichTextLabel*)desc;
-        float delay = SETUP_WAIT + 0.75f;
-        tweens_.tween_from(&r->modulate.a, 0, 1, 1.0f, TRANS_LINEAR, EASE_IN_OUT, delay);
+        float delay = SETUP_WAIT + (fast ? 0.45f : 0.75f), time = fast ? 0.5f : 1.0f;
+        tweens_.tween_from(&r->modulate.a, 0, 1, time, TRANS_LINEAR, EASE_IN_OUT, delay);
         r->visible_ratio = 0;
-        tweens_.tween_from(&r->visible_ratio, 0, 1, 1.0f, TRANS_SINE, EASE_OUT, delay);
+        tweens_.tween_from(&r->visible_ratio, 0, 1, time, TRANS_SINE, EASE_OUT, delay);
     }
     hide(lay->find_unique("SharedEventLabel")); /* single player */
 
@@ -256,14 +262,16 @@ void EventScreen::add_option(Node* box, const Json& o, int i, bool ancient) {
     hide(n->get_node("PlayerVoteContainer"));
     if (!ancient) {
         /* AnimateIn: after 0.5 s and 0.2 s per option before it, from 60 px
-         * to the left (Back Out) while fading in. */
-        float delay = SETUP_WAIT + 0.5f + 0.2f * (float)i;
+         * to the left (Back Out) while fading in, in 0.5 s (Fast mode:
+         * 0.25 s, 0.1 s, 0.25 s). */
+        bool fast = fast_mode();
+        float delay = SETUP_WAIT + (fast ? 0.25f : 0.5f) + (fast ? 0.1f : 0.2f) * (float)i, time = fast ? 0.25f : 0.5f;
         op.node->modulate.a = 0;
-        tweens_.tween_from(&op.node->modulate.a, 0, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, delay);
+        tweens_.tween_from(&op.node->modulate.a, 0, 1, time, TRANS_LINEAR, EASE_IN_OUT, delay);
         op.slide = -60;
         options_.push_back(op);
         Option& back = options_.back();
-        tweens_.tween_from(&back.slide, -60, 0, 0.5f, TRANS_BACK, EASE_OUT, delay);
+        tweens_.tween_from(&back.slide, -60, 0, time, TRANS_BACK, EASE_OUT, delay);
     } else {
         options_.push_back(op);
     }

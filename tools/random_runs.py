@@ -168,7 +168,7 @@ def act(rng, state):
     return a("proceed")
 
 
-def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None, game=False):
+def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None, game=False, fast=False):
     rng = random.Random(seed)
     tmp = None
     if game:
@@ -187,6 +187,9 @@ def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, 
         if ready.get("type") != "ready":
             result.update(status="bad_init", detail=ready)
             return result
+        if fast:
+            # The settings' Fast mode (the presentation's waits; not the rules)
+            s.send({"cmd": "set_setting", "name": "fast_mode", "value": True})
         if game:
             s.send({"cmd": "select_profile", "profile": 1})
             s.send({"cmd": "set_unlock_all", "on": True})
@@ -254,6 +257,7 @@ def main():
     ap.add_argument("--data-dir", help="SPIRE_DATA for the logic process")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--tank", action="store_true", help="999 HP so random play reaches the later acts")
+    ap.add_argument("--fast", action="store_true", help="the settings' Fast mode on (its waits in the steps)")
     ap.add_argument("--game", action="store_true",
                     help="the game's flow (start_game_run on a new profile with everything unlocked); needs --data-dir")
     a = ap.parse_args()
@@ -272,7 +276,7 @@ def main():
             seed = f"{a.seed_prefix}-{character.lower()}-{i}"
             trace = os.path.join(a.trace_dir, seed + ".jsonl") if a.trace_dir else None
             timing = os.path.join(a.timing_dir, seed + ".jsonl") if a.timing_dir else None
-            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing, a.game)
+            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing, a.game, a.fast)
             results.append(r)
             print(json.dumps(r)[:600], flush=True)
     ok = [r for r in results if r["status"] in ("victory", "defeat")]

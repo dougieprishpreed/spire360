@@ -155,6 +155,69 @@
       "note": "The fast / standard wait (the turn banners' 0.8 s, ...). It skips itself headless (NonInteractiveMode under TestMode); the hook records the wait the game's FastMode setting would make."
     },
     {
+      "id": "time.play_clock",
+      "action": "replace_calls",
+      "type": "Godot.Time",
+      "method": "GetTicksMsec",
+      "in_types": ["MegaCrit.Sts2.Core.Models.CardModel::OnPlayWrapper"],
+      "note": "OnPlayWrapper ends a play with CustomScaledWait(0.15 - elapsed, 0.3 - elapsed), elapsed by Time.GetTicksMsec since the play started. Headless the effects take no time, so the clock is the waits recorded meanwhile (Steps.ClockMs): a play waits only what its effects did not."
+    },
+    {
+      "id": "card.pile_tween",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.CardPileCmd",
+      "method": "GetTweenForCardsChangingPiles",
+      "params": ["IEnumerable`1", "System.Boolean"],
+      "in_types": ["MegaCrit.Sts2.Core.Commands.CardPileCmd::Add"],
+      "note": "CardPileCmd.Add awaits the tween of its cards changing piles; TestMode makes none. The hook records the time it would run (a draw's 0.25 s, Fast 0.1, ...) and returns no tween, as TestMode does."
+    },
+    {
+      "id": "card.shuffle",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardPileCmd",
+      "method": "Shuffle",
+      "note": "The discard pile's size as Shuffle starts: its cards fly to the draw pile min(0.045, 0.8 / n) s apart (card.shuffle_tween)."
+    },
+    {
+      "id": "card.shuffle_tween",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.CardPileCmd",
+      "method": "GetTweenForCardsChangingPiles",
+      "params": ["IEnumerable`1", "System.Boolean"],
+      "in_types": ["MegaCrit.Sts2.Core.Commands.CardPileCmd::Shuffle"],
+      "note": "Shuffle waits between the cards it flies to the draw pile (NCardFlyShuffleVfx), which it skips when TestMode makes no tween. Recorded as those waits; no tween is returned."
+    },
+    {
+      "id": "card.manual_play_tween",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Hooks.Hook",
+      "method": "AfterCardChangedPiles",
+      "in_types": ["MegaCrit.Sts2.Core.Commands.CardPileCmd::AddDuringManualCardPlay"],
+      "note": "AddDuringManualCardPlay awaits a power card's move to the play pile (0.25 s) before the hook; the hook records it and calls Hook.AfterCardChangedPiles."
+    },
+    {
+      "id": "card.remove_from_combat",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CardPileCmd",
+      "method": "RemoveFromCombat",
+      "params": ["IEnumerable`1", "System.Boolean"],
+      "note": "RemoveFromCombat burns a card that has a node (in the hand, or played and not a power) with NCardExhaustVfx; headless there is none. Recorded as card_burn cues before the cards leave their piles."
+    },
+    {
+      "id": "card.play_index",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "set_CurrentPlayIndex",
+      "note": "OnPlayWrapper's replays: from the second play on, a card that is not a power plays NCard.AnimMultiCardPlay (FindOnTable finds no node headless). Recorded as a multi_play cue and its CustomScaledWait(0.4, 0.5)."
+    },
+    {
+      "id": "card.power_fly",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "PlayPowerCardFlyVfx",
+      "note": "A power card's swoop into its owner (NCardFlyPowerVfx) and the wait on it. Headless NCard.FindOnTable finds no node, so the original would wait CustomScaledWait(0.1, 0.8) for a new card instead; recorded as the game plays a card from the play pile."
+    },
+    {
       "id": "talk.play",
       "action": "return_default",
       "type": "MegaCrit.Sts2.Core.Commands.TalkCmd",

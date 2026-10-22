@@ -105,6 +105,7 @@ private:
     int focus_;
     float pan_, pan_target_;
     double t_, unlock_t_;
+    double inspect_ready_; /* unlock_t_ the inspect screen's close button is enabled at */
     bool closing_unlock_;
     bool tutorial_done_; /* the tutorial was acknowledged: its answer spawns Neow */
     TweenSet tweens_;
