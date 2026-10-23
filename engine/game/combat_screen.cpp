@@ -87,6 +87,9 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     orb_box_ = NULL;
     power_fly_seconds_ = -1;
     rewards_at_ = -1;
+    energy_spin_ = NULL;
+    shown_energy_ = 0;
+    for (int i = 0; i < 3; ++i) depart_[i] = expect_[i] = 0;
 }
 
 /* NCombatBackground.Create: the background scene, each picked layer under
@@ -649,6 +652,7 @@ static void place_on_screen(Control* c, const Vec2& pos) {
 class SpinLayers : public ScriptBehavior {
 public:
     SpinLayers(Node* layers, float speed) : layers_(layers), speed_(speed) {}
+    void set_speed(float speed) { speed_ = speed; }
     virtual void process(Node*, double dt) {
         for (size_t i = 0; i < layers_->children.size(); ++i) {
             Node* c = layers_->children[i];
@@ -671,7 +675,7 @@ void CombatScreen::setup_combat_ui(Node* root, const Json& d) {
     if (!ui) return;
     const Json& player = d["player"];
     std::string character = lower(player["character"].is_string() ? player["character"].str() : std::string("ironclad"));
-    int energy = d["energy"].i(), max_energy = d["max_energy"].i(), stars = d["stars"].i();
+    int energy = d["energy"].i(), stars = d["stars"].i();
 
     /* Energy counter: CharacterModel.EnergyCounterPath, at the container's
      * origin (Regent: 22 px higher, room for the star counter). */
@@ -688,29 +692,14 @@ void CombatScreen::setup_combat_ui(Node* root, const Json& d) {
             unsigned outline;
         } outlines[] = { { "ironclad", 0x801212 }, { "silent", 0x004F04 }, { "defect", 0x163E64 },
                          { "necrobinder", 0x702D6F }, { "regent", 0x784000 } };
-        Color outline(0, 0, 0, 0.05f); /* CharacterModel default #0000000D */
+        energy_outline_ = Color(0, 0, 0, 0.05f); /* CharacterModel default #0000000D */
         for (size_t i = 0; i < sizeof(outlines) / sizeof(outlines[0]); ++i)
-            if (character == outlines[i].id) outline = hex(outlines[i].outline);
-        Node* label = orb->get_node("Label");
-        if (label && label->is_control()) {
-            Control* l = (Control*)label;
-            l->add_theme_color_override("font_color", energy > 0 ? Color(1, 0.964706f, 0.886275f) : hex(0xFF5555));
-            l->add_theme_color_override("font_outline_color", energy > 0 ? outline : hex(0x501717));
-            set_label(label, format("%d/%d", energy, max_energy));
-        }
-        /* RefreshLabel: the layers' energy_orb_dark material (the scene's
-         * own state) only at 0 energy; DarkGray then. */
-        Node* layers = orb->find_unique("Layers");
+            if (character == outlines[i].id) energy_outline_ = hex(outlines[i].outline);
         Node* spin = orb->find_unique("RotationLayers");
-        Node* groups[2] = { layers, spin };
-        for (int g = 0; g < 2; ++g)
-            for (size_t i = 0; groups[g] && i < groups[g]->children.size(); ++i) {
-                Node* c = groups[g]->children[i];
-                if (c->is_control() && energy > 0) ((Control*)c)->material = NULL;
-            }
-        if (layers && layers->is_control() && energy <= 0)
-            ((Control*)layers)->modulate = Color(0.663f, 0.663f, 0.663f); /* Colors.DarkGray */
-        if (spin && !orb->behavior) orb->behavior = new SpinLayers(spin, energy > 0 ? 30.0f : 5.0f);
+        energy_spin_ = NULL;
+        if (spin && !orb->behavior) orb->behavior = energy_spin_ = new SpinLayers(spin, 30.0f);
+        shown_energy_ = energy;
+        refresh_energy();
     }
 
     /* Star counter: Regent always, others once they have stars. */
@@ -1354,6 +1343,11 @@ void CombatScreen::process(double dt) {
         MovingCard& m = moving_cards_[i];
         if (m.kind == 3) {
             update_in_play(m, dt);
+            if (m.burn_at >= 0 && m.t >= m.burn_at) {
+                m.holder.node->modulate = Color(1, 1, 1, 1);
+                spawn_card_exhaust(lib_, exhaust_ui(), m.holder.node, false);
+                moving_cards_.erase(moving_cards_.begin() + (long)i);
+            }
             continue;
         }
         if (m.kind != 0) {
@@ -1444,6 +1438,14 @@ void CombatScreen::process(double dt) {
     if (radial_off_at_ > 0 && life_t_ >= radial_off_at_) {
         radial_off_at_ = 0;
         hide(root_ ? find_named(root_, "RadialBlur") : NULL);
+    }
+    update_cost_rolls(dt);
+    for (size_t i = creature_moves_.size(); i-- > 0;) {
+        CreatureMove& m = creature_moves_[i];
+        m.t += (float)dt;
+        float k = tween_interpolate(m.trans, m.ease, m.t < m.duration ? m.t : m.duration, 0, 1, m.duration);
+        m.node->set_position(m.from + (m.to - m.from) * k);
+        if (m.t >= m.duration) creature_moves_.erase(creature_moves_.begin() + (long)i);
     }
     for (size_t i = 0; i < orbs_.size(); ++i) {
         OrbSlot& o = orbs_[i];
@@ -2076,11 +2078,44 @@ void CombatScreen::refresh_state(Creature& c, bool animate) {
     c.shown_max_hp = c.data["max_hp"].i();
 }
 
+/* NEnergyCounter.RefreshLabel (each combat state change): the count in
+ * cream with the character's outline, red at 0; the orb's layers in
+ * energy_orb_dark and DarkGray at 0; its rotation 30 degrees a second per
+ * layer (0: 5). OnEnergyChanged: a rise restarts EnergyVfxBack / Front. */
+void CombatScreen::refresh_energy() {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* box = ui ? ui->get_node("EnergyCounterContainer") : NULL;
+    if (!box || box->children.empty()) return;
+    Node* orb = box->children[0];
+    int energy = state_["energy"].i();
+    Node* label = orb->get_node("Label");
+    if (label && label->is_control()) {
+        Control* l = (Control*)label;
+        l->add_theme_color_override("font_color", energy != 0 ? Color(1, 0.964706f, 0.886275f) : hex(0xFF5555));
+        l->add_theme_color_override("font_outline_color", energy != 0 ? energy_outline_ : hex(0x501717));
+        set_label(label, format("%d/%d", energy, state_["max_energy"].i()));
+    }
+    Resource* r = energy == 0 ? lib_->ext("materials/ui/energy_orb_dark.tres") : NULL;
+    MaterialRes* dark = r && r->kind == Resource::RES_SHADER_MATERIAL ? (MaterialRes*)r : NULL;
+    Node* layers = orb->find_unique("Layers");
+    Node* spin = orb->find_unique("RotationLayers");
+    Node* groups[2] = { layers, spin };
+    for (int g = 0; g < 2; ++g)
+        for (size_t i = 0; groups[g] && i < groups[g]->children.size(); ++i)
+            if (groups[g]->children[i]->is_control()) ((Control*)groups[g]->children[i])->material = dark;
+    if (layers && layers->is_control())
+        ((Control*)layers)->modulate = energy == 0 ? Color(0.663f, 0.663f, 0.663f) : Color(1, 1, 1, 1); /* Colors.DarkGray */
+    if (energy_spin_ && orb->behavior == energy_spin_) ((SpinLayers*)energy_spin_)->set_speed(energy == 0 ? 5.0f : 30.0f);
+    if (energy > shown_energy_) {
+        vfx_restart(orb->find_unique("EnergyVfxBack"));
+        vfx_restart(orb->find_unique("EnergyVfxFront"));
+    }
+    shown_energy_ = energy;
+}
+
 void CombatScreen::refresh_counters() {
     Node* ui = find_named(root_, "CombatUi");
-    Node* box = ui ? ui->get_node("EnergyCounterContainer") : NULL;
-    if (box && !box->children.empty())
-        set_label(box->children[0]->get_node("Label"), format("%d/%d", state_["energy"].i(), state_["max_energy"].i()));
+    refresh_energy();
     Node* star = ui ? ui->get_node("StarCounter") : NULL;
     if (star) {
         set_visible(star, state_["always_show_stars"].b() || state_["stars"].i() > 0);
@@ -2092,7 +2127,8 @@ void CombatScreen::refresh_counters() {
     for (int i = 0; piles && i < 3; ++i) {
         Node* pile = piles->get_node(names[i]);
         if (!pile) continue;
-        set_counter_label(pile->get_node("CountContainer/Count"), state_[fields[i]].i());
+        int shown = state_[fields[i]].i() + depart_[i] - arriving(i);
+        set_counter_label(pile->get_node("CountContainer/Count"), shown < 0 ? 0 : shown);
         if (i == 2) set_visible(pile, state_[fields[i]].i() > 0);
     }
     Node* end = ui ? ui->get_node("EndTurnButton") : NULL;
@@ -2239,6 +2275,13 @@ void CombatScreen::move_card(const Json& change) {
         state_.set(fields[p], Json::make_number(n < 0 ? 0 : n));
     }
     int id = change["card"].i(-1);
+    /* between piles with no node: counted as its silhouette goes */
+    int pf = from == "draw" ? 0 : from == "discard" ? 1 : from == "exhaust" ? 2 : -1;
+    int pt = to == "draw" ? 0 : to == "discard" ? 1 : -1;
+    if (pf >= 0 && pt >= 0) {
+        ++depart_[pf];
+        ++expect_[pt];
+    }
     /* a card in the play pile that its play sends on (CardPileCmd.Add's
      * tween: NCardFlyVfx to a pile, NCardExhaustVfx where it is) */
     Vec2 back_from(0, -500);
@@ -2337,6 +2380,11 @@ void CombatScreen::move_card(const Json& change) {
             Holder h = make_holder(cards[i]);
             if (!h.node) break;
             h.pos = from_play ? back_from : Vec2(from == "draw" ? -850.0f : 0.0f, from == "draw" ? -70.0f : -500.0f);
+            if (!from_play && (from == "discard" || from == "exhaust")) {
+                /* CreateCardNodeAndUpdateVisuals at the old pile */
+                Vec2 at = pile_center(from);
+                if (at.x >= 0) h.pos = inverse(hand_box_->global_transform()).xform(at);
+            }
             h.scale = from_play ? 0.8f : 0.15f;
             h.angle = from_play ? 0.0f : -25.0f;
             hand_box_->add_child(h.node);
@@ -2406,6 +2454,52 @@ void CombatScreen::apply_state(const Json& ch) {
         return;
     }
     if (type == "shuffle_fly") { spawn_shuffle_fly(); return; }
+    if (type == "card_fly") { spawn_shuffle_fly(ch["from"].str(), ch["to"].str()); return; }
+    if (type == "card_flash") {
+        /* NHandCardHolder.Flash: its Flash in the glow's colour (playable
+         * cyan, gold, red), to 0.6 in 0.15 s, out in 0.3 s */
+        for (size_t i = 0; i < holders_.size(); ++i) {
+            if (holders_[i].id != ch["card"].i(-1)) continue;
+            Node* f = holders_[i].node->get_node("Flash");
+            if (!f || !f->is_canvas_item()) break;
+            CanvasItem* fl = (CanvasItem*)f;
+            const std::string& glow = holders_[i].data["glow"].str();
+            fl->modulate = glow == "gold" ? Color(1, 0.784f, 0, 0) : glow == "red" ? Color(0.83f, 0, 0.33f, 0) : Color(0, 0.957f, 0.988f, 0);
+            if (f->is_node2d()) ((Node2D*)f)->scale = Vec2(1, 1);
+            else if (f->is_control()) ((Control*)f)->scale = Vec2(1, 1);
+            tweens_.kill(&fl->modulate.a);
+            tweens_.tween(&fl->modulate.a, 0.6f, 0.15f);
+            tweens_.tween(&fl->modulate.a, 0.0f, 0.3f, TRANS_LINEAR, EASE_IN_OUT, 0.15f);
+            break;
+        }
+        return;
+    }
+    if (type == "card_randomize_cost") {
+        CostRoll r;
+        r.id = ch["card"].i(-1);
+        r.t = 0;
+        r.duration = 0.4f + 0.2f * (float)(chaotic_rand() % 1001) / 1000.0f;
+        r.offset = 10.0f * (float)(chaotic_rand() % 1001) / 1000.0f;
+        for (size_t i = 0; i < cost_rolls_.size(); ++i)
+            if (cost_rolls_[i].id == r.id) cost_rolls_.erase(cost_rolls_.begin() + (long)i);
+        cost_rolls_.push_back(r);
+        return;
+    }
+    if (type == "card_create") { create_at_pile(ch); return; }
+    if (type == "escape") {
+        /* CreatureCmd.Escape: RemoveCreatureNode, ToggleIsInteractable(false),
+         * Visible = false */
+        if (c && c->node) c->node->visible = false;
+        if (lib_->audio()) lib_->audio()->stop_room_loops(ch["who"].str());
+        return;
+    }
+    if (type == "node_visible") {
+        /* Creature.SetNodeVisible */
+        if (ch["visible"].b()) node_hidden_.erase(ch["who"].str());
+        else node_hidden_.insert(ch["who"].str());
+        if (c && c->node) c->node->visible = ch["visible"].b();
+        return;
+    }
     if (type == "relic_flash") { flash_relic(ch); return; }
     if (type == "blade") {
         VfxCreature t;
@@ -2446,6 +2540,21 @@ void CombatScreen::apply_state(const Json& ch) {
         c->data.set(type, ch["to"]);
         refresh_state(*c, true);
         refresh_counters();
+        if (type == "block" && ch["from"].i() == 0 && ch["to"].i() > 0) {
+            /* NHealthBar.AnimateInBlock: the block in from 20 px higher
+             * (Back Out) as it fades in (Sine Out), 0.5 s */
+            Control* hb = ctl(c->node, "HealthBar");
+            Control* block = hb ? ctl(hb, "BlockContainer") : NULL;
+            if (block) {
+                float top = block->offset[SIDE_TOP], bottom = block->offset[SIDE_BOTTOM];
+                tweens_.kill(&block->modulate.a);
+                tweens_.kill(&block->offset[SIDE_TOP]);
+                tweens_.kill(&block->offset[SIDE_BOTTOM]);
+                tweens_.tween_from(&block->modulate.a, 0.0f, 1.0f, 0.5f, TRANS_SINE, EASE_OUT);
+                tweens_.tween_from(&block->offset[SIDE_TOP], top - 20.0f, top, 0.5f, TRANS_BACK, EASE_OUT);
+                tweens_.tween_from(&block->offset[SIDE_BOTTOM], bottom - 20.0f, bottom, 0.5f, TRANS_BACK, EASE_OUT);
+            }
+        }
     } else if (type == "power") {
         Json next = Json::make_array();
         bool exists = false;
@@ -2509,7 +2618,7 @@ void CombatScreen::finish_state(const Json& d, bool finishing) {
             }
             c.data = es[i];
             c.powers = es[i]["powers"];
-            c.node->visible = true;
+            c.node->visible = !(i < enemy_who_.size() && node_hidden_.count(enemy_who_[i]));
             tweens_.kill(&c.node->modulate.a);
             c.node->modulate.a = 1;
             refresh_state(c, true);
@@ -2528,6 +2637,7 @@ void CombatScreen::finish_state(const Json& d, bool finishing) {
         hide(find_named(root_, "CombatUi"));
         state_.set("player", d["player"]);
     }
+    for (int i = 0; i < 3; ++i) depart_[i] = expect_[i] = 0;
     refresh_counters();
     /* the last response's cards stay looked up until its own sync */
     bool later = false;
@@ -2615,6 +2725,173 @@ void CombatScreen::scale_visuals(Creature& c, float duration) {
     else tweens_.tween(&v->scale, c.scale_base * k, duration, TRANS_SINE, EASE_IN_OUT);
 }
 
+/* The game's calls on a creature's spine (NCreature.SpineAnimation's
+ * animation state): SetAnimation(name, loop, track), AddAnimation(name,
+ * delay, loop, track), SetTimeScale(scale); the receiver is args[0]. */
+void CombatScreen::update_cost_rolls(double dt) {
+    for (size_t i = cost_rolls_.size(); i-- > 0;) {
+        CostRoll& r = cost_rolls_[i];
+        r.t += (float)dt;
+        Holder* h = NULL;
+        for (size_t k = 0; k < holders_.size(); ++k)
+            if (holders_[k].id == r.id) h = &holders_[k];
+        Node* label = h && h->card_node ? h->card_node->find_unique("EnergyLabel") : NULL;
+        bool done = r.t >= r.duration;
+        if (label) {
+            if (done) {
+                /* UpdateEnergyCostVisuals: the cost it has now */
+                const Json& c = h->data;
+                set_label(label, c["cost_display"].is_string() ? c["cost_display"].str() : format("%d", c["cost"].i()));
+            } else {
+                float v = tween_interpolate(TRANS_SINE, EASE_OUT, r.t, 0, 50, r.duration);
+                int n = (int)(r.offset + v) % 8;
+                set_label(label, n > 3 ? std::string("?") : format("%d", (int)fmodf(v, 4)));
+            }
+        }
+        if (done || !label) cost_rolls_.erase(cost_rolls_.begin() + (long)i);
+    }
+}
+
+/* A creature's node moved along x by dx (TweenProperty "global_position:x"),
+ * a move it was making replaced. */
+void CombatScreen::move_creature_x(Creature& c, float dx, float duration, TweenTrans trans, TweenEase ease) {
+    if (!c.node) return;
+    for (size_t i = creature_moves_.size(); i-- > 0;)
+        if (creature_moves_[i].node == c.node) creature_moves_.erase(creature_moves_.begin() + (long)i);
+    CreatureMove m;
+    m.node = c.node;
+    m.from = c.node->position;
+    m.to = m.from + Vec2(dx, 0);
+    m.t = 0;
+    m.duration = duration > 0 ? duration : 0.001f;
+    m.trans = trans;
+    m.ease = ease;
+    creature_moves_.push_back(m);
+}
+
+/* SandpitPower (The Insatiable): Begin, where its target stood and the
+ * amount it started from (AfterApplied); Update, UpdateCreaturePositions
+ * (the target, or its Osty, drawn towards the owner as the amount counts
+ * down: 0.25 s Cubic Out); Pull, AfterRemoved's pull of everyone it
+ * holds to 450 px before it (0.7 s Sine InOut). */
+void CombatScreen::sandpit_call(const std::string& method, const Json& args) {
+    const std::string& owner = args[(size_t)0].str();
+    Creature* o = creature_for(owner);
+    if (!o || !o->node) return;
+    float ox = global_origin(o->node).x;
+    if (method == "Pull") {
+        const Json& who = args[1];
+        for (size_t i = 0; i < who.size(); ++i) {
+            Creature* c = creature_for(who[i].str());
+            if (c && c->node) move_creature_x(*c, ox - 450.0f - global_origin(c->node).x, 0.7f, TRANS_SINE, EASE_IN_OUT);
+        }
+        return;
+    }
+    Creature* t = args.size() > 1 ? creature_for(args[1].str()) : NULL;
+    if (!t || !t->node) return;
+    if (method == "Begin") {
+        sandpit_x_[owner] = global_origin(t->node).x;
+        sandpit_amount_[owner] = args[2].i();
+        return;
+    }
+    if (method != "Update" || !sandpit_amount_.count(owner) || sandpit_amount_[owner] <= 0) return;
+    int initial = sandpit_amount_[owner], amount = args[2].i();
+    float num = ox - 450.0f, num2 = sandpit_x_[owner] + 50.0f;
+    float num3 = (num2 - num) / (float)initial;
+    int num4 = amount < initial ? amount : initial, num5 = amount - initial > 0 ? amount - initial : 0;
+    Creature* lead = t;
+    float num6 = 0;
+    Creature* osty = args.size() > 4 && args[4].is_string() ? creature_for(args[4].str()) : NULL;
+    if (osty && osty->node && t->player) {
+        /* NCreature.GetOstyOffsetFromPlayer: where it stands from the player */
+        float x = global_origin(osty->node).x - global_origin(t->node).x;
+        lead = osty;
+        num2 += x;
+        num3 = (num2 - num) / (float)initial;
+        num6 = x - 100.0f * (1.0f - (float)num4 / (float)initial);
+    }
+    float num8 = ox - 400.0f + num3 * (float)num4 + num3 * ((float)num5 / ((float)num5 + 2.0f));
+    float lead_x = global_origin(lead->node).x, target_x = global_origin(t->node).x;
+    const Json& who = args[3];
+    for (size_t i = 0; i < who.size(); ++i) {
+        Creature* c = creature_for(who[i].str());
+        if (!c || !c->node) continue;
+        float d = c == lead ? num8 - lead_x : num8 - num6 - target_x;
+        if (fabsf(d) > 5.0f) move_creature_x(*c, d, 0.25f, TRANS_CUBIC, EASE_OUT);
+    }
+}
+
+/* The scripted calls that need the screen's creatures: Vantom.ScaleTo
+ * (ShrinkPower), Visuals/ScalingBone's scale to the size given, Sine
+ * InOut; FabricatorNormal.SetBotFallPosition, Visuals/FallControl's
+ * Position = Down * ((125 - the node's y) / the body's scale y);
+ * SurroundedPower.FaceDirection, the creatures' bodies and form effects
+ * flipped to face that way. */
+void CombatScreen::special_scripted(const std::string& call, const Json& args) {
+    if (call == "NCreature.FaceDirection") {
+        bool left = args.size() > 1 && args[1].b();
+        const Json& who = args[(size_t)0];
+        for (size_t i = 0; i < who.size(); ++i) {
+            Creature* c = creature_for(who[i].str());
+            if (!c || !c->visuals) continue;
+            Node* parts[2] = { c->visuals->find_unique("Visuals"), c->visuals->find_unique("FormVfx") };
+            Node* phobia = c->visuals->find_unique("PhobiaModeVisuals");
+            if (phobia && phobia->is_canvas_item() && ((CanvasItem*)phobia)->visible) parts[0] = phobia;
+            for (int k = 0; k < 2; ++k) {
+                Vec2* scale = !parts[k] ? NULL : parts[k]->is_node2d() ? &((Node2D*)parts[k])->scale
+                            : parts[k]->is_control() ? &((Control*)parts[k])->scale : NULL;
+                if (scale && ((!left && scale->x < 0) || (left && scale->x > 0))) scale->x = -scale->x;
+            }
+        }
+        return;
+    }
+    const std::string& name = args[(size_t)0].str();
+    size_t hash = name.find('#');
+    if (hash == std::string::npos) return;
+    Creature* cr = creature_for(name.substr(0, hash));
+    Node* n = cr && cr->visuals ? cr->visuals->get_node(name.substr(hash + 1)) : NULL;
+    if (!n || !n->is_node2d()) return;
+    Node2D* nd = (Node2D*)n;
+    if (call == "SpecialNode.ScaleTo") {
+        float s = args[1].f(1);
+        tweens_.kill(&nd->scale);
+        tweens_.tween(&nd->scale, Vec2(s, s), args[2].f(), TRANS_SINE, EASE_IN_OUT);
+    } else if (call == "SpecialNode.BotFall" && cr->node) {
+        Node* body = cr->visuals->find_unique("Visuals");
+        float sy = body && body->is_node2d() ? ((Node2D*)body)->scale.y : 1.0f;
+        if (sy != 0) nd->position = Vec2(0, (125.0f - cr->node->position.y) / sy);
+    }
+}
+
+void CombatScreen::spine_call(const std::string& method, const Json& args) {
+    Creature* cr = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
+    Node* body = cr && cr->visuals ? cr->visuals->find_unique("Visuals") : NULL;
+    SpineSprite* s = cr ? first_spine(body ? body : cr->visuals) : NULL;
+    if (!s) return;
+    if (method == "SetTimeScale") {
+        s->set_state_time_scale(args[1].f(1));
+        return;
+    }
+    Json op;
+    if (method == "SetAnimation") {
+        op.set("op", Json::make_string("set_animation"));
+        op.set("name", args[1]);
+        op.set("loop", Json::make_bool(args[2].b(true)));
+        op.set("track", Json::make_number(args[3].i()));
+    } else if (method == "AddAnimation" || method == "AddAnimationTracked") {
+        op.set("op", Json::make_string("add_animation"));
+        op.set("name", args[1]);
+        op.set("delay", Json::make_number(args[2].f()));
+        op.set("loop", Json::make_bool(args[3].b(true)));
+        op.set("track", Json::make_number(args[4].i()));
+    } else {
+        return;
+    }
+    Json ops = Json::make_array();
+    ops.append(op);
+    play_animator_ops(s, ops);
+}
+
 void CombatScreen::creature_call(const std::string& method, const Json& args) {
     Creature* c = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
     if (!c || !c->node) return;
@@ -2644,6 +2921,25 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
             const SpAnimation* idle = s->skeleton()->data()->find_animation("idle_loop");
             if (idle) s->animation_state()->add_animation(0, idle, true, 0);
         }
+    } else if (method == "FadeIn") {
+        /* OstyCmd.Summon: the new Osty's node from transparent to white */
+        tweens_.kill(&c->node->modulate.a);
+        c->node->modulate.a = 0;
+        tweens_.tween(&c->node->modulate.a, 1.0f, a1, TRANS_LINEAR, EASE_IN_OUT, a2);
+    } else if (method == "AnimDisableUi") {
+        /* the state display out (Expo Out, 0.5 s after 0.5 s) */
+        Control* state = ctl(c->node, "HealthBar");
+        if (state) tweens_.tween(&state->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+    } else if (method == "AnimHideIntent") {
+        /* the intents out over 0.5 s (after the delay given) */
+        Control* row = ctl(c->node, "Intents");
+        if (row) {
+            tweens_.kill(&row->modulate.a);
+            tweens_.tween(&row->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, a1);
+        }
+    } else if (method == "HideVisuals") {
+        /* SandpitPower.AfterRemoved: Visuals.Visible = false */
+        if (c->visuals) set_visible(c->visuals, false);
     } else if (method == "PerformIntent") {
         /* AnimHideIntent(0.4): the intents fade out over 0.5 s after 0.4 s. */
         Control* row = ctl(c->node, "Intents");
@@ -2861,7 +3157,24 @@ void CombatScreen::fire(const Cue& c) {
     }
     double crab_waits;
     if (c.kind == CUE_SCRIPTED && kaiser_crab_call(c.data["call"].str(), c.data["args"], &crab_waits)) return;
+    if (c.kind == CUE_SCRIPTED && (c.data["call"].str() == "SpecialNode.ScaleTo" || c.data["call"].str() == "SpecialNode.BotFall" ||
+                                   c.data["call"].str() == "NCreature.FaceDirection")) {
+        special_scripted(c.data["call"].str(), c.data["args"]);
+        return;
+    }
     if (c.kind == CUE_SCRIPTED && special_node_call(c.data["call"].str(), c.data["args"], *this)) return;
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 19, "MegaAnimationState.") == 0) {
+        spine_call(c.data["call"].str().substr(19), c.data["args"]);
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 21, "SpineAnimationAccess.") == 0) {
+        spine_call(c.data["call"].str().substr(21), c.data["args"]);
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 8, "Sandpit.") == 0) {
+        sandpit_call(c.data["call"].str().substr(8), c.data["args"]);
+        return;
+    }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
         creature_call(c.data["call"].str().substr(10), c.data["args"]);
         return;
@@ -2985,6 +3298,8 @@ void CombatScreen::show_banner(const std::string& kind, int round) {
     banners_.push_back(bn);
 }
 
+bool CombatScreen::cue_before(const Cue& a, const Cue& b) { return a.at < b.at; }
+
 void CombatScreen::show_start_banner(bool turn_banner) {
     /* NCombatStartBanner: the player's turn banner after its 2.6 s; the
      * turn itself (the pad) starts with the logic's steps (CombatManager:
@@ -3007,10 +3322,13 @@ void CombatScreen::show_start_banner(bool turn_banner) {
 void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finishing) {
     double t = 0;
     if (next_cue_ < cues_.size()) {
-        /* NCardPlayQueue: after the actions still playing */
+        /* NCardPlayQueue: after the actions still playing (not after the
+         * tasks running alongside them) */
         cues_.erase(cues_.begin(), cues_.begin() + (long)next_cue_);
         next_cue_ = 0;
-        t = cues_.back().at > cue_t_ ? cues_.back().at : cue_t_;
+        t = cue_t_;
+        for (size_t i = 0; i < cues_.size(); ++i)
+            if (!cues_[i].delayed && cues_[i].at > t) t = cues_[i].at;
     } else {
         cues_.clear();
         next_cue_ = 0;
@@ -3061,6 +3379,13 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
             Cue c;
             c.at = t;
             c.amount = 0;
+            /* a presentation task the game runs alongside (the logic's
+             * branches): so long after this point, the rest not waiting */
+            double delay = ch["delay"].num(0) / 1000.0;
+            if (delay > 0) {
+                c.at = t + delay;
+                c.delayed = true;
+            }
             if (type == "ui" && (ch["call"].str() == "NEnemyTurnBanner.Create" || ch["call"].str() == "NPlayerTurnBanner.Create")) {
                 c.kind = CUE_BANNER;
                 c.name = ch["call"].str() == "NEnemyTurnBanner.Create" ? "enemy" : "player";
@@ -3099,6 +3424,14 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                                         ch["call"].str() == "NCreature.OstyScaleToSize" ||
                                         ch["call"].str() == "NCreature.StartReviveAnim" ||
                                         ch["call"].str() == "NCreature.PerformIntent" ||
+                                        ch["call"].str().compare(0, 19, "MegaAnimationState.") == 0 ||
+                                        ch["call"].str().compare(0, 21, "SpineAnimationAccess.") == 0 ||
+                                        ch["call"].str().compare(0, 8, "Sandpit.") == 0 ||
+                                        ch["call"].str() == "NCreature.FaceDirection" ||
+                                        ch["call"].str() == "NCreature.FadeIn" ||
+                                        ch["call"].str() == "NCreature.HideVisuals" ||
+                                        ch["call"].str() == "NCreature.AnimDisableUi" ||
+                                        ch["call"].str() == "NCreature.AnimHideIntent" ||
                                         ch["call"].str() == "NCreature.RefreshIntents" ||
                                         ch["call"].str().compare(0, 12, "NGame.Screen") == 0 ||
                                         ch["call"].str() == "NGame.DoHitStop" ||
@@ -3134,10 +3467,13 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                     c.where = "viewport";
                 }
                 cues_.push_back(c);
+            } else if (type == "despawn" && escaped_.count(ch["who"].str())) {
+                continue;
             } else if (type == "death" || type == "despawn") {
                 c.kind = CUE_ANIM;
                 c.who = ch["who"].str();
                 c.name = "Dead";
+                c.data = ch; /* "play": the animator's ops for the Dead trigger */
                 if (!creature_for(c.who)) continue;
                 bool already = false;
                 for (size_t q = 0; q < cues_.size(); ++q)
@@ -3166,6 +3502,7 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                 c.data = ch;
                 cues_.push_back(c);
                 if (type == "round" && t > hand_locked_until_) hand_locked_until_ = t;
+                if (type == "escape") escaped_.insert(ch["who"].str());
             }
         }
     }
@@ -3177,11 +3514,13 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
         sync.data = sync_to;
         cues_.push_back(sync);
     }
+    std::stable_sort(cues_.begin(), cues_.end(), cue_before);
     /* The pad waits for the actions (not for the banners, nor for a
      * monster's death animation: the game goes on; the player's holds the
-     * game over). */
+     * game over; nor for what runs alongside). */
     busy_until_ = 0;
     for (size_t i = 0; i < cues_.size(); ++i) {
+        if (cues_[i].delayed) continue;
         double end = cues_[i].at + (cues_[i].kind == CUE_ANIM && cues_[i].name == "Dead" && cues_[i].who == "player" ? 1.5 : 0.4);
         if (cues_[i].kind != CUE_BANNER && cues_[i].kind != CUE_AUDIO && end > busy_until_) busy_until_ = end;
     }
@@ -3219,6 +3558,7 @@ void CombatScreen::start_flight(MovingCard& m, int kind, const std::string& pile
     Xform2D to_local = inverse(hand_box_->global_transform());
     Vec2 start = hand_box_->global_transform().xform(m.holder.pos);
     if (kind == 1) {
+        m.arrive = pile == "draw" ? 0 : pile == "discard" ? 1 : -1;
         Vec2 end = pile_center(pile);
         if (end.x < 0) end = start;
         m.to = to_local.xform(end);
@@ -3289,6 +3629,11 @@ bool CombatScreen::fly(MovingCard& m, double dt) {
                 place(card, m.to.x, m.to.y, 0, 0);
                 m.phase = 1;
                 m.ftime = 0;
+                if (m.arrive >= 0) {
+                    int pile = m.arrive;
+                    m.arrive = -1;
+                    land_on_pile(pile);
+                }
             } else {
                 float u2 = (m.ftime + 0.05f) / m.fdur;
                 Vec2 p = m.from * ((1 - u) * (1 - u)) + m.ctrl * (2 * (1 - u) * u) + m.to * (u * u);
@@ -3914,12 +4259,73 @@ void CombatScreen::burn_play_pile() {
     }
 }
 
+/* CardPileCmd's CreateCardNodeAndUpdateVisuals for a card leaving the
+ * draw, discard or exhaust pile for the play pile (Havoc, Mayhem) or the
+ * exhaust pile: made at full size at its old pile, AppendPlayPileLerpTween
+ * to the play pile (the lerp time, to 0.8 in 0.25 s); exhausted, it waits
+ * there (0.5 s, Fast 0.2) and NCardExhaustVfx burns it. */
+void CombatScreen::create_at_pile(const Json& ch) {
+    int id = ch["card"].i(-1);
+    if (!hand_box_ || in_play(id) || !ch["view"].is_object()) return;
+    Vec2 at = pile_center(ch["from"].str());
+    if (at.x < 0) return;
+    Holder h = make_holder(ch["view"]);
+    if (!h.node) return;
+    hand_box_->add_child(h.node);
+    play_cards_[id] = ch["view"];
+    MovingCard m;
+    m.holder = h;
+    m.from = m.holder.pos = inverse(hand_box_->global_transform()).xform(at);
+    m.to = play_pile_pos();
+    m.from_scale = 1;
+    m.to_scale = 0.8f;
+    m.from_angle = 0;
+    m.t = 0;
+    m.duration = fast_mode() ? 0.1 : 0.25;
+    m.mp_t = -1;
+    m.exhaust = false;
+    m.kind = 3;
+    m.trail = m.path_scene = NULL;
+    if (ch["to"].str() == "exhaust") m.burn_at = maxf((float)m.duration, 0.25f) + (fast_mode() ? 0.2 : 0.5);
+    h.node->z_index = 2;
+    moving_cards_.push_back(m);
+}
+
+int CombatScreen::arriving(int pile) const {
+    int n = pile >= 0 && pile < 3 ? expect_[pile] : 0;
+    for (size_t i = 0; i < moving_cards_.size(); ++i)
+        if (moving_cards_[i].kind == 1 && moving_cards_[i].arrive == pile) ++n;
+    for (size_t i = 0; i < shuffle_flies_.size(); ++i)
+        if (shuffle_flies_[i].arrive == pile) ++n;
+    return n;
+}
+
+/* NCombatCardPile.AddCard: the count up by one, the icon and the count
+ * from 1.25x back to their size (Expo Out, 0.5 s). */
+void CombatScreen::land_on_pile(int pile) {
+    refresh_counters();
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* piles = ui ? find_named(ui, "CombatPileContainer") : NULL;
+    Node* p = piles ? piles->get_node(pile == 0 ? "DrawPile" : "DiscardPile") : NULL;
+    if (!p) return;
+    Node* parts[2] = { p->get_node("Icon"), p->get_node("CountContainer/Count") };
+    for (int k = 0; k < 2; ++k) {
+        if (!parts[k] || !parts[k]->is_control()) continue;
+        Control* c = (Control*)parts[k];
+        c->pivot_offset = c->size * 0.5f;
+        tweens_.kill(&c->scale);
+        c->scale = Vec2(1.25f, 1.25f);
+        tweens_.tween(&c->scale, Vec2(1, 1), 0.5f, TRANS_EXPO, EASE_OUT);
+    }
+}
+
 /* PileType.GetTargetPosition: the pile button's centre on screen; (-1, -1)
  * without one. */
 Vec2 CombatScreen::pile_center(const std::string& pile) {
     Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
     Node* piles = ui ? find_named(ui, "CombatPileContainer") : NULL;
-    Node* b = piles ? piles->get_node(pile == "draw" ? "DrawPile" : "DiscardPile") : NULL;
+    if (pile == "deck") return Vec2(1760, 40); /* the top bar's deck button */
+    Node* b = piles ? piles->get_node(pile == "draw" ? "DrawPile" : pile == "exhaust" ? "ExhaustPile" : "DiscardPile") : NULL;
     if (!b || !b->is_control()) return Vec2(-1, -1);
     Control* c = (Control*)b;
     return c->global_transform().xform(c->size * 0.5f);
@@ -3959,14 +4365,23 @@ static void place_global(Control* n, const Vec2& at) {
     n->set_position(inverse(pg).xform(at));
 }
 
-/* NCardFlyShuffleVfx.Create / _Ready: from the discard pile to the draw
- * pile on a random arc (CardPileCmd.Shuffle's next card), with the
- * character's card trail and SfxCmd.PlayCardSwooshSfx. */
-void CombatScreen::spawn_shuffle_fly() {
+/* NCardFlyShuffleVfx.Create / _Ready: a card's silhouette from one pile to
+ * another on a random arc (CardPileCmd.Shuffle's next card, from the
+ * discard pile to the draw pile; a card moved between piles without a
+ * node), with the character's card trail and SfxCmd.PlayCardSwooshSfx. */
+void CombatScreen::spawn_shuffle_fly(const std::string& from_pile, const std::string& to_pile) {
+    int pf = from_pile == "draw" ? 0 : from_pile == "discard" ? 1 : from_pile == "exhaust" ? 2 : -1;
+    int pt = to_pile == "draw" ? 0 : to_pile == "discard" ? 1 : -1;
+    if (pf >= 0 && depart_[pf] > 0) --depart_[pf];
+    if (pt >= 0 && expect_[pt] > 0) --expect_[pt];
+    refresh_counters();
     if (!vfx_box_) return;
-    Vec2 from = pile_center("discard"), to = pile_center("draw");
+    Vec2 from = pile_center(from_pile), to = pile_center(to_pile);
     if (from.x < 0 || to.x < 0) return;
-    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/cards/card_movement_B_into_draw");
+    if (lib_->audio())
+        lib_->audio()->ui(to_pile == "draw" ? "event:/sfx/ui/cards/card_movement_B_into_draw"
+                          : to_pile == "discard" ? "event:/sfx/ui/cards/card_movement_B_into_discard"
+                                                 : "event:/sfx/ui/cards/card_movement_B_into_deck");
     Node* n = instance(lib_, "scenes/vfx/vfx_card_shuffle_fly.tscn");
     if (!n || !n->is_control()) {
         delete n;
@@ -3976,6 +4391,7 @@ void CombatScreen::spawn_shuffle_fly() {
     f.node = (Control*)n;
     f.from = from;
     f.to = to;
+    f.arrive = to_pile == "draw" ? 0 : to_pile == "discard" ? 1 : -1;
     float off = chaotic_range(-300, 400);
     f.speed = chaotic_range(1.1f, 1.25f);
     f.accel = chaotic_range(2, 2.5f);
@@ -4018,6 +4434,11 @@ void CombatScreen::update_shuffle_flies(double dt) {
                 place_global(f.node, f.to);
                 f.phase = 1;
                 f.time = 0;
+                if (f.arrive >= 0) {
+                    int pile = f.arrive;
+                    f.arrive = -1;
+                    land_on_pile(pile);
+                }
             } else {
                 Vec2 p = bezier(f.from, f.to, f.ctrl, f.time / f.duration);
                 Vec2 q = bezier(f.from, f.to, f.ctrl, (f.time + 0.05f) / f.duration);

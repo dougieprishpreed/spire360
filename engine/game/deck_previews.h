@@ -52,6 +52,9 @@ public:
     /* One deck_card cue now: a card into a combat pile flies to that pile's
      * button (PileType.GetTargetPosition). */
     void play_cue(const Json& cue, const std::string& character);
+    /* NGlobalUi.ReparentCard after a card reward's pick: that card, from
+     * where it was shown (global x, y and scale), into the deck at once. */
+    void fly_to_deck(const Json& card, float x, float y, float scale, const std::string& character);
     /* The run's previews (the client's), NULL before. */
     static DeckPreviews* current();
     /* Ends every preview (leaving the run). */

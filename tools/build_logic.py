@@ -49,7 +49,16 @@ STAGES = ["copy", "stubs", "patch", "jit", "smoke", "aot", "wasm", "c", "native"
 DEFAULT_STAGES = ["copy", "patch", "jit", "smoke", "wasm", "c"]
 
 
+# Parallel work the build may use (--jobs): MSBuild nodes, the IL compiler,
+# the native stage's compiles. Two by default, so the machine stays usable.
+JOBS = 2
+
+
 def run(cmd, **kw):
+    if cmd[:2] in (["dotnet", "build"], ["dotnet", "publish"]):
+        cmd = cmd + ["-m:%d" % JOBS] + (["-p:SpireIlcParallelism=%d" % JOBS] if cmd[1] == "publish" else [])
+    elif cmd[:2] == ["cmake", "--build"]:
+        cmd = cmd + ["--parallel", str(JOBS)]
     print("+", " ".join(str(c) for c in cmd), flush=True)
     kw.setdefault("check", True)
     return subprocess.run(cmd, **kw)
@@ -97,6 +106,47 @@ def stage_copy(a):
     with open(os.path.join(LIB_GAME, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
     print("  game version:", manifest.get("release_info", {}).get("version", "unknown"))
+    write_anim_lengths(a.game_dir)
+
+
+def write_anim_lengths(game_dir):
+    """Each creature's Spine animations and their lengths (the game's .pck
+    through the converter's readers), embedded in the logic: the UI calls
+    that answer with an animation's length (NCreature.StartDeathAnim) get
+    the game's value headless."""
+    out = os.path.join(LIB_GAME, "anim_lengths.json")
+    pck = next((os.path.join(d, f) for d, _, fs in os.walk(game_dir) for f in fs if f.lower().endswith(".pck")), None)
+    if not pck:
+        print("  (no .pck: animation lengths left out)")
+        return
+    sys.path.insert(0, os.path.join(ROOT, "converter"))
+    import re
+    from spire_convert import resources
+    from spire_convert import spine as spinefmt
+    from spire_convert.pck import Pck
+    src = resources.PckSource(Pck(pck))
+    res = resources.Resources(src)
+
+    def ext(text, kind):
+        return re.findall(r'\[ext_resource type="' + kind + r'"[^\]]*path="res://([^"]+)"', text)
+
+    table = {}
+    for f in sorted(src.list()):
+        if not (f.startswith("scenes/creature_visuals/") and f.endswith(".tscn")):
+            continue
+        try:
+            scene = src.read(res.resolve("res://" + f)).decode("utf-8")
+            data = ext(scene, "SpineSkeletonDataResource")
+            if not data:
+                continue
+            skel = ext(src.read(res.resolve("res://" + data[0])).decode("utf-8"), "SpineSkeletonFileResource")
+            doc = spinefmt.engine_skeleton(spinefmt.read_skeleton(src.read(res.resolve("res://" + skel[0]))))
+            table["res://" + f] = {an["name"]: round(an["duration"], 4) for an in doc["animations"]}
+        except Exception as e:  # noqa: BLE001
+            print(f"  (animation lengths: {f}: {e})")
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(table, fh, indent=0, sort_keys=True)
+    print(f"  animation lengths of {len(table)} creatures")
 
 
 def stage_stubs(a):
@@ -344,7 +394,7 @@ def stage_native(a):
             raise RuntimeError(f"{os.path.basename(src)}:\n{r.stdout}{r.stderr}")
         return obj
 
-    jobs = a.jobs or os.cpu_count() or 4
+    jobs = JOBS
     print(f"compiling {len(sources)} files with {cl or cc} -O{opt}, {jobs} jobs", flush=True)
     t0 = __import__("time").time()
     objs = []
@@ -378,8 +428,11 @@ def main():
     ap.add_argument("--native-cc", help="native stage: another C compiler, e.g. powerpc-linux-gnu-gcc "
                     "(big-endian check under qemu-ppc; links statically)")
     ap.add_argument("--native-tag", help="native stage: output to out/logic/native-<tag>")
-    ap.add_argument("--jobs", type=int, help="parallel compiles for the native stage (default: all cores)")
+    ap.add_argument("--jobs", type=int, default=2,
+                    help="parallel work: MSBuild nodes, the IL compiler, the native stage's compiles (default: 2)")
     a = ap.parse_args()
+    global JOBS
+    JOBS = max(1, a.jobs)
     # Visual Studio developer prompts set Platform=x64, which MSBuild reads as
     # a property (wasi-wasm publish fails with NETSDK1032).
     for k in [k for k in os.environ if k.lower() == "platform"]:

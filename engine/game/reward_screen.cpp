@@ -1,11 +1,14 @@
 #include "reward_screen.h"
 #include "inspect_screens.h"
 #include "card_view.h"
+#include "deck_previews.h"
 #include "loc.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
+
+#include <math.h>
 
 namespace spire {
 
@@ -162,9 +165,20 @@ std::string CardRewardScreen::input(const PadState& pad) {
     }
     if (n > 0 && (pad.pressed & (PadState::LEFT | PadState::RIGHT)))
         focus((pad.pressed & PadState::LEFT) ? (focus_ + n - 1) % n : (focus_ + 1) % n);
-    if ((pad.pressed & PadState::A) && n > 0 && focus_ >= 0)
+    if ((pad.pressed & PadState::A) && n > 0 && focus_ >= 0) {
+        /* CardReward.OnSelect: the card goes into the deck
+         * (NGlobalUi.ReparentCard, NCardFlyVfx) */
+        Control* h = holders_[(size_t)focus_];
+        if (h && DeckPreviews::current()) {
+            Xform2D g = h->global_transform();
+            float s = sqrtf(g.x.x * g.x.x + g.x.y * g.x.y);
+            DeckPreviews::current()->fly_to_deck(decision_["cards"][(size_t)focus_], g.origin.x, g.origin.y, s,
+                                                 decision_["player"]["character"].str());
+            h->visible = false;
+        }
         return protocol_action("select_card_reward",
                                format("\"card_index\":%d", decision_["cards"][(size_t)focus_]["index"].i(focus_)));
+    }
     if ((pad.pressed & (PadState::B | PadState::START)) && can_skip_) return protocol_action("skip_card_reward");
     return std::string();
 }

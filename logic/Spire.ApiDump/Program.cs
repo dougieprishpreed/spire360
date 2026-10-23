@@ -7,6 +7,8 @@ using Mono.Cecil;
 
 if (args.Length >= 3 && args[0] == "--calls")
     return Calls.Run(args[1], args[2]);
+if (args.Length >= 3 && args[0] == "--ui-surface")
+    return UiSurface.Run(args[1], args[2]);
 if (args.Length >= 5 && args[0] == "--gen-stubs")
     return StubGen.Run(args[1], args[2], args[3], args[4]);
 if (args.Length >= 2 && args[0] == "--real-bases")

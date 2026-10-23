@@ -67,6 +67,16 @@
     <IlcTreatWarningsAsErrors>false</IlcTreatWarningsAsErrors>
     <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
   </PropertyGroup>
+  <!-- Each creature's Spine animation lengths (tools/build_logic.py, copy
+       stage): what the UI would answer for an animation's length. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../lib/game/anim_lengths.json')">
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../lib/game/anim_lengths.json" LogicalName="anim_lengths.json" />
+  </ItemGroup>
+
+  <!-- The IL compiler's threads (tools/build_logic.py, its jobs option). -->
+  <ItemGroup Condition="'$(SpireIlcParallelism)' != ''">
+    <IlcArg Include="--parallelism:$(SpireIlcParallelism)" />
+  </ItemGroup>
   <ItemGroup Condition="'$(SpireWasm)' == 'true'">
     <PackageReference Include="Microsoft.DotNet.ILCompiler.LLVM" Version="$(SpireIlcLlvmVersion)" />
     <PackageReference Include="runtime.$(NETCoreSdkPortableRuntimeIdentifier).Microsoft.DotNet.ILCompiler.LLVM" Version="$(SpireIlcLlvmVersion)" />

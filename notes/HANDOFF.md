@@ -10,6 +10,124 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Alpha RC Xenia test 3 (2026-10-22): the systematic presentation port
+
+The user's third Xenia test found game-behaviour gaps (a card exhausted
+from the draw pile shows nothing, Havoc and Mayhem play from nowhere) and
+asked for every such case to be ported before the next build. The audit
+is `notes/UI_AUDIT.md` (inventory: `Spire.ApiDump --ui-surface`,
+`tools/ui_audit.py`); this is what changed, by mechanism:
+
+- Card moves the client could not see (no node on the table): the
+  card.pile_tween hook (GetTweenForCardsChangingPiles) now also records
+  `card_create` (a card made at its old pile, with its view, to the play
+  pile; exhausted ones burn there after max(lerp, 0.25) + 0.5 s, Fast
+  0.2) and `card_fly` (NCardFlyShuffleVfx silhouettes between piles); a
+  card coming into the hand from the discard or exhaust pile starts at
+  that pile. Pile counts rise as each card lands, with NCombatCardPile's
+  bump; the shuffle's discard count falls as each silhouette leaves.
+- `Creature.GetVfxContainer` / `GetBackVfxContainer` were null in TestMode
+  and the game writes `container?.AddChildSafely(X.Create(...))`, so the
+  effect was never even made: block sparks and "Blocked", heal numbers,
+  every attack's custom hit effect (Shiv, Claw, Perfected Strike, Sovereign
+  Blade, the Wrigglers' impacts, ...), Fan of Knives, the Ceremonial
+  Beast's lines, Test Subject's burn. They now answer the room's stand-in
+  containers. A UI method bound as a delegate (`WithHitVfxNode(NBigSlashVfx
+  .Create)`) ran its stripped body once reached: AttackCommand's
+  WithHitVfxNode / WithAttackerFx calls are replaced and the delegate
+  wrapped (attack.hit_vfx_node: 31 sites).
+- The adapter queued card plays itself and skipped
+  CardModel.EnqueueManualPlay's OnEnqueuePlayVfx (Inflame's ground fire and
+  power-up: the "quiet" Inflame was missing sounds, Fan of Knives,
+  Hellraiser, Pyre). Rest site options other than Heal and Smith now run
+  their DoLocalPostSelectVfx (Dig, Lift, Clone, Hatch, Kindle; Kindle's
+  shake and Pumpkin Candle flash ported in the rest screen).
+- TestMode-off branches: presentation-only methods added to
+  testmode.presentation.is_off (Tunneler's attack from below, Vantom's
+  charge-ups with their track-1 animations and music, Waterfall Giant's
+  build-up, Bygone Effigy's and Infested's second-phase music, Bouncing
+  Flask, Hand of Greed); for branches that reach into NGame, hooks that
+  read TestMode as on and record the cues (Nightmare, Doll Room, Sandpit).
+- Godot nodes the game drives itself, ported as cues
+  (PresentationHooks.cs): the monsters' aim nodes before an attack
+  (SpecialNode.AimAt / ReachTo / SetPosition), Torch Head's lights,
+  the Fabricator's bots' fall position, Vantom.ScaleTo (ShrinkPower;
+  driven bones now take their node's scale), Surrounded's facing, Osty's
+  fade-in, CreatureCmd.Escape (no death animation), Sandpit's pull,
+  Doom / Reattach's AnimDisableUi and AnimHideIntent.
+- Spine: NCreature.SpineAnimation / SpineBody stand-ins bound to the
+  creature; the client plays MegaAnimationState calls on them.
+  SpineAnimationAccess is a struct in the UI's namespace: the redirect
+  leaves its methods alone and they call MegaSprite / MegaAnimationState
+  inside that namespace, so on the stand-in sprite they ran the real
+  bodies and threw ("GetAnimationState() was called before the
+  SpineSprite's skeleton finished initializing"), killing the fight's
+  turn loop (Vantom, Lagavulin Matriarch, Queen, Soul Nexus, Waterfall
+  Giant). Its calls are replaced (spine.access.*) and go through the 'ui'
+  hook; a scripted Vantom fight runs clean with its track-1 charge-ups
+  recorded. Its receiver is unwrapped with a DynamicDependency on _sprite
+  for the AOT builds.
+- Death animations: anim_lengths.json (build_logic.py's copy stage, from
+  the .pck's skeletons) gives StartDeathAnim's length, so InfestedPower
+  reveals the Wrigglers after the elite's death animation (the bug the
+  user saw) and StockPower likewise; presentation tasks the game runs
+  alongside the turn are Steps branches (their waits delay only their own
+  cues).
+- Hand cards: NHandCardHolder.Flash on cost / keyword / replay /
+  affliction / upgrade changes (card_flash), the randomize-cost roll
+  (Confused, Slither, Snecko Oil), relics flashing on a previewed card
+  (CardCmd.FlashRelics), the picked reward card flying into the deck
+  (NGlobalUi.ReparentCard), Neow's HP counting up (NTopBarHp.LerpAtNeow),
+  the block icon animating in from 0.
+- Map: NBossMapPoint (the boss's spine node or placeholder picture and
+  outline, from the logic's BossNodePath); the normal points' shader is
+  now the game's (EFFECT_MAP_POINT: tones within 0.5 of the icon's tan
+  take the map's colour) instead of a colour matrix that kept reds red.
+
+The user's other reports:
+
+- Profile after the menu: the title now waits (on the logo's black) for
+  the logic's first main_menu answer (MenuFlow::menu_ready_).
+- Energy red at 2/3: the label is red only at 0 (refresh_energy).
+- Killing blow rushed: the rewards wait for the death animation + 1 s as
+  ShowRewards does (rewards_ready); the body no longer vanished early
+  (the HealthBar fix of the previous batch).
+- Hand fill delayed then there at once: the runtime log showed a 1.9 s
+  frame at the first combat decision (building the room); not changed yet.
+- Music gaps: a music bank parsed under the audio lock stopped the mixer
+  (act banks are 80-190 KB of JSON). The act's banks are parsed before
+  the lock (AudioEvents::preload / preload_for) and stay for the act.
+- Card streaks slow: the flights match NCardFlyVfx; the counts now rise
+  as the cards land, as in the game.
+- Vantom freeze: the watchdog (main.cpp) logs the phase, step, node and
+  audio thread state every 10 s after a 3 s stall; read
+  `xdk/spire360/Release/spire360.txt` after the next test.
+
+- The wrapped attack effects catch any exception (presentation only):
+  the Mecha Knight's took VfxCmd.GetSideCenter(...).Value, null in
+  TestMode, once the effects ran; GetSideCenter there now answers the
+  side's first creature's centre (vfx.side_center) and the big slash
+  plays at it.
+- A creature hidden by SetNodeVisible(false) stays hidden through the
+  response's sync (CombatScreen::node_hidden_): the capture showed the
+  Wrigglers during the elite's death animation; now they come 2.5 s
+  later, with the second-phase music.
+
+Checks: seeded traces differences 0 after each logic change (new48 ...
+new63); spire_check on new54 / new58: 1,421 responses, 0 failures; the
+tank trace (all three acts and bosses, with audio): 1,195 responses, 0
+failures, 0 decoder failures (the Vantom freeze does not reproduce on
+PC); content_coverage on the final logic: encounters 85/85, cards 60/60,
+potions 66/66; scripted fights (`tools/presentation_scenarios.py`:
+Havoc, Headbutt, Inflame; the Phrog Parasite's Wrigglers; Vantom; the
+Mecha Knight) captured with spire_play --replay-run and checked frame by
+frame; strict C++98 check passes. build_logic.py runs 2
+jobs at a time (--jobs).
+
+Still open (UI_AUDIT.md): Reattach's last fade over all segments,
+Rolling Boulder, Minion Dive Bomb, Pandora's Box's view, Nightmare's
+hands, the first combat's 1.9 s frame in Xenia.
+
 ## Settings review (2026-10-22): Fast mode, the game's own pacing, defaults
 
 The user tests with a new profile (PrefsSave defaults: Fast mode off, i.e.

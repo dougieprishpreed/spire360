@@ -140,4 +140,9 @@ void sleep_ms(int ms) { usleep((useconds_t)ms * 1000); }
 Thread::Thread() : impl_(0) {}
 Thread::~Thread() { join(); }
 
+const char* volatile g_trace_phase = "";
+const char* volatile g_trace_step = "";
+const void* volatile g_trace_node = 0;
+const char* volatile g_trace_audio = "";
+
 } /* namespace spire */

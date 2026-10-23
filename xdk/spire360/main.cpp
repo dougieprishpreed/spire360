@@ -69,6 +69,35 @@ static double now_ms() {
     return (double)c.QuadPart * 1000.0 / (double)f.QuadPart;
 }
 
+/* A frame that stops (an endless loop, a lock, the GPU): every 10 s while
+ * it lasts, the log says where the main thread is (the frame loop's phase,
+ * the client's step, the node being processed or drawn) and the audio
+ * thread. */
+static volatile unsigned g_frame = 0;
+static volatile bool g_quitting = false;
+
+static void watchdog_main(void*) {
+    unsigned seen = g_frame;
+    double since = now_ms(), reported = 0;
+    while (!g_quitting) {
+        sleep_ms(250);
+        unsigned f = g_frame;
+        if (f != seen) {
+            seen = f;
+            since = now_ms();
+            reported = 0;
+            continue;
+        }
+        double stuck = now_ms() - since;
+        if (stuck < 3000 || (reported > 0 && now_ms() - reported < 10000)) continue;
+        reported = now_ms();
+        const Node* n = (const Node*)g_trace_node;
+        logf("watchdog: frame %u stopped %.0f s ago: %s, %s; node %s (%s %s); audio thread %s", f, stuck / 1000,
+             g_trace_phase, g_trace_step, n ? n->name.c_str() : "-", n ? n->type.c_str() : "", n ? n->script.c_str() : "",
+             g_trace_audio);
+    }
+}
+
 /* Keep protocol latency separate from scene building and effect playback.
  * A rewards screen may be held until the killing blow has finished. */
 class TimedLogicLink : public SrtLink {
@@ -185,6 +214,8 @@ void __cdecl main() {
     /* The mix on hardware thread 4 (core 2): the frame loop keeps core 0,
      * the logic core 1 */
     else if (!audio.start_thread(4)) logf("audio: no audio thread (mixed in the frame loop)");
+    Thread watchdog;
+    watchdog.start(watchdog_main, NULL, 5);
     /* the menu music starts with the main menu, after the logo (MenuFlow) */
     FontLibrary* fonts = new FontLibrary(&pack);
     FontLibrary::set_current(fonts);
@@ -223,6 +254,8 @@ void __cdecl main() {
             pad.pressed &= ~PadState::Y;
         }
         double u0 = now_ms();
+        ++g_frame;
+        g_trace_phase = "update";
         {
             bool was_busy = game->busy();
             bool was_starting = flow->starting();
@@ -251,14 +284,20 @@ void __cdecl main() {
         /* Where a frame's time goes: process + layout, building the draw
          * calls, and Present (which waits for vsync and the GPU). */
         double f0 = now_ms();
+        g_trace_phase = "process";
         tree->process(dt > 0.1 ? 0.1 : dt);
+        g_trace_phase = "audio";
         audio.update(dt > 0.1 ? 0.1 : dt);
+        g_trace_phase = "layout";
         tree->layout(1);
         double f1 = now_ms();
+        g_trace_phase = "draw";
         renderer.begin(1280, 720, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
         tree->render(canvas);
+        g_trace_phase = "draw end";
         renderer.end();
         double f2 = now_ms();
+        g_trace_phase = "present";
         dev->Present(NULL, NULL, NULL, NULL);
         double f3 = now_ms();
         acc_ms += f1 - f0;
@@ -269,6 +308,10 @@ void __cdecl main() {
          * vertical blank) */
         double work = update_ms + (f2 - f0);
         if (work > worst) worst = work;
+        /* a frame long enough to see: where its time went */
+        if (work > 250)
+            logf("long frame %u: %.0f ms (update %.0f, process + layout %.0f, draw %.0f), decision %d", g_frame, work,
+                 update_ms, f1 - f0, f2 - f1, game->decision_count());
         if (work > 16.7) ++slow;
         if (++frames == 600) {
             logf("per frame: %.2f ms update, %.2f ms process + layout, %.2f ms draw, %.2f ms present; %ld draw calls; "
@@ -279,6 +322,8 @@ void __cdecl main() {
             acc_ms = acc_draw = acc_present = acc_update = worst = 0;
         }
     }
+    g_quitting = true;
+    watchdog.join();
     delete flow;
     delete game;
     delete tree;

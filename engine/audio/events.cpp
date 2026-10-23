@@ -644,10 +644,17 @@ struct AudioEvents::Impl {
         roots.clear();
         if (fade <= 0) mixer.stop_all();
     }
+    /* The act's music banks stay together (act1_a1, act1_a2, act1_b1: the
+     * map's and the fights' tracks switch between them; parsing one again
+     * would hold the mixer up). */
+    static bool same_act(const std::string& name, const std::string& preferred) {
+        size_t u = preferred.find('_');
+        return u != std::string::npos && name.compare(0, u + 1, preferred, 0, u + 1) == 0;
+    }
     void collect_banks() {
         for (std::map<std::string, Bank*>::iterator i = banks.begin(); i != banks.end();) {
             const std::string& name = i->first;
-            if (i->second->references == 0 && name != preferred && name != "Master.bank" && name != "sfx.bank" &&
+            if (i->second->references == 0 && name != preferred && !same_act(name, preferred) && name != "Master.bank" && name != "sfx.bank" &&
                 name != "ambience.bank" && name != "streams") { delete i->second; banks.erase(i++); }
             else ++i;
         }
@@ -661,8 +668,33 @@ bool AudioEvents::available() const {
     return impl_->index["version"].i() == 1;
 }
 void AudioEvents::preload(const std::string& bank) {
+    {
+        ScopedLock lock(impl_->lock);
+        if (bank.empty() || impl_->banks.count(bank)) return;
+    }
+    Impl::Bank* b = new Impl::Bank;
+    b->name = bank;
+    if (!read_json(impl_->pack, "audio/runtime/" + bank + ".json", b->doc)) {
+        delete b;
+        return;
+    }
     ScopedLock lock(impl_->lock);
-    impl_->load(bank);
+    if (impl_->banks.count(bank)) delete b;
+    else impl_->banks[bank] = b;
+}
+void AudioEvents::preload_for(const std::string& path) {
+    std::string bank;
+    {
+        ScopedLock lock(impl_->lock);
+        if (path.empty()) return;
+        std::string name = impl_->index["paths"].get(path).str();
+        const Json& options = impl_->index["events"].get(name.empty() ? path : name);
+        if (!options.size()) return;
+        bank = options[(size_t)0][(size_t)0].str();
+        for (size_t i = 0; i < options.size(); ++i)
+            if (options[i][(size_t)0].str() == impl_->preferred) bank = impl_->preferred;
+    }
+    preload(bank);
 }
 void AudioEvents::prefer_bank(const std::string& bank) {
     ScopedLock lock(impl_->lock);

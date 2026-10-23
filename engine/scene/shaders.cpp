@@ -797,6 +797,16 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[0] = effect_texture(c, m, "bright_lut");
         effect_particles(EFFECT_EXHAUST_QUICK);
         g_life_param[0] = 0;
+    } else if (s == "scenes/ui/normal_map_point.gdshader") {
+        e.id = EFFECT_MAP_POINT;
+        Color from = param_color(m, "initial_color", Color(0.705882f, 0.615686f, 0.537255f, 1));
+        Color to = param_color(m, "map_color", from);
+        e.p[0] = from.r;
+        e.p[1] = from.g;
+        e.p[2] = from.b;
+        e.p[4] = to.r;
+        e.p[5] = to.g;
+        e.p[6] = to.b;
     } else if (s == "shaders/boss_map_point_placeholder.gdshader") {
         e.id = EFFECT_TINT_GRAY;
         Color k = param_color(m, "tint_color", Color(1, 1, 1, 1));
@@ -1552,25 +1562,6 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
                 cm[r * 4 + 0] = cm[r * 4 + 1] = cm[r * 4 + 2] = w / 3.0f;
                 cm[r * 4 + 3] = w * k;
             }
-        }
-        c.set_color_matrix(cm);
-        return true;
-    }
-    if (m->shader == "scenes/ui/normal_map_point.gdshader") {
-        /* Texels within 0.5 of initial_color become map_color. The icons
-         * are two-tone (a dark body, light features near initial_color):
-         * per channel, the line through the dark tone (kept) and
-         * initial_color (to map_color), which also keeps the edges'
-         * antialiasing. */
-        Color from = param_color(m, "initial_color", Color(0.705882f, 0.615686f, 0.537255f, 1));
-        Color to = param_color(m, "map_color", from);
-        static const float dark[3] = { 0.17f, 0.13f, 0.08f };
-        const float f[3] = { from.r, from.g, from.b }, t[3] = { to.r, to.g, to.b };
-        float cm[12] = { 0 };
-        for (int r = 0; r < 3; ++r) {
-            float k = f[r] - dark[r] > 0.01f ? (t[r] - dark[r]) / (f[r] - dark[r]) : 1.0f;
-            cm[r * 4 + r] = k;
-            cm[r * 4 + 3] = dark[r] * (1 - k);
         }
         c.set_color_matrix(cm);
         return true;

@@ -14,8 +14,11 @@ public:
     ~AudioEvents();
     bool available() const;
     void prefer_bank(const std::string& bank);
-    /* A bank parsed now (its first event would parse it mid-game). */
+    /* A bank parsed now (its first event would parse it mid-game), read
+     * and parsed without the lock, so the mixer keeps playing meanwhile. */
     void preload(const std::string& bank);
+    /* The bank an event would play from, parsed the same way. */
+    void preload_for(const std::string& path);
     u32 play(const std::string& path, float volume = 1, const Json& parameters = Json());
     void parameter(u32 instance, const std::string& name, float value);
     void parameter_label(u32 instance, const std::string& name, const std::string& label);

@@ -1,6 +1,7 @@
 #include "rest_site_screen.h"
 #include "deck_previews.h"
 #include "loc.h"
+#include "top_bar.h"
 #include "../audio/game_audio.h"
 
 #include "../scene/controls.h"
@@ -8,8 +9,70 @@
 #include "../scene/particles.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
+#include "../scene/script.h"
+
+#include <math.h>
 
 namespace spire {
+
+namespace {
+/* NRestSiteCharacter.DoShake: ScreenPunchInstance(15, 0.4, 0), a cosine
+ * wiggle sideways easing out over 0.4 s. */
+class RestShake : public ScriptBehavior {
+public:
+    RestShake(Node2D* who) : who_(who), origin_(who->position), t_(0.4) {}
+    virtual void process(Node* n, double dt) {
+        if (n->queued_for_deletion()) return;
+        t_ -= dt;
+        if (t_ <= 0) {
+            who_->position = origin_;
+            n->queue_free();
+            return;
+        }
+        float u = (float)(t_ / 0.4), ease = 1 - (1 - u) * (1 - u) * (1 - u);
+        who_->position = origin_ + Vec2(cosf((float)t_ * 60.0f) * 15.0f * ease, 0);
+    }
+
+private:
+    Node2D* who_;
+    Vec2 origin_;
+    double t_;
+};
+
+/* NRelicFlashVfx at the character's origin: its three icons 0.2 s apart,
+ * each growing to 1.25 (Cubic Out, 1 s) as it fades (1.5 s), the effect
+ * rising 64 px (Expo Out, 1 s). */
+class RestRelicFlash : public ScriptBehavior {
+public:
+    explicit RestRelicFlash(const Vec2& at) : t_(0), at_(at) {}
+    virtual void process(Node* n, double dt) {
+        t_ += (float)dt;
+        if (n->is_control()) {
+            float k = t_ < 1 ? t_ : 1;
+            ((Control*)n)->set_position(at_ - Vec2(0, 64 * (k >= 1 ? 1 : 1 - powf(2, -10 * k))));
+        }
+        for (int i = 0; i < 3; ++i) {
+            Node* img = n->get_node(format("Image%d", i + 1));
+            if (!img || !img->is_control()) continue;
+            Control* c = (Control*)img;
+            float lt = t_ - 0.2f * (float)i;
+            if (lt < 0) {
+                c->modulate.a = 0;
+                continue;
+            }
+            float g = lt < 1 ? lt : 1, u = 1 - g;
+            float s = 1 + 0.25f * (1 - u * u * u);
+            c->scale = Vec2(s, s);
+            c->modulate.a = lt < 1.5f ? 1 - lt / 1.5f : 0.0f;
+        }
+        if (t_ >= 1.95f && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    float t_;
+    Vec2 at_;
+};
+} /* namespace */
 
 /* Colors.DarkGray: the characters once the fire is out. */
 static const float DARK_GRAY = 0.6627451f;
@@ -254,6 +317,30 @@ double RestSiteScreen::post_select(Node* room, const Json& steps) {
             CanvasItem* r = (CanvasItem*)room;
             tween_color(tweens_, &r->modulate, Color(0.1f, 0.1f, 0.1f, 1), 1.0f);
             tween_color(tweens_, &r->modulate, Color(1, 1, 1, 1), 1.0f, TRANS_LINEAR, EASE_IN_OUT, 2.0f);
+        }
+    } else if (option == "KINDLE" && !character_boxes_.empty() && !character_boxes_[0]->children.empty()) {
+        /* KindleRestSiteOption.PlayKindleVfx: the character shakes, Pumpkin
+         * Candle's flash on it (its fire sound is a cue of its own) */
+        Node* who = character_boxes_[0]->children[0];
+        if (who->is_node2d()) {
+            Node* shake = SceneLibrary::create_node("Node");
+            shake->behavior = new RestShake((Node2D*)who);
+            room->add_child(shake);
+        }
+        Node* fx = instance(lib_, "scenes/vfx/relic_flash_vfx.tscn");
+        if (fx && fx->is_control()) {
+            for (int k = 1; k <= 3; ++k) {
+                Node* img = fx->get_node(format("Image%d", k));
+                set_relic_icon(lib_, img, "pumpkin_candle");
+                if (img && img->is_canvas_item()) ((CanvasItem*)img)->modulate.a = 0;
+            }
+            Control* c = (Control*)fx;
+            for (int s = 0; s < 4; ++s) c->anchor[s] = 0;
+            c->set_position(Vec2(0, 0));
+            fx->behavior = new RestRelicFlash(Vec2(0, 0));
+            who->add_child(fx);
+        } else {
+            delete fx;
         }
     } else if (option == "SMITH" && DeckPreviews::current()) {
         Json c = *cue;

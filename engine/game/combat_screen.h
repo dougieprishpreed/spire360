@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 
 namespace spire {
 
@@ -222,6 +223,10 @@ private:
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
     void monster_death(Creature& cr, const std::string& who, class SpineSprite* s);
+    void refresh_energy();
+    Color energy_outline_; /* CharacterModel.EnergyLabelOutlineColor */
+    int shown_energy_;
+    class ScriptBehavior* energy_spin_; /* the orb's SpinLayers */
     void enable_ui(Creature& c);
     /* NCreature.AnimDie running (its own effect hides it): the room behind
      * the rewards leaves them be */
@@ -287,6 +292,36 @@ private:
     /* NCreature.TrackBlockStatus: whose block a creature's health bar also
      * shows (Osty: its summoner's), by who */
     std::map<std::string, std::string> block_tracking_;
+    /* CreatureCmd.Escape: whose node left the room (its despawn is no death) */
+    std::set<std::string> escaped_;
+    /* Creature.SetNodeVisible(false): who stays hidden until shown again
+     * (InfestedPower's Wrigglers until the elite's death animation is
+     * over), whatever a sync shows */
+    std::set<std::string> node_hidden_;
+    /* SandpitPower, by its owner: where its target stood and the amount it
+     * started from (AfterApplied) */
+    std::map<std::string, float> sandpit_x_;
+    std::map<std::string, int> sandpit_amount_;
+    /* creature nodes a tween moves along x (SandpitPower) */
+    struct CreatureMove {
+        Control* node;
+        Vec2 from, to;
+        float t, duration;
+        TweenTrans trans;
+        TweenEase ease;
+    };
+    std::vector<CreatureMove> creature_moves_;
+    /* NCard.PlayRandomizeCostAnim: a hand card's cost label rolling (0 to
+     * 50 over 0.4-0.6 s, Sine Out: "?" or a digit), then its cost again */
+    struct CostRoll {
+        int id;
+        float t, duration, offset;
+    };
+    std::vector<CostRoll> cost_rolls_;
+    void update_cost_rolls(double dt);
+    void move_creature_x(Creature& c, float dx, float duration, TweenTrans trans, TweenEase ease);
+    void sandpit_call(const std::string& method, const Json& args);
+    void special_scripted(const std::string& call, const Json& args);
     /* NCreature.AnimShake running, by who: its time */
     std::map<std::string, double> shakes_;
     TweenSet tweens_;
@@ -317,17 +352,22 @@ private:
     virtual Node* visuals_of(const std::string& who);
     virtual bool origin_of(const std::string& who, Vec2* out);
     struct Cue {
+        Cue() : at(0), kind(0), amount(0), delayed(false) {}
         double at;
         int kind;
         std::string who, path, name, where; /* where: center, feet, side, screen */
         int amount;
         Json data;
+        /* part of a presentation task the game runs alongside the turn
+         * ("delay"): it neither holds the pad nor the steps after it */
+        bool delayed;
     };
     Creature* creature_for(const std::string& who);
     bool vfx_position(const Cue& c, Vec2* out);
     void fire(const Cue& c);
     void show_banner(const std::string& kind, int round);
     void add_cue(const Cue& c);
+    static bool cue_before(const Cue& a, const Cue& b);
     std::vector<Cue> cues_;
     size_t next_cue_;
     double cue_t_, busy_until_;
@@ -337,6 +377,7 @@ private:
     void radial_blur(const std::string& position);
     /* NCreature's own calls the logic made on a creature's node. */
     void creature_call(const std::string& method, const Json& args);
+    void spine_call(const std::string& method, const Json& args);
     void anim_shake(const std::string& who);
     void scale_visuals(Creature& c, float duration);
     void scale_base(Creature& c);
@@ -366,6 +407,7 @@ private:
     Json state_, pending_; /* pending_: the last response (its cards' and powers' data) */
     int played_instance_;  /* the last played card that left the hand */
     struct MovingCard {
+        MovingCard() : burn_at(-1), arrive(-1) {}
         Holder holder;
         Vec2 from, to;
         float from_scale, to_scale;
@@ -383,6 +425,8 @@ private:
         Node* path_scene;  /* the power swoosh's scene (owned here) */
         float from_angle;  /* degrees */
         double mp_t;       /* NCard.AnimMultiCardPlay's time, < 0: none */
+        double burn_at;    /* exhausted from a pile: NCardExhaustVfx at this t (< 0: none) */
+        int arrive;        /* the pile (0 draw, 1 discard) a flight lands on: counted there then */
     };
     void update_in_play(MovingCard& m, double dt);
     MovingCard* in_play(int id);
@@ -398,9 +442,21 @@ private:
         Vec2 from, to, ctrl; /* on screen */
         float speed, accel, duration, time;
         int phase; /* 0 flying, 1 shrinking, 2 fading */
+        int arrive; /* the pile it lands on (0 draw, 1 discard, -1 none) */
     };
     std::vector<ShuffleFly> shuffle_flies_;
-    void spawn_shuffle_fly();
+    /* NCombatCardPile: a pile's count rises as each card lands on it
+     * (CardAddFinished at the end of NCardFlyVfx / NCardFlyShuffleVfx),
+     * with a bump; the cards still flying to it are not counted yet. */
+    int arriving(int pile) const;
+    void land_on_pile(int pile);
+    /* A card moved between piles without a node (the shuffle, ...): it
+     * leaves its pile's count as its silhouette sets off and joins the
+     * other's as it lands. By pile (0 draw, 1 discard, 2 exhaust): the
+     * ones moved whose silhouette has not set off yet (reset at a sync). */
+    int depart_[3], expect_[3];
+    void spawn_shuffle_fly(const std::string& from = "discard", const std::string& to = "draw");
+    void create_at_pile(const Json& ch);
     void update_shuffle_flies(double dt);
     Vec2 pile_center(const std::string& pile);
     /* NCardFlyPowerVfx.GetDuration from the play pile to this player */

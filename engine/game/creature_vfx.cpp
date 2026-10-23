@@ -1666,6 +1666,38 @@ bool death_delayed(Node* n) {
     return false;
 }
 
+/* The monsters' moves placing a node of theirs before an attack plays
+ * (their TestMode-off branches; the logic's "SpecialNode.*" cues):
+ * AimAt, the node's global x at the leftmost of the targets' + k * the
+ * visuals' scale x; ReachTo, Position = Left * (its x - the target's x)
+ * (FuzzyWurmCrawler); SetPosition. */
+static void place_special_node(Node2D* n, const std::string& call, const std::string& who, const Json& args,
+                               VfxAnchors& anchors, Node* visuals) {
+    if (call == "SpecialNode.SetPosition") {
+        n->position = Vec2(args[1].f(), args[2].f());
+        return;
+    }
+    Vec2 self, t;
+    if (!anchors.origin_of(who, &self)) return;
+    if (call == "SpecialNode.ReachTo") {
+        if (args.size() > 1 && args[1].is_string() && anchors.origin_of(args[1].str(), &t)) n->position = Vec2(-(self.x - t.x), 0);
+        return;
+    }
+    bool found = false;
+    float tx = 0;
+    const Json& targets = args[1];
+    for (size_t i = 0; i < targets.size(); ++i) {
+        if (!targets[i].is_string() || !anchors.origin_of(targets[i].str(), &t)) continue;
+        if (!found || t.x < tx) tx = t.x;
+        found = true;
+    }
+    if (!found) return;
+    float sx = visuals && visuals->is_node2d() ? ((Node2D*)visuals)->scale.x : 1.0f;
+    Xform2D pg = n->parent && n->parent->is_canvas_item() ? ((CanvasItem*)n->parent)->global_transform() : Xform2D();
+    Vec2 g = n->global_transform().origin;
+    n->position = pg.affine_inverse().xform(Vec2(tx + args[2].f() * sx, g.y));
+}
+
 bool special_node_call(const std::string& call, const Json& args, VfxAnchors& anchors) {
     const std::string& name = args[(size_t)0].str();
     size_t hash = name.find('#');
@@ -1696,6 +1728,11 @@ bool special_node_call(const std::string& call, const Json& args, VfxAnchors& an
         bool has = args.size() > 1 && args[1].is_string() && anchors.origin_of(args[1].str(), &at);
         if (n && n->behavior && (n->script == "res://src/Core/Nodes/Vfx/NMyteVfx.cs" || n->script == "res://src/Core/Nodes/Vfx/NSnappingJaxfruitVfx.cs"))
             ((TableVfx*)n->behavior)->set_target(has, at);
+    } else if (call == "SpecialNode.AimAt" || call == "SpecialNode.ReachTo" || call == "SpecialNode.SetPosition") {
+        if (n && n->is_node2d()) place_special_node((Node2D*)n, call, who, args, anchors, visuals);
+    } else if (call == "CanvasItem.SetVisible") {
+        /* TorchHeadAmalgam.OnDieToDoom: its torches' lights */
+        if (n) set_visible(n, args.size() > 1 && args[1].b());
     } else if (call == "NFlyconidSporesVfx.SetSporeTypeIsVulnerable") {
         bool vulnerable = args.size() > 1 && args[1].b();
         if (n) {

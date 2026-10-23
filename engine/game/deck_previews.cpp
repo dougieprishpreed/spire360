@@ -2,6 +2,7 @@
 #include "card_view.h"
 #include "combat_vfx.h"
 #include "screen_shake.h"
+#include "top_bar.h"
 #include "ui_util.h"
 
 #include "../audio/game_audio.h"
@@ -452,20 +453,118 @@ bool Preview::update(float dt) {
     return true;
 }
 
-/* CardCmd.PreviewInternal: grows in, flies after the cue's time. */
+/* NGlobalUi.ReparentCard: a picked reward card in the top bar's trail
+ * container where it was, flying into the deck at once. */
+class PickedPreview : public Preview {
+public:
+    PickedPreview(Layer* l, const Json& card, const Vec2& at, float scale) : Preview(l, Json()) {
+        card_ = new_card(card);
+        if (!card_) return;
+        root_ = card_;
+        Node* parent = l->trails ? l->trails : l->layer_node;
+        parent->add_child(card_);
+        Xform2D pg = parent->is_canvas_item() ? ((CanvasItem*)parent)->global_transform() : Xform2D();
+        card_->set_position(inverse(pg).xform(at));
+        card_->scale = Vec2(scale, scale);
+    }
+    virtual bool step(float) { return true; }
+};
+
+/* NRelicFlashVfx.StartVfx on a card (NCard.FlashRelicOnCard: twice its
+ * size at the card's middle): up 64 px (Expo Out, 1 s), its three icons
+ * 0.2 s apart, each growing to 1.25 (Cubic Out, 1 s) as it fades (1.5 s). */
+class CardRelicFlash : public ScriptBehavior {
+public:
+    explicit CardRelicFlash(const Vec2& at) : t_(0), at_(at) {}
+    virtual void process(Node* n, double dt) {
+        t_ += (float)dt;
+        if (n->is_control()) {
+            float k = t_ < 1 ? t_ : 1;
+            ((Control*)n)->set_position(at_ - Vec2(0, 64 * (k >= 1 ? 1 : 1 - powf(2, -10 * k))));
+        }
+        for (int i = 0; i < 3; ++i) {
+            Node* img = n->get_node(format("Image%d", i + 1));
+            if (!img || !img->is_control()) continue;
+            Control* c = (Control*)img;
+            float lt = t_ - 0.2f * (float)i;
+            if (lt < 0) {
+                c->modulate.a = 0;
+                continue;
+            }
+            float g = lt < 1 ? lt : 1, u = 1 - g;
+            float s = 1 + 0.25f * (1 - u * u * u);
+            c->scale = Vec2(s, s);
+            c->modulate.a = lt < 1.5f ? 1 - lt / 1.5f : 0.0f;
+        }
+        if (t_ >= 1.95f && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    float t_;
+    Vec2 at_;
+};
+
+/* CardCmd.PreviewInternal: grows in, flies after the cue's time; the
+ * relics that changed the card flash on it and in the top bar as it has
+ * grown in (FlashRelics). */
 class AddPreview : public Preview {
 public:
-    AddPreview(Layer* l, const Json& cue, int box) : Preview(l, cue), wait_((float)cue["time"].num(1.2)) {
+    AddPreview(Layer* l, const Json& cue, int box) : Preview(l, cue), wait_((float)cue["time"].num(1.2)), flashed_(false) {
         card_ = new_card(cue["card"]);
         if (!card_) return;
         root_ = card_;
         l->add(box, card_);
         grow_in(card_);
     }
-    virtual bool step(float) { return t_ >= 0.25f + wait_; }
+    virtual bool step(float) {
+        if (!flashed_ && t_ >= 0.25f) {
+            flashed_ = true;
+            flash_relics();
+        }
+        return t_ >= 0.25f + wait_;
+    }
 
 private:
+    void flash_relics() {
+        const Json& relics = cue_["relics"];
+        Node* root = layer_->layer_node ? layer_->layer_node->parent : NULL;
+        Node* body = card_ ? find_named(card_, "CardContainer") : NULL;
+        for (size_t i = 0; root && i < relics.size(); ++i) {
+            int index = relics[i].i(-1);
+            Node* holder = NULL;
+            for (size_t k = 0; !holder && k < root->children.size(); ++k) {
+                Node* bar = root->children[k]->get_node("TopBarLayer");
+                Node* row = bar ? find_named(bar, "RelicInventory") : NULL;
+                if (row && index >= 0 && index < (int)row->children.size()) holder = row->children[(size_t)index];
+            }
+            if (!holder || !holder->is_control()) continue;
+            /* RelicModel.Flash: the top bar holder's flash */
+            Node* hf = make_relic_holder_flash(layer_->lib, (Control*)holder);
+            if (hf) layer_->layer_node->add_child(hf);
+            Node* hi = holder->find_unique("Icon");
+            Texture2DRes* icon = hi && hi->type == "TextureRect" ? ((TextureRect*)hi)->texture : NULL;
+            if (!body || !body->is_control()) continue;
+            Node* fx = instance(layer_->lib, "scenes/vfx/relic_flash_vfx.tscn");
+            if (!fx || !fx->is_control()) {
+                delete fx;
+                continue;
+            }
+            for (int k = 1; k <= 3; ++k) {
+                Node* img = fx->get_node(format("Image%d", k));
+                if (img && icon && img->type == "TextureRect") ((TextureRect*)img)->texture = icon;
+                if (img && img->is_canvas_item()) ((CanvasItem*)img)->modulate.a = 0;
+            }
+            Control* c = (Control*)fx;
+            for (int s = 0; s < 4; ++s) c->anchor[s] = 0;
+            c->scale = Vec2(2, 2);
+            Vec2 at = ((Control*)body)->size * 0.5f;
+            c->set_position(at);
+            fx->behavior = new CardRelicFlash(at);
+            body->add_child(fx);
+        }
+    }
     float wait_;
+    bool flashed_;
 };
 
 /* CardPileCmd.RemoveFromDeck: grows in, NCardRemoveVfx 0.25 s later, the
@@ -828,6 +927,13 @@ void DeckPreviews::play_cue(const Json& c, const std::string& character) {
         for (size_t i = 0; i < c["cards"].size(); ++i) l->previews.push_back(new SmithPreview(l, c, c["cards"][i]));
     }
     if (p) l->previews.push_back(p);
+}
+
+void DeckPreviews::fly_to_deck(const Json& card, float x, float y, float scale, const std::string& character) {
+    Layer* l = layer_ ? (Layer*)layer_->behavior : NULL;
+    if (!l) return;
+    l->character = lower(character);
+    l->previews.push_back(new PickedPreview(l, card, Vec2(x, y), scale));
 }
 
 void DeckPreviews::clear() {

@@ -128,8 +128,48 @@ internal static class Steps
             return;
         }
         FlushChanges();
-        if (_pendingUi.Count < 500)
-            _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });
+        Add(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = type + "." + method, ["args"] = outArgs.Count > 0 ? outArgs : null });
+    }
+
+    /// <summary>The death's animation (the animator's ops for the Dead
+    /// trigger) on the death change recorded for that creature, or as an
+    /// animation cue of its own.</summary>
+    public static void AttachDeathAnimation(string who, List<Dictionary<string, object?>> ops)
+    {
+        if (!Enabled || !RecordUi) return;
+        for (int i = _pendingUi.Count - 1; i >= 0; i--)
+            if (_pendingUi[i]["t"] as string == "death" && _pendingUi[i]["who"] as string == who)
+            {
+                _pendingUi[i]["play"] = ops;
+                return;
+            }
+        Cue(new Dictionary<string, object?> { ["t"] = "anim", ["who"] = who, ["name"] = "Dead", ["wait"] = 0, ["play"] = ops });
+    }
+
+    // Presentation the game runs alongside the turn (TaskHelper.RunSafely of
+    // a visual task: a relic's DoActivateVisuals, a card's OnEnqueuePlayVfx,
+    // a reveal after a death animation). Headless it runs inline, so its
+    // waits must not hold back what follows: they only delay its own cues
+    // and changes ("delay", ms after the point where it started).
+    private static readonly List<int> _branches = new();
+
+    public static void BeginBranch()
+    {
+        FlushChanges();
+        _branches.Add(_branches.Count > 0 ? _branches[^1] : 0);
+    }
+
+    public static void EndBranch()
+    {
+        FlushChanges();
+        if (_branches.Count > 0) _branches.RemoveAt(_branches.Count - 1);
+    }
+
+    private static void Add(Dictionary<string, object?> cue)
+    {
+        if (_pendingUi.Count >= 500) return;
+        if (_branches.Count > 0 && _branches[^1] > 0) cue["delay"] = _branches[^1];
+        _pendingUi.Add(cue);
     }
 
     /// <summary>
@@ -164,7 +204,7 @@ internal static class Steps
         catch { return; }
         if (now == null) return;
         var diff = Diff(_last, now);
-        if (diff.Count > 0 && _pendingUi.Count < 500) _pendingUi.AddRange(diff);
+        foreach (var change in diff) Add(change);
         _last = now;
         _lastPrint = print;
     }
@@ -231,7 +271,7 @@ internal static class Steps
     {
         if (!Enabled || !RecordUi) return;
         FlushChanges();
-        if (_pendingUi.Count < 500) _pendingUi.Add(cue);
+        Add(cue);
     }
 
     public static Dictionary<string, object?> OrbInfo(OrbModel orb) => new()
@@ -260,13 +300,18 @@ internal static class Steps
 
     public static void Wait(int ms, string source, double? scale = null)
     {
+        if (ms > 0 && _branches.Count > 0)
+        {
+            FlushChanges();
+            _branches[^1] += ms;
+            return;
+        }
         if (ms > 0) ClockMs += ms;
         if (!Enabled || !RecordUi || ms <= 0) return;
         FlushChanges();
-        if (_pendingUi.Count >= 500) return;
         var cue = new Dictionary<string, object?> { ["t"] = "wait", ["ms"] = ms, ["src"] = source };
         if (scale != null) cue["scale"] = scale;
-        _pendingUi.Add(cue);
+        Add(cue);
     }
 
     /// <summary>Called after each queued continuation.</summary>

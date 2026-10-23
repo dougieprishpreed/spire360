@@ -50,6 +50,15 @@ private:
 
 void sleep_ms(int ms);
 
+/* Where the main thread is, for a watchdog on another thread (the console
+ * build logs it when a frame hangs): the frame loop's phase, the client's
+ * step and the node being processed or drawn; and the audio thread's.
+ * Plain stores, read only once the main thread has stopped. */
+extern const char* volatile g_trace_phase;
+extern const char* volatile g_trace_step;
+extern const void* volatile g_trace_node;
+extern const char* volatile g_trace_audio;
+
 } /* namespace spire */
 
 #endif

@@ -1097,6 +1097,20 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_MAP_POINT: {
+        float t[4] = { 1, 1, 1, 1 };
+        if (tex) sample(tex->img, u, v, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float rgb[3], d2 = 0;
+        for (int k = 0; k < 3; ++k) {
+            rgb[k] = t[k] * ia * col[k];
+            d2 += (rgb[k] - e.p[k]) * (rgb[k] - e.p[k]);
+        }
+        float a = clampf(t[3] * col[3], 0, 1);
+        for (int k = 0; k < 3; ++k) out[k] = clampf(d2 < 0.25f ? e.p[4 + k] : rgb[k], 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_COLORIZE_ADD: {
         float t[4] = { 1, 1, 1, 1 };
         if (tex) sample(tex->img, u, v, flags, t);

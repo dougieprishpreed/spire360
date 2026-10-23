@@ -372,6 +372,7 @@ void GameClient::start_room_transition() {
 
 void GameClient::update(const PadState& pad) {
     std::string line;
+    g_trace_step = "client: logic answers";
     while (link_->poll(line)) {
         if (line.empty() || line[0] != '{') continue; /* not protocol */
         std::string err;
@@ -405,7 +406,11 @@ void GameClient::update(const PadState& pad) {
                 msg["context"]["total_floor"].i() != decision_["context"]["total_floor"].i();
             if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
-            else show(msg);
+            else {
+                g_trace_step = "client: show";
+                show(msg);
+                g_trace_step = "client: logic answers";
+            }
         } else if (type == "settings") {
             apply_settings(msg);
         } else if (type == "ftues") {
@@ -495,6 +500,7 @@ void GameClient::update(const PadState& pad) {
         Json d = finishing_;
         finishing_ = Json();
         d.set("steps", Json()); /* already played on the persistent room */
+        g_trace_step = "client: show after the steps";
         show(d);
         return;
     }
@@ -508,6 +514,7 @@ void GameClient::update(const PadState& pad) {
     if (room_ && room_->busy()) return;
     if (ported_ && ported_->busy()) return;
     if (!queue && (check_ftues(pad) || ftue_)) return;
+    g_trace_step = "client: input";
     if (!queue && auto_ && (auto_until_ <= 0 || decisions_ < auto_until_)) choose_automatically();
     else handle_input(pad);
 }

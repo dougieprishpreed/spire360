@@ -23,7 +23,7 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
     : lib_(lib), tree_(tree), game_(game), version_(version), logo_(NULL), logo_node_(NULL), title_(new TitleScreen(lib)), title_node_(NULL),
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
       screen_(TITLE), chars_version_(0), decisions_seen_(0), starting_(false), in_run_(false),
-      quit_(false), leaving_run_(false) {
+      quit_(false), leaving_run_(false), menu_ready_(false), title_waiting_(false) {
     tutorials_ = NULL;
     tutorials_node_ = NULL;
     ascension_ = NULL;
@@ -47,9 +47,9 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
             logo_ = NULL;
         }
     }
-    if (!logo_) show_title();
-    /* The game data loads while the menu shows; the last profile is read
-     * as the game does at start-up. */
+    if (!logo_) title_waiting_ = true;
+    /* The game data loads while the logo plays; the last profile is read
+     * as the game does at start-up, before the menu shows. */
     game_->request_characters();
     game_->request("{\"cmd\":\"select_profile\",\"profile\":0}");
 }
@@ -210,6 +210,7 @@ void MenuFlow::handle_answer(const Json& a) {
     const std::string& type = a["type"].str();
     note("answer: " + type);
     if (type == "main_menu") {
+        menu_ready_ = true;
         menu_ = a;
         title_->set_menu(menu_);
         chars_->set_progress(menu_);
@@ -222,6 +223,7 @@ void MenuFlow::handle_answer(const Json& a) {
     } else if (type == "profiles") {
         if (profiles_) profiles_->set_profiles(a);
     } else if (type == "error") {
+        menu_ready_ = true;
         note("logic: " + a["message"].str());
         /* No profile could be read: the menu without one. */
         if (menu_.is_null()) title_->set_menu(menu_);
@@ -251,7 +253,7 @@ bool MenuFlow::update(const PadState& in) {
 
     if (logo_) {
         logo_->input(pad);
-        if (logo_->done()) {
+        if (logo_->done() && menu_ready_) {
             logo_node_->parent->remove_child(logo_node_);
             delete logo_node_;
             logo_node_ = NULL;
@@ -260,6 +262,11 @@ bool MenuFlow::update(const PadState& in) {
             show_title();
         }
         return !quit_;
+    }
+    if (title_waiting_) {
+        if (!menu_ready_) return !quit_;
+        title_waiting_ = false;
+        show_title();
     }
 
     if (in_run_) {

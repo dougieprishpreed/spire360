@@ -291,6 +291,12 @@ void SpineSprite::drive_bones() {
         float wx = cosf(f->rotation), wy = sinf(f->rotation);
         float lx = ia * wx + ib * wy, ly = ic * wx + id * wy;
         b.rotation = atan2f(ly, lx) * 57.2957795f;
+        /* SpineBone.set_global_transform's scale, where the node has one
+         * (Vantom's ScalingBone) */
+        if (f->scale.x != 1 || f->scale.y != 1) {
+            b.scale_x = f->scale.x;
+            b.scale_y = f->scale.y;
+        }
     }
 }
 

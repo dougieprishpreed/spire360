@@ -1819,7 +1819,9 @@ bool spawn_spec(SceneLibrary* lib, Node* box, const Spec& s, const Args& a, VfxA
  * Create(Creature) placement and colours. */
 bool spawn_big_slash(SceneLibrary* lib, Node* box, bool impact, const Args& a, VfxAnchors& anchors) {
     VfxCreature c;
-    if (a.creatures.empty() || !anchors.creature(a.creatures[0], &c)) return true;
+    /* Create(target), or Create(position, ...) at a creature's point */
+    const std::string who = !a.creatures.empty() ? a.creatures[0] : !a.places.empty() ? a.places[0].who : std::string();
+    if (who.empty() || !anchors.creature(who, &c)) return true;
     Node* fx = add_effect(lib, box, impact ? "scenes/vfx/vfx_big_slash_impact.tscn" : "scenes/vfx/vfx_big_slash.tscn");
     if (!fx || !fx->is_node2d()) return true;
     set_global(fx, c.center);
@@ -1845,7 +1847,99 @@ static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGround
                                            "NSpikeSplashVfx", "NKinPriestGrenadeVfx", "NSleepingVfx", "NHyperbeamVfx",
                                            "NSweepingBeamVfx", "NGrandFinaleVfx", "NHellraiserVfx",
                                            "NAdditiveOverlayVfx", "NDoomVfx", "NDoomOverlayVfx", "NHorizontalLinesVfx",
-                                           "NSmokyVignetteVfx" };
+                                           "NSmokyVignetteVfx", "NBlockSparkVfx", "NDamageBlockedVfx", "NHealNumVfx",
+                                           "NFanOfKnivesVfx", "NTestSubjectBurnVfx" };
+
+namespace {
+/* NDamageBlockedVfx / NHealNumVfx: a label that drifts (decelerating),
+ * eased by its tweens, freed after its life. */
+class FloatingText : public ScriptBehavior {
+public:
+    FloatingText(const Vec2& velocity, float decel, double life) : velocity_(velocity), decel_(decel), left_(life) {}
+    TweenSet tweens;
+    virtual void process(Node* n, double dt) {
+        float t = (float)dt;
+        tweens.update(dt);
+        Node2D* d = (Node2D*)n;
+        d->position = d->position + velocity_ * t;
+        float len = sqrtf(velocity_.x * velocity_.x + velocity_.y * velocity_.y);
+        if (len > 1e-3f) velocity_ = velocity_ * (1.0f - minf(decel_ * t, len) / len);
+        left_ -= dt;
+        if (left_ <= 0 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    Vec2 velocity_;
+    float decel_;
+    double left_;
+};
+
+/* NFanOfKnivesVfx.Animate: the nine shivs at the player's centre rise to
+ * 180 px (Back Out, 0.4-0.8 s each) from transparent black, and fade out
+ * (0.4 s) 0.25-0.5 s after the last has risen; after 0.4 s they fan out
+ * (Back Out, 0.8 s) to their angles, the middle one staying. */
+class FanOfKnives : public Effect {
+public:
+    virtual void begin(Node* n) {
+        static const float angles[9] = { -1.74533f, -1.3089975f, -0.872665f, -0.4363325f, 0.0f,
+                                         0.4363325f, 0.872665f, 1.3089975f, 1.74533f };
+        float rise[9], longest = 0;
+        for (int i = 0; i < 9; ++i) {
+            rise[i] = rand_range(0.4f, 0.8f);
+            if (rise[i] > longest) longest = rise[i];
+        }
+        life_ = 0.4 + 0.8;
+        for (int i = 0; i < 9; ++i) {
+            Node* s = n->get_node(format("ShivFanParticle%d", i + 1));
+            if (!s || s->type != "Sprite2D") continue;
+            Sprite2D* shiv = (Sprite2D*)s;
+            float k = rand_range(0.98f, 1.02f);
+            shiv->scale = Vec2(k, k);
+            tweens_.tween_from(&shiv->offset.y, 0.0f, -180.0f, rise[i], TRANS_BACK, EASE_OUT);
+            tweens_.tween_from(&shiv->modulate.a, 0.0f, 1.0f, rise[i]);
+            tweens_.tween_from(&shiv->modulate.r, 0.0f, 1.0f, rise[i]);
+            tweens_.tween_from(&shiv->modulate.g, 0.0f, 1.0f, rise[i]);
+            tweens_.tween_from(&shiv->modulate.b, 0.0f, 1.0f, rise[i]);
+            Node* sh = shiv->get_node("Shadow");
+            if (sh && sh->type == "Sprite2D") tweens_.tween_from(&((Sprite2D*)sh)->offset.y, 0.0f, -180.0f, rise[i], TRANS_BACK, EASE_OUT);
+            float delay = rand_range(0.25f, 0.5f);
+            tweens_.tween(&shiv->modulate.a, 0.0f, 0.4f, TRANS_LINEAR, EASE_IN_OUT, longest + delay);
+            if (longest + delay + 0.4 > life_) life_ = longest + delay + 0.4;
+            if (angles[i] != 0) tweens_.tween(&shiv->rotation, angles[i], 0.8f, TRANS_BACK, EASE_OUT, 0.4f);
+        }
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= life_ && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double life_;
+};
+
+/* NTestSubjectBurnVfx: the back container's dark sheet, in from
+ * transparent after 0.25 s (0.3 s), a beat, dimmed to half (0.15 s) and
+ * back (0.25 s), held 0.35 s, out (0.3 s). */
+class TestSubjectBurn : public Effect {
+public:
+    virtual void begin(Node* n) {
+        if (!n->is_canvas_item()) return;
+        CanvasItem* c = (CanvasItem*)n;
+        c->modulate = Color(1, 1, 1, 0);
+        tweens_.tween(&c->modulate.a, 1.0f, 0.3f, TRANS_LINEAR, EASE_IN_OUT, 0.25f);
+        float* ch[3] = { &c->modulate.r, &c->modulate.g, &c->modulate.b };
+        for (int k = 0; k < 3; ++k) {
+            tweens_.tween(ch[k], 0.5f, 0.15f, TRANS_LINEAR, EASE_IN_OUT, 0.65f);
+            tweens_.tween(ch[k], 1.0f, 0.25f, TRANS_LINEAR, EASE_IN_OUT, 0.8f);
+        }
+        tweens_.tween(&c->modulate.a, 0.5f, 0.15f, TRANS_LINEAR, EASE_IN_OUT, 0.65f);
+        tweens_.tween(&c->modulate.a, 1.0f, 0.25f, TRANS_LINEAR, EASE_IN_OUT, 0.8f);
+        tweens_.tween(&c->modulate.a, 0.0f, 0.3f, TRANS_LINEAR, EASE_IN_OUT, 1.4f);
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= 1.7 && !n->queued_for_deletion()) n->queue_free();
+    }
+};
+} /* namespace */
 
 namespace {
 /* NDamageNumVfx._Ready / AnimVfx / _Process. */
@@ -2233,6 +2327,96 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     const Spec* s = spec_named(cls);
     if (s) {
         spawn_spec(lib, box, *s, a, anchors);
+        return true;
+    }
+    if (cls == "NBlockSparkVfx") {
+        /* CreatureCmd.Damage, a hit fully blocked: the sparks at the
+         * creature's VfxSpawnPosition (an interactable one), freed with its
+         * specks */
+        if (!have || !c.interactable) return true;
+        static const Spec spark = { "NBlockSparkVfx", "scenes/vfx/block_spark_vfx.tscn", "NBlockSparkVfx.cs", AT_CENTER,
+                                    TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false,
+                                    { { 0, OP_RESTART, "_particles" } }, -1.0f };
+        spawn_spec(lib, box, spark, a, anchors);
+        return true;
+    }
+    if (cls == "NDamageBlockedVfx") {
+        /* "Blocked" above it: from (+-20, -60..-40), shrinking to 0.6 and
+         * rising 250 px (Quad Out, 2 s), from blue to white (Cubic Out),
+         * fading after 0.5 s (Sine In, 1.5 s) */
+        if (!have || !c.interactable) return true;
+        Node* n = instance(lib, "scenes/vfx/vfx_blocked_text.tscn");
+        if (!n || !n->is_node2d()) {
+            delete n;
+            return true;
+        }
+        Node2D* d = (Node2D*)n;
+        box->add_child(n);
+        set_global(n, c.center + Vec2(rand_range(-20, 20), rand_range(-60, -40)));
+        d->rotation = rand_range(-2, 2) * PI_F / 180.0f;
+        Node* label = n->get_node("Label");
+        set_label(label, Loc::get("vfx", "BLOCKED"));
+        FloatingText* b = new FloatingText(Vec2(0, 0), 0, 2.0);
+        b->tweens.tween_from(&d->scale, Vec2(1, 1), Vec2(0.6f, 0.6f), 2.0f, TRANS_QUAD, EASE_OUT);
+        b->tweens.tween(&d->position.y, d->position.y - 250.0f, 2.0f, TRANS_QUAD, EASE_OUT);
+        if (label && label->is_canvas_item()) {
+            CanvasItem* l = (CanvasItem*)label;
+            Color blue = hex(0x21C0FF);
+            b->tweens.tween_from(&l->modulate.r, blue.r, 1.0f, 2.0f, TRANS_CUBIC, EASE_OUT);
+            b->tweens.tween_from(&l->modulate.g, blue.g, 1.0f, 2.0f, TRANS_CUBIC, EASE_OUT);
+            b->tweens.tween_from(&l->modulate.b, blue.b, 1.0f, 2.0f, TRANS_CUBIC, EASE_OUT);
+        }
+        b->tweens.tween(&d->modulate.a, 0.0f, 1.5f, TRANS_SINE, EASE_IN, 0.5f);
+        n->behavior = b;
+        return true;
+    }
+    if (cls == "NHealNumVfx") {
+        /* the amount in green, 100 px above the centre (+-10, +-5), thrown
+         * up (-600..-300, +-100 px/s) and slowed (2000 px/s2), from 2.5x
+         * (Quad Out, 0.5 s), faded after 1 s (Quad In, 0.3 s) */
+        if (!have || !c.interactable) return true;
+        Node* n = instance(lib, "scenes/vfx/vfx_heal_num.tscn");
+        if (!n || !n->is_node2d()) {
+            delete n;
+            return true;
+        }
+        Node2D* d = (Node2D*)n;
+        box->add_child(n);
+        set_global(n, c.center + Vec2(rand_range(-10, 10), -100.0f + rand_range(-5, 5)));
+        Node* label = n->get_node("Label");
+        set_label(label, format("%d", a.numbers.empty() ? 0 : (int)a.numbers[0]));
+        if (label && label->is_control()) {
+            float k = rand_range(1.2f, 1.3f);
+            ((Control*)label)->scale = Vec2(k, k);
+        }
+        d->rotation = rand_range(-5, 5) * PI_F / 180.0f;
+        FloatingText* b = new FloatingText(Vec2(rand_range(-100, 100), rand_range(-600, -300)), 2000.0f, 1.3);
+        b->tweens.tween(&d->modulate.a, 0.0f, 0.3f, TRANS_QUAD, EASE_IN, 1.0f);
+        b->tweens.tween_from(&d->scale, Vec2(2.5f, 2.5f), Vec2(1, 1), 0.5f, TRANS_QUAD, EASE_OUT);
+        n->behavior = b;
+        return true;
+    }
+    if (cls == "NFanOfKnivesVfx") {
+        if (!have) return true;
+        Node* parent = anchors.back_box() ? anchors.back_box() : box;
+        Node* n = instance(lib, "scenes/vfx/fan_of_knives_vfx.tscn");
+        if (!n) return true;
+        parent->add_child(n);
+        set_global(n, c.center);
+        if (lib->audio()) lib->audio()->ui("event:/sfx/characters/silent/silent_fan_of_knives");
+        FanOfKnives* f = new FanOfKnives();
+        n->behavior = f;
+        f->start(n);
+        return true;
+    }
+    if (cls == "NTestSubjectBurnVfx") {
+        Node* parent = anchors.back_box() ? anchors.back_box() : box;
+        Node* n = instance(lib, "scenes/vfx/monsters/test_subject_burn_vfx.tscn");
+        if (!n) return true;
+        parent->add_child(n);
+        TestSubjectBurn* f = new TestSubjectBurn();
+        n->behavior = f;
+        f->start(n);
         return true;
     }
     if (call == "PlayerHurtVignetteHelper.Play") {

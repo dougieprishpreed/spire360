@@ -7,6 +7,7 @@
 #include "shaders.h"
 #include "tween.h"
 #include "viewport.h"
+#include "../core/thread.h"
 
 #include <algorithm>
 #include <math.h>
@@ -84,6 +85,7 @@ void SceneTree::layout(int passes) {
 }
 
 void SceneTree::process_node(Node* n, double dt) {
+    g_trace_node = n;
     if (n->queued_for_deletion()) return;
     if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
     if (n->behavior) n->behavior->process(n, dt);
@@ -331,6 +333,7 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
         shader_blend(d.material, &blend);
         canvas.set_item(d.xf, d.modulate, blend, d.ci->effective_texture_flags() | extra_flags);
         canvas.set_clip(d.has_clip ? &d.clip : NULL);
+        g_trace_node = d.ci;
         d.ci->draw(canvas);
         shader_end(canvas, d.material);
         ++items_drawn;

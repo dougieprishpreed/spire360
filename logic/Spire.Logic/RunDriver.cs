@@ -904,6 +904,9 @@ public partial class RunDriver
         var handCountBefore = hand.Count;
         var playsBefore = PlaysStarted(card);
 
+        // CardModel.EnqueueManualPlay: the card's enqueue effect (Inflame's
+        // ground fire and power-up, Fan of Knives, ...) alongside the play.
+        TaskHelper.RunSafely(card.OnEnqueuePlayVfx(target));
         var playAction = new PlayCardAction(card, target);
         RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
         WaitForActionExecutor();
@@ -1818,6 +1821,10 @@ public partial class RunDriver
                     look = new Dictionary<string, object?>
                     {
                         ["bg"] = new[] { Res(act.MapTopBgPath), Res(act.MapMidBgPath), Res(act.MapBotBgPath) },
+                        // NBossMapPoint: the boss's node (a spine skeleton, or
+                        // a placeholder picture and outline: <path>.png)
+                        ["boss_node"] = act.BossEncounter != null ? Res(act.BossEncounter.BossNodePath) : null,
+                        ["second_boss_node"] = act.SecondBossEncounter != null ? Res(act.SecondBossEncounter.BossNodePath) : null,
                         ["bg_color"] = Rgba(act.MapBgColor),
                         ["traveled_color"] = Rgba(act.MapTraveledColor),
                         ["untraveled_color"] = Rgba(act.MapUntraveledColor),
@@ -2991,6 +2998,11 @@ public partial class RunDriver
                 if (mode != MegaCrit.Sts2.Core.Settings.FastModeType.Instant && normal > 0)
                     cue["wait"] = mode == MegaCrit.Sts2.Core.Settings.FastModeType.Fast ? fast : normal;
                 Steps.Cue(cue);
+                // NRestSiteRoom's DoLocalPostSelectVfx for the other options
+                // (Dig's shovel, Lift's and Clone's shake, Hatch's chirp,
+                // Kindle's fire): their sounds and shakes become cues.
+                if (option is not HealRestSiteOption && option is not SmithRestSiteOption)
+                    TaskHelper.RunSafely(option.DoLocalPostSelectVfx());
             }
             catch (Exception ex) { Log($"rest site vfx cue: {ex.Message}"); }
         };

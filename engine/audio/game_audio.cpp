@@ -41,10 +41,13 @@ void GameAudio::thread_main(void* self) {
     GameAudio* a = (GameAudio*)self;
     float samples[512];
     while (!a->stopping_) {
+        g_trace_audio = "locking";
         {
             ScopedLock lock(a->lock_);
+            g_trace_audio = "mixing";
             while (a->output_.demand()) { a->render(samples, 256); if (!a->output_.submit(samples, 256)) break; }
         }
+        g_trace_audio = "sleeping";
         sleep_ms(2);
     }
 }
@@ -167,19 +170,26 @@ void GameAudio::steps(const Json& steps) {
         const Json& c = steps[i][k];
         if (c["t"].str() == "wait") delay += c["ms"].num() / 1000;
         else if (c["t"].str() == "sfx" || is_audio_call(c["call"].str())) {
-            Scheduled scheduled; scheduled.at = clock_ + delay; scheduled.cue = c; pending_.push_back(scheduled);
+            /* "delay": a sound of a task the game runs alongside */
+            Scheduled scheduled; scheduled.at = clock_ + delay + c["delay"].num(0) / 1000; scheduled.cue = c; pending_.push_back(scheduled);
         }
     }
 }
 void GameAudio::decision(const Json& d) {
-    ScopedLock lock(lock_);
     const Json& a = d["context"]["audio"];
     if (a.is_null()) return;
-    int floor = d["context"]["total_floor"].i();
-    if (floor_ != floor) { stop_room_loops(); floor_ = floor; }
     std::string bank = a["bank"].str();
     size_t slash = bank.find_last_of('/'); if (slash != std::string::npos) bank = bank.substr(slash + 1);
+    /* The act's bank and the banks of the tracks about to play, parsed
+     * before the lock: the audio thread keeps mixing (a parse under it
+     * was a gap in the music). */
     events_.prefer_bank(bank);
+    events_.preload(bank);
+    events_.preload_for(a["custom"].str().empty() ? a["track"].str() : a["custom"].str());
+    events_.preload_for(a["ambience"].str());
+    ScopedLock lock(lock_);
+    int floor = d["context"]["total_floor"].i();
+    if (floor_ != floor) { stop_room_loops(); floor_ = floor; }
     act_track_ = a["track"].str();
     music(a["custom"].str().empty() ? act_track_ : a["custom"].str());
     ambience(a["ambience"].str());

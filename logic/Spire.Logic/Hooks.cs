@@ -60,6 +60,7 @@ internal static partial class Hooks
     public static void Install()
     {
         InstallSound();
+        InstallPresentation();
         // LocTable.GetRawText(string key): the table's text, or the key when missing
         // (the original throws for missing keys).
         Bridge.Register("loc.get_raw_text", a =>
@@ -181,10 +182,10 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterBefore("deck.preview_add", a =>
         {
             if (a.Length < 3 || a[1] is not float time || a[2] is not MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style) return;
-            if (a[0] is CardPileAddResult r) { if (r.success) PreviewCue("add", r.cardAdded, style, time); }
+            if (a[0] is CardPileAddResult r) { if (r.success) PreviewCue("add", r.cardAdded, style, time, r.modifyingModels); }
             else if (a[0] is IReadOnlyList<CardPileAddResult> results)
                 foreach (var x in results)
-                    if (x.success) PreviewCue("add", x.cardAdded, style, time);
+                    if (x.success) PreviewCue("add", x.cardAdded, style, time, x.modifyingModels);
         });
         Spire.HookBridge.Hooks.RegisterBefore("deck.remove", a =>
         {
@@ -384,7 +385,10 @@ internal static partial class Hooks
         Bridge.Register("card.pile_tween", a =>
         {
             if (a.Length > 0 && a[0] is IEnumerable<CardPileAddResult> results)
+            {
+                PileCues(results);
                 Steps.Wait(CardTweenMs(results), "card");
+            }
             return ((Godot.Tween?)null, false);
         });
         // CardPileCmd.Shuffle: each card of the discard pile flies to the draw
@@ -425,6 +429,22 @@ internal static partial class Hooks
                     Steps.Cue(new Dictionary<string, object?> { ["t"] = "card_burn", ["card"] = Steps.IdOf(c) });
             }
         });
+        // Creature.SetNodeVisible(visible): the creature's node shown or
+        // hidden (InfestedPower's Wrigglers until the elite's death
+        // animation is over, ...).
+        Spire.HookBridge.Hooks.RegisterBefore("creature.node_visible", a =>
+        {
+            if (a.Length < 2 || a[0] is not Creature c || a[1] is not bool visible) return;
+            if (!CombatManager.Instance.IsInProgress) return;
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "node_visible", ["who"] = Steps.Who(c), ["visible"] = visible });
+        });
+        // Presentation tasks the game runs alongside the turn (patches
+        // branch.*): their waits delay only their own cues.
+        foreach (var branch in new[] { "card_enqueue_vfx", "relic_activate", "infested_reveal", "stock_reveal", "reattach_vfx", "lords_parasol" })
+        {
+            Spire.HookBridge.Hooks.RegisterBefore("branch." + branch + ".begin", _ => Steps.BeginBranch());
+            Spire.HookBridge.Hooks.RegisterAfter("branch." + branch + ".end", (_, _) => Steps.EndBranch());
+        }
         // CardModel.OnPlayWrapper's replays (CurrentPlayIndex = i > 0, not a
         // power): NCard.AnimMultiCardPlay in the play pile, then
         // CustomScaledWait(0.4, 0.5).
@@ -526,12 +546,47 @@ internal static partial class Hooks
             {
                 PileType.Hand => from.HasValue ? lerp : 0,
                 PileType.Play => Math.Max(lerp, 0.25f),
-                PileType.Exhaust => from.HasValue && from != PileType.Hand && from != PileType.Play ? lerp + hold : 0,
+                PileType.Exhaust => from.HasValue && from != PileType.Hand && from != PileType.Play ? Math.Max(lerp, 0.25f) + hold : 0,
                 _ => 0,
             };
             longest = Math.Max(longest, t);
         }
         return (int)Math.Round(longest * 1000);
+    }
+
+    private static string PileName(PileType p) => p.ToString().ToLowerInvariant();
+
+    /// <summary>GetTweenForCardsChangingPiles for the cards with no node on
+    /// the table (FindOnTable finds only the hand's and the play pile's,
+    /// whose moves the card changes show): one between the draw, discard,
+    /// exhaust piles and the deck flies there as a silhouette
+    /// (NCardFlyShuffleVfx); one going to the play pile (Havoc, Mayhem) or
+    /// exhausted from another pile is made at its old pile
+    /// (CreateCardNodeAndUpdateVisuals) and goes to the play pile, to burn
+    /// there for the exhaust.</summary>
+    private static void PileCues(IEnumerable<CardPileAddResult> results)
+    {
+        if (!CombatManager.Instance.IsInProgress) return;
+        foreach (var r in results)
+        {
+            if (!r.success) continue;
+            var card = r.cardAdded;
+            var to = card.Pile?.Type;
+            var from = r.oldPile?.Type;
+            if (to == null || from == null || from == PileType.Hand || from == PileType.Play) continue;
+            if (from is not (PileType.Draw or PileType.Discard or PileType.Exhaust or PileType.Deck)) continue;
+            if (to is PileType.Draw or PileType.Discard or PileType.Deck)
+                Steps.Cue(new Dictionary<string, object?>
+                {
+                    ["t"] = "card_fly", ["card"] = Steps.IdOf(card), ["from"] = PileName(from.Value), ["to"] = PileName(to.Value),
+                });
+            else if (to is PileType.Play or PileType.Exhaust && Driver != null)
+                Steps.Cue(new Dictionary<string, object?>
+                {
+                    ["t"] = "card_create", ["card"] = Steps.IdOf(card), ["from"] = PileName(from.Value), ["to"] = PileName(to.Value),
+                    ["view"] = Driver.DeckCardView(card),
+                });
+        }
     }
 
     private static int WaitMs(object? arg) => arg switch
@@ -591,8 +646,15 @@ internal static partial class Hooks
         catch { return pw.Id.Entry; }
     }
 
-    private static void PreviewCue(string op, CardModel card, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style, float time)
+    private static void PreviewCue(string op, CardModel card, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle style, float time,
+                                   List<AbstractModel>? modifying = null)
     {
+        // CardCmd.FlashRelics: the relics that changed the card flash on it
+        // and in the top bar once it has grown in (their places in the
+        // player's relics)
+        var owned = card.Owner.Relics.ToList();
+        _flashRelics = modifying?.OfType<RelicModel>().Select(rl => (object?)owned.IndexOf(rl))
+            .Where(i => i is int n && n >= 0).ToList();
         if (card.Pile == null || CombatManager.Instance.IsEnding) return;
         if (card.Pile.Type.IsCombatPile())
         {
@@ -618,8 +680,12 @@ internal static partial class Hooks
         if (from != null) cue["from"] = Driver.DeckCardView(from);
         if (style != null) cue["style"] = style.ToString();
         if (time > 0) cue["time"] = time;
+        if (op == "add" && _flashRelics?.Count > 0) cue["relics"] = _flashRelics;
+        _flashRelics = null;
         Steps.Cue(cue);
     }
+
+    private static List<object?>? _flashRelics;
 
     /// <summary>VfxCmd.PlayOnCreature / PlayOnCreatureCenter(target, path): at the
     /// creature's feet (its position) or its centre (VfxSpawnPosition); none

@@ -320,6 +320,10 @@ enum EffectId {
      * tex3(UV + (1, p6)).a (p6 TIME * FloatParameter * 1.8); all repeat.
      * No vertex colour. */
     EFFECT_POWERUP_AURA = 59,
+    /* scenes/ui/normal_map_point.gdshader: COLOR (texel times vertex
+     * colour) whose rgb lies within 0.5 of p0..2 (initial_color) becomes
+     * p4..6 (map_color); the rest as it is. */
+    EFFECT_MAP_POINT = 60,
     EFFECT_COUNT
 };
 

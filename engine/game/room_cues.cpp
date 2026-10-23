@@ -10,6 +10,7 @@
 #include "../scene/scene.h"
 #include "../scene/script.h"
 #include "../scene/tween.h"
+#include "../scene/tween.h"
 #include "loc.h"
 
 #include <math.h>
@@ -67,6 +68,25 @@ private:
     SceneLibrary* lib_;
     Control* holder_;
     int frames_;
+};
+
+/* NTopBarHp.LerpAtNeow: "0/max", then after 0.5 s the HP counting up to
+ * the player's (Cubic InOut, 1 s). */
+class HpLerp : public ScriptBehavior {
+public:
+    HpLerp(Node* label, int hp, int max) : label_(label), hp_(hp), max_(max), t_(0) {}
+    virtual void process(Node* n, double dt) {
+        if (n->queued_for_deletion()) return;
+        t_ += dt;
+        float u = t_ < 0.5 ? 0.0f : tween_interpolate(TRANS_CUBIC, EASE_IN_OUT, (float)(t_ - 0.5 < 1 ? t_ - 0.5 : 1), 0, 1, 1);
+        set_label(label_, format("%d/%d", (int)(hp_ * u), max_));
+        if (t_ >= 1.5) n->queue_free();
+    }
+
+private:
+    Node* label_;
+    int hp_, max_;
+    double t_;
 };
 
 /* The room's effects go under the top bar (NEventRoom.VfxContainer,
@@ -252,6 +272,14 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
                 if (num) add_under_bar(screen, num);
             } else if (call == "PlayerFullscreenHealVfx.Play" && args.size() >= 2) {
                 heal_vfx(lib, screen, d["player"], args[1].num());
+            } else if (call == "NTopBarHp.LerpAtNeow") {
+                Node* bar = screen->get_node("TopBarLayer");
+                Node* label = bar ? bar->find_unique("HpLabel") : NULL;
+                if (!label) continue;
+                Node* later = SceneLibrary::create_node("Node");
+                later->name = "HpLerp";
+                later->behavior = new HpLerp(label, d["player"]["hp"].i(), d["player"]["max_hp"].i());
+                bar->add_child(later);
             }
         }
 }

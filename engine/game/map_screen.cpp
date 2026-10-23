@@ -4,6 +4,7 @@
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
+#include "../scene/spine_sprite.h"
 
 #include <math.h>
 
@@ -314,6 +315,38 @@ Node* MapScreen::build(const Json& d, std::string* error) {
             if (pt.icon) pt.icon->self_modulate = was_visited || pt.choice ? hex(0x241F1A) : Color(0x7D / 255.0f, 0x6A / 255.0f, 0x55 / 255.0f, 0xD8 / 255.0f);
         } else {
             if (kind == 3 || second_boss) c->scale = Vec2(0.75f, 0.75f);
+            /* NBossMapPoint._Ready: the boss's node, a skeleton playing
+             * "animation" (boss_map_point: its black layer in the traveled
+             * or untraveled colour, map_color the act's), or the
+             * placeholder picture (that colour) and its outline (the
+             * act's). */
+            bool lit = was_visited || pt.choice;
+            const std::string& path = look[kind == 2 ? "boss_node" : "second_boss_node"].str();
+            Node* sn = n->find_unique("SpineSprite");
+            Node* img = n->find_unique("PlaceholderImage");
+            Node* outline = n->find_unique("PlaceholderOutline");
+            Resource* r = path.empty() ? NULL : lib_->ext(path);
+            Color layer = lit ? traveled : untraveled;
+            if (r && r->kind == Resource::RES_SPINE_DATA && sn && sn->type == "SpineSprite") {
+                SpineSprite* s = (SpineSprite*)sn;
+                s->set_data(lib_, (SpineDataRes*)r);
+                s->add_animation("animation", true, 0, 0);
+                s->shader_params["black_layer_color.r"] = layer.r;
+                s->shader_params["black_layer_color.g"] = layer.g;
+                s->shader_params["black_layer_color.b"] = layer.b;
+                s->shader_params["map_color.r"] = bg_color.r;
+                s->shader_params["map_color.g"] = bg_color.g;
+                s->shader_params["map_color.b"] = bg_color.b;
+                set_visible(sn, true);
+                set_visible(img, false);
+            } else if (!path.empty()) {
+                set_visible(sn, false);
+                set_texture(lib_, img, path + ".png");
+                set_texture(lib_, outline, path + "_outline.png");
+                if (img && img->is_canvas_item()) ((CanvasItem*)img)->self_modulate = layer;
+                if (outline && outline->is_canvas_item()) ((CanvasItem*)outline)->self_modulate = bg_color;
+                set_visible(img, true);
+            }
         }
         hide(n->find_unique("MapPointVoteContainer"));
         points_box->add_child(n);

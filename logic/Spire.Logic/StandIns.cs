@@ -10,6 +10,8 @@
 // are encoded: x = 1e6 + slot * 1e4, y = -1e6 - anchor * 1e4, plus whatever
 // offset the game adds; Steps decodes them in cue arguments as
 // "<who>@<anchor>[+dx,dy]" for the presentation to place there.
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Creatures;
@@ -43,6 +45,10 @@ internal static class StandIns
 
     private static NBestiary? _bestiary;
     private static Godot.Control? _layout;
+    // NCombatRoom.CombatVfxContainer / BackCombatVfxContainer (and the
+    // Bestiary's): containers the effects are added to (their Create calls
+    // are recorded; what is added is null)
+    private static Godot.Control? _vfxBox, _backVfxBox;
     private static NCombatBackground? _background;
     private static NKaiserCrabBossBackground? _kaiserCrab;
 
@@ -171,6 +177,8 @@ internal static class StandIns
             {
                 if (id.EndsWith("NBestiary::get_Instance", StringComparison.Ordinal)) return _bestiary ??= Blank<NBestiary>();
                 if (id.EndsWith("NBestiary::get_Layout", StringComparison.Ordinal)) return _layout ??= new Godot.Control();
+                if (id.EndsWith("NBestiary::get_VfxContainer", StringComparison.Ordinal)) return _vfxBox ??= new Godot.Control();
+                if (id.EndsWith("NBestiary::get_BackVfxContainer", StringComparison.Ordinal)) return _backVfxBox ??= new Godot.Control();
                 if (id.EndsWith("NBestiary::GetCreatureNode", StringComparison.Ordinal))
                 {
                     foreach (var x in a)
@@ -196,6 +204,10 @@ internal static class StandIns
                         return false;
                 }
             }
+            if (id.EndsWith("NCombatRoom::get_CombatVfxContainer", StringComparison.Ordinal))
+                return CombatManager.Instance.IsInProgress ? _vfxBox ??= new Godot.Control() : null;
+            if (id.EndsWith("NCombatRoom::get_BackCombatVfxContainer", StringComparison.Ordinal))
+                return CombatManager.Instance.IsInProgress ? _backVfxBox ??= new Godot.Control() : null;
             if (id.EndsWith("NCombatRoom::get_Background", StringComparison.Ordinal))
                 return CombatManager.Instance.IsInProgress ? _background ??= Blank<NCombatBackground>() : null;
             if (id.EndsWith("NCombatRoom::get_Instance", StringComparison.Ordinal))
@@ -206,6 +218,17 @@ internal static class StandIns
                     if (x is Creature c)
                         return c.CombatState != null && CombatManager.Instance.IsInProgress ? Node(c) : null;
                 return null;
+            }
+            if (method == "GetAnimationState" && a.Length > 0 && TryCreature(a[0], out var sc2))
+                return State(sc2);
+            if (method == "get_SpineBody" && SkeletonAnims == null && a.Length > 0 &&
+                a[0] is MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals sv && VisualsOf.TryGetValue(sv, out var svc))
+                return Sprite(svc);
+            if (method == "get_SpineAnimation" && a.Length > 0)
+            {
+                if (a[0] is NCreature an && Creatures.TryGetValue(an, out var ac)) return new SpineAnimationAccess(Sprite(ac));
+                if (a[0] is MegaCrit.Sts2.Core.Nodes.Combat.NCreatureVisuals av && VisualsOf.TryGetValue(av, out var avc))
+                    return new SpineAnimationAccess(Sprite(avc));
             }
             if (a.Length > 0 && a[0] is NCreature n && Creatures.TryGetValue(n, out var cr))
             {
@@ -218,6 +241,7 @@ internal static class StandIns
                     case "get_IsInteractable": return cr.IsAlive;
                     case "get_Entity": return cr;
                     case "get_Hitbox": return Hitbox(cr);
+                    case "StartDeathAnim": return DeathAnimLength(cr);
                 }
             }
         }
@@ -228,6 +252,21 @@ internal static class StandIns
             Console.Error.WriteLine($"[WARN] UI stand-ins disabled: {ex.GetType().Name}: {ex.Message}");
         }
         return null;
+    }
+
+    /// <summary>NCreature.StartDeathAnim: with a skeleton, SetAnimationTrigger
+    /// ("Dead") (the animator's death state: the death plays it) and that
+    /// animation's length; the monster's DeathAnimLengthOverride over it; at
+    /// most 30 s.</summary>
+    private static float DeathAnimLength(Creature cr)
+    {
+        List<Dictionary<string, object?>>? ops = AnimLengths.HasSkeleton(cr) ? Animators.Trigger(cr, "Dead") : null;
+        if (ops != null) Steps.AttachDeathAnimation(Steps.Who(cr), ops);
+        if (cr.Monster != null && cr.Monster.HasDeathAnimLengthOverride) return cr.Monster.DeathAnimLengthOverride;
+        string? anim = null;
+        foreach (var op in ops ?? new())
+            if (op["op"] as string == "set_animation" && (op["track"] is int track ? track : 0) == 0) { anim = op["name"] as string; break; }
+        return anim == null ? 0f : Math.Min(AnimLengths.Of(cr, anim), 30f);
     }
 
     private static NCreature Node(Creature c)
@@ -266,12 +305,51 @@ internal static class StandIns
         return new Godot.Vector2(Base + slot * Step, -Base - anchor * Step);
     }
 
-    /// <summary>The creature a stand-in node stands for.</summary>
+    /// <summary>A creature's VfxSpawnPosition as the stand-ins encode it.</summary>
+    public static Godot.Vector2 CenterOf(Creature c) => Encode(c, 0);
+
+    /// <summary>The creature a stand-in node stands for (its node, spine
+    /// sprite or animation state, or a SpineAnimationAccess on its sprite).</summary>
     public static bool TryCreature(object? o, out Creature creature)
     {
         creature = null!;
-        return o is NCreature n && Creatures.TryGetValue(n, out creature!);
+        if (o is NCreature n) return Creatures.TryGetValue(n, out creature!);
+        if (o is SpineAnimationAccess access) o = SpriteOf(access);
+        return o != null && SpineOf.TryGetValue(o, out creature!);
     }
+
+    private static FieldInfo? _accessSprite;
+
+    /// <summary>SpineAnimationAccess's sprite (a struct the game passes
+    /// around: its calls arrive with a copy as the receiver).</summary>
+    [DynamicDependency("_sprite", typeof(SpineAnimationAccess))]
+    private static object? SpriteOf(SpineAnimationAccess access)
+    {
+        _accessSprite ??= typeof(SpineAnimationAccess).GetField("_sprite", BindingFlags.Instance | BindingFlags.NonPublic);
+        return _accessSprite?.GetValue(access);
+    }
+
+    // A creature's spine (NCreature.SpineAnimation, NCreatureVisuals.SpineBody):
+    // a sprite and its animation state standing for that creature's, so the
+    // game's calls on them (SetAnimation on a track, ...) are recorded with
+    // the creature as their receiver.
+    private static readonly ConditionalWeakTable<Creature, MegaSprite> Sprites = new();
+    private static readonly ConditionalWeakTable<Creature, MegaAnimationState> States = new();
+    private static readonly ConditionalWeakTable<object, Creature> SpineOf = new();
+
+    private static MegaSprite Sprite(Creature c) => Sprites.GetValue(c, cr =>
+    {
+        var s = Blank<MegaSprite>();
+        SpineOf.AddOrUpdate(s, cr);
+        return s;
+    });
+
+    private static MegaAnimationState State(Creature c) => States.GetValue(c, cr =>
+    {
+        var s = Blank<MegaAnimationState>();
+        SpineOf.AddOrUpdate(s, cr);
+        return s;
+    });
 
     /// <summary>"e1@bottom" (and "+dx,dy" when the game moved it) for an
     /// encoded position; null for any other.</summary>

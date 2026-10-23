@@ -204,6 +204,101 @@
       "note": "RemoveFromCombat burns a card that has a node (in the hand, or played and not a power) with NCardExhaustVfx; headless there is none. Recorded as card_burn cues before the cards leave their piles."
     },
     {
+      "id": "branch.card_enqueue_vfx.begin",
+      "action": "call_before",
+      "type": "*",
+      "method": "OnEnqueuePlayVfx",
+      "all_overloads": true,
+      "note": "CardModel.EnqueueManualPlay runs the card's OnEnqueuePlayVfx (a ground fire, the PowerUp animation) alongside the play it queues. Headless it runs inline: Steps.BeginBranch keeps its waits off the turn's timeline."
+    },
+    {
+      "id": "branch.card_enqueue_vfx.end",
+      "action": "call_after",
+      "type": "*",
+      "method": "OnEnqueuePlayVfx",
+      "all_overloads": true,
+      "note": "The end of card_enqueue_vfx's branch."
+    },
+    {
+      "id": "branch.relic_activate.begin",
+      "action": "call_before",
+      "type": "*",
+      "method": "DoActivateVisuals",
+      "all_overloads": true,
+      "note": "A relic's DoActivateVisuals (Flash, IsActivating, Cmd.Wait(1)) runs alongside the effect that triggered it (TaskHelper.RunSafely). Headless it runs inline: Steps.BeginBranch keeps its waits off the turn's timeline."
+    },
+    {
+      "id": "branch.relic_activate.end",
+      "action": "call_after",
+      "type": "*",
+      "method": "DoActivateVisuals",
+      "all_overloads": true,
+      "note": "The end of relic_activate's branch."
+    },
+    {
+      "id": "branch.infested_reveal.begin",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.InfestedPower",
+      "method": "RevealWrigglersAfterDeathAnim",
+      "note": "InfestedPower reveals the Wrigglers after the elite's death animation, alongside the turn. Headless it runs inline: Steps.BeginBranch keeps its waits off the turn's timeline."
+    },
+    {
+      "id": "branch.infested_reveal.end",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.InfestedPower",
+      "method": "RevealWrigglersAfterDeathAnim",
+      "note": "The end of infested_reveal's branch."
+    },
+    {
+      "id": "branch.stock_reveal.begin",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.StockPower",
+      "method": "RevealReplacementAfterDeathAnim",
+      "note": "StockPower reveals the replacement after the death animation, alongside the turn. Headless it runs inline: Steps.BeginBranch keeps its waits off the turn's timeline."
+    },
+    {
+      "id": "branch.stock_reveal.end",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.StockPower",
+      "method": "RevealReplacementAfterDeathAnim",
+      "note": "The end of stock_reveal's branch."
+    },
+    {
+      "id": "branch.reattach_vfx.begin",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.ReattachPower",
+      "method": "PlayVfxAndThenRemoveNodes",
+      "note": "ReattachPower's fade of the segments, alongside the turn. Headless it runs inline: Steps.BeginBranch keeps its waits off the turn's timeline."
+    },
+    {
+      "id": "branch.reattach_vfx.end",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.ReattachPower",
+      "method": "PlayVfxAndThenRemoveNodes",
+      "note": "The end of reattach_vfx's branch."
+    },
+    {
+      "id": "branch.lords_parasol.begin",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Relics.LordsParasol",
+      "method": "PurchaseEverything",
+      "note": "Lord's Parasol buys the merchant's stock one item after another, alongside entering the shop. Headless it runs inline: Steps.BeginBranch keeps its waits off the turn's timeline."
+    },
+    {
+      "id": "branch.lords_parasol.end",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Relics.LordsParasol",
+      "method": "PurchaseEverything",
+      "note": "The end of lords_parasol's branch."
+    },
+    {
+      "id": "creature.node_visible",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Entities.Creatures.Creature",
+      "method": "SetNodeVisible",
+      "note": "Creature.SetNodeVisible sets the creature node's Visible (a Godot setter, not recorded): recorded as a node_visible cue (InfestedPower hides the Wrigglers until the elite's death animation is over)."
+    },
+    {
       "id": "card.play_index",
       "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Models.CardModel",
@@ -714,6 +809,404 @@
       "note": "See testmode.game_flow.is_off."
     },
     {
+      "id": "aim.bowlbug_silk.spit",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.BowlbugSilk",
+      "method": "SpitMove",
+      "note": "The move aims a node of the monster's (a bone the attack's animation follows, a spit target) at its target before it plays: a Godot position the game sets in a TestMode-off branch (the Thieving Hopper's on a null node headless). Recorded as a SpecialNode cue (Hooks.InstallPresentation)."
+    },
+    {
+      "id": "aim.bygone_effigy.slash",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.BygoneEffigy",
+      "method": "SlashMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.kin_follower.boomerang",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.KinFollower",
+      "method": "BoomerangMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.leaf_slime_m.sticky_shot",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.LeafSlimeM",
+      "method": "StickyShotMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.twig_slime_m.sticky_shot",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.TwigSlimeM",
+      "method": "StickyShotMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.magi_knight.magic_bomb",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.MagiKnight",
+      "method": "MagicBombMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.slumbering_beetle.rollout",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.SlumberingBeetle",
+      "method": "RolloutMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.tunneler.below",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.Tunneler",
+      "method": "BelowMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.thieving_hopper.thievery",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.ThievingHopper",
+      "method": "ThieveryMove",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "aim.fuzzy_wurm_crawler.acid_goop",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.FuzzyWurmCrawler",
+      "method": "AcidGoop",
+      "note": "See aim.bowlbug_silk.spit."
+    },
+    {
+      "id": "torch_head.die_to_doom",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.TorchHeadAmalgam",
+      "method": "OnDieToDoom",
+      "note": "Killed by Doom, the Torch Head Amalgam's torches' lights go out (SetVisible(false) on its special nodes, TestMode off): recorded as CanvasItem.SetVisible cues."
+    },
+    {
+      "id": "bot_fall.guardbot",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.Guardbot",
+      "method": "AfterAddedToRoom",
+      "note": "FabricatorNormal.SetBotFallPosition (TestMode off): the bot's Visuals/FallControl is placed so its fall in starts above the room. Recorded as a SpecialNode.BotFall cue."
+    },
+    {
+      "id": "bot_fall.noisebot",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.Noisebot",
+      "method": "AfterAddedToRoom",
+      "note": "See bot_fall.guardbot."
+    },
+    {
+      "id": "bot_fall.stabbot",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.Stabbot",
+      "method": "AfterAddedToRoom",
+      "note": "See bot_fall.guardbot."
+    },
+    {
+      "id": "bot_fall.zapbot",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.Zapbot",
+      "method": "AfterAddedToRoom",
+      "note": "See bot_fall.guardbot."
+    },
+    {
+      "id": "vantom.scale_to",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.Vantom",
+      "method": "ScaleTo",
+      "note": "Vantom.ScaleTo (ShrinkPower): its Visuals/ScalingBone node's scale tween (a Godot tween, nothing headless). Recorded as a SpecialNode.ScaleTo cue."
+    },
+    {
+      "id": "surrounded.face",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.SurroundedPower",
+      "method": "FaceDirection",
+      "note": "SurroundedPower.FaceDirection flips the owner's and its pets' bodies and form effects (Godot scales, nothing headless) and sets the kaiser_crab_direction music parameter. Recorded as NCreature.FaceDirection and UpdateMusicParameter cues."
+    },
+    {
+      "id": "osty.fade_in",
+      "action": "replace_calls",
+      "type": "Godot.Node",
+      "method": "CreateTween",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Commands.OstyCmd::Summon"
+      ],
+      "note": "OstyCmd.Summon fades a new Osty's node in from transparent (0.35 s after 0.1 s, a tween on the node). The tween is a stub headless; the hook records an NCreature.FadeIn cue and returns one."
+    },
+    {
+      "id": "creature.escape",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.CreatureCmd",
+      "method": "Escape",
+      "note": "CreatureCmd.Escape takes the creature's node out of the room and hides it (no death animation). Recorded as an escape cue, so its despawn is not shown as a death."
+    },
+    {
+      "id": "vfx.at_position",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "PlayVfx",
+      "optional": true,
+      "note": "VfxCmd.PlayVfx(position, path, container) returns at once in test mode. Recorded as a vfx cue when the position is a creature's (Hand of Greed's coins at its target's VfxSpawnPosition)."
+    },
+    {
+      "id": "testmode.nightmare.is_off",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
+      "method": "get_IsOff",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Cards.Nightmare::OnPlay"
+      ],
+      "note": "Nightmare.OnPlay's TestMode-off branch adds a vignette and the hands to NGame's run node (out of reach headless). The hook records them as cues with the branch's CustomScaledWait(0.1, 0.25) and reads TestMode as on."
+    },
+    {
+      "id": "testmode.doll_room.is_off",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
+      "method": "get_IsOff",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Events.DollRoom::BeforeEventStarted"
+      ],
+      "note": "DollRoom.BeforeEventStarted's ambience (NDebugAudioManager.Play): recorded as a cue; TestMode reads on (the handle it keeps stays null)."
+    },
+    {
+      "id": "sandpit.applied",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.SandpitPower",
+      "method": "AfterApplied",
+      "note": "SandpitPower (The Insatiable) moves its target towards the owner as it counts down, from where the target stood when it was applied (Godot positions, TestMode on: nothing). Recorded as Sandpit.Begin, Sandpit.Update (with the tween's 0.25 s) and Sandpit.Pull cues."
+    },
+    {
+      "id": "sandpit.update_positions",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.SandpitPower",
+      "method": "UpdateCreaturePositions",
+      "note": "See sandpit.applied."
+    },
+    {
+      "id": "sandpit.removed",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.SandpitPower",
+      "method": "AfterRemoved",
+      "note": "See sandpit.applied: AfterRemoved's pull and the bodies it hides, played at its TestMode-off reads (testmode.sandpit_removed.is_off)."
+    },
+    {
+      "id": "testmode.sandpit_removed.is_off",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
+      "method": "get_IsOff",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Powers.SandpitPower::AfterRemoved"
+      ],
+      "note": "SandpitPower.AfterRemoved's TestMode-off reads: the first pulls everyone it holds in, each later one hides one of their bodies (cues queued by sandpit.removed); TestMode reads on."
+    },
+    {
+      "id": "attack.hit_vfx_node",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.Builders.AttackCommand",
+      "method": "WithHitVfxNode",
+      "note": "AttackCommand's custom hit effects (WithHitVfxNode). A lambda's Create call is redirected like any UI call, but a UI method bound directly as the delegate (WithHitVfxNode(NBigSlashVfx.Create): Sovereign Blade, Grand Finale, Gunk Up, the Wrigglers) would run its stripped body. The hook registers the delegate wrapped: such a method's call is recorded instead."
+    },
+    {
+      "id": "attack.attacker_vfx_node",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.Builders.AttackCommand",
+      "method": "WithAttackerFx",
+      "params": [
+        "Func`1"
+      ],
+      "optional": true,
+      "note": "See attack.hit_vfx_node: the attacker's custom effects (WithAttackerFx(Func<Node2D>))."
+    },
+    {
+      "id": "card.randomize_cost.confused",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.ConfusedPower",
+      "method": "AfterCardDrawn",
+      "note": "A card whose cost is randomized in the hand (Confused, Slither, Snecko Oil) rolls its cost (NCard.PlayRandomizeCostAnim, through NCard.FindOnTable: null headless, so the call is skipped). Recorded as a card_randomize_cost cue."
+    },
+    {
+      "id": "card.randomize_cost.slither",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Enchantments.Slither",
+      "method": "AfterCardDrawn",
+      "note": "See card.randomize_cost.confused."
+    },
+    {
+      "id": "card.randomize_cost.snecko_oil",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.Potions.SneckoOil",
+      "method": "OnUse",
+      "note": "See card.randomize_cost.confused."
+    },
+    {
+      "id": "card.flash.set_BaseReplayCount",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "set_BaseReplayCount",
+      "note": "A hand card flashes when its cost, star cost, keywords, replays, affliction or upgrade change (NHandCardHolder.Flash on the card's EnergyCostChanged, StarCostChanged, KeywordsChanged, ReplayCountChanged, AfflictionChanged and Upgraded events, raised by these methods). Recorded as a card_flash cue for a card in the hand."
+    },
+    {
+      "id": "card.flash.set_BaseStarCost",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "set_BaseStarCost",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.InvokeEnergyCostChanged",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "InvokeEnergyCostChanged",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.AddTemporaryStarCost",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "AddTemporaryStarCost",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.AddKeyword",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "AddKeyword",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.RemoveKeyword",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "RemoveKeyword",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.AfflictInternal",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "AfflictInternal",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.ClearAfflictionInternal",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "ClearAfflictionInternal",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.UpgradeInternal",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "UpgradeInternal",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "card.flash.DowngradeInternal",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.CardModel",
+      "method": "DowngradeInternal",
+      "note": "See card.flash.set_BaseReplayCount."
+    },
+    {
+      "id": "neow.hp_lerp",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.AncientEventModel",
+      "method": "BeforeEventStarted",
+      "note": "Neow heals the player from 0 and the top bar's HP counts up (NTopBarHp.LerpAtNeow through NRun.Instance.GlobalUi, null headless). Recorded as that call."
+    },
+    {
+      "id": "spine.access.get_state",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaSprite",
+      "method": "GetAnimationState",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "SpineAnimationAccess (NCreature.SpineAnimation) is a struct in the UI's namespace: the redirect leaves its methods alone, and they call MegaSprite / MegaAnimationState inside that namespace, which the redirect does not rewrite either. Its calls on the creature's stand-in sprite go to the 'ui' hook here (recorded, answered)."
+    },
+    {
+      "id": "spine.access.set_animation",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaAnimationState",
+      "method": "SetAnimation",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "See spine.access.get_state."
+    },
+    {
+      "id": "spine.access.add_animation",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaAnimationState",
+      "method": "AddAnimation",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "See spine.access.get_state."
+    },
+    {
+      "id": "spine.access.get_current",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaAnimationState",
+      "method": "GetCurrent",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "See spine.access.get_state."
+    },
+    {
+      "id": "spine.access.current_name",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaAnimationState",
+      "method": "GetCurrentAnimationName",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "See spine.access.get_state."
+    },
+    {
+      "id": "spine.access.current_duration",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaAnimationState",
+      "method": "GetCurrentAnimationDuration",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "See spine.access.get_state."
+    },
+    {
+      "id": "spine.access.time_scale",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Bindings.MegaSpine.MegaAnimationState",
+      "method": "SetTimeScale",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Bindings.MegaSpine.SpineAnimationAccess"
+      ],
+      "optional": true,
+      "note": "See spine.access.get_state."
+    },
+    {
+      "id": "vfx.side_center",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "GetSideCenter",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Monsters.MechaKnight"
+      ],
+      "note": "VfxCmd.GetSideCenter is null in TestMode; the Mecha Knight's hit effects take its .Value (an exception once they run). Answered with the side's first creature's centre, encoded as the stand-ins' positions are, so the effect is recorded at it."
+    },
+    {
       "id": "testmode.presentation.is_off",
       "action": "replace_calls",
       "type": "MegaCrit.Sts2.Core.TestSupport.TestMode",
@@ -724,9 +1217,19 @@
         "MegaCrit.Sts2.Core.Models.Monsters.Myte::ToxicMove",
         "MegaCrit.Sts2.Core.Models.Monsters.SnappingJaxfruit::EnergyOrb",
         "MegaCrit.Sts2.Core.Models.Monsters.Flyconid::VulnerableSporesMove",
-        "MegaCrit.Sts2.Core.Models.Monsters.Flyconid::FrailSporesMove"
+        "MegaCrit.Sts2.Core.Models.Monsters.Flyconid::FrailSporesMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.Tunneler::BelowMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.Vantom::PrepareMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.Vantom::InkBlotMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.Vantom::InkyLanceMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.Vantom::DismemberMove",
+        "MegaCrit.Sts2.Core.Models.Monsters.WaterfallGiant::IncrementBuildUpAnimationTrack",
+        "MegaCrit.Sts2.Core.Models.Monsters.BygoneEffigy::WakeMove",
+        "MegaCrit.Sts2.Core.Models.Powers.InfestedPower::RevealWrigglersAfterDeathAnim",
+        "MegaCrit.Sts2.Core.Models.Cards.BouncingFlask::OnPlay",
+        "MegaCrit.Sts2.Core.Models.Cards.HandOfGreed::OnPlay"
       ],
-      "note": "Presentation the game skips in TestMode, with no effect on the rules: the potion thrown from the player to its target (NItemThrowVfx, then a 0.5 s wait), the rest site's healing cross, and the monsters' calls on their special nodes (the Myte's and Snapping Jaxfruit's targets, the Flyconid's spore kind). TestMode reads off there in every run, so it reaches the steps as cues (the UI calls stay redirected)."
+      "note": "Presentation the game skips in TestMode, with no effect on the rules: the potion thrown from the player to its target (NItemThrowVfx, then a 0.5 s wait), the rest site's healing cross, and the monsters' calls on their special nodes (the Myte's and Snapping Jaxfruit's targets, the Flyconid's spore kind); the Tunneler's attack from below (sound, animation, 1 s), Vantom's charge-ups (waits, sounds, its track-1 animations, the music's progress), the Waterfall Giant's build-up (music, ambience, track-1 animation; its PressureBuildupIdx only decides whether its body fades after death), the elites' second-phase music (Bygone Effigy, Infested), Bouncing Flask's throws and splashes (0.5 s each), Hand of Greed's target position for its coins. TestMode reads off there in every run, so it reaches the steps as cues (the UI calls stay redirected)."
     },
     {
       "id": "vfx.scene_at_screen",
@@ -745,9 +1248,11 @@
       "method": "get_IsOn",
       "in_types": [
         "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetCreatureNode",
+        "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetVfxContainer",
+        "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetBackVfxContainer",
         "MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment::AnimSegmentsAttack"
       ],
-      "note": "Creature.GetCreatureNode returns null in TestMode; in every run here it reaches the UI stand-ins (NCombatRoom.GetCreatureNode, NBestiary.GetCreatureNode), so the monsters' calls on their creature nodes become cues. DecimillipedeSegment.AnimSegmentsAttack: the segments' AttackShake (special nodes) and the rocks scene (its asset is null headless, so nothing is made in the logic) before a 0.5 s wait. Presentation only: the nodes are stand-ins whose calls are redirected."
+      "note": "Creature.GetCreatureNode returns null in TestMode; in every run here it reaches the UI stand-ins (NCombatRoom.GetCreatureNode, NBestiary.GetCreatureNode), so the monsters' calls on their creature nodes become cues. Creature.GetVfxContainer / GetBackVfxContainer likewise answer the room's stand-in containers: the game writes container?.AddChildSafely(X.Create(...)), whose effect is not even made when the container is null (the block spark and Blocked text, heal numbers, every attack's custom hit effect: Shiv, Claw, Perfected Strike, ...). DecimillipedeSegment.AnimSegmentsAttack: the segments' AttackShake (special nodes) and the rocks scene (its asset is null headless, so nothing is made in the logic) before a 0.5 s wait. Presentation only: the nodes are stand-ins whose calls are redirected."
     },
     {
       "id": "run.ended",

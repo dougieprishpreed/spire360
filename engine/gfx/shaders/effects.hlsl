@@ -715,6 +715,14 @@ float4 ps_e57(VsOut i) : COLOR {
     return float4(saturate(rgb) * a, a);
 }
 
+// 60: normal_map_point: the icon's tones near initial_color in the map's colour.
+float4 ps_e60(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv) * i.color;
+    float3 rgb = distance(t.rgb, g_p0.rgb) < 0.5 ? g_p1.rgb : t.rgb;
+    float a = saturate(t.a);
+    return float4(saturate(rgb) * a, a);
+}
+
 // 58: vfx_ui_epoch_unlock_chains: the chains brightened and eroded.
 float4 ps_e58(VsOut i) : COLOR {
     float4 t = tex2D(g_tex, i.uv);
