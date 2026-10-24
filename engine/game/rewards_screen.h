@@ -34,6 +34,9 @@ public:
     /* Before build: the overlay opens after this long (the Crystal
      * Sphere's Cmd.Wait(0.75) after its last divination). */
     void set_delay(double seconds) { delay_ = seconds; }
+    /* Before build: a new screen (NRewardsScreen._Ready: victory.mp3 as it
+     * opens), not one coming back from the card reward screen. */
+    void set_fresh(bool fresh) { fresh_ = fresh; }
     int focused() const { return focus_; }
     /* The row of the decision's reward with that index (NULL: none). */
     Control* row_for(int reward_index) const;
@@ -59,7 +62,7 @@ private:
     Control* window_;
     ProceedButton proceed_;
     int focus_, start_focus_;
-    bool animate_in_, terminal_, can_skip_;
+    bool animate_in_, terminal_, can_skip_, fresh_;
     double delay_;
     Node* overlay_[2]; /* the backstop and the screen, hidden while delayed */
     TweenSet tweens_;

@@ -10,6 +10,104 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Completeness audit (2026-10-24): why gaps kept surfacing, and the loop that finds them
+
+The user asked for the Rolling Boulder, Minion Dive Bomb, the
+Decimillipede's last fade, Pandora's Box's card screen and Nightmare's
+hands, and for a systematic audit instead of build-by-build discovery.
+Why earlier passes missed things:
+
+- Verification checked determinism (seeded traces) and crashes, never
+  whether the client showed what the game shows.
+- The engine's spawn functions answered "true" on failure: the Rolling
+  Boulder and Nightmare's hands sat behind `if (!have) return true` (a
+  call without a single creature) and were silently dropped; Bouncing
+  Flask's NGaseousImpactVfx (a Vector2 overload) likewise. Failure paths
+  now return false, so the cue ledger records a drop.
+- The coverage harness itself skipped content: boss fights were lost even
+  at 9999 HP (their deaths never ran), Regent cards were never playable
+  (no stars), cards with their own conditions (Grand Finale, Clash) were
+  skipped, encounters that draw monsters at random (Ruby Raiders, 3 of 5)
+  ran one seed, events branched only on their first page, rest-site relics
+  took a random option, potions were never used in a shop.
+- The adapter auto-skipped events without options: the Fake Merchant (a
+  shared event, act 2+) went straight to the map.
+- Unported-script counts at instancing flagged effects whose spawners
+  attach their behaviour; real gaps hid in the noise.
+
+The loop now (each step writes what the next reads):
+
+1. `tools/content_coverage.py --work work/covNN` (ledgers on): cards with
+   energy, stars and (BlockedByCardLogic) an empty hand and draw pile;
+   encounters random for 150 steps, then the enemies' HP capped
+   (`set_player enemy_hp`) until they die, re-run with new seeds until
+   every possible monster appeared (`content.encounter_monsters`); events
+   explored breadth first (same seed, every unlocked option, 4 deep, 16
+   paths, 500 gold); potions also used in a shop; relics' own rest
+   options chosen.
+2. `out/engine/spire_gaps --fast --dt 0.1 pack OUT.json traces...`: the
+   CueLedger (seen / used / dropped per kind), scripts that reached their
+   first frame without a behaviour, scenes loaded vs the pack's.
+3. `tools/presentation_audit.py --runs work/covNN --gaps OUT.json`:
+   categories sound, scene, call, answer (now one item per guard site,
+   `Value@Site`), event, testmode, godot, delegate, headless, exception,
+   skip (new: what the adapter passed over, Ledger.Skip), cue, script,
+   asset, content; verdicts in `notes/presentation_verdicts.tsv`.
+4. A "used" cue is not proof: check new effects in a capture
+   (`presentation_scenarios.py`, `spire_play --replay-run ... --frames-after N:k`).
+   `SPIRE_CUE_TRACE=1` prints each cue played / dropped / taken back.
+
+Ported in this pass (engine 71+, logic 71+):
+
+- Rolling Boulder (path, bounce, shadow, hits timed to its pass), Minion
+  Dive Bomb, Nightmare's hands and vignette, the Decimillipede's group
+  fade, Pandora's Box's simple cards view: captured and checked.
+- Intents: NCreature.RefreshIntents / UpdateIntent carry the intents the
+  game's call showed; the row changes when the game's does (the turn's new
+  moves at its start, a power changing the numbers at once), not when the
+  steps end.
+- Potion liquid overlay (EFFECT_LIQUID_OVERLAY, effects 61: sw renderer
+  and HLSL; the Xbox fxc entry is in effects_build.cmd): thrown potions
+  and Bouncing Flask tint the body for 1 s; NSplashVfx at a position.
+- Gold changes in combat (a thief) update the top bar when they happen.
+- ToggleIsInteractable / SetCreatureIsInteractable: the state display
+  hides (fleeing Fat Gremlin, Thieving Hopper; segments waiting to
+  reattach).
+- NDebugAudioManager.Stop by handle (Dense Vegetation's sleep.tres).
+- little_light_script.gd: background lights start 0..5 s pre-processed.
+- The Fake Merchant: a shop decision of its six relics, its own room
+  (fake_merchant.tscn, the player in relaxed_loop, its laugh and welcome),
+  buying through its inventory, Foul Potion thrown at it starts its fight.
+- The shop pass: the merchant's dialogue on opening, thanks on a purchase,
+  disappointment and the slot wiggle on a failure (gold, a full belt);
+  cards fly to the deck, relics and potions fly from their slot to the
+  top bar; Foul Potion at the merchant (slime impact, line, rumble).
+- Sovereign Blade's forge preview, the Bowlbug Egg's cocoon, the Queen's
+  freed-Repy background, the Ceremonial Beast's background phases and
+  music parameters, the Decimillipede segments' phobia textures, the
+  second boss icon, the potion flash.
+
+Also fixed in the logic: a TargetedNoCreature potion (Foul Potion outside
+combat) was given the player as its target, which UsePotionAction cancels
+(the potion went for nothing); it has none, as PotionModel.EnqueueManualUse
+passes. The Fake Merchant's whole flow plays (scenario `fake`: its room,
+a purchase, the potion thrown, its fight, the rug and relic rewards).
+
+Checks: seeded traces differences 0 (traces/new68, new70, new71, new72);
+spire_check on new72 and scen72: 1,927 responses, 0 failures, 0 decoder
+failures; the boulder, dive, nightmare, segments, pandora, flask, intents
+and Fake Merchant captured (work/cap69, cap71, cap72); strict C++98 on the
+changed files. Still open (presentation_verdicts.tsv): the menu screens'
+sounds and animations (timeline, run history, settings tickboxes and
+slider, character unlock, custom run), map drawing, hover tips of a
+focused creature, Lord's Parasol's purchases one by one, the card
+overlays and blur materials (checks), the sleeping effects' position
+(check), the Queen's own death (cov72 kills bosses now).
+
+Next console build: logic (all stages: patches.json changed), engine
+(effects.hlsl gained ps_e61: effects_build.cmd runs fxc for it); the pack
+is unchanged.
+
 ## Alpha RC Xenia test 3 (2026-10-22): the systematic presentation port
 
 The user's third Xenia test found game-behaviour gaps (a card exhausted

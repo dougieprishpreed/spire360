@@ -146,6 +146,14 @@ public partial class RunDriver
         };
         var sphere = CrystalSphereBehind();
         if (sphere != null) state["crystal_sphere"] = sphere;
+        // NRewardsScreen's header after a combat in which loot was stolen
+        try
+        {
+            var rs = player.RunState;
+            if (rs?.CurrentRoom is MegaCrit.Sts2.Core.Rooms.CombatRoom && rs.CurrentMapPointHistoryEntry?.GetEntry(player.NetId).WasMugged == true)
+                state["mugged"] = true;
+        }
+        catch { }
         return state;
     }
 

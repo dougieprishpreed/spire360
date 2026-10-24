@@ -15,6 +15,7 @@ using MegaCrit.Sts2.Core.Entities.Ascension;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Entities.Powers;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
@@ -151,12 +152,13 @@ internal static partial class Hooks
         // Creature.InvokePowerModified(power, change, silent): PowerIncreased
         // (a rise, or a fall of a counter that may go negative), which
         // NCreature.OnPowerIncreased shows unless silent: NPowerAppliedVfx
-        // (ShouldPlayVfx) with the buff or debuff burst, by the type at the
-        // new amount.
+        // with the buff or debuff burst and the buff / debuff sound when the
+        // power ShouldPlayVfx, by the type at the new amount; a debuff shakes
+        // the creature (AnimShake) either way.
         Spire.HookBridge.Hooks.RegisterBefore("power.modified", a =>
         {
             if (a.Length < 4 || a[1] is not PowerModel pw || a[2] is not int change || a[3] is not bool silent) return;
-            if (silent || pw.Owner == null || !CombatManager.Instance.IsInProgress || !pw.ShouldPlayVfx) return;
+            if (silent || pw.Owner == null || !CombatManager.Instance.IsInProgress) return;
             bool rise = change > 0 || (pw.StackType == PowerStackType.Counter && pw.AllowNegative && change < 0);
             if (!rise) return;
             string id = pw.Id.Entry.ToLowerInvariant();
@@ -166,6 +168,80 @@ internal static partial class Hooks
                 ["title"] = SafeTitle(pw),
                 ["icon"] = "images/powers/" + id + ".png", ["beta_icon"] = "images/powers/beta/" + id + ".png",
                 ["buff"] = pw.GetTypeForAmount(pw.Amount) == PowerType.Buff,
+                ["vfx"] = pw.ShouldPlayVfx,
+                // SfxCmd.Play stays quiet while the combat ends
+                ["sound"] = pw.ShouldPlayVfx && !CombatManager.Instance.IsEnding,
+            });
+        });
+        // VfxCmd.PlayNonCombatVfx(container, position, path): the event's effect
+        Bridge.Register("vfx.non_combat", a =>
+        {
+            if (a.Length > 2 && a[1] is Godot.Vector2 at && a[2] is string path)
+                Steps.Cue(new Dictionary<string, object?>
+                {
+                    ["t"] = "ui", ["call"] = "VfxCmd.PlayNonCombatVfx", ["args"] = new List<object?> { path, at.X, at.Y },
+                });
+            return new Godot.Node2D();
+        });
+        // RunSaveManager.SaveRun (its Saved): NSaveIndicator.SavedGame
+        Spire.HookBridge.Hooks.RegisterBefore("save.indicator", a =>
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "saved" }));
+        // ForgeCmd.PreviewSovereignBlade: the blades in the hand hammered
+        // where they are, the others shown and sent back to their piles
+        Spire.HookBridge.Hooks.RegisterBefore("forge.preview", a =>
+        {
+            if (a.Length < 1 || a[0] is not IEnumerable<CardModel> blades || Driver == null) return;
+            var list = blades.ToList();
+            var hand = list.Where(c => c.Pile?.Type == PileType.Hand).Select(c => (object?)Steps.IdOf(c)).ToList();
+            var others = list.Where(c => c.Pile != null && c.Pile.Type != PileType.Hand).Select(c => (object?)new Dictionary<string, object?>
+            {
+                ["card"] = Driver.DeckCardView(c),
+                ["pile"] = c.Pile!.Type.ToString().ToLowerInvariant(),
+            }).ToList();
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "forge_preview", ["hand"] = hand, ["others"] = others });
+        });
+        // FoulPotion.OnUse out of combat: thrown at the merchant (the shop's
+        // or the Fake Merchant)
+        Spire.HookBridge.Hooks.RegisterBefore("foul_potion.on_use", a =>
+        {
+            if (CombatManager.Instance.IsInProgress) return;
+            var room = MegaCrit.Sts2.Core.Runs.RunManager.Instance.DebugOnlyGetState()?.CurrentRoom;
+            string? where = room is MegaCrit.Sts2.Core.Rooms.MerchantRoom ? "merchant"
+                : room is MegaCrit.Sts2.Core.Rooms.EventRoom er && er.CanonicalEvent is MegaCrit.Sts2.Core.Models.Events.FakeMerchant ? "fake_merchant"
+                : null;
+            if (where != null) Steps.Cue(new Dictionary<string, object?> { ["t"] = "foul_potion", ["where"] = where });
+        });
+        Spire.HookBridge.Hooks.RegisterBefore("fiend_fire.on_play", a =>
+        {
+            _fiendFire = a.Length > 0 ? a[0] as CardModel : null;
+            _fiendFireScale = 0.8f;
+        });
+        // Player.AddPotionInternal's AddPotionFailed: NPotionContainer.PlayAddFailedAnim
+        Spire.HookBridge.Hooks.RegisterAfter("potion.add_failed", (a, r) =>
+        {
+            bool silent = a.Length > 3 && a[3] is bool s && s;
+            if (!silent && r is PotionProcureResult res && !res.success && res.failureReason == PotionProcureFailureReason.TooFull)
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "potion_full" });
+        });
+        // PowerModel.StartPulsing / StopPulsing: NPower's pulse (the icon's shader)
+        foreach (var (hook, on) in new[] { ("power.pulse_start", true), ("power.pulse_stop", false) })
+            Spire.HookBridge.Hooks.RegisterAfter(hook, (a, _) =>
+            {
+                if (a.Length > 0 && a[0] is PowerModel pw && pw.Owner != null)
+                    Steps.Cue(new Dictionary<string, object?> { ["t"] = "power_pulse", ["who"] = Steps.Who(pw.Owner), ["power"] = pw.Id.Entry, ["on"] = on });
+            });
+        // Creature.RemovePowerInternal: the PowerRemoved event NCreature.OnPowerRemoved
+        // answers with NPowerRemovedVfx ("wears off", ShouldPlayVfx) where the
+        // creature's node still is.
+        Spire.HookBridge.Hooks.RegisterBefore("power.removed", a =>
+        {
+            if (a.Length < 2 || a[1] is not PowerModel pw || pw.Owner == null || !CombatManager.Instance.IsInProgress) return;
+            if (!pw.ShouldPlayVfx || pw.Owner.IsDead) return;
+            string id = pw.Id.Entry.ToLowerInvariant();
+            Steps.CueAsIs(new Dictionary<string, object?>
+            {
+                ["t"] = "power_removed", ["power"] = pw.Id.Entry, ["who"] = Steps.Who(pw.Owner), ["title"] = SafeTitle(pw),
+                ["icon"] = "images/powers/" + id + ".png", ["beta_icon"] = "images/powers/beta/" + id + ".png",
             });
         });
         // Deck changes outside combat: what NRun.GlobalUi's preview containers
@@ -487,11 +563,42 @@ internal static partial class Hooks
             // NCreature.PerformIntent (CombatManager.ExecuteEnemyTurn awaits it
             // before each enemy acts): the intents hide, CustomScaledWait(0.25, 0.4).
             if (id.EndsWith("NCreature::PerformIntent", StringComparison.Ordinal)) ScaledWait(0.25f, 0.4f);
+            // NCreature.RefreshIntents / UpdateIntent (a turn's new moves, a
+            // power changing their numbers): the intents as the call shows them
+            if ((id.EndsWith("NCreature::RefreshIntents", StringComparison.Ordinal) ||
+                 id.EndsWith("NCreature::UpdateIntent", StringComparison.Ordinal)) &&
+                a.Length > 0 && StandIns.TryCreature(a[0], out var intentOf) && intentOf.Monster != null)
+                Steps.SetOnLastUi("intents", RunDriver.IntentsView(intentOf, intentOf.CombatState?.PlayerCreatures?.ToList()));
             // The events' NCardEnchantVfx.Create(card): the enchanted card's view.
             if (id.EndsWith("NCardEnchantVfx::Create", StringComparison.Ordinal) && a.Length > 0 && a[0] is CardModel enchanted)
                 DeckCue("enchant", enchanted, null, null, 0);
+            // Fiend Fire's fires grow by 0.1 a hit from 0.8 (their Scale)
+            if (id.EndsWith("NGroundFireVfx::Create", StringComparison.Ordinal) && _fiendFire?.Pile?.Type == PileType.Play)
+            {
+                Steps.AppendToLastUi(_fiendFireScale);
+                _fiendFireScale += 0.1f;
+            }
+            // NSimpleCardsViewScreen.ShowScreen(results, infoText) (Pandora's Box):
+            // the cards the screen lists, with its text
+            if (id.EndsWith("NSimpleCardsViewScreen::ShowScreen", StringComparison.Ordinal) && Driver != null &&
+                a.Length > 1 && a[0] is IEnumerable<CardPileAddResult> shown)
+                Steps.Cue(new Dictionary<string, object?>
+                {
+                    ["t"] = "cards_view",
+                    ["cards"] = shown.Select(r => (object?)Driver.DeckCardView(r.cardAdded)).ToList(),
+                    ["info"] = a[1] is LocString info ? info.GetFormattedText() : null,
+                });
             Driver?.OnUiCall(id, a);
-            return StandIns.Answer(id, a);
+            var answer = StandIns.Answer(id, a);
+            // NDebugAudioManager.Play's handle (Dense Vegetation stops its
+            // sleep.tres by it): a number of its own, on the cue
+            if (id.EndsWith("NDebugAudioManager::Play", StringComparison.Ordinal))
+            {
+                answer = ++_debugAudioHandle;
+                Steps.SetOnLastUi("handle", answer);
+            }
+            if (Ledger.On) Ledger.Ui(id, answer);
+            return answer;
         });
 
         // Neutralize.OnPlay(choiceContext, cardPlay): sts2-cli's safe re-implementation
@@ -518,6 +625,11 @@ internal static partial class Hooks
     }
 
     private static int _shuffleStepMs;
+
+    /// <summary>The Fiend Fire being played and its next fire's scale.</summary>
+    private static CardModel? _fiendFire;
+    private static int _debugAudioHandle;
+    private static float _fiendFireScale;
 
     /// <summary>NCardFlyPowerVfx.GetDuration with the play pile and the
     /// player where they usually are (the swoosh path's baked length / 3000,

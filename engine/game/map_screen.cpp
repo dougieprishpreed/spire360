@@ -1,5 +1,7 @@
 #include "map_screen.h"
+#include "combat_vfx.h"
 #include "loc.h"
+#include "../audio/game_audio.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -9,6 +11,93 @@
 #include <math.h>
 
 namespace spire {
+
+namespace {
+/* NMapCircleVfx._Ready with playAnim: its scale from twice down to its own
+ * (1 s, Expo Out), its alpha 0 -> 0.95 (0.5 s, Expo Out), the five circle
+ * frames at 24 a second. NMapNodeSelectVfx: gone after 1 s. */
+class MapFx : public ScriptBehavior {
+public:
+    MapFx(SceneLibrary* lib, Control* c, Node* image, float scale, bool circle)
+        : lib_(lib), c_(c), image_(image), scale_(scale), circle_(circle), done_(false), t_(0), frame_(-1) {}
+    virtual void process(Node* n, double dt) {
+        if (done_) return;
+        t_ += dt;
+        if (!circle_) {
+            if (t_ >= 1.0 && !n->queued_for_deletion()) n->queue_free();
+            return;
+        }
+        float u = clampf((float)t_, 0, 1);
+        float s = scale_ * 2.0f + (scale_ - scale_ * 2.0f) * tween_interpolate(TRANS_EXPO, EASE_OUT, u, 0, 1, 1);
+        c_->scale = Vec2(s, s);
+        c_->modulate.a = 0.95f * tween_interpolate(TRANS_EXPO, EASE_OUT, clampf((float)(t_ / 0.5), 0, 1), 0, 1, 1);
+        int f = (int)(t_ * 24.0);
+        if (f > 4) f = 4;
+        if (f != frame_) {
+            frame_ = f;
+            set_texture(lib_, image_, format("images/atlases/compressed.sprites/map/map_circle_%d.tres", f));
+        }
+        if (t_ >= 1.0) circle_ = done_ = true;
+    }
+
+private:
+    SceneLibrary* lib_;
+    Control* c_;
+    Node* image_;
+    float scale_;
+    bool circle_, done_;
+    double t_;
+    int frame_;
+};
+
+/* Before the point's vote container (MoveChildSafely to its index), at the
+ * point's pivot. */
+void add_at_pivot(Control* point, Control* fx) {
+    Vec2 pivot = point->pivot_offset;
+    fx->offset[SIDE_LEFT] += pivot.x;
+    fx->offset[SIDE_RIGHT] += pivot.x;
+    fx->offset[SIDE_TOP] += pivot.y;
+    fx->offset[SIDE_BOTTOM] += pivot.y;
+    Node* vote = point->get_node("MapPointVoteContainer");
+    if (vote) point->add_child_before(fx, vote);
+    else point->add_child(fx);
+}
+} /* namespace */
+
+void MapScreen::add_circle(Point& p, bool animate) {
+    Node* n = instance(lib_, "scenes/vfx/map_circle_vfx.tscn");
+    if (!n || !n->is_control()) {
+        delete n;
+        return;
+    }
+    Control* c = (Control*)n;
+    c->rotation = p.circle_rot * 3.14159265f / 180.0f;
+    Node* image = n->get_node("TextureRect");
+    if (animate) {
+        c->modulate.a = 0;
+        set_texture(lib_, image, "images/atlases/compressed.sprites/map/map_circle_0.tres");
+        c->behavior = new MapFx(lib_, c, image, p.circle_scale, true);
+    } else {
+        c->scale = Vec2(p.circle_scale, p.circle_scale);
+        c->modulate.a = 0.95f;
+        set_texture(lib_, image, "images/atlases/compressed.sprites/map/map_circle_4.tres");
+    }
+    add_at_pivot(p.node, c);
+}
+
+void MapScreen::add_select_vfx(Point& p) {
+    Node* n = instance(lib_, "scenes/vfx/map_node_select_vfx.tscn");
+    if (!n || !n->is_control()) {
+        delete n;
+        return;
+    }
+    Control* c = (Control*)n;
+    float s = p.kind == 2 || p.kind == 3 ? 2.0f : p.normal ? 1.0f : 1.5f;
+    c->scale = Vec2(s, s);
+    vfx_restart(n);
+    c->behavior = new MapFx(lib_, c, NULL, s, false);
+    add_at_pivot(p.node, c);
+}
 
 static const float PI_F = 3.14159265f;
 
@@ -280,6 +369,10 @@ Node* MapScreen::build(const Json& d, std::string* error) {
             pt.reticle->pivot_offset = offset_size(pt.reticle) * 0.5f;
         }
         pt.choice = false;
+        pt.kind = kind;
+        pt.normal = kind == 0 || (kind == 1 && type != "Ancient");
+        pt.circle_rot = (*p)["circle"].size() == 2 ? (*p)["circle"][(size_t)0].f() : 0;
+        pt.circle_scale = (*p)["circle"].size() == 2 ? (*p)["circle"][1].f() : 0.875f;
         for (size_t k = 0; k < choices.size(); ++k)
             if (choices[k]["col"].i() == col && choices[k]["row"].i() == row) pt.choice = true;
         pt.elapsed = hash_range(act, col, row, 0, 3140);
@@ -305,7 +398,11 @@ Node* MapScreen::build(const Json& d, std::string* error) {
                 pt.icon->shader_params["map_color.b"] = (bg_color.b + 0.745098f) * 0.5f;
             }
             if (pt.icon_container) pt.icon_container->rotation = hash_gauss(act, col, row, 8.0f) * PI_F / 180.0f;
-            hide(n->find_unique("QuestIcon"));
+            /* RefreshMarkedIconVisibility: a quest marks the point (Spoils
+             * Map, Fur Coat) */
+            set_visible(n->find_unique("QuestIcon"), (*p)["quest"].b());
+            /* RefreshState: a traveled point shows its circle */
+            if (was_visited) add_circle(pt, false);
         } else if (kind == 1) {
             /* NAncientMapPoint: the act's ancient's node picture. */
             set_texture(lib_, pt.icon, "images/packed/map/ancients/ancient_node_" + ancient + ".png");
@@ -564,8 +661,13 @@ void MapScreen::begin_travel(int col, int row) {
         if (paths_[i].from_col == current_col_ && paths_[i].from_row == current_row_ &&
             paths_[i].to_col == col && paths_[i].to_row == row) travel_ticks_ = paths_[i].ticks;
     if (marker_) tweens_.tween(&marker_->scale, Vec2(0, 0), 0.2f);
+    /* TravelToMapCoord: wipe_map with the fade out */
+    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/wipe_map");
     for (size_t i = 0; i < points_.size(); ++i) if (points_[i].col == col && points_[i].row == row) {
         Point& p = points_[i];
+        /* OnSelected (ShowCircleVfx with its animation), NMapNodeSelectVfx */
+        if (p.normal) add_circle(p, true);
+        add_select_vfx(p);
         marker_to_ = offset_pos(p.node) + Vec2(offset_size(p.node).x * 0.5f - 20, -35);
         if (p.icon) {
             p.icon->self_modulate = Color();

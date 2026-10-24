@@ -7,6 +7,10 @@
  * - the draw, discard and exhaust piles in combat (NCardPileScreen, LT, RT,
  *   RB), the draw pile by rarity so its order stays hidden.
  *
+ * - cards a relic changed (NSimpleCardsViewScreen: Pandora's Box), its
+ *   info text at the bottom; A shows a card, the confirm button (Y) closes
+ *   it (its back button is disabled).
+ *
  * The pile's info text at the bottom. B (or the button that opened it)
  * closes it. Nothing reaches the logic. */
 #ifndef SPIRE_PILE_SCREEN_H
@@ -54,6 +58,7 @@ private:
     Json msg_;
     std::string pile_;
     bool deck_;
+    bool simple_; /* NSimpleCardsViewScreen */
     bool upgrades_;  /* View Upgrades */
     Node* root_;
     Control* rows_;

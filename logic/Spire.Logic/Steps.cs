@@ -107,6 +107,13 @@ internal static class Steps
                     // NDamageNumVfx.Create(target, result): the number it shows.
                     outArgs.Add(dr.UnblockedDamage + dr.OverkillDamage);
                     break;
+                case System.Collections.IEnumerable nodes when HasCreatureNodes(nodes):
+                    // a list of creature nodes (NMonsterDeathVfx.Create(creatureNodes)): who they are
+                    var whos = new List<object?>();
+                    foreach (var x in nodes)
+                        if (StandIns.TryCreature(x, out var cx)) whos.Add(Who(cx));
+                    outArgs.Add(whos);
+                    break;
                 default:
                     var tn = a.GetType().Name;
                     if (tn == "Color" && a.GetType().Namespace == "Godot")
@@ -144,6 +151,46 @@ internal static class Steps
                 return;
             }
         Cue(new Dictionary<string, object?> { ["t"] = "anim", ["who"] = who, ["name"] = "Dead", ["wait"] = 0, ["play"] = ops });
+    }
+
+    /// <summary>One more argument for the UI call just recorded (what the
+    /// game sets on the node it made: Fiend Fire's fire's scale).</summary>
+    public static void AppendToLastUi(object? value)
+    {
+        if (_pendingUi.Count == 0 || _pendingUi[^1]["t"] as string != "ui") return;
+        var cue = _pendingUi[^1];
+        var args = cue.TryGetValue("args", out var v) && v is List<object?> l ? l : new List<object?>();
+        args.Add(value);
+        cue["args"] = args;
+    }
+
+    /// <summary>A key on the ui cue just recorded (what the client needs
+    /// from the game's state at the moment of the call).</summary>
+    public static void SetOnLastUi(string key, object? value)
+    {
+        if (_pendingUi.Count == 0 || _pendingUi[^1]["t"] as string != "ui") return;
+        _pendingUi[^1][key] = value;
+    }
+
+    private static bool HasCreatureNodes(System.Collections.IEnumerable items)
+    {
+        foreach (var x in items)
+            if (StandIns.TryCreature(x, out _)) return true;
+        return false;
+    }
+
+    /// <summary>NCreature.StartDeathAnim(shouldRemove: false): the creature
+    /// stays (AnimDie neither fades nor frees it: a Decimillipede segment
+    /// that will reattach); its death change says so ("keep").</summary>
+    public static void MarkDeathKept(string who)
+    {
+        if (!Enabled || !RecordUi) return;
+        for (int i = _pendingUi.Count - 1; i >= 0; i--)
+            if (_pendingUi[i]["t"] as string == "death" && _pendingUi[i]["who"] as string == who)
+            {
+                _pendingUi[i]["keep"] = true;
+                return;
+            }
     }
 
     // Presentation the game runs alongside the turn (TaskHelper.RunSafely of
@@ -267,9 +314,21 @@ internal static class Steps
     /// A presentation cue the logic's own commands make (VfxCmd, CreatureCmd
     /// animation triggers), recorded in order with the other cues.
     /// </summary>
+    /// <summary>A cue without taking the state's changes first: for hooks
+    /// inside a change the game is still making (a snapshot there reads a
+    /// half-updated combat: Creature.RemovePowerInternal).</summary>
+    public static void CueAsIs(Dictionary<string, object?> cue)
+    {
+        if (!Enabled || !RecordUi) return;
+        if (Ledger.On && cue.TryGetValue("t", out var t) && t is string kind) Ledger.Cue("t:" + kind);
+        Add(cue);
+    }
+
     public static void Cue(Dictionary<string, object?> cue)
     {
         if (!Enabled || !RecordUi) return;
+        if (Ledger.On && cue.TryGetValue("t", out var t) && t is string kind)
+            Ledger.Cue(kind == "ui" && cue.TryGetValue("call", out var c) && c is string call ? call : "t:" + kind);
         FlushChanges();
         Add(cue);
     }

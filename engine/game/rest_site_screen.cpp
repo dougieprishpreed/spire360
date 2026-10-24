@@ -1,5 +1,6 @@
 #include "rest_site_screen.h"
 #include "deck_previews.h"
+#include "../core/cue_ledger.h"
 #include "loc.h"
 #include "top_bar.h"
 #include "../audio/game_audio.h"
@@ -297,7 +298,10 @@ double RestSiteScreen::post_select(Node* room, const Json& steps) {
     const Json* cue = NULL;
     for (size_t i = 0; i < steps.size(); ++i)
         for (size_t k = 0; k < steps[i].size(); ++k)
-            if (steps[i][k]["t"].str() == "rest_vfx") cue = &steps[i][k];
+            if (steps[i][k]["t"].str() == "rest_vfx") {
+                cue = &steps[i][k];
+                CueLedger::used(*cue);
+            }
     if (!cue) return 0;
     const std::string& option = (*cue)["option"].str();
     if (option == "HEAL") {

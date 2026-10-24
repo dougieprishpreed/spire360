@@ -579,6 +579,7 @@ void TimelineScreen::next_unlock() {
             Node* item = NULL;
             if (kind == "cards") {
                 item = make_card(lib_, items[i]);
+                card_reward_glow(lib_, item, items[i]["rarity"].str());
             } else {
                 TextureRect* t = new TextureRect();
                 t->name = "Icon";

@@ -603,6 +603,11 @@ private:
 bool resolve(const Place& p, VfxAnchors& anchors, Vec2* out) {
     VfxCreature c;
     if (!anchors.creature(p.who, &c)) return false;
+    if (p.anchor == "side_floor") {
+        if (!anchors.side_floor(c.enemy, out)) return false;
+        *out = *out + p.offset;
+        return true;
+    }
     if (p.anchor == "hitbox") *out = c.hitbox.pos + p.offset;
     else if (p.anchor == "hitbox_size") *out = c.hitbox.size + p.offset;
     else *out = (p.anchor == "bottom" ? c.bottom : p.anchor == "top" ? c.top : c.center) + p.offset;
@@ -899,6 +904,297 @@ private:
         set_visible(exported_one(n, "_laserContainer"), on);
     }
     int phase_;
+};
+
+/* NRollingBoulderVfx._Ready / PlayAnim: with k = damage / (damage + 40),
+ * scale 1.5 k, time to impact Lerp(0.5, 0.25, k), spin Lerp(600, 1000, k)
+ * degrees a second, start Lerp(600, 1000, k) left of the impact point (the
+ * screen's middle, at the targets' mean floor) and 150 px above the top;
+ * a constant x speed, falling to the floor and bouncing at a third of its
+ * speed; the shadow (in the back container) grows as it falls. Done 1 s
+ * after it has passed every target. */
+struct BoulderPath {
+    float scale, impact_time, spin;
+    Vec2 start, impact;
+    float vx, ay;
+};
+
+static BoulderPath boulder_path(float damage, const std::vector<VfxCreature>& targets) {
+    BoulderPath p;
+    float k = damage > 0 ? damage / (damage + 40.0f) : 0;
+    p.scale = k * 1.5f;
+    p.impact_time = 0.5f + (0.25f - 0.5f) * k;
+    p.spin = 600.0f + 400.0f * k;
+    float x_offset = 600.0f + 400.0f * k;
+    float y = 0;
+    for (size_t i = 0; i < targets.size(); ++i) y += targets[i].bottom.y;
+    if (!targets.empty()) y /= (float)targets.size();
+    p.impact = Vec2(960.0f, y);
+    p.start = Vec2(p.impact.x - x_offset, -150.0f);
+    p.vx = (p.impact.x - p.start.x) / p.impact_time;
+    p.ay = 2.0f * (p.impact.y - p.start.y) / (p.impact_time * p.impact_time);
+    return p;
+}
+
+} /* namespace */
+
+void rolling_boulder_times(float damage, const std::vector<VfxCreature>& targets, std::vector<double>* hits, double* done) {
+    BoulderPath p = boulder_path(damage, targets);
+    double last = 0;
+    hits->clear();
+    for (size_t i = 0; i < targets.size(); ++i) {
+        double t = p.vx > 0 ? (targets[i].hitbox.pos.x - p.start.x) / p.vx : 0;
+        if (t < 0) t = 0;
+        hits->push_back(t);
+        if (t > last) last = t;
+    }
+    *done = last + 1.0;
+}
+
+namespace {
+
+class RollingBoulder : public Effect {
+public:
+    RollingBoulder() : shadow_(NULL), boulder_(NULL), hit_(0), timer_(0), first_impact_(false), done_(false) {}
+    void setup(Node* n, float damage, const std::vector<VfxCreature>& targets, Node* back) {
+        targets_ = targets;
+        path_ = boulder_path(damage, targets);
+        if (n->is_node2d()) ((Node2D*)n)->scale = Vec2(path_.scale, path_.scale);
+        Node* s = n->get_node("Shadow");
+        boulder_ = n->get_node("Boulder");
+        if (s && s->is_node2d()) {
+            shadow_ = (Node2D*)s;
+            shadow_offset_ = shadow_->position;
+            shadow_scale_ = shadow_->scale;
+            /* _shadow.Reparent(BackCombatVfxContainer) */
+            if (back) {
+                n->remove_child(s);
+                back->add_child(s);
+            }
+            shadow_->scale = Vec2(0, 0);
+        }
+        set_global(n, path_.start);
+        velocity_ = Vec2(path_.vx, 0);
+        at_ = path_.start;
+    }
+    virtual void tick(Node* n, double dt) {
+        if (done_) return;
+        float d = (float)dt;
+        velocity_.y += path_.ay * d;
+        at_ = at_ + velocity_ * d;
+        if (boulder_ && boulder_->is_node2d()) ((Node2D*)boulder_)->rotation += path_.spin * 3.14159265f / 180.0f * d;
+        if (shadow_) {
+            float k = path_.impact.y != 0 ? at_.y / path_.impact.y : 1;
+            if (k < 0) k = 0;
+            shadow_->scale = shadow_scale_ * path_.scale * k;
+            set_global(shadow_, Vec2(at_.x, path_.impact.y) + shadow_offset_ * path_.scale);
+        }
+        while (hit_ < targets_.size() && at_.x >= targets_[hit_].hitbox.pos.x) ++hit_;
+        if (hit_ >= targets_.size()) timer_ += dt;
+        if (at_.y >= path_.impact.y) {
+            if (!first_impact_) {
+                first_impact_ = true;
+                Node* behind = n->get_node("SlamBehind");
+                Node* front = n->get_node("SlamFront");
+                set_global(behind, path_.impact);
+                set_global(front, path_.impact);
+                vfx_emitting(behind, true);
+                vfx_emitting(front, true);
+            }
+            velocity_.y = -velocity_.y * 0.33f;
+            if (fabsf(velocity_.y) < 1.0f) {
+                velocity_.y = 0;
+                path_.ay = 0;
+            }
+            at_.y = path_.impact.y;
+        }
+        set_global(n, at_);
+        if (timer_ > 1.0 && !n->queued_for_deletion()) {
+            done_ = true;
+            if (shadow_) shadow_->queue_free();
+            shadow_ = NULL;
+            n->queue_free();
+        }
+    }
+
+private:
+    std::vector<VfxCreature> targets_;
+    BoulderPath path_;
+    Node2D* shadow_;
+    Node* boulder_;
+    Vec2 shadow_offset_, shadow_scale_, velocity_, at_;
+    size_t hit_;
+    double timer_;
+    bool first_impact_, done_;
+};
+
+static float chaotic_range(float lo, float hi) { return lo + (hi - lo) * (float)(chaotic_rand() % 10001) / 10000.0f; }
+
+/* NSpookyHandVfx (Nightmare's hands): from nothing to its size after
+ * 0..0.4 s (0.4..0.5 s, Spring Out), held 0.3..0.6 s, then to half its
+ * size (Back In) as it fades (Quad Out) over 0.4..0.6 s; its red jittered
+ * by 0.2; meanwhile it sways (sin(t * 3..5) * 0.1..0.3 radians), at half
+ * the sway for 0.05 s at a time, 2..6 times after 0.5..1.2 s. */
+class SpookyHand : public Effect {
+public:
+    SpookyHand() : rotation_(0), duration_(0), speed_(chaotic_range(3, 5)), intensity_(chaotic_range(0.1f, 0.3f)),
+        can_pause_(chaotic_range(0.5f, 1.2f)), paused_t_(0), pauses_(0), total_pauses_(2 + (int)(chaotic_rand() % 5)),
+        paused_(false) {}
+    virtual void begin(Node* n) {
+        if (!n->is_control()) return;
+        Control* c = (Control*)n;
+        rotation_ = c->rotation;
+        Vec2 target = c->scale;
+        c->scale = Vec2(0, 0);
+        c->modulate.r += chaotic_range(-0.2f, 0.2f);
+        float delay = chaotic_range(0, 0.4f), grow = chaotic_range(0.4f, 0.5f), hold = chaotic_range(0.3f, 0.6f);
+        float out = chaotic_range(0.4f, 0.6f);
+        tweens_.tween(&c->scale, target, grow, TRANS_SPRING, EASE_OUT, delay);
+        tweens_.tween(&c->scale, target * 0.5f, out, TRANS_BACK, EASE_IN, delay + grow + hold);
+        tweens_.tween(&c->modulate.a, 0.0f, out, TRANS_QUAD, EASE_OUT, delay + grow + hold);
+    }
+    virtual void tick(Node* n, double dt) {
+        if (!n->is_control()) return;
+        float d = (float)dt;
+        duration_ += d * speed_;
+        can_pause_ -= d;
+        if (paused_) {
+            paused_t_ += d;
+            if (paused_t_ >= 0.05f) {
+                paused_ = false;
+                paused_t_ = 0;
+                ++pauses_;
+            }
+            ((Control*)n)->rotation = rotation_ + sinf(duration_) * intensity_ * 0.5f;
+        } else {
+            ((Control*)n)->rotation = rotation_ + sinf(duration_) * intensity_;
+        }
+        if (can_pause_ < 0 && pauses_ < total_pauses_) paused_ = true;
+    }
+
+private:
+    float rotation_, duration_, speed_, intensity_, can_pause_, paused_t_;
+    int pauses_, total_pauses_;
+    bool paused_;
+};
+
+/* NNightmareHandsVfx: gone after 2 s (SelfDestruct). */
+class NightmareHands : public Effect {
+public:
+    virtual void tick(Node* n, double) {
+        if (t_ >= 2.0 && !n->queued_for_deletion()) n->queue_free();
+    }
+};
+
+/* NMinionDiveBombVfx.PlaySequence: the minion (its texture and animation
+ * by _textureCurve: idle, rotating, punch; each index's particles restart)
+ * flies from the caster (+ _sourceOffset) to the target's floor
+ * (+ _destinationOffset) over _flightTime, along _horizontalCurve and up by
+ * _verticalCurve * _maxHeight; the falling particles start at
+ * _fallingVfxEntryTime. Then it vanishes, a weak short shake, the impact
+ * at the target's floor; gone 2 s later. */
+class MinionDiveBomb : public Effect {
+public:
+    explicit MinionDiveBomb(Node* n)
+        : flight_(exported_float(n, "_flightTime", 1.0f)), falling_at_(exported_float(n, "_fallingVfxEntryTime", 0.725f)),
+          max_height_(exported_float(n, "_maxHeight", 400.0f)), index_(-1), falling_(false), landed_(false) {
+        const Json* v = n->get_extra("_horizontalCurve");
+        if (v) CurveData::from(script_resource(*v), horizontal_);
+        v = n->get_extra("_verticalCurve");
+        if (v) CurveData::from(script_resource(*v), vertical_);
+        v = n->get_extra("_textureCurve");
+        if (v) CurveData::from(script_resource(*v), texture_);
+        v = n->get_extra("_minionTextures");
+        for (size_t i = 0; v && i < v->size(); ++i) {
+            Resource* r = script_resource((*v)[i]);
+            textures_.push_back(r && r->is_texture() ? (Texture2DRes*)r : NULL);
+        }
+        v = n->get_extra("_minionAnimations");
+        for (size_t i = 0; v && i < v->size(); ++i) animations_.push_back((*v)[i].str());
+        source_offset_ = Vec2(100, 0);
+        destination_offset_ = Vec2(0, -100);
+        v = n->get_extra("_sourceOffset");
+        if (v) jv_vec2(*v, source_offset_);
+        v = n->get_extra("_destinationOffset");
+        if (v) jv_vec2(*v, destination_offset_);
+    }
+    /* Initialize(sourcePosition, destinationPosition) */
+    void setup(Node* n, const Vec2& source, const Vec2& destination) {
+        source_ = source;
+        destination_ = destination;
+        set_visible(exported_one(n, "_fallingTrail"), true);
+        set_global(n, source);
+        std::vector<Node*> list;
+        exported(n, "_minionVfx", list);
+        for (size_t i = 0; i < list.size(); ++i) vfx_emitting(list[i], false);
+    }
+    virtual void begin(Node* n) {
+        update_minion(n, 0);
+        Node* sprite = exported_one(n, "_minionSprite");
+        set_global(sprite, source_ + source_offset_);
+        if (sprite && sprite->is_canvas_item()) ((CanvasItem*)sprite)->self_modulate = Color(1, 1, 1, 1);
+    }
+    virtual void tick(Node* n, double) {
+        Node* sprite = exported_one(n, "_minionSprite");
+        Node* falling = exported_one(n, "_fallingVfx");
+        if (!landed_ && t_ < flight_) {
+            float k = (float)(t_ / flight_);
+            float w = horizontal_.valid() ? horizontal_.sample(k) : k;
+            float h = vertical_.valid() ? vertical_.sample(k) : 0;
+            float s = texture_.valid() ? texture_.sample(k) : 0;
+            update_minion(n, (int)floorf(s));
+            Vec2 a = source_ + source_offset_, b = destination_ + destination_offset_;
+            Vec2 at = a + (b - a) * w + Vec2(0, -1) * h * max_height_;
+            set_global(sprite, at);
+            set_global(falling, at);
+            if (t_ >= falling_at_ && !falling_) {
+                falling_ = true;
+                vfx_restart(falling);
+                set_visible(exported_one(n, "_fallingTrail"), true);
+            }
+        } else if (!landed_) {
+            landed_ = true;
+            if (sprite && sprite->is_canvas_item()) ((CanvasItem*)sprite)->self_modulate = Color(1, 1, 1, 0);
+            ScreenShake::get().shake("Weak", "Short");
+            Node* impact = exported_one(n, "_impactVfx");
+            set_global(impact, destination_);
+            vfx_restart(impact);
+            set_visible(exported_one(n, "_fallingTrail"), false);
+            vfx_emitting(falling, false);
+        }
+        if (landed_ && t_ >= flight_ + 2.0 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    /* UpdateMinionSprite: the index's texture and animation; its particles */
+    void update_minion(Node* n, int index) {
+        if (index == index_) return;
+        index_ = index;
+        Node* sprite = exported_one(n, "_minionSprite");
+        if (!textures_.empty() && sprite && sprite->type == "Sprite2D") {
+            int i = index < 0 ? 0 : index >= (int)textures_.size() ? (int)textures_.size() - 1 : index;
+            if (textures_[(size_t)i]) ((Sprite2D*)sprite)->texture = textures_[(size_t)i];
+        }
+        Node* animator = exported_one(n, "_minionAnimator");
+        if (!animations_.empty() && animator && animator->type == "AnimationPlayer") {
+            int i = index < 0 ? 0 : index >= (int)animations_.size() ? (int)animations_.size() - 1 : index;
+            if (animations_[(size_t)i] != playing_) {
+                playing_ = animations_[(size_t)i];
+                ((AnimationPlayer*)animator)->play(playing_);
+            }
+        }
+        std::vector<Node*> list;
+        exported(n, "_minionVfx", list);
+        if (index >= 0 && index < (int)list.size()) vfx_restart(list[(size_t)index]);
+    }
+    float flight_, falling_at_, max_height_;
+    CurveData horizontal_, vertical_, texture_;
+    std::vector<Texture2DRes*> textures_;
+    std::vector<std::string> animations_;
+    std::string playing_;
+    Vec2 source_offset_, destination_offset_, source_, destination_;
+    int index_;
+    bool falling_, landed_;
 };
 
 /* NSweepingBeamVfx: from the Defect's eye, the beam sweeps over
@@ -1344,7 +1640,9 @@ ScriptBehavior* make_doom_vfx(Node*) { return new DoomVfx(); }
 class MonsterDeath : public Effect {
 public:
     MonsterDeath() : anchors_(NULL), delay_(0), end_(-1), visual_(NULL) {}
-    void setup(VfxAnchors* anchors, const std::string& who, double delay, const Vec2& padding) {
+    /* Create(creatureNodes): one fade over them all (ReattachPower's last
+     * segment); each its own padding */
+    void setup(VfxAnchors* anchors, const std::vector<std::string>& who, double delay, const std::vector<Vec2>& padding) {
         anchors_ = anchors;
         who_ = who;
         delay_ = delay;
@@ -1402,21 +1700,40 @@ private:
         }
         return NULL;
     }
-    /* PlayVfx: false when there is nothing to fade. */
+    /* PlayVfx: false when there is nothing to fade. Each creature's body
+     * bounds (or hitbox) grown by its padding, merged. */
     bool play(Node* n) {
-        VfxCreature who;
-        if (!anchors_ || !anchors_->creature(who_, &who)) return false;
-        Node* visuals = anchors_->take_visuals(who_);
-        if (!visuals || !visuals->is_canvas_item() || !((CanvasItem*)visuals)->is_visible_in_tree()) return false;
-        /* GetCurrentBody: %Visuals, the spine body when there is one */
-        Node* body = visuals->find_unique("Visuals");
-        SpineSprite* spine = find_spine(body ? body : visuals);
-        if (!body) body = spine ? (Node*)spine : visuals;
-        if (!body->is_node2d()) return false;
+        if (!anchors_) return false;
+        std::vector<Node*> bodies, all_visuals;
         Rect2 r;
-        if (!spine_bounds(spine, &r)) r = who.hitbox;
-        Vec2 grown(r.size.x * padding_.x, r.size.y * padding_.y);
-        r = Rect2(r.pos - (grown - r.size) * 0.5f, grown);
+        bool any = false;
+        for (size_t i = 0; i < who_.size(); ++i) {
+            VfxCreature who;
+            if (!anchors_->creature(who_[i], &who)) continue;
+            Node* visuals = anchors_->take_visuals(who_[i]);
+            if (!visuals || !visuals->is_canvas_item() || !((CanvasItem*)visuals)->is_visible_in_tree()) continue;
+            /* GetCurrentBody: %Visuals, the spine body when there is one */
+            Node* body = visuals->find_unique("Visuals");
+            SpineSprite* spine = find_spine(body ? body : visuals);
+            if (!body) body = spine ? (Node*)spine : visuals;
+            if (!body->is_node2d()) continue;
+            Rect2 one;
+            if (!spine_bounds(spine, &one)) one = who.hitbox;
+            Vec2 pad = i < padding_.size() ? padding_[i] : Vec2(1.2f, 1.2f);
+            Vec2 grown(one.size.x * pad.x, one.size.y * pad.y);
+            one = Rect2(one.pos - (grown - one.size) * 0.5f, grown);
+            if (!any) {
+                r = one;
+            } else {
+                Vec2 lo(minf(r.pos.x, one.pos.x), minf(r.pos.y, one.pos.y));
+                Vec2 hi(maxf(r.pos.x + r.size.x, one.pos.x + one.size.x), maxf(r.pos.y + r.size.y, one.pos.y + one.size.y));
+                r = Rect2(lo, hi - lo);
+            }
+            any = true;
+            bodies.push_back(body);
+            all_visuals.push_back(visuals);
+        }
+        if (!any) return false;
         Vec2 center = r.pos + r.size * 0.5f;
         float num = floorf(maxf(r.size.x, r.size.y) + 0.5f);
         if (num < 2) return false;
@@ -1432,19 +1749,22 @@ private:
         float room = sqrtf(pxf.x.x * pxf.x.x + pxf.x.y * pxf.x.y);
         Sprite2D* sprite = (Sprite2D*)visual_;
         sprite->scale = sprite->scale * (1.0f / (2.0f * (room > 0 ? room : 1.0f)));
-        /* the body, its global transform kept, at its place in the viewport */
-        Node2D* b = (Node2D*)body;
-        Xform2D bg = b->global_transform();
-        b->parent->remove_child(b);
-        vp->add_child(b);
-        b->position = bg.origin - (center - Vec2(num, num) * 0.5f);
-        b->rotation = 0;
-        b->skew = 0;
-        float sx = sqrtf(bg.x.x * bg.x.x + bg.x.y * bg.x.y), sy = sqrtf(bg.y.x * bg.y.x + bg.y.y * bg.y.y);
-        b->scale = Vec2(bg.x.x < 0 ? -sx : sx, bg.y.y < 0 ? -sy : sy);
-        b->visible = true;
+        /* the bodies, their global transforms kept, at their places in the
+         * viewport */
+        for (size_t i = 0; i < bodies.size(); ++i) {
+            Node2D* b = (Node2D*)bodies[i];
+            Xform2D bg = b->global_transform();
+            b->parent->remove_child(b);
+            vp->add_child(b);
+            b->position = bg.origin - (center - Vec2(num, num) * 0.5f);
+            b->rotation = 0;
+            b->skew = 0;
+            float sx = sqrtf(bg.x.x * bg.x.x + bg.x.y * bg.x.y), sy = sqrtf(bg.y.x * bg.y.x + bg.y.y * bg.y.y);
+            b->scale = Vec2(bg.x.x < 0 ? -sx : sx, bg.y.y < 0 ? -sy : sy);
+            b->visible = true;
+            ((CanvasItem*)all_visuals[i])->visible = false;
+        }
         vp->update_mode = SubViewport::UPDATE_ONCE;
-        ((CanvasItem*)visuals)->visible = false;
         set_visible(visual_, true);
         /* PlayVfxInternal */
         play_sfx("event:/sfx/enemy/enemy_fade");
@@ -1460,9 +1780,9 @@ private:
         return true;
     }
     VfxAnchors* anchors_;
-    std::string who_;
+    std::vector<std::string> who_;
     double delay_, end_;
-    Vec2 padding_;
+    std::vector<Vec2> padding_;
     Node* visual_;
 };
 
@@ -1676,6 +1996,9 @@ private:
 };
 
 ScriptBehavior* make_card_exhaust_quick(Node* n) { return new CardExhaustQuick(n); }
+ScriptBehavior* make_minion_dive_bomb(Node* n) { return new MinionDiveBomb(n); }
+ScriptBehavior* make_spooky_hand(Node*) { return new SpookyHand(); }
+ScriptBehavior* make_nightmare_hands(Node*) { return new NightmareHands(); }
 
 ScriptBehavior* make_doom_overlay(Node*) { return new DoomOverlay(); }
 
@@ -1741,12 +2064,16 @@ Node* add_effect(SceneLibrary* lib, Node* box, const std::string& scene) {
 }
 
 bool spawn_spec(SceneLibrary* lib, Node* box, const Spec& s, const Args& a, VfxAnchors& anchors) {
-    if (a.creatures.empty() && !(a.has_word("Player") || a.has_word("Enemy"))) return false;
+    if (a.creatures.empty() && a.places.empty() && !(a.has_word("Player") || a.has_word("Enemy"))) return false;
     Vec2 at;
     VfxCreature first, second;
     bool have_first = !a.creatures.empty() && anchors.creature(a.creatures[0], &first);
     bool have_second = a.creatures.size() > 1 && anchors.creature(a.creatures[1], &second);
-    if (a.creatures.empty()) {
+    if (a.creatures.empty() && !a.places.empty()) {
+        /* Create(Vector2, ...): the position the logic's stand-in node
+         * gave (Bouncing Flask's NGaseousImpactVfx at its target) */
+        if (!resolve(a.places[0], anchors, &at)) return false;
+    } else if (a.creatures.empty()) {
         /* Create(CombatSide, combatState, tint): the side's centre. */
         if (!anchors.side_center(a.has_word("Enemy"), &at)) return false;
     } else if (!have_first) {
@@ -1758,7 +2085,7 @@ bool spawn_spec(SceneLibrary* lib, Node* box, const Spec& s, const Args& a, VfxA
         at = s.anchor == AT_BOTTOM ? first.bottom : s.anchor == AT_TOP ? first.top : first.center;
     }
     Node* fx = add_effect(lib, box, s.scene);
-    if (!fx) return true;
+    if (!fx) return false;
     set_global(fx, at);
     if (!strcmp(s.name, "NWormyImpactVfx") && have_first) {
         set_global(exported_one(fx, "_groundPivot"), first.bottom);
@@ -1841,6 +2168,90 @@ bool spawn_big_slash(SceneLibrary* lib, Node* box, bool impact, const Args& a, V
 
 } /* namespace */
 
+namespace {
+/* NCreatureVisuals.ApplyLiquidOverlayInternal: the spine body drawn with
+ * potion_liquid_overlay (its tint, the body's hue) for 1 s, the overlay's
+ * influence from 1 to 0, then its own material again; a second splash
+ * meanwhile (TryApplyLiquidOverlay) takes its tint and the full second. */
+class LiquidOverlay : public ScriptBehavior {
+public:
+    LiquidOverlay(SpineSprite* s, MaterialRes* saved, const Color& tint) : spine_(s), saved_(saved), t_(1.0) { set(tint); }
+    void set(const Color& tint) {
+        spine_->shader_params["tint.r"] = tint.r;
+        spine_->shader_params["tint.g"] = tint.g;
+        spine_->shader_params["tint.b"] = tint.b;
+        t_ = 1.0;
+    }
+    virtual void process(Node* n, double dt) {
+        if (t_ <= 0) return;
+        spine_->shader_params["overlay_influence"] = (float)t_;
+        t_ -= dt;
+        if (t_ > 0) return;
+        spine_->slot_material[0] = saved_;
+        spine_->shader_params.erase("overlay_influence");
+        n->queue_free();
+    }
+
+private:
+    SpineSprite* spine_;
+    MaterialRes* saved_;
+    double t_;
+};
+
+SpineSprite* first_spine_under(Node* n) {
+    if (!n) return NULL;
+    if (n->type == "SpineSprite") return (SpineSprite*)n;
+    for (size_t i = 0; i < n->children.size(); ++i) {
+        SpineSprite* s = first_spine_under(n->children[i]);
+        if (s) return s;
+    }
+    return NULL;
+}
+
+/* NSplashVfx.Create(position, tint): its particles tinted, freed after
+ * 2 s */
+bool spawn_splash(SceneLibrary* lib, Node* box, const Vec2& at, const Color& tint) {
+    Node* fx = add_effect(lib, box, "scenes/vfx/vfx_splash.tscn");
+    if (!fx) return false;
+    set_global(fx, at);
+    std::vector<Node*> list;
+    exported(fx, "_particles", list);
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (list[i]->is_canvas_item()) ((CanvasItem*)list[i])->self_modulate = tint;
+        restart(list[i]);
+    }
+    static const Spec splash = { "NSplashVfx", "", "", AT_CENTER, TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false,
+                                 { { 0, OP_NONE, NULL } }, 2.0f };
+    fx->behavior = new Sequence(&splash);
+    return true;
+}
+
+/* NLiquidOverlayVfx.Create(creature, tint): TryApplyLiquidOverlay on its
+ * visuals' spine body */
+bool liquid_overlay(SceneLibrary* lib, VfxAnchors& anchors, const std::string& who, const Color& tint) {
+    Node* visuals = anchors.visuals_of(who);
+    Node* body = visuals ? visuals->find_unique("Visuals") : NULL;
+    SpineSprite* s = first_spine_under(body ? body : visuals);
+    if (!s) return false;
+    Node* running = s->get_node("LiquidOverlay");
+    if (running && running->behavior && !running->queued_for_deletion()) {
+        ((LiquidOverlay*)running->behavior)->set(tint);
+        return true;
+    }
+    Resource* r = lib->ext("materials/vfx/potion/potion_liquid_overlay.tres");
+    if (!r || r->kind != Resource::RES_SHADER_MATERIAL) return false;
+    Node* n = SceneLibrary::create_node("Node");
+    if (!n) return false;
+    n->name = "LiquidOverlay";
+    /* its hue: the body's own (SetScaleAndHue's hsv material), else none */
+    if (s->shader_params.find("h") == s->shader_params.end()) s->shader_params["h"] = 1.0f;
+    n->behavior = new LiquidOverlay(s, s->slot_material[0], tint);
+    s->slot_material[0] = (MaterialRes*)r;
+    s->add_child(n);
+    return true;
+}
+} /* namespace */
+
 static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGroundFireVfx", "NStunnedVfx", "NPowerUpVfx",
                                            "NBolasVfx", "NBigSlashVfx", "NBigSlashImpactVfx", "NHitSparkVfx",
                                            "NItemThrowVfx", "NSmallMagicMissileVfx", "NLargeMagicMissileVfx",
@@ -1848,7 +2259,9 @@ static const char* const OTHER_CALLS[] = { "NThinSliceVfx", "NStabVfx", "NGround
                                            "NSweepingBeamVfx", "NGrandFinaleVfx", "NHellraiserVfx",
                                            "NAdditiveOverlayVfx", "NDoomVfx", "NDoomOverlayVfx", "NHorizontalLinesVfx",
                                            "NSmokyVignetteVfx", "NBlockSparkVfx", "NDamageBlockedVfx", "NHealNumVfx",
-                                           "NFanOfKnivesVfx", "NTestSubjectBurnVfx" };
+                                           "NFanOfKnivesVfx", "NTestSubjectBurnVfx", "NMinionDiveBombVfx",
+                                           "NRollingBoulderVfx", "NNightmareHandsVfx", "NSplashVfx",
+                                           "NLiquidOverlayVfx" };
 
 namespace {
 /* NDamageBlockedVfx / NHealNumVfx: a label that drifts (decelerating),
@@ -2032,7 +2445,49 @@ void restart_all_particles(Node* n) {
     if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") ((Particles2D*)n)->restart();
     for (size_t i = 0; i < n->children.size(); ++i) restart_all_particles(n->children[i]);
 }
+
+/* NPowerRemovedVfx.StartVfx: %Container centred on the node (its size laid
+ * out), its alpha to 1 in 0.25 s (Expo Out), held 0.5 s, to 0 in 1 s
+ * (Linear), then the node goes; meanwhile it rises to 160 px above the
+ * label's y in 2 s (Quart Out). */
+class PowerRemoved : public Effect {
+public:
+    virtual void begin(Node* n) {
+        Node* cn = n->find_unique("Container");
+        Node* field = n->find_unique("PowerField");
+        if (!cn || !cn->is_control()) return;
+        Control* c = (Control*)cn;
+        Vec2 at = c->position - c->size * 0.5f;
+        c->set_position(at);
+        float field_y = field && field->is_control() ? ((Control*)field)->position.y : 0;
+        tweens_.tween(&c->modulate.a, 1.0f, 0.25f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween(&c->modulate.a, 0.0f, 1.0f, TRANS_LINEAR, EASE_OUT, 0.75f);
+        float top = c->offset[SIDE_TOP], bottom = c->offset[SIDE_BOTTOM];
+        float rise = field_y - 160.0f - at.y;
+        tweens_.tween(&c->offset[SIDE_TOP], top + rise, 2.0f, TRANS_QUART, EASE_OUT);
+        tweens_.tween(&c->offset[SIDE_BOTTOM], bottom + rise, 2.0f, TRANS_QUART, EASE_OUT);
+    }
+    virtual void tick(Node* n, double) {
+        if (t_ >= 1.75 && !n->queued_for_deletion()) n->queue_free();
+    }
+};
 } /* namespace */
+
+void spawn_power_removed(SceneLibrary* lib, Node* box, const Vec2& at, const std::string& title, const std::string& icon) {
+    if (!box) return;
+    Node* fx = instance(lib, "scenes/vfx/power_removed_vfx.tscn");
+    if (!fx || !fx->is_node2d()) {
+        delete fx;
+        return;
+    }
+    ((Node2D*)fx)->position = at;
+    set_label(fx->find_unique("WearsOff"), Loc::get("vfx", "POWER_WEARS_OFF"));
+    set_label(fx->find_unique("PowerField"), title);
+    set_texture(lib, fx->find_unique("TextureRect"), icon);
+    delete fx->behavior;
+    fx->behavior = new PowerRemoved();
+    box->add_child(fx);
+}
 
 void spawn_power_applied(SceneLibrary* lib, Node* box, const Vec2& at, const std::string& title, const std::string& icon,
                          bool buff) {
@@ -2241,6 +2696,13 @@ void spawn_speech_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnch
     VfxCreature c;
     Vec2 at;
     if (args.size() < 2 || !speech_position(args[1].str(), anchors, &c, &at)) return;
+    speech_bubble_at(lib, box, args[(size_t)0].str(), at, c.enemy, args.size() > 2 ? args[2].num(1.75) : 1.75,
+                     args.size() > 3 ? args[3].str() : std::string());
+}
+} /* namespace */
+
+void speech_bubble_at(SceneLibrary* lib, Node* box, const std::string& line, const Vec2& at, bool right, double seconds,
+                      const std::string& color) {
     /* one line at a time: a bubble kept until the next goes now */
     for (size_t i = 0; i < box->children.size(); ++i) {
         Node* old = box->children[i];
@@ -2260,14 +2722,14 @@ void spawn_speech_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnch
     Node* shadow = fx->find_unique("Shadow");
     Node* text = fx->find_unique("Text");
     float h, s, v;
-    bubble_hsv(args.size() > 3 ? args[3].str() : std::string(), &h, &s, &v);
+    bubble_hsv(color, &h, &s, &v);
     if (bubble && bubble->is_canvas_item()) {
         CanvasItem* b = (CanvasItem*)bubble;
         b->shader_params["h"] = h;
         b->shader_params["s"] = s;
         b->shader_params["v"] = v;
     }
-    if (c.enemy) {
+    if (right) {
         if (container && container->is_control()) {
             Control* k = (Control*)container;
             float w = k->offset[SIDE_RIGHT] - k->offset[SIDE_LEFT];
@@ -2276,17 +2738,16 @@ void spawn_speech_bubble(SceneLibrary* lib, Node* box, const Json& args, VfxAnch
         if (bubble && bubble->type == "Sprite2D") ((Sprite2D*)bubble)->flip_h = true;
         if (shadow && shadow->type == "Sprite2D") ((Sprite2D*)shadow)->flip_h = true;
     }
-    set_label(text, format("[center][fly_in offset_x=%d offset_y=40]%s[/fly_in][/center]", c.enemy ? 60 : -60,
-                           args[(size_t)0].str().c_str()));
-    double seconds = args.size() > 2 ? args[2].num(1.75) : 1.75;
+    set_label(text, format("[center][fly_in offset_x=%d offset_y=40]%s[/fly_in][/center]", right ? 60 : -60, line.c_str()));
     delete fx->behavior;
     fx->behavior = new SpeechBubble(root, contents && contents->is_node2d() ? (Node2D*)contents : NULL,
                                     bubble && bubble->is_node2d() ? (Node2D*)bubble : NULL,
                                     text && text->type == "RichTextLabel" ? (RichTextLabel*)text : NULL, seconds);
     box->add_child(fx);
-    root->set_position(at);
+    /* at is global: in the box's own space (the merchant's scene container
+     * is offset; the combat VFX container is not) */
+    root->set_position(box->is_canvas_item() ? inverse(((CanvasItem*)box)->global_transform()).xform(at) : at);
 }
-} /* namespace */
 
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors) {
     if (!is_combat_vfx_call(call)) return false;
@@ -2304,30 +2765,27 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     VfxCreature c;
     bool have = !a.creatures.empty() && anchors.creature(a.creatures[0], &c);
     if (call == "NCombatRoom.PlaySplashVfx") {
-        /* NSplashVfx at the bottom of the hitbox, its particles tinted
-         * (NLiquidOverlayVfx's overlay on the creature is not drawn). */
-        if (!have) return true;
-        Node* fx = add_effect(lib, box, "scenes/vfx/vfx_splash.tscn");
-        if (!fx) return true;
-        set_global(fx, c.bottom);
+        /* NSplashVfx at the bottom of the hitbox, NLiquidOverlayVfx on the
+         * creature, both in the tint */
+        if (!have) return false;
         Color tint = a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0];
-        std::vector<Node*> list;
-        exported(fx, "_particles", list);
-        for (size_t i = 0; i < list.size(); ++i) {
-            if (list[i]->is_canvas_item()) ((CanvasItem*)list[i])->self_modulate = tint;
-            restart(list[i]);
-        }
-        fx->behavior = NULL;
-        /* NSplashVfx frees itself after 2 s: a Sequence with no steps. */
-        static const Spec splash = { "NSplashVfx", "", "", AT_CENTER, TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false,
-                                     { { 0, OP_NONE, NULL } }, 2.0f };
-        fx->behavior = new Sequence(&splash);
-        return true;
+        liquid_overlay(lib, anchors, a.creatures[0], tint);
+        return spawn_splash(lib, box, c.bottom, tint);
+    }
+    if (cls == "NSplashVfx") {
+        /* Create(position, tint) (Bouncing Flask: each bounce's target) */
+        Vec2 at;
+        if (a.places.empty() || !resolve(a.places[0], anchors, &at)) return false;
+        return spawn_splash(lib, box, at, a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0]);
+    }
+    if (cls == "NLiquidOverlayVfx") {
+        /* Create(creature, tint) */
+        if (a.creatures.empty()) return false;
+        return liquid_overlay(lib, anchors, a.creatures[0], a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0]);
     }
     const Spec* s = spec_named(cls);
     if (s) {
-        spawn_spec(lib, box, *s, a, anchors);
-        return true;
+        return spawn_spec(lib, box, *s, a, anchors);
     }
     if (cls == "NBlockSparkVfx") {
         /* CreatureCmd.Damage, a hit fully blocked: the sparks at the
@@ -2337,8 +2795,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         static const Spec spark = { "NBlockSparkVfx", "scenes/vfx/block_spark_vfx.tscn", "NBlockSparkVfx.cs", AT_CENTER,
                                     TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false,
                                     { { 0, OP_RESTART, "_particles" } }, -1.0f };
-        spawn_spec(lib, box, spark, a, anchors);
-        return true;
+        return spawn_spec(lib, box, spark, a, anchors);
     }
     if (cls == "NDamageBlockedVfx") {
         /* "Blocked" above it: from (+-20, -60..-40), shrinking to 0.6 and
@@ -2348,7 +2805,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         Node* n = instance(lib, "scenes/vfx/vfx_blocked_text.tscn");
         if (!n || !n->is_node2d()) {
             delete n;
-            return true;
+            return false;
         }
         Node2D* d = (Node2D*)n;
         box->add_child(n);
@@ -2378,7 +2835,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         Node* n = instance(lib, "scenes/vfx/vfx_heal_num.tscn");
         if (!n || !n->is_node2d()) {
             delete n;
-            return true;
+            return false;
         }
         Node2D* d = (Node2D*)n;
         box->add_child(n);
@@ -2397,10 +2854,10 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         return true;
     }
     if (cls == "NFanOfKnivesVfx") {
-        if (!have) return true;
+        if (!have) return false;
         Node* parent = anchors.back_box() ? anchors.back_box() : box;
         Node* n = instance(lib, "scenes/vfx/fan_of_knives_vfx.tscn");
-        if (!n) return true;
+        if (!n) return false;
         parent->add_child(n);
         set_global(n, c.center);
         if (lib->audio()) lib->audio()->ui("event:/sfx/characters/silent/silent_fan_of_knives");
@@ -2412,7 +2869,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     if (cls == "NTestSubjectBurnVfx") {
         Node* parent = anchors.back_box() ? anchors.back_box() : box;
         Node* n = instance(lib, "scenes/vfx/monsters/test_subject_burn_vfx.tscn");
-        if (!n) return true;
+        if (!n) return false;
         parent->add_child(n);
         TestSubjectBurn* f = new TestSubjectBurn();
         n->behavior = f;
@@ -2434,7 +2891,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         }
         Node* fx = add_effect(lib, top, "scenes/vfx/ui/vfx_low_hp_border.tscn");
         if (fx && fx->behavior) ((LowHpBorder*)fx->behavior)->play();
-        return true;
+        return fx != NULL;
     }
     if (call == "NDoomOverlayVfx.GetOrCreate") {
         for (size_t i = 0; i < box->children.size(); ++i) {
@@ -2447,22 +2904,22 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         }
         Node* fx = add_effect(lib, box, "scenes/vfx/doom_overlay_vfx.tscn");
         if (fx && fx->behavior) ((Effect*)fx->behavior)->start(fx);
-        return true;
+        return fx != NULL;
     }
     if (cls == "NDoomVfx") {
         /* Create(visuals, Hitbox.GlobalPosition, Hitbox.Size, shouldDie) */
-        if (a.places.size() < 2) return true;
+        if (a.places.size() < 2) return false;
         VfxCreature who;
-        if (!anchors.creature(a.places[0].who, &who)) return true;
+        if (!anchors.creature(a.places[0].who, &who)) return false;
         Node* fx = add_effect(lib, box, "scenes/vfx/vfx_doom.tscn");
-        if (!fx) return true;
+        if (!fx) return false;
         set_global(fx, who.hitbox.pos + Vec2(who.hitbox.size.x * 0.5f, who.hitbox.size.y));
         bool die = !a.bools.empty() && a.bools[0];
         if (fx->behavior) {
             ((DoomVfx*)fx->behavior)->setup(who.hitbox.size, die ? anchors.take_visuals(a.places[0].who) : NULL, die);
             ((Effect*)fx->behavior)->start(fx);
         }
-        return true;
+        return fx != NULL;
     }
     if (cls == "NSmokyVignetteVfx") {
         /* Create(tint, highlight): Haze's in the VFX container, Whirlwind's
@@ -2494,17 +2951,17 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             Vec2 p;
             if (resolve(a.places[i], anchors, &p)) at.push_back(p);
         }
-        if (at.empty()) return true;
+        if (at.empty()) return false;
         if (cls == "NItemThrowVfx") {
-            if (at.size() < 2) return true;
+            if (at.size() < 2) return false;
             Node* fx = add_effect(lib, box, "scenes/vfx/vfx_item_throw.tscn");
-            if (!fx || !fx->behavior) return true;
+            if (!fx || !fx->behavior) return false;
             Resource* r = a.paths.empty() ? NULL : lib->ext(a.paths[0]);
             ((ItemThrow*)fx->behavior)->setup(at[0], at[1], r && r->is_texture() ? (Texture2DRes*)r : NULL);
             ((Effect*)fx->behavior)->start(fx);
         } else if (cls == "NSleepingVfx") {
             Node* fx = add_effect(lib, box, "scenes/vfx/vfx_sleeping.tscn");
-            if (!fx) return true;
+            if (!fx) return false;
             set_global(fx, at[0]);
             if (fx->behavior) {
                 ((Sleeping*)fx->behavior)->setup(a.bools.empty() || a.bools[0]);
@@ -2514,7 +2971,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             bool large = cls == "NLargeMagicMissileVfx";
             Node* fx = add_effect(lib, box, large ? "scenes/vfx/vfx_large_magic_missile.tscn"
                                                    : "scenes/vfx/vfx_small_magic_missile.tscn");
-            if (!fx) return true;
+            if (!fx) return false;
             set_global(fx, at[0]);
             Color tint = a.colors.empty() ? Color(1, 1, 1, 1) : a.colors[0];
             std::vector<Node*> list;
@@ -2528,16 +2985,47 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     if (cls == "NAdditiveOverlayVfx") {
         Node* fx = add_effect(lib, box, "scenes/vfx/additive_overlay_vfx.tscn");
         if (fx && fx->behavior) ((Effect*)fx->behavior)->start(fx);
-        return true;
+        return fx != NULL;
     }
     if (cls == "NBigSlashVfx" || cls == "NBigSlashImpactVfx") return spawn_big_slash(lib, box, cls == "NBigSlashImpactVfx", a, anchors);
-    if (!have) return true;
+    if (cls == "NNightmareHandsVfx") {
+        /* Nightmare: added to NRun.GlobalUi, over the room */
+        Node* fx = instance(lib, "scenes/vfx/cards/nightmare_hands_vfx.tscn");
+        if (!fx) return false;
+        box->add_child(fx);
+        return true;
+    }
+    if (cls == "NRollingBoulderVfx") {
+        /* Create(creatures, damage): sorted by where they stand, the order
+         * the boulder meets them (PlayAnim: none on the screen, no boulder) */
+        std::vector<VfxCreature> targets;
+        for (size_t l = 0; l < a.lists.size(); ++l)
+            for (size_t k = 0; k < a.lists[l].size(); ++k) {
+                VfxCreature t;
+                if (anchors.creature(a.lists[l][k], &t)) targets.push_back(t);
+            }
+        if (targets.empty()) return false;
+        Node* fx = instance(lib, "scenes/vfx/vfx_rolling_boulder.tscn");
+        if (!fx || !fx->is_node2d()) {
+            delete fx;
+            return false;
+        }
+        delete fx->behavior;
+        RollingBoulder* b = new RollingBoulder();
+        fx->behavior = b;
+        box->add_child(fx);
+        b->setup(fx, a.numbers.empty() ? 0 : a.numbers[0], targets, anchors.back_box());
+        return true;
+    }
+    /* the rest start at a creature: a call without one on the screen is a
+     * drop (the cue ledger counts it), not a silent success */
+    if (!have) return false;
     if (cls == "NHitSparkVfx") {
         /* requireInteractable (default true): not on dying creatures. */
         if (!c.interactable && !(a.bools.size() && !a.bools[0])) return true;
         Node* fx = add_effect(lib, box, "scenes/vfx/hit_spark_vfx.tscn");
         if (fx) set_global(fx, c.center);
-        return true;
+        return fx != NULL;
     }
     if (cls == "NThinSliceVfx") {
         Node* fx = add_effect(lib, box, "scenes/vfx/thin_slice_vfx.tscn");
@@ -2545,7 +3033,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             ((ThinSlice*)fx->behavior)->setup(c.center, a.words.empty() ? "Cyan" : a.words[0]);
             ((Effect*)fx->behavior)->start(fx);
         }
-        return true;
+        return fx != NULL;
     }
     if (cls == "NStabVfx") {
         Node* fx = add_effect(lib, box, "scenes/vfx/stab_vfx.tscn");
@@ -2553,31 +3041,33 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             ((Stab*)fx->behavior)->setup(c.center, !a.bools.empty() && a.bools[0], a.words.empty() ? "Red" : a.words[0]);
             ((Effect*)fx->behavior)->start(fx);
         }
-        return true;
+        return fx != NULL;
     }
     if (cls == "NGroundFireVfx") {
         Node* fx = add_effect(lib, box, "scenes/vfx/fires/vfx_ground_fire.tscn");
-        if (!fx) return true;
+        if (!fx) return false;
         set_global(fx, c.bottom);
+        /* Fiend Fire's: Scale = One * 0.8, 0.9, ... (the logic's number) */
+        if (!a.numbers.empty() && fx->is_node2d()) ((Node2D*)fx)->scale = Vec2(a.numbers[0], a.numbers[0]);
         if (fx->behavior) {
             ((GroundFire*)fx->behavior)->setup(a.words.empty() ? "Red" : a.words[0]);
             ((Effect*)fx->behavior)->start(fx);
         }
-        return true;
+        return fx != NULL;
     }
     if (cls == "NStunnedVfx") {
         Node* fx = add_effect(lib, box, "scenes/vfx/stunned_vfx.tscn");
-        if (!fx) return true;
+        if (!fx) return false;
         set_global(fx, c.top);
         if (fx->behavior) ((Effect*)fx->behavior)->start(fx);
-        return true;
+        return fx != NULL;
     }
     if (cls == "NPowerUpVfx") {
         if (!c.interactable) return true;
         bool ghostly = call == "NPowerUpVfx.CreateGhostly";
         Node* fx = add_effect(lib, box, ghostly ? "scenes/vfx/vfx_ghostly_power_up/vfx_ghostly_power_up.tscn"
                                                 : "scenes/vfx/vfx_power_up/vfx_power_up.tscn");
-        if (!fx) return true;
+        if (!fx) return false;
         set_global(fx, c.center);
         if (fx->behavior) {
             ((PowerUp*)fx->behavior)->setup(anchors.back_box());
@@ -2602,18 +3092,18 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     }
     if (cls == "NKinPriestGrenadeVfx") {
         Node* fx = add_effect(lib, box, "scenes/vfx/monsters/kin_priest_grenade_vfx.tscn");
-        if (!fx) return true;
+        if (!fx) return false;
         set_global(fx, c.bottom);
         if (fx->behavior) ((Effect*)fx->behavior)->start(fx);
-        return true;
+        return fx != NULL;
     }
     if (cls == "NHyperbeamVfx" || cls == "NSweepingBeamVfx") {
         Vec2 eye = c.center + (c.defect ? Vec2(34, -30) : Vec2(0, 0));
         if (cls == "NHyperbeamVfx") {
             VfxCreature target;
-            if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return true;
+            if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return false;
             Node* fx = add_effect(lib, box, "scenes/vfx/vfx_hyperbeam.tscn");
-            if (!fx || !fx->is_node2d()) return true;
+            if (!fx || !fx->is_node2d()) return false;
             set_global(fx, eye);
             Vec2 d = target.center - eye;
             ((Node2D*)fx)->rotation = atan2f(d.y, d.x);
@@ -2626,7 +3116,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
                     if (anchors.creature(a.lists[l][k], &t)) targets.push_back(t.center);
                 }
             Node* fx = add_effect(lib, box, "scenes/vfx/vfx_sweeping_beam.tscn");
-            if (!fx) return true;
+            if (!fx) return false;
             set_global(fx, eye);
             if (fx->behavior) {
                 ((SweepingBeam*)fx->behavior)->setup(targets, box);
@@ -2641,28 +3131,47 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             ((GrandFinale*)fx->behavior)->setup(c.center);
             ((Effect*)fx->behavior)->start(fx);
         }
-        return true;
+        return fx != NULL;
     }
     if (cls == "NHellraiserVfx") {
         spawn_hellraiser(lib, box, anchors.back_box(), c.bottom);
         return true;
     }
+    if (cls == "NMinionDiveBombVfx") {
+        /* Create(owner, target): the owner's VfxSpawnPosition to the
+         * target's GetBottomOfHitbox */
+        VfxCreature target;
+        if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return false;
+        Node* fx = add_effect(lib, box, "scenes/vfx/vfx_minion_dive_bomb.tscn");
+        if (fx && fx->behavior) {
+            ((MinionDiveBomb*)fx->behavior)->setup(fx, c.center, target.bottom);
+            ((Effect*)fx->behavior)->start(fx);
+        }
+        return fx != NULL;
+    }
     if (cls == "NBolasVfx") {
         VfxCreature target;
-        if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return true;
+        if (a.creatures.size() < 2 || !anchors.creature(a.creatures[1], &target)) return false;
         Node* fx = add_effect(lib, box, "scenes/vfx/cards/bolas_vfx.tscn");
         if (fx && fx->behavior) {
             ((Bolas*)fx->behavior)->setup(c.center, target.center);
             ((Effect*)fx->behavior)->start(fx);
         }
-        return true;
+        return fx != NULL;
     }
-    return true;
+    /* named in OTHER_CALLS with no effect here */
+    return false;
 }
 
 void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::string& who, double delay,
                          const Vec2& padding) {
     if (!lib || !parent) return;
+    spawn_monster_death_group(lib, parent, anchors, std::vector<std::string>(1, who), delay, std::vector<Vec2>(1, padding));
+}
+
+void spawn_monster_death_group(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::vector<std::string>& who,
+                               double delay, const std::vector<Vec2>& padding) {
+    if (!lib || !parent || who.empty()) return;
     Node* fx = add_effect(lib, parent, "scenes/vfx/vfx_monster_death.tscn");
     if (!fx) return;
     if (fx->behavior) ((MonsterDeath*)fx->behavior)->setup(&anchors, who, delay, padding);
@@ -2717,6 +3226,9 @@ void install_combat_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/Ui/NLowHpBorderVfx.cs", make_low_hp_border);
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustVfx.cs", make_card_exhaust);
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardExhaustQuickVfx.cs", make_card_exhaust_quick);
+    register_script("res://src/Core/Nodes/Vfx/NMinionDiveBombVfx.cs", make_minion_dive_bomb);
+    register_script("res://src/Core/Nodes/Vfx/Cards/NSpookyHandVfx.cs", make_spooky_hand);
+    register_script("res://src/Core/Nodes/Vfx/Cards/NNightmareHandsVfx.cs", make_nightmare_hands);
 }
 
 } /* namespace spire */

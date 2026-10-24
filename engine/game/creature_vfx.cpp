@@ -1733,6 +1733,14 @@ bool special_node_call(const std::string& call, const Json& args, VfxAnchors& an
     } else if (call == "CanvasItem.SetVisible") {
         /* TorchHeadAmalgam.OnDieToDoom: its torches' lights */
         if (n) set_visible(n, args.size() > 1 && args[1].b());
+    } else if (call == "CanvasItem.SetSelfModulate") {
+        /* TestSubject.SetColor: its %CanvasGroup, "#rrggbbaa" */
+        const std::string& s = args.size() > 1 ? args[1].str() : std::string();
+        if (n && n->is_canvas_item() && s.size() == 9 && s[0] == '#') {
+            unsigned long v = strtoul(s.c_str() + 1, NULL, 16);
+            ((CanvasItem*)n)->self_modulate = Color((float)((v >> 24) & 255) / 255.0f, (float)((v >> 16) & 255) / 255.0f,
+                                                    (float)((v >> 8) & 255) / 255.0f, (float)(v & 255) / 255.0f);
+        }
     } else if (call == "NFlyconidSporesVfx.SetSporeTypeIsVulnerable") {
         bool vulnerable = args.size() > 1 && args[1].b();
         if (n) {

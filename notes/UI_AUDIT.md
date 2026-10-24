@@ -1,5 +1,10 @@
 # Presentation audit: the game's UI layer against the client
 
+> Superseded for day-to-day use by `tools/presentation_audit.py` (the
+> coverage ledgers, the client's cue ledger and the static inventory
+> joined; verdicts in `presentation_verdicts.tsv`): see HANDOFF's
+> "Completeness audit (2026-10-24)". This file keeps the first pass.
+
 What the headless logic leaves out of the game, and where the client plays
 it instead. The inventory comes from the game assembly
 (`Spire.ApiDump --ui-surface logic/lib/game/sts2.dll work/ui_surface.json`,

@@ -33,6 +33,13 @@ public:
     virtual bool creature(const std::string& who, VfxCreature* out) = 0;
     /* VfxCmd.GetSideCenter: the middle of a side's creatures. */
     virtual bool side_center(bool enemies, Vec2* out) = 0;
+    /* VfxCmd.GetSideCenterFloor: the mean of the side's hittable creatures'
+     * hitbox bottoms in x, the lowest of them in y; none by default. */
+    virtual bool side_floor(bool enemies, Vec2* out) {
+        (void)enemies;
+        (void)out;
+        return false;
+    }
     /* NCombatRoom.BackCombatVfxContainer (behind the creatures). */
     virtual Node* back_box() = 0;
     /* The creature's NCreatureVisuals, taken by an effect that keeps its
@@ -67,6 +74,16 @@ bool death_delayed(Node* visuals);
 /* True when call is one of the scripted effects (shown or not). box:
  * NCombatRoom.CombatVfxContainer. */
 bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, const Json& args, VfxAnchors& anchors);
+/* NSpeechBubbleVfx.Create(line, side, position, seconds, color) in box at a
+ * global position: right (DialogueSide.Right), the bubble to the speaker's
+ * left (an enemy's, NMerchantButton.PlayDialogue's); color VfxColor's name
+ * ("" the default). */
+void speech_bubble_at(SceneLibrary* lib, Node* box, const std::string& line, const Vec2& at, bool right, double seconds,
+                      const std::string& color);
+/* NRollingBoulderVfx.PlayAnim's path for these targets: when the boulder
+ * reaches each (its hitbox's left edge; the HitCreature signal) and when it
+ * is done (all hit, then 1 s), from its start. */
+void rolling_boulder_times(float damage, const std::vector<VfxCreature>& targets, std::vector<double>* hits, double* done);
 bool is_combat_vfx_call(const std::string& call);
 /* The node an exported NodePath names ("_overlay"), NULL if none; the
  * nodes of a NodePath array. */
@@ -88,6 +105,11 @@ Node* make_damage_number(SceneLibrary* lib, const Vec2& at, int amount);
  * ExtraDeathVfxPadding. */
 void spawn_monster_death(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::string& who, double delay,
                          const Vec2& padding);
+/* NMonsterDeathVfx.Create(creatureNodes): one fade over all their bodies
+ * (ReattachPower.DoFadeOutOnAllSegments, the Decimillipede's last
+ * segment). */
+void spawn_monster_death_group(SceneLibrary* lib, Node* parent, VfxAnchors& anchors, const std::vector<std::string>& who,
+                               double delay, const std::vector<Vec2>& padding);
 /* CardPileCmd's exhaust of a card (an NCard, or the hand holder showing
  * one), which the effect takes and frees. quick (from the hand):
  * NCardExhaustQuickVfx over the card where it is, then smoke and embers;
@@ -100,6 +122,9 @@ void spawn_card_exhaust(SceneLibrary* lib, Node* ui, Node* card, bool quick);
  * fades and its title rising (a buff, green) or falling (a debuff, red)
  * 100 px from 200 px above; NPowerAppliedBuffVfx / NPowerAppliedDebuffVfx
  * (vfx_buff_applied / vfx_debuff_applied) 200 px above, freed after 2 s. */
+/* NCreature.OnPowerRemoved: NPowerRemovedVfx ("wears off") at the top of
+ * the creature's hitbox, with the power's title and big icon. */
+void spawn_power_removed(SceneLibrary* lib, Node* box, const Vec2& at, const std::string& title, const std::string& icon);
 void spawn_power_applied(SceneLibrary* lib, Node* box, const Vec2& at, const std::string& title, const std::string& icon,
                          bool buff);
 

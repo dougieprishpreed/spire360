@@ -655,6 +655,25 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.tex[2] = effect_texture(c, m, "tex_frg_18");
         e.tex[3] = effect_texture(c, m, "tex_frg_2");
         e.repeat = 1 | 2 | 4 | 8;
+    } else if (s == "shaders/vfx/potion/vfx_potion_liquid_overlay_shader.gdshader") {
+        Vec2 dp = shader_param_vec2(m, "distortion_panning_speed", Vec2(0, 0));
+        Vec2 op = shader_param_vec2(m, "overlay_panning_speed", Vec2(0, 0));
+        Color tint = param_color(m, "tint", Color(1, 1, 1, 1));
+        e.id = EFFECT_LIQUID_OVERLAY;
+        e.p[0] = pan(dp.x);
+        e.p[1] = pan(dp.y);
+        e.p[2] = param(m, "distortion_strength", 0.0f);
+        e.p[3] = param(m, "overlay_influence", 0.0f);
+        e.p[4] = pan(op.x);
+        e.p[5] = pan(op.y);
+        e.p[8] = tint.r;
+        e.p[9] = tint.g;
+        e.p[10] = tint.b;
+        Canvas::hsv_matrix(param(m, "h", 1.0f), param(m, "s", 1.0f), param(m, "v", 1.0f), e.extra);
+        e.extra_count = 3;
+        e.tex[0] = effect_texture(c, m, "overlay_texture");
+        e.tex[1] = effect_texture(c, m, "lut");
+        e.repeat = 1;
     } else if (s == "shaders/vfx/ui/vfx_ui_epoch_unlock_chains_shader.gdshader") {
         Color k = param_color(m, "bright_color", Color(0, 0, 0, 0));
         e.id = EFFECT_EPOCH_CHAINS;

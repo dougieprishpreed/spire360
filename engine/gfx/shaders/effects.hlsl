@@ -723,6 +723,20 @@ float4 ps_e60(VsOut i) : COLOR {
     return float4(saturate(rgb) * a, a);
 }
 
+// 61: vfx_potion_liquid_overlay: the creature's texels (hue-shifted, g_x[0..2])
+// mixed with the tinted lut of a screen-space panning liquid, by its alpha
+// times the influence, on opaque texels only.
+float4 ps_e61(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float3 hs = float3(dot(g_x[0].xyz, t.rgb), dot(g_x[1].xyz, t.rgb), dot(g_x[2].xyz, t.rgb)) * i.color.rgb;
+    float a = saturate(t.a * i.color.a);
+    float4 d = tex2D(g_e0, i.screen * 10.0 + g_p0.xy);
+    float4 ov = tex2D(g_e0, i.screen * 10.0 + g_p1.xy + d.b * g_p0.z);
+    float3 l = tex2D(g_e1, float2(ov.r, 0.5)).rgb * g_p2.rgb;
+    float k = ov.a * step(0.5, a) * g_p0.w;
+    return float4(saturate(lerp(hs, l, k)) * a, a);
+}
+
 // 58: vfx_ui_epoch_unlock_chains: the chains brightened and eroded.
 float4 ps_e58(VsOut i) : COLOR {
     float4 t = tex2D(g_tex, i.uv);

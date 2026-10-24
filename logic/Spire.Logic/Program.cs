@@ -25,6 +25,7 @@ internal static class Program
             e.SetObserved();
         };
 
+        Ledger.Open();
         // IL-patch handlers must exist before any game code runs.
         Hooks.Install();
 
@@ -37,6 +38,7 @@ internal static class Program
         var driver = new RunDriver();
         Hooks.Driver = driver;
         Steps.Attach(driver.LocalPlayer);
+        UiEvents.Install();
         RunDriver.NestedDecisionLoop = pending => NestedLoop(proto, driver, pending);
 
         proto.Write(new Dictionary<string, object?>

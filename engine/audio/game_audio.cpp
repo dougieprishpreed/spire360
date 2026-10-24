@@ -1,4 +1,5 @@
 #include "game_audio.h"
+#include "../core/cue_ledger.h"
 #include "../core/pack.h"
 #include <algorithm>
 
@@ -10,7 +11,7 @@ bool is_audio_call(const std::string& call) {
 }
 }
 GameAudio::GameAudio(const Pack* pack) : pack_(pack), events_(pack), music_id_(0), ambience_id_(0), rng_(0x39ba1u),
-    floor_(-1), context_progress_(-1), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), stopping_(false) {
+    floor_(-1), context_progress_(-1), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), stopping_(false), dry_(false) {
     /* The banks every screen uses, parsed before the first sound (sfx.bank
      * alone is a long parse, a hitch at the first attack otherwise). */
     if (events_.available()) {
@@ -90,6 +91,7 @@ void GameAudio::cue(const Json& cue) {
     ScopedLock lock(lock_);
     const std::string& kind = cue["t"].str();
     if (kind == "death" || kind == "despawn") { stop_room_loops(cue["who"].str()); return; }
+    if (kind == "ui" || kind == "sfx") CueLedger::used(cue);
     std::string path = cue["path"].str(), operation = cue["op"].str(), owner = cue["who"].str();
     float volume = cue["volume"].f(1);
     float variance = 0;
@@ -98,7 +100,7 @@ void GameAudio::cue(const Json& cue) {
     Json params = cue["params"];
     if (kind == "ui") {
         const std::string& call = cue["call"].str();
-        if (!is_audio_call(call)) return;
+        if (!is_audio_call(call)) { CueLedger::retract(cue); return; }
         const Json& a = cue["args"];
         std::string method = call.substr(call.find('.') + 1);
         path = a[(size_t)0].str();
@@ -118,6 +120,15 @@ void GameAudio::cue(const Json& cue) {
         else if (method == "StopLoop" || method == "StopSfxLoop") operation = "stop";
         else if (method == "SetParam") { operation = "param"; params.set(a[1].str(), a[2]); }
         else if (method == "StopAllLoops" || method == "StopAll") { stop_room_loops(); return; }
+        else if (call == "NDebugAudioManager.Stop") {
+            /* Stop(handle, fadeTime = 0.5): the voice that Play gave it,
+             * faded out */
+            std::map<int, u32>::iterator v = debug_voices_.find(a[(size_t)0].i(-1));
+            if (v == debug_voices_.end()) { CueLedger::retract(cue); return; }
+            events_.stop(v->second, a.size() > 1 ? a[1].f(0.5f) : 0.5f);
+            debug_voices_.erase(v);
+            return;
+        }
         else if (method == "PlayMusic" || method == "PlayCustomMusic") { music(path); return; }
         else if (method == "StopCustomMusic") { music(act_track_); events_.global_parameter("Progress", 7); return; }
         else if (method == "StopMusic") { music(""); return; }
@@ -127,7 +138,7 @@ void GameAudio::cue(const Json& cue) {
             return;
         } else if (method == "TriggerEliteSecondPhase") { events_.global_parameter("Progress", 8); return; }
         else if (method == "TriggerCampfireGoingOut") { events_.parameter(ambience_id_, "Campfire", 1); return; }
-        else return;
+        else { CueLedger::retract(cue); return; }
     } else if (kind != "sfx") return;
     if (path.empty()) return;
     std::string loop_key = owner + ":" + path;
@@ -161,6 +172,10 @@ void GameAudio::cue(const Json& cue) {
         }
         u32 id = events_.play(name, volume, params);
         if (variance > 0) { rng_ = rng_ * 1664525u + 1013904223u; events_.pitch(id, 1 + (((rng_ >> 8) / 16777216.0f) * 2 - 1) * variance); }
+        if (cue["handle"].is_number()) {
+            if (debug_voices_.size() > 64) debug_voices_.clear();
+            debug_voices_[cue["handle"].i()] = id;
+        }
     }
 }
 void GameAudio::steps(const Json& steps) {
@@ -208,7 +223,12 @@ void GameAudio::render(float* out, int count) {
             if (pending_[i].at <= clock_ + 0.0000001) { cue(pending_[i].cue); pending_.erase(pending_.begin() + i); }
             else { int until = (int)ceil((pending_[i].at - clock_) * 48000 - 0.0001); if (until > 0 && until < part) part = until; ++i; }
         }
-        events_.render(out + cursor * 2, part);
+        if (dry_) {
+            events_.stop_all(0);
+            for (int k = 0; k < part * 2; ++k) out[cursor * 2 + k] = 0;
+        } else {
+            events_.render(out + cursor * 2, part);
+        }
         if (recording_ && recorded_frames_ < 0x3fffffffU - (u32)part) {
             for (int k = 0; k < part * 2; ++k) {
                 int sample = (int)(clampf(out[cursor * 2 + k], -1, 1) * 32767);

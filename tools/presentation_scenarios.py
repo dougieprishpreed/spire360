@@ -13,6 +13,17 @@ spire_play --replay-run (frame captures) and spire_check replay.
             SpineAnimationAccess, the music's progress)
   mecha     the Mecha Knight fought to the end (its hit effects at the
             player side's centre)
+  boulder   Rolling Boulder over three enemies (each hit as it passes, the
+            boulder_hit marks), then the turns it rolls again
+  dive      Minion Dive Bomb (NMinionDiveBombVfx)
+  nightmare Nightmare (its vignette and hands), a debuff (the debuff sound,
+            the shake), powers wearing off
+  segments  the Decimillipede fought to the end (Reattach: the last
+            segment's fade over all of them)
+  pandora   Pandora's Box obtained (the simple cards view of what it changed)
+  fake      the Fake Merchant: a relic bought, a Foul Potion thrown, its fight
+  flask     Bouncing Flask and a Fire Potion (splashes, liquid overlays),
+            Neutralize's Weak (the intents' numbers at once)
 
 Each writes OUT/scenario/<name>.jsonl and .log (content_coverage's Runner).
 """
@@ -83,6 +94,82 @@ def main():
     if not only or "mecha" in only:
         case, lg, state = fight("mecha", "MECHA_KNIGHT_ELITE", "elite")
         run.play_until(case, lg, state, lambda s: s.get("decision") in ("rewards", "map_select"), 400)
+        run.finish(case, lg)
+    if not only or "boulder" in only:
+        case, lg, state = fight("boulder", "TWO_TAILED_RATS_NORMAL")
+        state = play(case, lg, state, "ROLLING_BOULDER")
+        end_turns(case, lg, state, 2)
+        run.finish(case, lg)
+    if not only or "dive" in only:
+        case, lg, state = fight("dive", "SHRINKER_BEETLE_WEAK")
+        for _ in range(2):
+            state = play(case, lg, state, "MINION_DIVE_BOMB")
+        run.finish(case, lg)
+    if not only or "nightmare" in only:
+        case, lg, state = fight("nightmare", "SHRINKER_BEETLE_WEAK")
+        state = play(case, lg, state, "NIGHTMARE")
+        if state.get("decision") == "card_select":
+            state = run.step(case, lg, {"cmd": "action", "action": "select_cards", "args": {"indices": "0"}})
+        for card in ("BASH", "NEUTRALIZE"):
+            state = play(case, lg, state, card)
+        end_turns(case, lg, state, 3)
+        run.finish(case, lg)
+    if not only or "segments" in only:
+        case, lg, state = fight("segments", "DECIMILLIPEDE_ELITE", "elite")
+        # every segment killed in one turn (Whirlwind hits them all), so the
+        # last one's death fades them together
+        for _ in range(6):
+            if state.get("decision") != "combat_play":
+                break
+            state = play(case, lg, state, "WHIRLWIND")
+        run.play_until(case, lg, state, lambda s: s.get("decision") in ("rewards", "map_select"), 100)
+        run.finish(case, lg)
+    if not only or "flask" in only:
+        # Bouncing Flask's splashes and liquid overlays, a thrown potion's
+        # (NCombatRoom.PlaySplashVfx); a power changing the intents' numbers
+        case, lg, state = fight("flask", "TWO_TAILED_RATS_NORMAL")
+        state = play(case, lg, state, "BOUNCING_FLASK")
+        state = run.step(case, lg, {"cmd": "obtain", "potions": ["FIRE_POTION"]})
+        state = run.step(case, lg, {"cmd": "get_state"})
+        pots = [x for x in (state.get("player") or {}).get("potions") or [] if x]
+        if pots:
+            state = run.step(case, lg, {"cmd": "action", "action": "use_potion",
+                                        "args": {"potion_index": pots[0]["index"], "target_index": 0}})
+            state = run.play_until(case, lg, state, lambda s: s.get("decision") == "combat_play", 20)
+        state = play(case, lg, state, "NEUTRALIZE")
+        end_turns(case, lg, state, 1)
+        run.finish(case, lg)
+    if not only or "fake" in only:
+        # the Fake Merchant: its room, a relic bought, a Foul Potion thrown
+        # at it, its fight won (HP capped), the rewards
+        case = cc.Case("scenario", "fake")
+        lg = run.logic("scenario", "fake")
+        run.new_run(case, lg, character="Ironclad", seed="fake")
+        run.step(case, lg, {"cmd": "set_player", "gold": 300})
+        run.step(case, lg, {"cmd": "obtain", "potions": ["FOUL_POTION"]})
+        state = run.step(case, lg, {"cmd": "enter_room", "type": "event", "event": "FAKE_MERCHANT"})
+        if state.get("decision") == "shop":
+            relics = [r for r in state.get("relics") or [] if r.get("is_stocked")]
+            if relics:
+                state = run.step(case, lg, {"cmd": "action", "action": "buy_relic",
+                                            "args": {"relic_index": relics[0]["index"]}})
+            pots = [x for x in (state.get("player") or {}).get("potions") or [] if x]
+            if pots:
+                state = run.step(case, lg, {"cmd": "action", "action": "use_potion",
+                                            "args": {"potion_index": pots[0]["index"]}})
+        else:
+            case.notes.append(f"no shop: {state.get('decision')}")
+        if state.get("decision") == "combat_play":
+            run.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+            state = run.step(case, lg, {"cmd": "get_state"})
+        run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 200)
+        run.finish(case, lg)
+    if not only or "pandora" in only:
+        case = cc.Case("scenario", "pandora")
+        lg = run.logic("scenario", "pandora")
+        run.new_run(case, lg, character="Ironclad", seed="pandora")
+        state = run.step(case, lg, {"cmd": "obtain", "relics": ["PANDORAS_BOX"]})
+        run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
         run.finish(case, lg)
     bad = [c for c in run.cases if c.status != "ok"]
     return 1 if bad else 0

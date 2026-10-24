@@ -49,7 +49,14 @@ private:
         Control* reticle;
         bool choice;
         float elapsed; /* the pulse's phase */
+        int kind;      /* 0 normal, 1 start / ancient, 2 boss, 3 second boss */
+        bool normal;   /* an NNormalMapPoint (its circle once traveled) */
+        float circle_rot, circle_scale; /* NMapCircleVfx's (the logic's) */
     };
+    /* NNormalMapPoint.ShowCircleVfx; NMapScreen.TravelToMapCoord's
+     * NMapNodeSelectVfx */
+    void add_circle(Point& p, bool animate);
+    void add_select_vfx(Point& p);
     struct Placed {
         const Json* data;
         Vec2 pos, size, endpoint;

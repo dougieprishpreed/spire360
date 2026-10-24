@@ -1,5 +1,6 @@
 #include "deck_previews.h"
 #include "card_view.h"
+#include "../core/cue_ledger.h"
 #include "combat_vfx.h"
 #include "screen_shake.h"
 #include "top_bar.h"
@@ -649,7 +650,8 @@ public:
     virtual bool step(float) {
         static const float DEGREES[3] = { 20, -10, 5 };
         while (blows_ < 3 && t_ >= 0.25f * (float)(blows_ + 1)) {
-            if (blows_ == 0 && layer_->lib->audio()) layer_->lib->audio()->ui("card_smith.mp3");
+            /* silent: ForgeCmd's preview (playSfx false) */
+            if (blows_ == 0 && layer_->lib->audio() && !cue_["silent"].b()) layer_->lib->audio()->ui("card_smith.mp3");
             Node* spark = root_ ? root_->get_node(format("Spark%d", blows_ + 1)) : NULL;
             for (size_t i = 0; spark && i < spark->children.size(); ++i)
                 if (spark->children[i]->type == "GPUParticles2D" || spark->children[i]->type == "CPUParticles2D")
@@ -925,8 +927,12 @@ void DeckPreviews::play_cue(const Json& c, const std::string& character) {
     else if (op == "enchant") p = new EnchantPreview(l, c);
     else if (op == "smith") {
         for (size_t i = 0; i < c["cards"].size(); ++i) l->previews.push_back(new SmithPreview(l, c, c["cards"][i]));
+        CueLedger::used(c);
     }
-    if (p) l->previews.push_back(p);
+    if (p) {
+        l->previews.push_back(p);
+        CueLedger::used(c);
+    }
 }
 
 void DeckPreviews::fly_to_deck(const Json& card, float x, float y, float scale, const std::string& character) {

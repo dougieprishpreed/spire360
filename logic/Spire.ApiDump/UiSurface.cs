@@ -28,17 +28,17 @@ static class UiSurface
         "ResourceLoader", "RandomNumberGenerator", "Marshalls", "Signal", "Error",
     };
 
-    static ModuleDefinition _module = null!;
+    internal static ModuleDefinition _module = null!;
     static readonly Dictionary<TypeDefinition, bool> _godot = new();
 
-    static bool InUiNamespace(TypeReference t)
+    internal static bool InUiNamespace(TypeReference t)
     {
         while (t.IsNested) t = t.DeclaringType;
         var ns = t.Namespace ?? "";
         return UiNamespaces.Any(p => ns == p || ns.StartsWith(p + ".", StringComparison.Ordinal));
     }
 
-    static bool DerivesFromGodot(TypeReference t)
+    internal static bool DerivesFromGodot(TypeReference t)
     {
         if (t.Module != _module && t.Scope != _module) return false;
         TypeDefinition? def;
@@ -58,16 +58,16 @@ static class UiSurface
         return result;
     }
 
-    static bool IsUi(TypeReference t) => InUiNamespace(t) || DerivesFromGodot(t.GetElementType());
+    internal static bool IsUi(TypeReference t) => InUiNamespace(t) || DerivesFromGodot(t.GetElementType());
 
-    static bool IsGodot(TypeReference t)
+    internal static bool IsGodot(TypeReference t)
     {
         var e = t.GetElementType();
         while (e.IsNested) e = e.DeclaringType;
         return e.Namespace == "Godot" && !GodotValues.Contains(e.Name);
     }
 
-    static string Plain(string name)
+    internal static string Plain(string name)
     {
         int lt = name.IndexOf('<'), gt = name.IndexOf('>');
         return lt == 0 && gt > 1 ? name[1..gt] : name;
@@ -75,7 +75,7 @@ static class UiSurface
 
     /// <summary>The source method a compiler-generated body belongs to
     /// (state machines <M>d__N, lambdas <M>b__N in <>c / display classes).</summary>
-    static string Owner(MethodDefinition m)
+    internal static string Owner(MethodDefinition m)
     {
         var t = m.DeclaringType;
         string name = Plain(m.Name);
@@ -87,13 +87,13 @@ static class UiSurface
         return t.FullName + "::" + name;
     }
 
-    static string Callee(MethodReference mr)
+    internal static string Callee(MethodReference mr)
     {
         var t = mr.DeclaringType.GetElementType();
         return t.FullName + "::" + mr.Name;
     }
 
-    static void Add(Dictionary<string, SortedSet<string>> map, string key, string value)
+    internal static void Add(Dictionary<string, SortedSet<string>> map, string key, string value)
     {
         if (!map.TryGetValue(key, out var set)) map[key] = set = new SortedSet<string>(StringComparer.Ordinal);
         set.Add(value);

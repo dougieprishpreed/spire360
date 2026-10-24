@@ -1,13 +1,17 @@
 #include "shop_screen.h"
 #include "inspect_screens.h"
 #include "card_view.h"
+#include "combat_vfx.h"
+#include "deck_previews.h"
 #include "loc.h"
 #include "screen_shake.h"
 #include "top_bar.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/animation.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
+#include "../scene/rich_text.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
 
@@ -24,6 +28,10 @@ static const unsigned CREAM = 0xFFF6E2, RED = 0xFF5555, GREEN = 0x7FFF00;
 
 static Control* as_control(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
+/* A purchase's line for the screen the purchase's decision brings
+ * (NMerchantInventory.OnPurchaseCompleted: ShowForPurchaseAttempt) */
+static std::string g_say_next;
+
 /* NSpineAutoPlayer / the characters' _Ready: the idle loop. */
 static void play_idle_all(Node* n) {
     if (n->type == "SpineSprite") {
@@ -36,7 +44,107 @@ static void play_idle_all(Node* n) {
 ShopScreen::ShopScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), inspect_card_(NULL), inspect_relic_(NULL), inspect_node_(NULL), inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL),
       back_button_(NULL), focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), slots_closed_top_(0),
-      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0) {}
+      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0), fake_(false),
+      again_(false), dialogue_(NULL), dialogue_box_(NULL), dialogue_bubble_(NULL), dialogue_text_(NULL), welcome_at_(-1) {}
+
+std::string ShopScreen::line(const char* kind) const {
+    /* MerchantDialogueSet.CreateFromLocStrings: <prefix><kind>.lineN */
+    const char* table = fake_ ? "events" : "merchant_room";
+    std::string prefix = std::string(fake_ ? "FAKE_MERCHANT" : "MERCHANT") + ".talk." + kind + ".line";
+    std::vector<std::string> lines;
+    for (int n = 1; n < 32; ++n) {
+        std::string key = prefix + format("%d", n);
+        std::string text = Loc::get(table, key.c_str());
+        if (text == std::string(table) + "." + key) break;
+        lines.push_back(text);
+    }
+    return lines.empty() ? std::string() : lines[chaotic_rand() % lines.size()];
+}
+
+void ShopScreen::sfx(const char* path) {
+    if (!lib_->audio()) return;
+    Json cue;
+    cue.set("t", Json::make_string("sfx"));
+    cue.set("op", Json::make_string("play"));
+    cue.set("path", Json::make_string(path));
+    cue.set("volume", Json::make_number(1));
+    lib_->audio()->cue(cue);
+}
+
+void ShopScreen::say(const char* kind) {
+    std::string text = line(kind);
+    if (!dialogue_ || text.empty()) return;
+    /* ShowRandom: fades in (0.25 s) growing to 1 (Back Out), the text
+     * typed in 0.4 s, the bubble from 0.25 to 0.75 (0.5 s, Expo Out), the
+     * box down from -80 (0.5 s, Back Out); 1 s later out (0.5 s, Sine Out);
+     * at a random x in 450..1450 */
+    if (dialogue_text_) set_label(dialogue_text_, "[fly_in]" + text + "[/fly_in]");
+    dialogue_->position.x = 450.0f + (float)(chaotic_rand() % 1001);
+    tweens_.kill(&dialogue_->modulate.a);
+    dialogue_->modulate.a = 0;
+    tweens_.tween(&dialogue_->modulate.a, 1.0f, 0.25f);
+    tweens_.tween(&dialogue_->scale, Vec2(1, 1), 0.25f, TRANS_BACK, EASE_OUT);
+    if (dialogue_text_) tweens_.tween_from(&dialogue_text_->visible_ratio, 0.0f, 1.0f, 0.4f);
+    if (dialogue_bubble_)
+        tweens_.tween_from(&dialogue_bubble_->scale, Vec2(0.25f, 0.25f), Vec2(0.75f, 0.75f), 0.5f, TRANS_EXPO, EASE_OUT);
+    if (dialogue_box_) tweens_.tween_from(&dialogue_box_->position.y, -80.0f, 0.0f, 0.5f, TRANS_BACK, EASE_OUT);
+    tweens_.tween(&dialogue_->modulate.a, 0.0f, 0.5f, TRANS_SINE, EASE_OUT, 1.5f);
+}
+
+void ShopScreen::merchant_says(const std::string& text, double seconds) {
+    /* NSpeechBubbleVfx.Create(line, Right, GlobalPosition + Size.X *
+     * Left, seconds, Blue) in the button's parent */
+    if (!merchant_ || !merchant_->parent || text.empty()) return;
+    Vec2 at = merchant_->global_transform().origin - Vec2(merchant_->size.x, 0);
+    speech_bubble_at(lib_, merchant_->parent, text, at, true, seconds, "Blue");
+}
+
+void ShopScreen::purchase_failed(const Slot& s, const char* kind) {
+    static const char* const visuals[] = { "CardHolder", "RelicHolder", "PotionHolder", "Visual" };
+    Node* v = NULL;
+    for (size_t i = 0; i < sizeof(visuals) / sizeof(visuals[0]) && !v; ++i) v = s.node->find_unique(visuals[i]);
+    if (v && (v->is_node2d() || v->is_control())) {
+        bool known = false;
+        for (size_t i = 0; i < wiggles_.size(); ++i)
+            if (wiggles_[i].node == v) {
+                wiggles_[i].t = 0;
+                known = true;
+            }
+        if (!known) {
+            Wiggle w = { v, v->is_node2d() ? ((Node2D*)v)->position.x : offset_pos((Control*)v).x, 0 };
+            wiggles_.push_back(w);
+        }
+    }
+    sfx("event:/sfx/npcs/merchant/merchant_dissapointment");
+    say(kind);
+}
+
+void ShopScreen::purchased(const Slot& s) {
+    sfx("event:/sfx/npcs/merchant/merchant_thank_yous");
+    g_say_next = "purchaseSuccess";
+    const char* key = s.kind == "card" ? "cards" : s.kind == "relic" ? "relics" : s.kind == "potion" ? "potions" : NULL;
+    const Json* entry = NULL;
+    for (size_t k = 0; key && k < decision_[key].size(); ++k)
+        if (decision_[key][k]["index"].i((int)k) == s.index) entry = &decision_[key][k];
+    if (!entry) return;
+    const char* holder_name = s.kind == "card" ? "CardHolder" : s.kind == "relic" ? "RelicHolder" : "PotionHolder";
+    Node* holder = s.node->find_unique(holder_name);
+    Node* item = holder && !holder->children.empty() ? holder->children[0] : NULL;
+    if (!item || !item->is_canvas_item()) return;
+    Xform2D g = ((CanvasItem*)item)->global_transform();
+    float scale = sqrtf(g.x.x * g.x.x + g.x.y * g.x.y);
+    if (s.kind == "card") {
+        /* NGlobalUi.ReparentCard, NCardFlyVfx to the deck */
+        if (DeckPreviews::current())
+            DeckPreviews::current()->fly_to_deck(*entry, g.origin.x, g.origin.y, scale, decision_["player"]["character"].str());
+        item->parent->remove_child(item);
+        delete item;
+    } else {
+        /* RelicInventory.AnimateRelic / PotionContainer.AnimatePotion from
+         * the slot (the next top bar's) */
+        top_bar_acquire_from(s.kind, (*entry)["id"].str(), g.origin, scale);
+    }
+}
 
 std::string ShopScreen::focused_kind() const {
     return focus_ >= 0 && focus_ < (int)slots_list_.size() ? slots_list_[(size_t)focus_].kind : std::string();
@@ -146,20 +254,33 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
     decision_ = d;
     tweens_.clear();
     focus_ = -1;
-    Node* room = instance(lib_, "scenes/rooms/merchant_room.tscn");
+    /* FakeMerchant (an event): NFakeMerchant's room, a merchant's */
+    fake_ = d["fake_merchant"].b();
+    Node* room = instance(lib_, fake_ ? "scenes/events/custom/fake_merchant.tscn" : "scenes/rooms/merchant_room.tscn");
     if (!room) {
-        if (error) *error = "no merchant_room.tscn";
+        if (error) *error = "no merchant room scene";
         return NULL;
     }
     hide(room->find_unique("CardDetailScreen"));
     /* AfterRoomIsLoaded: the player (Character.MerchantAnimPath) in
-     * %CharacterContainer. */
+     * %CharacterContainer; the Fake Merchant's, its combat visuals in
+     * relaxed_loop (StartCharacterAnimation) */
     std::string character = lower(d["player"]["character"].is_string() ? d["player"]["character"].str() : "ironclad");
     Node* box = room->find_unique("CharacterContainer");
-    Node* who = instance(lib_, "scenes/merchant/characters/" + character + "_merchant.tscn");
+    Node* who = instance(lib_, fake_ ? "scenes/creature_visuals/" + character + ".tscn"
+                                     : "scenes/merchant/characters/" + character + "_merchant.tscn");
     if (box && who) box->add_child(who);
     else delete who;
     play_idle_all(room);
+    if (fake_ && who) {
+        std::vector<Node*> stack(1, who);
+        while (!stack.empty()) {
+            Node* n = stack.back();
+            stack.pop_back();
+            if (n->type == "SpineSprite") ((SpineSprite*)n)->set_animation("relaxed_loop", true, 0);
+            for (size_t k = 0; k < n->children.size(); ++k) stack.push_back(n->children[k]);
+        }
+    }
 
     merchant_ = ctl(room, "MerchantButton");
     if (merchant_) {
@@ -186,7 +307,18 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
             hand_->set_animation("default", true, 0);
             hand_start_ = hand_target_ = hand_->position;
         }
-        hide(inventory_->find_unique("Dialogue"));
+        /* NMerchantDialogue._Ready: transparent until it speaks */
+        Node* dl = inventory_->find_unique("Dialogue");
+        dialogue_ = dl && dl->is_node2d() ? (Node2D*)dl : NULL;
+        if (dialogue_) {
+            dialogue_->modulate.a = 0;
+            Node* db = dialogue_->find_unique("DialogueBox");
+            Node* bb = dialogue_->find_unique("Bubble");
+            Node* tx = dialogue_->find_unique("Text");
+            dialogue_box_ = db && db->is_node2d() ? (Node2D*)db : NULL;
+            dialogue_bubble_ = bb && bb->is_node2d() ? (Node2D*)bb : NULL;
+            dialogue_text_ = tx && tx->type == "RichTextLabel" ? (RichTextLabel*)tx : NULL;
+        }
         if (slots_) {
             /* Its top-left at y -1000 (closed) or 80 (open); anchored at the
              * screen's centre. */
@@ -214,6 +346,29 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
     }
     root_ = root;
     shake_target_ = room->is_control() ? (Control*)room : NULL; /* NMerchantRoom */
+    /* the purchase's line, after its decision */
+    if (!g_say_next.empty() && again_) say(g_say_next.c_str());
+    g_say_next.clear();
+    /* NFakeMerchant.ShowWelcomeDialogue: 0.75 s in, its laugh and a line */
+    welcome_at_ = fake_ && !again_ ? 0.75 : -1;
+    /* FoulPotion.OnUse at the merchant: NMerchantRoom.FoulPotionThrown (the
+     * thank-yous, a foulPotion line, a medium rumble) and ShowPotionVfx
+     * (vfx_slime_impact at the merchant button) */
+    const Json& steps = d["steps"];
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            if (steps[i][k]["t"].str() != "foul_potion" || !merchant_) continue;
+            Node* fx = instance(lib_, "scenes/vfx/vfx_slime_impact.tscn");
+            if (fx && fx->is_node2d() && merchant_->parent && merchant_->parent->is_canvas_item()) {
+                merchant_->parent->add_child(fx);
+                ((Node2D*)fx)->position = inverse(((CanvasItem*)merchant_->parent)->global_transform()).xform(merchant_->global_transform().origin);
+            } else {
+                delete fx;
+            }
+            sfx("event:/sfx/npcs/merchant/merchant_thank_yous");
+            merchant_says(line("foulPotion"), 2.0);
+            ScreenShake::get().rumble("Medium", "Short", false);
+        }
     return root;
 }
 
@@ -234,6 +389,12 @@ void ShopScreen::focus_merchant(bool on) {
  * the slots down to y 80 (0.7 s, Quint Out); the proceed arrow goes. */
 void ShopScreen::open_inventory(bool animate) {
     open_ = true;
+    /* NMerchantInventory.Open: the welcome and a line (not when the screen
+     * comes back open after a purchase) */
+    if (animate) {
+        sfx("event:/sfx/npcs/merchant/merchant_welcome");
+        say("openInventory");
+    }
     /* _backButton.Enable / Disable with the inventory. */
     if (back_button_) back_button_->visible = true;
     focus_merchant(false);
@@ -389,9 +550,17 @@ std::string ShopScreen::input(const PadState& pad) {
     if (pad.pressed & PadState::DOWN) focus_slot(nearest(focus_, 0, 1));
     if (pad.pressed & PadState::A) {
         const Slot& s = slots_list_[(size_t)focus_];
-        /* MerchantEntry.OnTryPurchase: not enough gold fails (the merchant
-         * says so; here nothing happens). */
-        if (s.cost > decision_["player"]["gold"].i()) return std::string();
+        /* MerchantEntry.OnTryPurchase: not enough gold (FailureGold), a full
+         * potion belt (FailureSpace) fails where it is */
+        if (s.cost > decision_["player"]["gold"].i()) {
+            purchase_failed(s, "purchaseFailureGold");
+            return std::string();
+        }
+        if (s.kind == "potion" && decision_["player"]["potions"].size() >= (size_t)decision_["player"]["max_potions"].i(3)) {
+            purchase_failed(s, "purchaseFailureSpace");
+            return std::string();
+        }
+        if (s.kind != "removal") purchased(s);
         if (s.kind == "card") return protocol_action("buy_card", format("\"card_index\":%d", s.index));
         if (s.kind == "relic") return protocol_action("buy_relic", format("\"relic_index\":%d", s.index));
         if (s.kind == "potion") return protocol_action("buy_potion", format("\"potion_index\":%d", s.index));
@@ -413,6 +582,24 @@ void ShopScreen::stop_hand(double linger) {
 void ShopScreen::frame(double dt) {
     tweens_.update(dt);
     proceed_.frame(dt);
+    /* WiggleAnimation: x + sin(p * 2 pi) * 10, p 0..2 over 0.4 s (Quad Out) */
+    for (size_t i = 0; i < wiggles_.size();) {
+        Wiggle& w = wiggles_[i];
+        w.t += dt;
+        float k = tween_interpolate(TRANS_QUAD, EASE_OUT, (float)(w.t < 0.4 ? w.t : 0.4), 0, 2, 0.4f);
+        float x = w.x0 + sinf(k * 6.2831853f) * 10.0f;
+        if (w.node->is_node2d()) ((Node2D*)w.node)->position.x = x;
+        else {
+            Control* c = (Control*)w.node;
+            c->set_position(Vec2(x, offset_pos(c).y));
+        }
+        if (w.t >= 0.4) wiggles_.erase(wiggles_.begin() + (long)i);
+        else ++i;
+    }
+    if (welcome_at_ >= 0 && (welcome_at_ -= dt) < 0) {
+        sfx("event:/sfx/npcs/reverse_merchant/reverse_merchant_laugh");
+        merchant_says(line("welcome"), 4.0);
+    }
     if (hand_ && inventory_) {
         /* NMerchantHand._Process: towards the slot (its origin) with a
          * Perlin wobble, lerped at 4 per second; the wrist turns -10..10

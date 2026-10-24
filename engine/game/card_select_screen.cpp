@@ -238,6 +238,7 @@ Node* CardSelectScreen::build_row(const Json& d) {
         Control* hc = (Control*)h;
         Node* card = make_card(lib_, cs[(size_t)i]);
         if (card) hc->add_child(card);
+        card_reward_glow(lib_, card, cs[(size_t)i]["rarity"].str());
         float x = -(float)(n - 1) * ROW_STEP * 0.5f + ROW_STEP * (float)i;
         place(hc, x, 0, 0, 0);
         hc->scale = Vec2(SMALL_SCALE, SMALL_SCALE);

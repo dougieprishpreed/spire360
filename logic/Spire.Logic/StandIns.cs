@@ -26,7 +26,7 @@ namespace Spire.Logic;
 internal static class StandIns
 {
     private const float Base = 1_000_000f, Step = 10_000f, Slack = 4_000f;
-    private static readonly string[] Anchors = { "center", "bottom", "top", "power", "hitbox", "hitbox_size" };
+    private static readonly string[] Anchors = { "center", "bottom", "top", "power", "hitbox", "hitbox_size", "side_floor" };
 
     private static NCombatRoom? _room;
     private static readonly ConditionalWeakTable<Creature, NCreature> Nodes = new();
@@ -48,7 +48,17 @@ internal static class StandIns
     // NCombatRoom.CombatVfxContainer / BackCombatVfxContainer (and the
     // Bestiary's): containers the effects are added to (their Create calls
     // are recorded; what is added is null)
-    private static Godot.Control? _vfxBox, _backVfxBox;
+    private static Godot.Control? _vfxBox, _backVfxBox, _eventVfxBox;
+    private static MegaCrit.Sts2.Core.Nodes.Rooms.NEventRoom? _eventRoom;
+    private static NMerchantRoom? _merchantRoom;
+    private static MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory? _merchantInventory;
+    private static NMerchantButton? _merchantButton;
+
+    /// <summary>The Fake Merchant's node (EventModel.Node, which its UI
+    /// sets): its inventory and button are the stand-ins'.</summary>
+    public static Godot.Control FakeMerchantNode() =>
+        _fakeMerchant ??= Blank<MegaCrit.Sts2.Core.Nodes.Events.Custom.NFakeMerchant>();
+    private static MegaCrit.Sts2.Core.Nodes.Events.Custom.NFakeMerchant? _fakeMerchant;
     private static NCombatBackground? _background;
     private static NKaiserCrabBossBackground? _kaiserCrab;
 
@@ -204,8 +214,54 @@ internal static class StandIns
                         return false;
                 }
             }
+            // Effects the game waits for or sounds only when they exist (null
+            // headless skips it): Hyperbeam's and Sweeping Beam's 0.5 s, End of
+            // Days' missile (its WaitTime), Fiend Fire's attack_fire per hit.
+            // The calls themselves are cues already; a stand-in lets the code
+            // after its null check run.
+            if (CombatManager.Instance.IsInProgress)
+                switch (id[(id.LastIndexOf('.', sep) + 1)..])
+                {
+                    case "NHyperbeamVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NHyperbeamVfx>();
+                    case "NSweepingBeamVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSweepingBeamVfx>();
+                    case "NLargeMagicMissileVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NLargeMagicMissileVfx>();
+                    case "NLargeMagicMissileVfx::get_WaitTime": return 0.2f;
+                    case "NGroundFireVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NGroundFireVfx>();
+                }
+            // NEventRoom.Instance / VfxContainer outside combat: the events' own
+            // effects (Dense Vegetation's slashes, Jungle Maze's hits) are made
+            // only when the container exists; its Size places them.
+            if (id.EndsWith("NEventRoom::get_Instance", StringComparison.Ordinal))
+                return CombatManager.Instance.IsInProgress ? null : _eventRoom ??= Blank<MegaCrit.Sts2.Core.Nodes.Rooms.NEventRoom>();
+            // FoulPotion.GetFoulPotionMerchantTarget / OnUse: the merchant's
+            // button beside its closed inventory (NMerchantRoom.Instance in a
+            // shop; the Fake Merchant's node), so the potion can be thrown
+            if (id.EndsWith("NMerchantRoom::get_Instance", StringComparison.Ordinal))
+                return !CombatManager.Instance.IsInProgress &&
+                       MegaCrit.Sts2.Core.Runs.RunManager.Instance.DebugOnlyGetState()?.CurrentRoom is MegaCrit.Sts2.Core.Rooms.MerchantRoom
+                    ? _merchantRoom ??= Blank<NMerchantRoom>()
+                    : null;
+            if (id.EndsWith("NMerchantRoom::get_Inventory", StringComparison.Ordinal) ||
+                id.EndsWith("NFakeMerchant::get_Inventory", StringComparison.Ordinal))
+                return _merchantInventory ??= Blank<MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory>();
+            if (id.EndsWith("NMerchantRoom::get_MerchantButton", StringComparison.Ordinal) ||
+                id.EndsWith("NFakeMerchant::get_MerchantButton", StringComparison.Ordinal))
+                return _merchantButton ??= Blank<NMerchantButton>();
+            if (id.EndsWith("NEventRoom::get_VfxContainer", StringComparison.Ordinal))
+            {
+                if (CombatManager.Instance.IsInProgress) return null;
+                _eventVfxBox ??= new Godot.Control { Size = new Godot.Vector2(1920, 1080) };
+                if (_eventVfxBox.GetChildCount() > 32)
+                    foreach (var child in _eventVfxBox.GetChildren()) _eventVfxBox.RemoveChild(child);
+                return _eventVfxBox;
+            }
             if (id.EndsWith("NCombatRoom::get_CombatVfxContainer", StringComparison.Ordinal))
+            {
+                // effect stand-ins added to it stay its children: keep it small
+                if (_vfxBox != null && _vfxBox.GetChildCount() > 32)
+                    foreach (var child in _vfxBox.GetChildren()) _vfxBox.RemoveChild(child);
                 return CombatManager.Instance.IsInProgress ? _vfxBox ??= new Godot.Control() : null;
+            }
             if (id.EndsWith("NCombatRoom::get_BackCombatVfxContainer", StringComparison.Ordinal))
                 return CombatManager.Instance.IsInProgress ? _backVfxBox ??= new Godot.Control() : null;
             if (id.EndsWith("NCombatRoom::get_Background", StringComparison.Ordinal))
@@ -241,7 +297,9 @@ internal static class StandIns
                     case "get_IsInteractable": return cr.IsAlive;
                     case "get_Entity": return cr;
                     case "get_Hitbox": return Hitbox(cr);
-                    case "StartDeathAnim": return DeathAnimLength(cr);
+                    case "StartDeathAnim":
+                        if (a.Length > 1 && a[1] is bool remove && !remove) Steps.MarkDeathKept(Steps.Who(cr));
+                        return DeathAnimLength(cr);
                 }
             }
         }
@@ -307,6 +365,9 @@ internal static class StandIns
 
     /// <summary>A creature's VfxSpawnPosition as the stand-ins encode it.</summary>
     public static Godot.Vector2 CenterOf(Creature c) => Encode(c, 0);
+    /// <summary>VfxCmd.GetSideCenterFloor for c's side ("eN@side_floor":
+    /// the client takes its hittable creatures' floor).</summary>
+    public static Godot.Vector2 SideFloorOf(Creature c) => Encode(c, 6);
 
     /// <summary>The creature a stand-in node stands for (its node, spine
     /// sprite or animation state, or a SpineAnimationAccess on its sprite).</summary>

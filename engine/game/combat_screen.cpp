@@ -1,4 +1,5 @@
 #include "combat_screen.h"
+#include "../core/cue_ledger.h"
 #include "screen_shake.h"
 #include "game.h"
 #include "card_view.h"
@@ -56,6 +57,13 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     player_.node = NULL;
     osty_.node = NULL;
     paused_ = watch_shuffle_ = shuffle_hit_ = hand_unfocused_ = false;
+    end_state_ = 1;
+    end_shiny_ = false;
+    boulder_t0_ = boulder_done_ = 0;
+    encounter_slots_ = NULL;
+    beast_bg_state_ = 0;
+    beast_ringing_ = beast_progress_ = -1;
+    end_glow_t_ = 0;
     creature_focus_ = NULL;
     creature_tips_ = NULL;
     sel_mode_ = 0;
@@ -121,6 +129,7 @@ Node* CombatScreen::make_background(const Json& bg) {
 
 static void play_idle(Node* n);
 static SpineSprite* first_spine(Node* n);
+static void segment_phobia(SceneLibrary* lib, Node* visuals, const Json& data, bool dead);
 
 /* NCreature.Create + _Ready: the creature scene with the visuals as its first
  * child at its origin; the visuals' %Bounds give the width placement uses. */
@@ -437,6 +446,8 @@ void CombatScreen::make_powers(Creature& c, const Json& powers) {
         }
         Node* icon = n->find_unique("Icon");
         set_texture(lib_, icon, "images/atlases/power_atlas.sprites/" + lower(pw["id"].str()) + ".tres");
+        if (icon && icon->is_canvas_item())
+            ((CanvasItem*)icon)->shader_params["pulse"] = pulsing_.count(creature_who(c) + " " + pw["id"].str()) ? 1.0f : 0.0f;
         /* RefreshAmount */
         Node* label = n->find_unique("AmountLabel");
         if (label && label->is_control()) {
@@ -666,6 +677,88 @@ private:
     float speed_;
 };
 
+/* NCardSmithVfx.PlayAnimation() on a hand card: Spark1..3's particles at
+ * 0, 0.25 and 0.5 s, freed at 0.9 s */
+class SmithSparks : public ScriptBehavior {
+public:
+    SmithSparks() : t_(0), next_(0) {}
+    virtual void process(Node* n, double dt) {
+        t_ += dt;
+        while (next_ < 3 && t_ >= 0.25 * next_) {
+            Node* spark = n->get_node(format("Spark%d", next_ + 1));
+            for (size_t i = 0; spark && i < spark->children.size(); ++i)
+                if (spark->children[i]->type == "GPUParticles2D" || spark->children[i]->type == "CPUParticles2D")
+                    ((Particles2D*)spark->children[i])->restart();
+            ++next_;
+        }
+        if (t_ >= 0.9 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    double t_;
+    int next_;
+};
+
+/* NStarCounter: the rotation layers turn (layer i at (i + 1) * 5 degrees
+ * a second with no stars, else 30); the label counts towards the stars
+ * (MathHelper.SmoothDamp, 0.1 s), red at 0 with the icon's hsv s 0.5 and
+ * v 0.85; a gain (UpdateStarCount) flashes the icon's v from 2 to 1 in
+ * 0.2 s; a loss sets the count at once. */
+class StarCounterAnim : public ScriptBehavior {
+public:
+    StarCounterAnim(Node* layers, Node* label, CanvasItem* icon, int stars)
+        : layers_(layers), label_(label), icon_(icon), stars_(stars), shown_(-1), lerp_((float)stars), velocity_(0),
+          flash_(-1) {
+        show(stars);
+    }
+    void set_stars(int stars) {
+        if (stars < stars_) {
+            flash_ = -1;
+            lerp_ = (float)stars;
+            velocity_ = 0;
+            stars_ = stars;
+            show(stars);
+            return;
+        }
+        if (stars > stars_) flash_ = 0;
+        stars_ = stars;
+    }
+    virtual void process(Node*, double dt) {
+        float speed = stars_ == 0 ? 5.0f : 30.0f;
+        for (size_t i = 0; layers_ && i < layers_->children.size(); ++i) {
+            Node* c = layers_->children[i];
+            if (c->is_control()) ((Control*)c)->rotation += (float)(dt * speed * (double)(i + 1)) * 3.14159265f / 180.0f;
+        }
+        lerp_ = smooth_damp(lerp_, (float)stars_, &velocity_, 0.1f, (float)dt);
+        show((int)floorf(lerp_ + 0.5f));
+        if (flash_ >= 0 && icon_) {
+            flash_ += dt;
+            float k = flash_ >= 0.2 ? 1.0f : (float)(flash_ / 0.2);
+            icon_->shader_params["v"] = 2.0f - k;
+            if (flash_ >= 0.2) flash_ = -1;
+        }
+    }
+
+private:
+    void show(int stars) {
+        if (stars == shown_) return;
+        shown_ = stars;
+        if (label_ && label_->is_control())
+            ((Control*)label_)->add_theme_color_override("default_color", stars > 0 ? Color(1, 0.964706f, 0.886275f) : hex(0xFF5555));
+        set_label(label_, format("[center]%d[/center]", stars));
+        if (icon_ && flash_ < 0) {
+            icon_->shader_params["s"] = stars == 0 ? 0.5f : 1.0f;
+            icon_->shader_params["v"] = stars == 0 ? 0.85f : 1.0f;
+        }
+    }
+    Node* layers_;
+    Node* label_;
+    CanvasItem* icon_;
+    int stars_, shown_;
+    float lerp_, velocity_;
+    double flash_;
+};
+
 static void set_counter_label(Node* label, int count) {
     set_label(label, format("%d", count));
 }
@@ -712,8 +805,10 @@ void CombatScreen::setup_combat_ui(Node* root, const Json& d) {
                                                         stars > 0 ? Color(1, 0.964706f, 0.886275f) : hex(0xFF5555));
             set_label(count, format("[center]%d[/center]", stars));
         }
-        Node* spin = star->get_node("Icon/RotationLayers");
-        if (spin && !star->behavior) star->behavior = new SpinLayers(spin, stars > 0 ? 30.0f : 5.0f);
+        Node* icon = star->get_node("Icon");
+        if (!star->behavior)
+            star->behavior = new StarCounterAnim(star->get_node("Icon/RotationLayers"), count,
+                                                 icon && icon->is_canvas_item() ? (CanvasItem*)icon : NULL, stars);
     }
 
     /* Piles: counts and their pad glyphs (LT, RT, RB). */
@@ -1100,6 +1195,14 @@ void CombatScreen::show_nameplate(Creature& c, bool on) {
     if (c.nameplate) tweens_.tween(&c.nameplate->modulate.a, on ? 1.0f : 0.0f, on ? 0.15f : 0.2f);
 }
 
+void CombatScreen::think(const std::string& text, double seconds) {
+    Json args = Json::make_array();
+    args.append(Json::make_string(text));
+    args.append(Json::make_string("player"));
+    args.append(Json::make_number(seconds));
+    spawn_combat_vfx(lib_, vfx_box_, "NThoughtBubbleVfx.Create", args, *this);
+}
+
 void CombatScreen::begin_play(int card, const std::string& target_type, int target) {
     if (card < 0 || card >= (int)holders_.size()) return;
     end_play();
@@ -1279,6 +1382,30 @@ static void long_press_bar(Node* bar, double t, float fade) {
     r->modulate.a = (x * x * x + 1) * fade;
 }
 
+/* NPotion.DoBounce: the container 12 px up (0.125 s, Sine Out) and back
+ * (0.125 s, Sine In); a child node of the potion, gone with it. */
+class PotionBounce : public ScriptBehavior {
+public:
+    explicit PotionBounce(Control* c) : c_(c), top_(c->offset[SIDE_TOP]), bottom_(c->offset[SIDE_BOTTOM]), t_(0) {}
+    virtual void process(Node* n, double dt) {
+        t_ += dt;
+        float k = t_ < 0.125 ? tween_interpolate(TRANS_SINE, EASE_OUT, (float)(t_ / 0.125), 0, 1, 1)
+                             : 1.0f - tween_interpolate(TRANS_SINE, EASE_IN, clampf((float)((t_ - 0.125) / 0.125), 0, 1), 0, 1, 1);
+        c_->offset[SIDE_TOP] = top_ - 12.0f * k;
+        c_->offset[SIDE_BOTTOM] = bottom_ - 12.0f * k;
+        if (t_ >= 0.25 && !n->queued_for_deletion()) {
+            c_->offset[SIDE_TOP] = top_;
+            c_->offset[SIDE_BOTTOM] = bottom_;
+            n->queue_free();
+        }
+    }
+
+private:
+    Control* c_;
+    float top_, bottom_;
+    double t_;
+};
+
 void CombatScreen::process(double dt) {
     for (std::map<std::string, double>::iterator it = shakes_.begin(); it != shakes_.end();) {
         Creature* c = creature_for(it->first);
@@ -1325,6 +1452,42 @@ void CombatScreen::process(double dt) {
                 long_press_bar(bar, long_press_t_, 1);
             }
         }
+    }
+    if (end_shiny_) {
+        /* GlowPulse: GlowVfx's scale 0.5 -> 0.7 (Quart Out) and alpha
+         * 0.4 -> 0 over 1.5 s, looping */
+        end_glow_t_ += dt;
+        Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+        Node* vfx = ui ? ui->get_node("EndTurnButton/Visuals/GlowVfx") : NULL;
+        if (vfx && vfx->is_control()) {
+            float p = (float)(fmod(end_glow_t_, 1.5) / 1.5);
+            float s = 0.5f + 0.2f * tween_interpolate(TRANS_QUART, EASE_OUT, p, 0, 1, 1);
+            ((Control*)vfx)->scale = Vec2(s, s);
+            ((Control*)vfx)->modulate.a = 0.4f * (1.0f - p);
+        }
+    }
+    for (size_t i = 0; i < potion_shines_.size(); ++i) {
+        if (potion_shines_[i] < 0 || life_t_ < potion_shines_[i]) continue;
+        potion_shines_[i] = -1;
+        /* NPotionHolder.ShineOnStartOfCombat: NPotion.DoBounce (12 px up and
+         * back, 0.125 s each, Sine), a slosh 0.25 s later (0.3, Large) */
+        Node* bar = root_ ? root_->get_node("TopBarLayer") : NULL;
+        Node* holders = bar ? find_named(bar, "PotionHolders") : NULL;
+        Node* holder = holders && i < holders->children.size() ? holders->children[i] : NULL;
+        Node* potion = holder ? find_named(holder, "Container") : NULL;
+        if (!potion || !potion->is_control()) continue;
+        /* the bounce lives on the potion (the top bar is rebuilt with
+         * each decision) */
+        Node* b = SceneLibrary::create_node("Node");
+        b->name = "Bounce";
+        b->behavior = new PotionBounce((Control*)potion);
+        potion->add_child(b);
+        slosh_at_.push_back(life_t_ + 0.25);
+    }
+    for (size_t i = slosh_at_.size(); i-- > 0;) {
+        if (life_t_ < slosh_at_[i]) continue;
+        slosh_at_.erase(slosh_at_.begin() + (long)i);
+        if (lib_->audio()) lib_->audio()->ui(format("potion_slosh_%d.mp3", (int)(chaotic_rand() % 3) + 1), 0.3f);
     }
     float t = (float)dt;
     tweens_.update(dt);
@@ -1548,18 +1711,26 @@ void setup_creature_spine(Node* visuals, const Json& data) {
     for (size_t i = 0; i < ops.size(); ++i) {
         const Json& op = ops[i];
         const std::string& kind = op["op"].str();
+        /* "node": a spine sprite under the body's (the Bowlbug Egg's
+         * cocoon, CocoonSlotNode/Cocoon) */
+        SpineSprite* t = s;
+        if (op["node"].is_string()) {
+            Node* sub = s->get_node(op["node"].str());
+            if (!sub || sub->type != "SpineSprite") continue;
+            t = (SpineSprite*)sub;
+        }
         if (kind == "skin") {
             std::vector<std::string> names;
             for (size_t k = 0; k < op["skins"].size(); ++k) names.push_back(op["skins"][k].str());
-            s->set_skins(names);
+            t->set_skins(names);
         } else if (kind == "set_animation") {
-            s->set_animation(op["name"].str(), op["loop"].b(true), op["track"].i());
+            t->set_animation(op["name"].str(), op["loop"].b(true), op["track"].i());
         } else if (kind == "add_animation") {
-            s->add_animation(op["name"].str(), op["loop"].b(true), op["delay"].f(), op["track"].i());
+            t->add_animation(op["name"].str(), op["loop"].b(true), op["delay"].f(), op["track"].i());
         } else if (kind == "add_empty_animation") {
-            s->add_empty_animation(op["track"].i());
+            t->add_empty_animation(op["track"].i());
         } else if (kind == "time_scale") {
-            s->set_state_time_scale(op["scale"].f(1));
+            t->set_state_time_scale(op["scale"].f(1));
         }
     }
     /* the animator's first state (low health, ...) over the idle */
@@ -1910,6 +2081,24 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     tips_for_ = -2;
     std::vector<int> enemy_node_ids;
     ghosts_.clear();
+    /* NCombatRoom.CreateEnemyNodes: an encounter with its own scene
+     * (scenes/encounters/<id>) puts it first in the enemy container, 960,
+     * 540 up and to the left; its enemies stand at their slots' markers */
+    encounter_slots_ = NULL;
+    beast_bg_.clear();
+    beast_bg_state_ = 0;
+    beast_ringing_ = beast_progress_ = -1;
+    if (view["has_scene"].b() && view["encounter"].is_string()) {
+        Node* s = instance(lib_, "scenes/encounters/" + lower(view["encounter"].str()) + ".tscn");
+        if (s && s->is_control()) {
+            encounter_slots_ = (Control*)s;
+            encounter_slots_->set_position(Vec2(-960, -540));
+            if (enemies->children.empty()) enemies->add_child(s);
+            else enemies->add_child_before(s, enemies->children[0]);
+        } else {
+            delete s;
+        }
+    }
     for (size_t i = 0; i < es.size(); ++i) {
         enemy_who_.push_back(format("e%d", es[i]["combat_id"].i(-1)));
         if (!make_creature(es[i]["id"].str(), false, c)) {
@@ -1959,6 +2148,17 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         build_hand(find_named(root, "CombatUi"), d);
     }
     pets_x_ = 0;
+    /* BigMushroom.AfterRoomEntered: Grow (the player's ScaleTo(1.5, 0)) */
+    if (player_.node) {
+        const Json& relics = d["player"]["relics"];
+        for (size_t i = 0; i < relics.size(); ++i)
+            if (relics[i]["id"].str() == "BIG_MUSHROOM") {
+                scale_base(player_);
+                player_.scale_temp = 1.5f;
+                scale_visuals(player_, 0);
+                break;
+            }
+    }
     position_players(ally_nodes, scaling, view["fully_center_players"].b(), &osty_, osty_max_hp, &pets_x_);
     position_pets(pets_x_);
     /* Where the enemies stand: as before in this fight; laid out again
@@ -1966,7 +2166,15 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     bool known = places_ != NULL && !enemy_nodes.empty();
     for (size_t i = 0; known && i < enemy_node_ids.size(); ++i)
         if (places_->find(enemy_node_ids[i]) == places_->end()) known = false;
-    if (known) {
+    if (encounter_slots_) {
+        /* PositionCreaturesWithSlots */
+        for (size_t i = 0; i < enemy_nodes.size(); ++i) {
+            Vec2 at;
+            if (!slot_position(enemy_nodes[i].data, &at)) at = Vec2(250.0f + (float)i * 220.0f, 200);
+            enemy_nodes[i].node->set_position(at);
+            if (places_) (*places_)[enemy_node_ids[i]] = at;
+        }
+    } else if (known) {
         for (size_t i = 0; i < enemy_nodes.size(); ++i) enemy_nodes[i].node->set_position((*places_)[enemy_node_ids[i]]);
     } else {
         std::vector<Vec2> at;
@@ -1975,6 +2183,24 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
             (*places_)[enemy_node_ids[i]] = at[i];
     }
     play_idle(root);
+    /* NCeremonialBeastBgVfx._Ready: its parent hidden */
+    {
+        std::vector<Node*> stack(1, root);
+        while (!stack.empty()) {
+            Node* n = stack.back();
+            stack.pop_back();
+            if (n->script == "res://src/Core/Nodes/Vfx/Backgrounds/NCeremonialBeastBgVfx.cs" && n->parent &&
+                n->parent->type == "SpineSprite") {
+                beast_bg_.push_back((SpineSprite*)n->parent);
+                set_visible(n->parent, false);
+            }
+            /* NQueenRepyBgVfx.OnCombatSetUp: Repy hidden once the run
+             * freed him */
+            if (n->script == "res://src/Core/Nodes/Vfx/Backgrounds/NQueenRepyBgVfx.cs")
+                set_visible(n, !view["freed_repy"].b());
+            for (size_t k = 0; k < n->children.size(); ++k) stack.push_back(n->children[k]);
+        }
+    }
     for (size_t i = 0; i < enemies_.size(); ++i) setup_creature_spine(enemies_[i].visuals, enemies_[i].data);
     for (size_t i = 0; i < ghosts_.size(); ++i) setup_creature_spine(ghosts_[i].c.visuals, ghosts_[i].c.data);
     if (player_.node && !aftermath_) setup_creature_spine(player_.visuals, player_.data);
@@ -2118,8 +2344,10 @@ void CombatScreen::refresh_counters() {
     refresh_energy();
     Node* star = ui ? ui->get_node("StarCounter") : NULL;
     if (star) {
-        set_visible(star, state_["always_show_stars"].b() || state_["stars"].i() > 0);
-        set_label(star->find_unique("CountLabel"), format("[center]%d[/center]", state_["stars"].i()));
+        /* RefreshVisibility: once shown it stays */
+        if (state_["always_show_stars"].b() || state_["stars"].i() > 0) set_visible(star, true);
+        if (star->behavior) ((StarCounterAnim*)star->behavior)->set_stars(state_["stars"].i());
+        else set_label(star->find_unique("CountLabel"), format("[center]%d[/center]", state_["stars"].i()));
     }
     Node* piles = find_named(ui, "CombatPileContainer");
     static const char* names[] = { "DrawPile", "DiscardPile", "ExhaustPile" };
@@ -2134,10 +2362,12 @@ void CombatScreen::refresh_counters() {
     Node* end = ui ? ui->get_node("EndTurnButton") : NULL;
     if (end) set_label(end->get_node("Visuals/Label"), Loc::format("gameplay_ui", "END_TURN_BUTTON", "turnNumber",
                         format("%d", state_["turn_number"].i(state_["round"].i(1)))));
+    refresh_end_glow();
+    update_beast_bg();
     Node* top = root_ ? root_->get_node("TopBarLayer") : NULL;
     if (top) {
         set_label(find_named(top, "HpLabel"), format("%d/%d", player_.data["hp"].i(), player_.data["max_hp"].i()));
-        set_label(find_named(top, "GoldLabel"), format("%d", state_["player"]["gold"].i()));
+        set_top_bar_gold(top, state_["player"]["gold"].i());
     }
 }
 
@@ -2196,7 +2426,9 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
                 update_bounds(c);
                 refresh_state(c, false);
                 set_nameplate_text(c.nameplate, es[i]["name"].str());
-                if (places_ && places_->find(es[i]["combat_id"].i()) != places_->end()) c.node->set_position((*places_)[es[i]["combat_id"].i()]);
+                Vec2 slot;
+                if (slot_position(es[i], &slot)) c.node->set_position(slot);
+                else if (places_ && places_->find(es[i]["combat_id"].i()) != places_->end()) c.node->set_position((*places_)[es[i]["combat_id"].i()]);
                 else c.node->set_position(Vec2(250.0f + (float)i * 220.0f, 200));
                 play_idle(c.node);
                 setup_creature_spine(c.visuals, c.data);
@@ -2398,17 +2630,17 @@ void CombatScreen::move_card(const Json& change) {
     refresh_counters();
 }
 
-void CombatScreen::apply_state(const Json& ch) {
+bool CombatScreen::apply_state(const Json& ch) {
     const std::string& type = ch["t"].str();
     Creature* c = creature_for(ch["who"].str());
-    if (type == "card") { move_card(ch); return; }
+    if (type == "card") { move_card(ch); return true; }
     if (type == "power_card") {
         /* PlayPowerCardFlyVfx for a replay: a new card in the play pile,
          * growing in over 0.1 s */
         std::map<int, Json>::iterator d = play_cards_.find(ch["card"].i(-1));
-        if (d == play_cards_.end() || in_play(d->first) || !hand_box_) return;
+        if (d == play_cards_.end() || in_play(d->first) || !hand_box_) return true;
         Holder h = make_holder(d->second);
-        if (!h.node) return;
+        if (!h.node) return true;
         hand_box_->add_child(h.node);
         MovingCard m;
         m.holder = h;
@@ -2424,7 +2656,7 @@ void CombatScreen::apply_state(const Json& ch) {
         m.trail = m.path_scene = NULL;
         h.node->z_index = 2;
         moving_cards_.push_back(m);
-        return;
+        return true;
     }
     if (type == "power_fly") {
         /* CardModel.PlayPowerCardFlyVfx: NCardFlyPowerVfx from the play pile */
@@ -2433,12 +2665,12 @@ void CombatScreen::apply_state(const Json& ch) {
             m->holder.node->modulate = Color(1, 1, 1, 1);
             start_flight(*m, 2, "");
         }
-        return;
+        return true;
     }
     if (type == "multi_play") {
         MovingCard* m = in_play(ch["card"].i(-1));
         if (m) m->mp_t = 0;
-        return;
+        return true;
     }
     if (type == "card_burn") {
         /* CardPileCmd.RemoveFromCombat: NCardExhaustVfx where the card is */
@@ -2448,13 +2680,13 @@ void CombatScreen::apply_state(const Json& ch) {
                 moving_cards_[i].holder.node->modulate = Color(1, 1, 1, 1);
                 spawn_card_exhaust(lib_, exhaust_ui(), moving_cards_[i].holder.node, false);
                 moving_cards_.erase(moving_cards_.begin() + (long)i);
-                return;
+                return true;
             }
         burn_ids_.push_back(id);
-        return;
+        return true;
     }
-    if (type == "shuffle_fly") { spawn_shuffle_fly(); return; }
-    if (type == "card_fly") { spawn_shuffle_fly(ch["from"].str(), ch["to"].str()); return; }
+    if (type == "shuffle_fly") { spawn_shuffle_fly(); return true; }
+    if (type == "card_fly") { spawn_shuffle_fly(ch["from"].str(), ch["to"].str()); return true; }
     if (type == "card_flash") {
         /* NHandCardHolder.Flash: its Flash in the glow's colour (playable
          * cyan, gold, red), to 0.6 in 0.15 s, out in 0.3 s */
@@ -2472,7 +2704,7 @@ void CombatScreen::apply_state(const Json& ch) {
             tweens_.tween(&fl->modulate.a, 0.0f, 0.3f, TRANS_LINEAR, EASE_IN_OUT, 0.15f);
             break;
         }
-        return;
+        return true;
     }
     if (type == "card_randomize_cost") {
         CostRoll r;
@@ -2483,59 +2715,178 @@ void CombatScreen::apply_state(const Json& ch) {
         for (size_t i = 0; i < cost_rolls_.size(); ++i)
             if (cost_rolls_[i].id == r.id) cost_rolls_.erase(cost_rolls_.begin() + (long)i);
         cost_rolls_.push_back(r);
-        return;
+        return true;
     }
-    if (type == "card_create") { create_at_pile(ch); return; }
+    if (type == "card_create") { create_at_pile(ch); return true; }
     if (type == "escape") {
         /* CreatureCmd.Escape: RemoveCreatureNode, ToggleIsInteractable(false),
          * Visible = false */
         if (c && c->node) c->node->visible = false;
         if (lib_->audio()) lib_->audio()->stop_room_loops(ch["who"].str());
-        return;
+        return true;
     }
     if (type == "node_visible") {
         /* Creature.SetNodeVisible */
         if (ch["visible"].b()) node_hidden_.erase(ch["who"].str());
         else node_hidden_.insert(ch["who"].str());
         if (c && c->node) c->node->visible = ch["visible"].b();
-        return;
+        return true;
     }
-    if (type == "relic_flash") { flash_relic(ch); return; }
+    if (type == "relic_flash") { flash_relic(ch); return true; }
+    if (type == "forge_preview") {
+        /* ForgeCmd.PreviewSovereignBlade: NCardSmithVfx(card) over each
+         * blade in the hand (its sparks at 0, 0.25 and 0.5 s, gone at
+         * 0.9 s); the others in one preview, then to their piles; silent */
+        const Json& hand = ch["hand"];
+        for (size_t i = 0; i < hand.size(); ++i)
+            for (size_t h = 0; h < holders_.size(); ++h) {
+                if (holders_[h].id != hand[i].i(-1) || !holders_[h].card_node || !holders_[h].card_node->is_canvas_item()) continue;
+                Node* fx = instance(lib_, "scenes/vfx/vfx_card_smith.tscn");
+                if (!fx || !fx->is_canvas_item()) {
+                    delete fx;
+                    break;
+                }
+                Xform2D g = ((CanvasItem*)holders_[h].card_node)->global_transform();
+                float s = sqrtf(g.x.x * g.x.x + g.x.y * g.x.y);
+                hide(fx->find_unique("CardContainer"));
+                Node* ui = exhaust_ui();
+                if (!ui) {
+                    delete fx;
+                    break;
+                }
+                ui->add_child(fx);
+                if (fx->is_control()) {
+                    ((Control*)fx)->set_position(inverse(((CanvasItem*)ui)->global_transform()).xform(g.origin));
+                    ((Control*)fx)->scale = Vec2(s, s);
+                } else if (fx->is_node2d()) {
+                    ((Node2D*)fx)->position = inverse(((CanvasItem*)ui)->global_transform()).xform(g.origin);
+                    ((Node2D*)fx)->scale = Vec2(s, s);
+                }
+                fx->behavior = new SmithSparks();
+                break;
+            }
+        const Json& others = ch["others"];
+        for (size_t i = 0; i < others.size() && DeckPreviews::current(); ++i) {
+            Json cue;
+            cue.set("op", Json::make_string("smith"));
+            Json cards = Json::make_array();
+            cards.append(others[i]["card"]);
+            cue.set("cards", cards);
+            cue.set("pile", others[i]["pile"]);
+            cue.set("silent", Json::make_bool(true));
+            DeckPreviews::current()->play_cue(cue, player_.data["character"].str());
+        }
+        return true;
+    }
+    if (type == "foul_potion" && ch["where"].str() == "fake_merchant" && !enemy_who_.empty()) {
+        /* NFakeMerchant.FoulPotionThrown: its foulPotion line (the fight
+         * comes with it), from the merchant it turned into */
+        std::vector<std::string> lines;
+        for (int n = 1; n < 32; ++n) {
+            std::string key = format("FAKE_MERCHANT.talk.foulPotion.line%d", n);
+            std::string text = Loc::get("events", key.c_str());
+            if (text == "events." + key) break;
+            lines.push_back(text);
+        }
+        if (lines.empty() || !vfx_box_) return false;
+        Json args = Json::make_array();
+        args.append(Json::make_string(lines[chaotic_rand() % lines.size()]));
+        args.append(Json::make_string(enemy_who_[0]));
+        args.append(Json::make_number(2.0));
+        args.append(Json::make_string("Blue"));
+        return spawn_combat_vfx(lib_, vfx_box_, "NSpeechBubbleVfx.Create", args, *this);
+    }
+    if (type == "gold") {
+        /* NTopBarGold.UpdateGold on Player.GoldChanged (a thief's steal):
+         * the count runs to it when it happens */
+        Node* top = root_ ? root_->get_node("TopBarLayer") : NULL;
+        if (!top) return false;
+        set_top_bar_gold(top, ch["to"].i());
+        Json p = state_["player"];
+        p.set("gold", ch["to"]);
+        state_.set("player", p);
+        return true;
+    }
     if (type == "blade") {
         VfxCreature t;
         bool aimed = ch["target"].is_string() && creature(ch["target"].str(), &t);
         sovereign_blade_cue(lib_, player_.node, ch, aimed ? &t.center : NULL);
-        return;
+        return true;
     }
-    if (type == "power_flash") { flash_power(ch); return; }
+    if (type == "power_flash") {
+        /* NCreature.OnPowerFlashed (the big icon), NPower.OnPowerFlashed */
+        flash_power(ch);
+        power_row_flash(ch["who"].str(), ch["power"].str());
+        return true;
+    }
+    if (type == "power_pulse") {
+        /* NPower.OnPulsingStarted / Stopped: the icon's pulse parameter */
+        std::string key = ch["who"].str() + " " + ch["power"].str();
+        if (ch["on"].b()) pulsing_.insert(key);
+        else pulsing_.erase(key);
+        if (c) make_powers(*c, c->powers);
+        return true;
+    }
     if (type == "power_vfx") {
+        /* NCreature.OnPowerIncreased: NPowerAppliedVfx and the burst
+         * (ShouldPlayVfx), the buff / debuff sound, AnimShake on a debuff */
+        VfxCreature at;
+        bool buff = ch["buff"].b();
+        if (ch["vfx"].b(true) && vfx_box_ && creature(ch["who"].str(), &at)) {
+            std::string icon = lib_->ext(ch["icon"].str()) ? ch["icon"].str() : ch["beta_icon"].str();
+            spawn_power_applied(lib_, vfx_box_, at.center, ch["title"].str(), icon, buff);
+        }
+        if (ch["sound"].b(false) && lib_->audio()) lib_->audio()->ui(buff ? "event:/sfx/buff" : "event:/sfx/debuff");
+        if (!buff) anim_shake(ch["who"].str());
+        return true;
+    }
+    if (type == "ui_event") {
+        ui_event(ch["ev"].str());
+        return true;
+    }
+    if (type == "power_removed") {
+        /* NCreature.OnPowerRemoved: NPowerRemovedVfx at GetTopOfHitbox */
         VfxCreature at;
         if (vfx_box_ && creature(ch["who"].str(), &at)) {
             std::string icon = lib_->ext(ch["icon"].str()) ? ch["icon"].str() : ch["beta_icon"].str();
-            spawn_power_applied(lib_, vfx_box_, at.center, ch["title"].str(), icon, ch["buff"].b());
+            spawn_power_removed(lib_, vfx_box_, at.top, ch["title"].str(), icon);
         }
-        return;
+        return true;
     }
     if (type == "deck_card") {
         /* CardCmd.PreviewCardPileAdd in the fight (a status card an enemy
          * gives): shown in NCombatRoom.Ui's preview row, then to its pile */
         if (DeckPreviews::current()) DeckPreviews::current()->play_cue(ch, player_.data["character"].str());
-        return;
+        return true;
     }
-    if (type == "orb_activate") { activate_orb(ch); return; }
+    if (type == "orb_activate") { activate_orb(ch); return true; }
     if (type == "orbs" && ch["orbs"].is_array()) {
         sync_orbs(ch["orbs"], ch["slots"].i(), true);
         state_.set("orbs", ch["orbs"]);
         state_.set("orb_slots", ch["slots"]);
-        return;
+        return true;
+    }
+    if (type == "stars" && ch["to"].i() > ch["from"].i()) {
+        /* NStarCounter.UpdateStarCount: star_gain_vfx behind the counter */
+        Node* ui = find_named(root_, "CombatUi");
+        Control* star = ui ? child_ctl(ui, "StarCounter") : NULL;
+        Node* fx = star ? instance(lib_, "scenes/vfx/star_gain_vfx.tscn") : NULL;
+        if (fx && fx->is_node2d()) {
+            /* NVfxParticleSystem emits and frees it */
+            ((Node2D*)fx)->position = star->size * 0.5f;
+            if (star->children.empty()) star->add_child(fx);
+            else star->add_child_before(fx, star->children[0]);
+        } else {
+            delete fx;
+        }
     }
     if (type == "energy" || type == "max_energy" || type == "stars" || type == "round") {
         state_.set(type, ch["to"]);
         if (type == "round") state_.set("turn_number", ch["to"]);
         refresh_counters();
-        return;
+        return true;
     }
-    if (!c) return;
+    if (!c) return false;
     if (type == "hp" || type == "max_hp" || type == "block") {
         c->data.set(type, ch["to"]);
         refresh_state(*c, true);
@@ -2585,6 +2936,8 @@ void CombatScreen::apply_state(const Json& ch) {
         c->powers = next;
         make_powers(*c, next);
         refresh_state(*c, true);
+        /* NPower.OnDisplayAmountChanged: its flash */
+        if (exists && !ch["removed"].b() && ch["to"].i() != ch["from"].i()) power_row_flash(ch["who"].str(), ch["power"].str());
     } else if (type == "spawn" || type == "revive") {
         std::vector<std::string>::iterator d = std::find(dying_.begin(), dying_.end(), ch["who"].str());
         if (d != dying_.end()) dying_.erase(d);
@@ -2595,7 +2948,10 @@ void CombatScreen::apply_state(const Json& ch) {
         c->node->modulate.a = 1;
         enable_ui(*c);
         play_idle(c->node);
+    } else {
+        return false;
     }
+    return true;
 }
 
 void CombatScreen::finish_state(const Json& d, bool finishing) {
@@ -2679,7 +3035,7 @@ bool CombatScreen::creature(const std::string& who, VfxCreature* out) {
                                               h.size.y * sqrtf(xf.y.x * xf.y.x + xf.y.y * xf.y.y)));
     out->bottom = xf.xform(h.pos + Vec2(h.size.x * 0.5f, h.size.y));
     out->enemy = !cr->player;
-    out->interactable = cr->player || cr->data["hp"].i(1) > 0;
+    out->interactable = (cr->player || cr->data["hp"].i(1) > 0) && !uninteractable_.count(who);
     out->defect = cr == &player_ && lower(player_.data["character"].str()) == "defect";
     return true;
 }
@@ -2698,6 +3054,25 @@ bool CombatScreen::origin_of(const std::string& who, Vec2* out) {
     Creature* cr = creature_for(who);
     if (!cr || !cr->node) return false;
     *out = global_origin(cr->node);
+    return true;
+}
+
+bool CombatScreen::side_floor(bool enemies, Vec2* out) {
+    std::vector<std::string> side;
+    if (enemies) side = enemy_who_;
+    else side.push_back("player");
+    Vec2 floor(0, 0);
+    int n = 0;
+    for (size_t i = 0; i < side.size(); ++i) {
+        VfxCreature c;
+        if (!creature(side[i], &c) || !c.interactable) continue;
+        if (c.bottom.y > floor.y) floor.y = c.bottom.y;
+        floor.x += c.bottom.x;
+        ++n;
+    }
+    if (n == 0) return false;
+    floor.x /= (float)n;
+    *out = floor;
     return true;
 }
 
@@ -2774,10 +3149,10 @@ void CombatScreen::move_creature_x(Creature& c, float dx, float duration, TweenT
  * (the target, or its Osty, drawn towards the owner as the amount counts
  * down: 0.25 s Cubic Out); Pull, AfterRemoved's pull of everyone it
  * holds to 450 px before it (0.7 s Sine InOut). */
-void CombatScreen::sandpit_call(const std::string& method, const Json& args) {
+bool CombatScreen::sandpit_call(const std::string& method, const Json& args) {
     const std::string& owner = args[(size_t)0].str();
     Creature* o = creature_for(owner);
-    if (!o || !o->node) return;
+    if (!o || !o->node) return false;
     float ox = global_origin(o->node).x;
     if (method == "Pull") {
         const Json& who = args[1];
@@ -2785,16 +3160,17 @@ void CombatScreen::sandpit_call(const std::string& method, const Json& args) {
             Creature* c = creature_for(who[i].str());
             if (c && c->node) move_creature_x(*c, ox - 450.0f - global_origin(c->node).x, 0.7f, TRANS_SINE, EASE_IN_OUT);
         }
-        return;
+        return true;
     }
     Creature* t = args.size() > 1 ? creature_for(args[1].str()) : NULL;
-    if (!t || !t->node) return;
+    if (!t || !t->node) return false;
     if (method == "Begin") {
         sandpit_x_[owner] = global_origin(t->node).x;
         sandpit_amount_[owner] = args[2].i();
-        return;
+        return true;
     }
-    if (method != "Update" || !sandpit_amount_.count(owner) || sandpit_amount_[owner] <= 0) return;
+    if (method != "Update") return false;
+    if (!sandpit_amount_.count(owner) || sandpit_amount_[owner] <= 0) return true;
     int initial = sandpit_amount_[owner], amount = args[2].i();
     float num = ox - 450.0f, num2 = sandpit_x_[owner] + 50.0f;
     float num3 = (num2 - num) / (float)initial;
@@ -2819,6 +3195,7 @@ void CombatScreen::sandpit_call(const std::string& method, const Json& args) {
         float d = c == lead ? num8 - lead_x : num8 - num6 - target_x;
         if (fabsf(d) > 5.0f) move_creature_x(*c, d, 0.25f, TRANS_CUBIC, EASE_OUT);
     }
+    return true;
 }
 
 /* The scripted calls that need the screen's creatures: Vantom.ScaleTo
@@ -2863,14 +3240,14 @@ void CombatScreen::special_scripted(const std::string& call, const Json& args) {
     }
 }
 
-void CombatScreen::spine_call(const std::string& method, const Json& args) {
+bool CombatScreen::spine_call(const std::string& method, const Json& args) {
     Creature* cr = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
     Node* body = cr && cr->visuals ? cr->visuals->find_unique("Visuals") : NULL;
     SpineSprite* s = cr ? first_spine(body ? body : cr->visuals) : NULL;
-    if (!s) return;
+    if (!s) return false;
     if (method == "SetTimeScale") {
         s->set_state_time_scale(args[1].f(1));
-        return;
+        return true;
     }
     Json op;
     if (method == "SetAnimation") {
@@ -2885,16 +3262,17 @@ void CombatScreen::spine_call(const std::string& method, const Json& args) {
         op.set("loop", Json::make_bool(args[3].b(true)));
         op.set("track", Json::make_number(args[4].i()));
     } else {
-        return;
+        return false;
     }
     Json ops = Json::make_array();
     ops.append(op);
     play_animator_ops(s, ops);
+    return true;
 }
 
-void CombatScreen::creature_call(const std::string& method, const Json& args) {
+bool CombatScreen::creature_call(const std::string& method, const Json& args) {
     Creature* c = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
-    if (!c || !c->node) return;
+    if (!c || !c->node) return false;
     float a1 = args.size() > 1 ? (float)args[(size_t)1].num(0) : 0, a2 = args.size() > 2 ? (float)args[(size_t)2].num(0) : 0;
     /* the unscaled size from the factors as they are, before one changes */
     if (method == "ScaleTo" || method == "SetDefaultScaleTo" || method == "OstyScaleToSize") scale_base(*c);
@@ -2915,6 +3293,7 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
         tweens_.kill(&c->node->modulate.a);
         c->node->modulate.a = 1;
         enable_ui(*c);
+        segment_phobia(lib_, c->visuals, c->data, false);
         SpineSprite* s = first_spine(c->visuals);
         if (!(s && s->set_animation("revive", false, 0))) play_idle(c->node);
         else if (s->skeleton() && s->animation_state()) {
@@ -2930,6 +3309,14 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
         /* the state display out (Expo Out, 0.5 s after 0.5 s) */
         Control* state = ctl(c->node, "HealthBar");
         if (state) tweens_.tween(&state->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+    } else if (method == "ToggleIsInteractable") {
+        /* its state display (health bar, block, powers) shown or hidden: a
+         * fleeing Fat Gremlin or Thieving Hopper, a Decimillipede segment
+         * waiting to reattach (NCombatRoom.SetCreatureIsInteractable) */
+        bool on = args.size() > 1 && args[(size_t)1].b();
+        set_visible(c->node->find_unique("StateDisplay"), on);
+        if (on) uninteractable_.erase(args[(size_t)0].str());
+        else uninteractable_.insert(args[(size_t)0].str());
     } else if (method == "AnimHideIntent") {
         /* the intents out over 0.5 s (after the delay given) */
         Control* row = ctl(c->node, "Intents");
@@ -2958,7 +3345,244 @@ void CombatScreen::creature_call(const std::string& method, const Json& args) {
             tweens_.tween(&row->modulate.a, 1.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT,
                           (float)(chaotic_rand() % 301) / 1000.0f);
         }
+    } else {
+        return false;
     }
+    return true;
+}
+
+void CombatScreen::ui_event(const std::string& ev) {
+    if (ev == "CombatSetUp") {
+        combat_ui_anim(true);
+        /* NOrbManager.OnCombatSetup: AddSlotAnim, the slots out from the
+         * middle to the arc (TweenLayout: 0.45 s, Sine InOut) */
+        for (size_t i = 0; i < orbs_.size(); ++i) {
+            if (!orbs_[i].node) continue;
+            orbs_[i].from = Vec2(0, 0);
+            orbs_[i].t = 0;
+            orbs_[i].node->set_position(Vec2(0, 0));
+        }
+        /* ShinePotions: after 1 s, each holder with a potion shines in turn
+         * (0.25 s apart), by slot */
+        const Json& potions = state_["player"]["potions"];
+        potion_shines_.clear();
+        double at = life_t_ + 1.0;
+        for (int slot = 0; slot < 10; ++slot) {
+            bool here = false;
+            for (size_t i = 0; i < potions.size(); ++i)
+                if (potions[i]["index"].i(-1) == slot && !potions[i]["id"].str().empty()) here = true;
+            potion_shines_.push_back(here ? at : -1);
+            if (here) at += 0.25;
+        }
+    } else if (ev == "CombatEnded") {
+        combat_ui_anim(false);
+        /* NCreature.OnCombatEnded: AnimHideIntent; OrbManager.ClearOrbs: the
+         * orbs to the middle (1 s, Sine InOut) as they fade (0.25 s) */
+        for (size_t i = 0; i < enemies_.size(); ++i) {
+            Control* row = enemies_[i].node ? ctl(enemies_[i].node, "Intents") : NULL;
+            if (row) {
+                tweens_.kill(&row->modulate.a);
+                tweens_.tween(&row->modulate.a, 0.0f, 0.5f);
+            }
+        }
+        for (size_t i = 0; i < orbs_.size(); ++i) {
+            if (!orbs_[i].node) continue;
+            FadingOrb f = { orbs_[i].node, life_t_ + 0.25 };
+            fading_orbs_.push_back(f);
+        }
+        orbs_.clear();
+    } else if (ev == "AboutToSwitchToEnemyTurn") {
+        end_turn_state(0);
+    } else if (ev == "PlayerEndedTurn") {
+        if (end_state_ != 0) end_turn_state(2);
+    } else if (ev == "TurnStarted") {
+        end_turn_state(1);
+    }
+}
+
+/* NCombatUi.AnimIn / AnimOut: NPlayerHand from / to 500 px below (0.8 s,
+ * Expo Out / Back In), NEnergyCounter from / to (-480, 128) (0.6 s), the
+ * piles from / to their hide offsets (draw (-150, 100), discard (150, 100),
+ * exhaust (150, 0); 0.5 s); going out, the end turn button hides and the
+ * play pile fades (PostCombatCleanUp, 0.25 s). */
+void CombatScreen::combat_ui_anim(bool in) {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    if (!ui) return;
+    struct Part {
+        Control* c;
+        Vec2 hide;
+        float seconds;
+    } parts[5];
+    int n = 0;
+    Node* hand = find_named(ui, "Hand");
+    if (hand && hand->is_control()) { parts[n].c = (Control*)hand; parts[n].hide = Vec2(0, 500); parts[n++].seconds = 0.8f; }
+    Node* box = ui->get_node("EnergyCounterContainer");
+    if (box && !box->children.empty() && box->children[0]->is_control()) {
+        parts[n].c = (Control*)box->children[0]; parts[n].hide = Vec2(-480, 128); parts[n++].seconds = 0.6f;
+    }
+    Node* piles = find_named(ui, "CombatPileContainer");
+    static const char* names[] = { "DrawPile", "DiscardPile", "ExhaustPile" };
+    static const float hide[][2] = { { -150, 100 }, { 150, 100 }, { 150, 0 } };
+    for (int i = 0; piles && i < 3; ++i) {
+        Node* p = piles->get_node(names[i]);
+        if (!p || !p->is_control()) continue;
+        parts[n].c = (Control*)p; parts[n].hide = Vec2(hide[i][0], hide[i][1]); parts[n++].seconds = 0.5f;
+    }
+    for (int i = 0; i < n; ++i) {
+        Control* c = parts[i].c;
+        static const Side sides[4] = { SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM };
+        for (int s = 0; s < 4; ++s) {
+            float* v = &c->offset[sides[s]];
+            float d = (s % 2 == 0) ? parts[i].hide.x : parts[i].hide.y;
+            tweens_.kill(v);
+            if (in) tweens_.tween_from(v, *v + d, *v, parts[i].seconds, TRANS_EXPO, EASE_OUT);
+            else tweens_.tween(v, *v + d, parts[i].seconds, TRANS_BACK, EASE_IN);
+        }
+    }
+    if (!in) {
+        end_turn_state(0);
+        Node* play = find_named(ui, "PlayContainer");
+        if (play && play->is_canvas_item()) tweens_.tween(&((CanvasItem*)play)->modulate.a, 0.0f, 0.25f);
+    }
+}
+
+/* NEndTurnButton.SetState: hidden slides it 250 px down (AnimOut, 0.5 s
+ * Expo Out); enabled from hidden back to ShowPos (AnimIn, 0.5 s Back Out);
+ * RefreshEnabled: enabled is white and cream, else StsColors.gray. */
+void CombatScreen::end_turn_state(int state) {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Control* end = ui ? child_ctl(ui, "EndTurnButton") : NULL;
+    if (!end || state == end_state_) return;
+    float y = end->offset[SIDE_TOP], h = end->offset[SIDE_BOTTOM] - end->offset[SIDE_TOP];
+    if (state == 0) {
+        tweens_.kill(&end->offset[SIDE_TOP]);
+        tweens_.kill(&end->offset[SIDE_BOTTOM]);
+        tweens_.tween(&end->offset[SIDE_TOP], 846.0f + 250.0f, 0.5f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween(&end->offset[SIDE_BOTTOM], 846.0f + 250.0f + h, 0.5f, TRANS_EXPO, EASE_OUT);
+    } else if (state == 1 && end_state_ == 0) {
+        tweens_.kill(&end->offset[SIDE_TOP]);
+        tweens_.kill(&end->offset[SIDE_BOTTOM]);
+        tweens_.tween_from(&end->offset[SIDE_TOP], y, 846.0f, 0.5f, TRANS_BACK, EASE_OUT);
+        tweens_.tween_from(&end->offset[SIDE_BOTTOM], y + h, 846.0f + h, 0.5f, TRANS_BACK, EASE_OUT);
+    }
+    end_state_ = state;
+    bool on = state == 1 && !sel_mode_;
+    Node* image = end->get_node("Visuals/Image");
+    Node* label = end->get_node("Visuals/Label");
+    if (image && image->is_canvas_item()) ((CanvasItem*)image)->modulate = on ? Color(1, 1, 1, 1) : Color(0.5f, 0.5f, 0.5f, 1);
+    if (label && label->is_canvas_item())
+        ((CanvasItem*)label)->modulate = on ? Color(1, 0.964706f, 0.886275f, 1) : Color(0.5f, 0.5f, 0.5f, 1);
+    refresh_end_glow();
+}
+
+/* NEndTurnButton.StartOrStopPulseVfx: enabled with no card that can be
+ * played, Glow to 0.75 (0.8 s, Back Out) growing 0.45 -> 0.5 and GlowVfx
+ * pulsing; otherwise both out in 0.5 s (Expo Out). */
+void CombatScreen::refresh_end_glow() {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* end = ui ? ui->get_node("EndTurnButton") : NULL;
+    Node* gn = end ? end->get_node("Visuals/Glow") : NULL;
+    Node* vn = end ? end->get_node("Visuals/GlowVfx") : NULL;
+    if (!gn || !gn->is_control() || !vn || !vn->is_control()) return;
+    bool playable = false;
+    const Json& hand = state_["hand"];
+    for (size_t i = 0; i < hand.size(); ++i)
+        if (hand[i]["can_play"].b() && hand[i]["cost"].i() <= state_["energy"].i()) playable = true;
+    bool shiny = !playable && end_state_ == 1 && !sel_mode_;
+    if (shiny == end_shiny_) return;
+    end_shiny_ = shiny;
+    Control* glow = (Control*)gn;
+    Control* vfx = (Control*)vn;
+    tweens_.kill(&glow->modulate.a);
+    tweens_.kill(&glow->scale);
+    if (shiny) {
+        end_glow_t_ = 0;
+        tweens_.tween(&glow->modulate.a, 0.75f, 0.8f, TRANS_BACK, EASE_OUT);
+        tweens_.tween_from(&glow->scale, Vec2(0.45f, 0.45f), Vec2(0.5f, 0.5f), 0.8f, TRANS_BACK, EASE_OUT);
+    } else {
+        tweens_.tween(&glow->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween(&vfx->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT);
+    }
+}
+
+/* NCeremonialBeastBgVfx.UpdateState at each change of the fight:
+ * UpdateRingingSfx (the player's Ringing), UpdateVfxAndMusic (the beast:
+ * none or dead, flowers and progress 5; before its second phase hidden;
+ * above a third of its HP the glow, below it the skulls, progress 1). */
+void CombatScreen::update_beast_bg() {
+    if (beast_bg_.empty()) return;
+    float ringing = find_power(player_.powers, "RINGING_POWER") ? 1.0f : 0.0f;
+    const Json* beast = NULL;
+    const Json& es = state_["enemies"];
+    for (size_t i = 0; i < es.size(); ++i)
+        if (es[i]["id"].str() == "CEREMONIAL_BEAST") beast = &es[i];
+    int next = 0;
+    float progress = beast_progress_;
+    bool shown = true;
+    if (!beast || (*beast)["hp"].i() <= 0) {
+        next = 3;
+        progress = 5;
+    } else if (!(*beast)["second_phase"].b()) {
+        shown = false;
+    } else if ((float)(*beast)["hp"].i() > (float)(*beast)["max_hp"].i() * 0.33f) {
+        next = 1;
+        progress = 1;
+    } else {
+        next = 2;
+        progress = 1;
+    }
+    for (size_t i = 0; i < beast_bg_.size(); ++i) set_visible(beast_bg_[i], shown || next == 3);
+    if (lib_->audio()) {
+        const char* names[2] = { "ringing", "ceremonial_beast_progress" };
+        float values[2] = { ringing, progress };
+        float* last[2] = { &beast_ringing_, &beast_progress_ };
+        for (int k = 0; k < 2; ++k) {
+            if (values[k] < 0 || values[k] == *last[k]) continue;
+            *last[k] = values[k];
+            Json cue, args = Json::make_array();
+            cue.set("t", Json::make_string("ui"));
+            cue.set("call", Json::make_string("NRunMusicController.UpdateMusicParameter"));
+            args.append(Json::make_string(names[k]));
+            args.append(Json::make_number(values[k]));
+            cue.set("args", args);
+            lib_->audio()->cue(cue);
+        }
+    }
+    /* PlayGlow / PlaySkulls once each; PlayFlowers */
+    if (next == 0 || (next == beast_bg_state_ && next != 3) || (next == 3 && beast_bg_state_ == 3)) return;
+    if (next < beast_bg_state_ && next != 3) return;
+    beast_bg_state_ = next;
+    static const char* const spawn[4] = { "", "glow_spawn", "skulls_spawn", "glow_and_skulls_idle" };
+    static const char* const then[4] = { "", "glow_idle", "glow_and_skulls_idle", "plants_spawn" };
+    for (size_t i = 0; i < beast_bg_.size(); ++i) {
+        SpineSprite* s = beast_bg_[i];
+        if (!s->set_animation(spawn[next], next == 3, 0)) continue;
+        SpSkeleton* sk = s->skeleton();
+        const SpAnimation* a = sk ? sk->data()->find_animation(then[next]) : NULL;
+        if (a && s->animation_state()) s->animation_state()->add_animation(0, a, next != 3, next == 3 ? 4.5f : 0);
+    }
+}
+
+bool CombatScreen::slot_position(const Json& enemy, Vec2* out) const {
+    if (!encounter_slots_ || !enemy["slot"].is_string()) return false;
+    Node* m = encounter_slots_->get_node(enemy["slot"].str());
+    if (!m || !m->is_node2d()) return false;
+    *out = Vec2(-960, -540) + ((Node2D*)m)->position;
+    return true;
+}
+
+std::string CombatScreen::creature_who(const Creature& c) const {
+    if (c.player) return "player";
+    if (&c == &osty_) return "osty";
+    return format("e%d", c.data["combat_id"].i(-1));
+}
+
+/* NPower.FlashPower: the row icon's PowerFlash particles */
+void CombatScreen::power_row_flash(const std::string& who, const std::string& power) {
+    Creature* c = creature_for(who);
+    Control* box = c ? ctl(ctl(c->node, "HealthBar"), "PowerContainer") : NULL;
+    Node* n = box ? box->get_node("Power_" + power) : NULL;
+    if (n) vfx_restart(n->find_unique("PowerFlash"));
 }
 
 /* NCreature.AnimShake: unless one runs or it plays "hurt", the visuals
@@ -3003,12 +3627,25 @@ void CombatScreen::enable_ui(Creature& c) {
     tweens_.tween(&state->modulate.a, 1.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
 }
 
-void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSprite* s) {
+/* DecimillipedeSegment.ChangePhobiaModeTexture (AfterDeath / ReattachMove):
+ * in phobia mode a segment's body is its shriveled image while it is down,
+ * its own once it reattaches */
+static void segment_phobia(SceneLibrary* lib, Node* visuals, const Json& data, bool dead) {
+    const std::string& id = data["id"].str();
+    if (!visuals || id.compare(0, 21, "DECIMILLIPEDE_SEGMENT") != 0 || !client_settings()["phobia_mode"].b()) return;
+    Node* body = visuals->find_unique("PhobiaModeVisuals");
+    if (!body || body->type != "Sprite2D") return;
+    Resource* r = lib->ext("images/monsters/phobia_mode/" + lower(id) + (dead ? "_shriveled_phobia.png" : "_phobia.png"));
+    if (r && r->is_texture()) ((Sprite2D*)body)->texture = (Texture2DRes*)r;
+}
+
+void CombatScreen::monster_death(Creature& cr, const std::string& who, SpineSprite* s, bool keep) {
+    segment_phobia(lib_, cr.visuals, cr.data, true);
     /* AnimDisableUi: the state display (%HealthBar) only; the body plays
      * its death animation */
     Control* state = ctl(cr.node, "HealthBar");
     if (state) tweens_.tween(&state->modulate.a, 0.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
-    if (cr.player || who.empty() || who[0] != 'e') return;
+    if (cr.player || who.empty() || who[0] != 'e' || keep) return;
     dying_.push_back(who);
     double wait = 0;
     SpAnimationState* st = s ? s->animation_state() : NULL;
@@ -3104,7 +3741,12 @@ static const char* trigger_animation(const std::string& trigger) {
 
 void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_AUDIO) { if (lib_->audio()) lib_->audio()->cue(c.data); return; }
-    if (c.kind == CUE_STATE) { apply_state(c.data); return; }
+    if (c.kind == CUE_STATE) {
+        if (apply_state(c.data)) CueLedger::used(c.data);
+        else CueLedger::dropped(c.data);
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED) CueLedger::used(c.data);
     if (c.kind == CUE_SYNC) { finish_state(c.data, c.amount != 0); return; }
     if (c.kind == CUE_BANNER) {
         if (c.name == "enemy") burn_play_pile();
@@ -3126,11 +3768,11 @@ void CombatScreen::fire(const Cue& c) {
         /* the creature's CreatureAnimator (the logic ran it) */
         if (c.data["play"].is_array()) {
             bool played = play_animator_ops(s, c.data["play"]);
-            if (dying) monster_death(*cr, c.who, played ? s : NULL);
+            if (dying) monster_death(*cr, c.who, played ? s : NULL, c.data["keep"].b());
             return;
         }
         bool played = s && s->set_animation(anim, false, 0);
-        if (dying) monster_death(*cr, c.who, played ? s : NULL);
+        if (dying) monster_death(*cr, c.who, played ? s : NULL, c.data["keep"].b());
         if (!played) return;
         SpSkeleton* sk = s->skeleton();
         const SpAnimation* idle = sk && anim != "die" ? sk->data()->find_animation("idle_loop") : NULL;
@@ -3164,19 +3806,70 @@ void CombatScreen::fire(const Cue& c) {
     }
     if (c.kind == CUE_SCRIPTED && special_node_call(c.data["call"].str(), c.data["args"], *this)) return;
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 19, "MegaAnimationState.") == 0) {
-        spine_call(c.data["call"].str().substr(19), c.data["args"]);
+        if (!spine_call(c.data["call"].str().substr(19), c.data["args"])) CueLedger::retract(c.data);
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 21, "SpineAnimationAccess.") == 0) {
-        spine_call(c.data["call"].str().substr(21), c.data["args"]);
+        if (!spine_call(c.data["call"].str().substr(21), c.data["args"])) CueLedger::retract(c.data);
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 8, "Sandpit.") == 0) {
-        sandpit_call(c.data["call"].str().substr(8), c.data["args"]);
+        if (!sandpit_call(c.data["call"].str().substr(8), c.data["args"])) CueLedger::retract(c.data);
         return;
     }
+    if (c.kind == CUE_SCRIPTED && c.data.has("intents") &&
+        (c.data["call"].str() == "NCreature.RefreshIntents" || c.data["call"].str() == "NCreature.UpdateIntent")) {
+        /* NCreature.UpdateIntent: the row shows the intents the game's call
+         * saw (a turn's new moves, a power changing their numbers) at once,
+         * its fade left as it is; RefreshIntents then reveals them */
+        const Json& args = c.data["args"];
+        std::string who = args.size() > 0 ? args[(size_t)0].str() : "";
+        for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i) {
+            if (enemy_who_[i] != who || !enemies_[i].node) continue;
+            Json intents = c.data["intents"].size() > 0 ? c.data["intents"] : Json();
+            if (enemies_[i].data["intents"] != intents) {
+                Control* row = ctl(enemies_[i].node, "Intents");
+                float alpha = row ? row->modulate.a : 1.0f;
+                make_intents(enemies_[i], intents, (int)i);
+                if (row) row->modulate.a = alpha;
+                enemies_[i].data.set("intents", intents);
+            }
+            break;
+        }
+        if (c.data["call"].str() == "NCreature.UpdateIntent") return;
+    }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
-        creature_call(c.data["call"].str().substr(10), c.data["args"]);
+        if (!creature_call(c.data["call"].str().substr(10), c.data["args"])) CueLedger::retract(c.data);
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NMonsterDeathVfx.Create") {
+        /* ReattachPower.DoFadeOutOnAllSegments: the intents out (their own
+         * cues), then after 0.25 s (PlayVfxAndThenRemoveNodes) one fade over
+         * every segment's body */
+        const Json& list = c.data["args"][(size_t)0];
+        std::vector<std::string> who;
+        std::vector<Vec2> pads;
+        Node* parent = NULL;
+        for (size_t i = 0; i < list.size(); ++i) {
+            Creature* cr = creature_for(list[i].str());
+            if (!cr || !cr->node) continue;
+            const Json& p = cr->data["death_padding"];
+            who.push_back(list[i].str());
+            pads.push_back(p.size() >= 2 ? Vec2(p[(size_t)0].f(1.2f), p[(size_t)1].f(1.2f)) : Vec2(1.2f, 1.2f));
+            if (!parent) parent = cr->node->parent;
+        }
+        if (parent && !who.empty()) {
+            spawn_monster_death_group(lib_, parent, *this, who, 0.25, pads);
+            /* their DeathAnimationTask: what the rewards wait for (the
+             * fade is at most 2.5 s) */
+            for (size_t i = 0; i < who.size(); ++i) death_end_[who[i]] = life_t_ + 0.25 + 2.5;
+        } else {
+            CueLedger::retract(c.data);
+        }
+        return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.SetCreatureIsInteractable") {
+        if (!creature_call("ToggleIsInteractable", c.data["args"])) CueLedger::retract(c.data);
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.ShakeOstyIfDead") {
@@ -3189,7 +3882,7 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_SCRIPTED) {
-        spawn_combat_vfx(lib_, vfx_box_, c.data["call"].str(), c.data["args"], *this);
+        if (!spawn_combat_vfx(lib_, vfx_box_, c.data["call"].str(), c.data["args"], *this)) CueLedger::retract(c.data);
         return;
     }
     if (!vfx_box_) return;
@@ -3386,11 +4079,38 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                 c.at = t + delay;
                 c.delayed = true;
             }
+            if (type == "ui" && ch["call"].str() == "NRollingBoulderVfx.Create") {
+                /* RollingBoulderPower: the boulder's path times the damage
+                 * that follows each boulder_hit mark (HitCreature) */
+                std::vector<VfxCreature> targets;
+                std::vector<std::string> who;
+                const Json& list = ch["args"][(size_t)0];
+                for (size_t i = 0; i < list.size(); ++i) {
+                    VfxCreature vc;
+                    if (creature(list[i].str(), &vc)) {
+                        targets.push_back(vc);
+                        who.push_back(list[i].str());
+                    }
+                }
+                std::vector<double> hits;
+                rolling_boulder_times((float)ch["args"][1].num(0), targets, &hits, &boulder_done_);
+                boulder_t0_ = t;
+                boulder_hits_.clear();
+                for (size_t i = 0; i < who.size(); ++i) boulder_hits_[who[i]] = hits[i];
+            }
+            if (type == "boulder_hit" || type == "boulder_done") {
+                std::map<std::string, double>::iterator h = boulder_hits_.find(ch["who"].str());
+                double at = boulder_t0_ + (type == "boulder_done" ? boulder_done_ : h != boulder_hits_.end() ? h->second : 0);
+                if (at > t) t = at;
+                CueLedger::used(ch);
+                continue;
+            }
             if (type == "ui" && (ch["call"].str() == "NEnemyTurnBanner.Create" || ch["call"].str() == "NPlayerTurnBanner.Create")) {
                 c.kind = CUE_BANNER;
                 c.name = ch["call"].str() == "NEnemyTurnBanner.Create" ? "enemy" : "player";
                 c.amount = ch["args"].size() > 0 ? ch["args"][(size_t)0].i() : 0;
                 cues_.push_back(c);
+                CueLedger::used(ch);
                 /* CombatManager.StartTurn: player actions allowed again */
                 if (c.name == "player" && t > hand_locked_until_) hand_locked_until_ = t;
             } else if (type == "sfx" || (type == "ui" && (ch["call"].str().find("Audio") != std::string::npos ||
@@ -3401,8 +4121,9 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                 c.who = ch["who"].str();
                 c.name = ch["name"].str();
                 c.data = ch;
-                if (!creature_for(c.who)) continue;
+                if (!creature_for(c.who)) { CueLedger::dropped(ch); continue; }
                 cues_.push_back(c);
+                CueLedger::used(ch);
                 double w = ch["wait"].num(0);
                 if (w > 0) t += w;
             } else if (type == "vfx") {
@@ -3416,10 +4137,12 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                     c.where = ch["at"].str();
                 }
                 cues_.push_back(c);
+                CueLedger::used(ch);
             } else if (type == "ui" && (is_combat_vfx_call(ch["call"].str()) || ch["call"].str() == "NCombatRoom.RadialBlur" ||
                                         ch["call"].str() == "NCreature.ScaleTo" ||
                                         ch["call"].str() == "NCreature.TrackBlockStatus" ||
                                         ch["call"].str() == "NCombatRoom.ShakeOstyIfDead" ||
+                                        ch["call"].str() == "NMonsterDeathVfx.Create" ||
                                         ch["call"].str() == "NCreature.SetDefaultScaleTo" ||
                                         ch["call"].str() == "NCreature.OstyScaleToSize" ||
                                         ch["call"].str() == "NCreature.StartReviveAnim" ||
@@ -3433,6 +4156,9 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                                         ch["call"].str() == "NCreature.AnimDisableUi" ||
                                         ch["call"].str() == "NCreature.AnimHideIntent" ||
                                         ch["call"].str() == "NCreature.RefreshIntents" ||
+                                        ch["call"].str() == "NCreature.UpdateIntent" ||
+                                        ch["call"].str() == "NCreature.ToggleIsInteractable" ||
+                                        ch["call"].str() == "NCombatRoom.SetCreatureIsInteractable" ||
                                         ch["call"].str().compare(0, 12, "NGame.Screen") == 0 ||
                                         ch["call"].str() == "NGame.DoHitStop" ||
                                         ch["call"].str().find("FormVfx.Create") != std::string::npos)) {
@@ -3458,29 +4184,33 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                 c.who = ch["args"][(size_t)0].str();
                 c.where = "center";
                 c.amount = ch["args"][1].i();
-                if (!creature_for(c.who)) continue;
+                if (!creature_for(c.who)) { CueLedger::dropped(ch); continue; }
                 /* requireInteractable (default true): an event's room has no
                  * interactable creatures, so only the local player's number,
                  * at viewport * (0.25, 0.5) */
                 if (visual_only_ && !(ch["args"].size() > 2 && ch["args"][2].is_bool() && !ch["args"][2].b())) {
-                    if (c.who != "player") continue;
+                    if (c.who != "player") { CueLedger::dropped(ch); continue; }
                     c.where = "viewport";
                 }
                 cues_.push_back(c);
+                CueLedger::used(ch);
             } else if (type == "despawn" && escaped_.count(ch["who"].str())) {
+                CueLedger::used(ch);
                 continue;
             } else if (type == "death" || type == "despawn") {
                 c.kind = CUE_ANIM;
                 c.who = ch["who"].str();
                 c.name = "Dead";
                 c.data = ch; /* "play": the animator's ops for the Dead trigger */
-                if (!creature_for(c.who)) continue;
+                if (!creature_for(c.who)) { CueLedger::dropped(ch); continue; }
+                CueLedger::used(ch);
                 bool already = false;
                 for (size_t q = 0; q < cues_.size(); ++q)
                     if (cues_[q].kind == CUE_ANIM && cues_[q].who == c.who && cues_[q].name == "Dead") already = true;
                 if (already) continue;
                 cues_.push_back(c);
             } else if (type == "wait") {
+                CueLedger::used(ch);
                 double w = ch["ms"].num(0) / 1000.0;
                 const std::string& src = ch["src"].str();
                 if (src == "power_fly" && ch["scale"].is_number()) {

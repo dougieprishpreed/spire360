@@ -104,6 +104,9 @@ public:
      * hit (all enemies, the player). A then plays it, B: end_play().
      * set_play_target: false if that enemy cannot be aimed at (not shown). */
     void begin_play(int card, const std::string& target_type, int target);
+    /* NThoughtBubbleVfx over the player (a card that cannot be played:
+     * NControllerCardPlay.Start's reason line) */
+    void think(const std::string& text, double seconds);
     bool set_play_target(int enemy);
     void end_play();
     bool playing() const { return play_card_ >= 0; }
@@ -222,7 +225,9 @@ private:
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
-    void monster_death(Creature& cr, const std::string& who, class SpineSprite* s);
+    /* keep: StartDeathAnim(shouldRemove: false), the body stays (AnimDie
+     * neither fades nor frees it) */
+    void monster_death(Creature& cr, const std::string& who, class SpineSprite* s, bool keep = false);
     void refresh_energy();
     Color energy_outline_; /* CharacterModel.EnergyLabelOutlineColor */
     int shown_energy_;
@@ -242,7 +247,7 @@ private:
     void sync_hand(const Json& cards, bool animate);
     void move_card(const Json& change);
     void refresh_state(Creature& c, bool animate);
-    void apply_state(const Json& change);
+    bool apply_state(const Json& change);
     void finish_state(const Json& d, bool finishing);
     bool active(const Holder& h) const;
     void place_queue();
@@ -294,6 +299,9 @@ private:
     std::map<std::string, std::string> block_tracking_;
     /* CreatureCmd.Escape: whose node left the room (its despawn is no death) */
     std::set<std::string> escaped_;
+    /* NCreature.ToggleIsInteractable(false): its state display hidden, the
+     * effects for interactable creatures skip it */
+    std::set<std::string> uninteractable_;
     /* Creature.SetNodeVisible(false): who stays hidden until shown again
      * (InfestedPower's Wrigglers until the elite's death animation is
      * over), whatever a sync shows */
@@ -320,7 +328,7 @@ private:
     std::vector<CostRoll> cost_rolls_;
     void update_cost_rolls(double dt);
     void move_creature_x(Creature& c, float dx, float duration, TweenTrans trans, TweenEase ease);
-    void sandpit_call(const std::string& method, const Json& args);
+    bool sandpit_call(const std::string& method, const Json& args);
     void special_scripted(const std::string& call, const Json& args);
     /* NCreature.AnimShake running, by who: its time */
     std::map<std::string, double> shakes_;
@@ -347,6 +355,7 @@ private:
     /* VfxAnchors (the scripted effects' creature points). */
     virtual bool creature(const std::string& who, VfxCreature* out);
     virtual bool side_center(bool enemies, Vec2* out);
+    virtual bool side_floor(bool enemies, Vec2* out);
     virtual Node* back_box();
     virtual Node* take_visuals(const std::string& who);
     virtual Node* visuals_of(const std::string& who);
@@ -376,9 +385,44 @@ private:
     double radial_off_at_; /* when the radial blur hides (life_t_), 0: off */
     void radial_blur(const std::string& position);
     /* NCreature's own calls the logic made on a creature's node. */
-    void creature_call(const std::string& method, const Json& args);
-    void spine_call(const std::string& method, const Json& args);
+    bool creature_call(const std::string& method, const Json& args);
+    bool spine_call(const std::string& method, const Json& args);
     void anim_shake(const std::string& who);
+    /* The game's combat events the logic records (UiEvents: "ui_event"):
+     * NCombatUi.AnimIn at CombatSetUp, AnimOut at CombatEnded (and the
+     * creatures' intents out, the orbs gathered in), NEndTurnButton's state
+     * (SetState: 0 hidden, 1 enabled, 2 disabled) with its glow when no card
+     * can be played (StartOrStopPulseVfx), NPotionContainer.ShinePotions. */
+    void ui_event(const std::string& ev);
+    void combat_ui_anim(bool in);
+    void end_turn_state(int state);
+    void refresh_end_glow();
+    int end_state_;
+    bool end_shiny_;
+    double end_glow_t_;
+    std::vector<double> potion_shines_; /* life_t_ at which each slot's potion bounces */
+    std::vector<double> slosh_at_;      /* and when its slosh sounds */
+    /* RollingBoulderPower: when the boulder started (the steps' time) and
+     * when it meets each target / is done, from then */
+    /* EncounterModel.HasScene: the encounter's scene (its slots' markers)
+     * in the enemy container; NULL for the row layout */
+    Control* encounter_slots_;
+    /* NCeremonialBeastBgVfx (the boss background's two spine sprites):
+     * hidden until its second phase, then glow, skulls, flowers; the
+     * music's ringing / progress parameters */
+    std::vector<class SpineSprite*> beast_bg_;
+    int beast_bg_state_; /* 0 none, 1 glow, 2 skulls, 3 flowers */
+    float beast_ringing_, beast_progress_;
+    void update_beast_bg();
+    /* PositionCreaturesWithSlots: an enemy at its slot's marker */
+    bool slot_position(const Json& enemy, Vec2* out) const;
+    double boulder_t0_, boulder_done_;
+    /* NPower: the row icons pulsing ("who power"), its flash */
+    std::set<std::string> pulsing_;
+    void power_row_flash(const std::string& who, const std::string& power);
+    /* Steps.Who: "player", "osty", "e<combat id>" */
+    std::string creature_who(const Creature& c) const;
+    std::map<std::string, double> boulder_hits_;
     void scale_visuals(Creature& c, float duration);
     void scale_base(Creature& c);
     Node* root_;

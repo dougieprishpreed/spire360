@@ -425,6 +425,24 @@ private:
     std::vector<Vec2> global_;
 };
 
+/* scenes/backgrounds/little_light_script.gd (the backgrounds' little
+ * lights, CPUParticles2D): _ready sets its preprocess to randi_range(0, 5)
+ * seconds, so the lights are under way and apart when the room appears
+ * (set before the particles' first step, which runs it). */
+class LittleLight : public ScriptBehavior {
+public:
+    LittleLight() : done_(false) {}
+    virtual void process(Node* n, double) {
+        if (done_) return;
+        done_ = true;
+        if (n->type == "CPUParticles2D" || n->type == "GPUParticles2D") ((Particles2D*)n)->preprocess = (double)(chaotic_rand() % 6);
+    }
+
+private:
+    bool done_;
+};
+
+ScriptBehavior* make_little_light(Node*) { return new LittleLight(); }
 ScriptBehavior* make_sprite_animator(Node* n) { return new SpriteAnimator(n); }
 ScriptBehavior* make_particle_system(Node* n) { return new VfxParticleSystem(n); }
 ScriptBehavior* make_vfx_spine(Node* n) { return new VfxSpine(n); }
@@ -460,6 +478,7 @@ Node* make_vfx_projectile(SceneLibrary* lib, const std::string& handler, const s
 
 void install_vfx_scripts() {
     register_script("res://src/Core/Nodes/Vfx/Utilities/NSpriteAnimator.cs", make_sprite_animator);
+    register_script("res://scenes/backgrounds/little_light_script.gd", make_little_light);
     register_script("res://src/Core/Nodes/Vfx/Utilities/NVfxParticleSystem.cs", make_particle_system);
     register_script("res://src/Core/Nodes/Vfx/Utilities/NVfxSpine.cs", make_vfx_spine);
     register_script("res://src/Core/Nodes/Vfx/NBigSlashVfx.cs", make_big_slash);

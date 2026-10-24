@@ -1,5 +1,6 @@
 #include "rewards_screen.h"
 #include "loc.h"
+#include "../audio/game_audio.h"
 #include "top_bar.h"
 
 #include "../scene/controls.h"
@@ -15,7 +16,7 @@ static const unsigned CREAM = 0xFFF6E2, GOLD = 0xEFC851, OUTLINE = 0x225157, GOL
 
 RewardsScreen::RewardsScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), window_(NULL), focus_(-1), start_focus_(0), animate_in_(true), terminal_(true),
-      can_skip_(true), delay_(0) {
+      can_skip_(true), fresh_(false), delay_(0) {
     overlay_[0] = overlay_[1] = NULL;
 }
 
@@ -93,10 +94,13 @@ Node* RewardsScreen::build(const Json& d, std::string* error) {
     if (delay_ > 0) {
         set_visible(back, false);
         set_visible(screen, false);
+    } else if (fresh_ && lib_->audio()) {
+        lib_->audio()->ui("victory.mp3");
     }
     hide(screen->find_unique("WaitingForOtherPlayers"));
     hide(screen->find_unique("Scrollbar"));
-    set_label(screen->find_unique("HeaderLabel"), Loc::get("gameplay_ui", "COMBAT_REWARD_HEADER_LOOT"));
+    set_label(screen->find_unique("HeaderLabel"),
+              Loc::get("gameplay_ui", d["mugged"].b() ? "COMBAT_REWARD_HEADER_MUGGED" : "COMBAT_REWARD_HEADER_LOOT"));
     Node* w = screen->get_node("Rewards");
     window_ = w && w->is_control() ? (Control*)w : NULL;
 
@@ -219,6 +223,7 @@ void RewardsScreen::frame(double dt) {
         delay_ = 0;
         set_visible(overlay_[0], true);
         set_visible(overlay_[1], true);
+        if (fresh_ && lib_->audio()) lib_->audio()->ui("victory.mp3");
     }
     tweens_.update(dt);
     proceed_.frame(dt);

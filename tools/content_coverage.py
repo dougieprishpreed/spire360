@@ -21,9 +21,13 @@ Suites (default: all):
 Each case's protocol trace goes to <work>/<suite>/<case>.jsonl (replayable
 by spire_check); <work>/report.json has every case's outcome, the errors
 and the decision kinds, cues and screens the runs used. The logic's stderr
-is scanned for exceptions per case.
+is scanned for exceptions per case. Each case's presentation ledger (the
+logic's SPIRE_LEDGER: UI calls and their answers, stripped UI bodies run,
+exceptions) goes to <case>.ledger.jsonl for tools/presentation_audit.py
+(--no-ledger: none).
 """
 import argparse
+import collections
 import json
 import os
 import random
@@ -42,16 +46,23 @@ def act_for(rng, state):
     return random_runs.act(rng, state)
 
 
+LEDGER = True
+
+
 class Logic:
     """One logic process; restarted when it dies."""
 
     def __init__(self, cmd, data, trace):
         self.cmd, self.data, self.trace = cmd, data, trace
+        if LEDGER and os.path.exists(trace[:-6] + ".ledger.jsonl"):
+            os.remove(trace[:-6] + ".ledger.jsonl")
         self.start()
 
     def start(self):
         env = dict(os.environ)
         env["SPIRE_DATA"] = self.data
+        if LEDGER:
+            env["SPIRE_LEDGER"] = os.path.abspath(self.trace[:-6] + ".ledger.jsonl")
         self.s = random_runs.Session(shlex.split(self.cmd), env, self.trace, False)
         ready = self.s.read()
         if ready.get("type") != "ready":
@@ -77,6 +88,7 @@ class Case:
         self.decisions = {}
         self.cues = set()
         self.notes = []
+        self.monsters = set()  # the enemies' ids the fight's states showed
 
     def record(self, state):
         t = state.get("type")
@@ -88,6 +100,9 @@ class Case:
         d = state.get("decision")
         if d:
             self.decisions[d] = self.decisions.get(d, 0) + 1
+        for e in state.get("enemies") or []:
+            if isinstance(e, dict) and e.get("id"):
+                self.monsters.add(e["id"])
         for step in state.get("steps") or []:
             for ch in step if isinstance(step, list) else [step]:
                 if not isinstance(ch, dict):
@@ -226,9 +241,16 @@ class Runner:
                                 state = self.step(case, lg, {"cmd": "enter_room", "type": "elite",
                                                              "encounter": self.a.fight})
                         state = self.step(case, lg, {"cmd": "add_to_hand", "cards": [card["id"]], "energy": 9,
-                                                     "upgraded": upgraded})
+                                                     "stars": 9, "upgraded": upgraded})
                         hand = state.get("hand") or []
                         mine = [h for h in hand if (h.get("id") or "").split(".")[-1] == card["id"]]
+                        if mine and not mine[-1].get("can_play") and "BlockedByCardLogic" in (mine[-1].get("unplayable_reason") or ""):
+                            # its own condition (an empty draw pile, a hand of
+                            # attacks): the card alone in hand, nothing to draw
+                            state = self.step(case, lg, {"cmd": "add_to_hand", "cards": [card["id"]], "energy": 9,
+                                                         "stars": 9, "upgraded": upgraded, "clear": True})
+                            hand = state.get("hand") or []
+                            mine = [h for h in hand if (h.get("id") or "").split(".")[-1] == card["id"]]
                         if not mine:
                             case.notes.append(f"{card['id']}: not in hand")
                             continue
@@ -261,6 +283,14 @@ class Runner:
                                                      "args": {"potion_index": pots[0]["index"]}})
                         state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
                         state = self.step(case, lg, {"cmd": "obtain", "potions": [p["id"]]})
+                    # And in a shop (Foul Potion thrown at the merchant)
+                    state = self.step(case, lg, {"cmd": "enter_room", "type": "shop"})
+                    pots = [x for x in (state.get("player") or {}).get("potions") or [] if x]
+                    if pots and pots[0].get("can_use"):
+                        state = self.step(case, lg, {"cmd": "action", "action": "use_potion",
+                                                     "args": {"potion_index": pots[0]["index"]}})
+                    state = self.step(case, lg, {"cmd": "action", "action": "leave_room", "args": {}})
+                    state = self.step(case, lg, {"cmd": "obtain", "potions": [p["id"]]})
                 state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
                 pots = [x for x in (state.get("player") or {}).get("potions") or [] if x]
                 if pots:
@@ -288,6 +318,14 @@ class Runner:
                 for room in ({"type": "monster", "encounter": self.a.fight}, {"type": "rest_site"}, {"type": "shop"},
                              {"type": "treasure"}):
                     state = self.step(case, lg, dict({"cmd": "enter_room"}, **room))
+                    if state.get("decision") == "rest_site":
+                        # the relic's own rest option (Dig, Lift, Kindle, Clone,
+                        # Hatch, ...) rather than whatever the agent picks
+                        own = [o for o in state.get("options") or []
+                               if o.get("option_id") not in ("HEAL", "SMITH") and not o.get("is_locked")]
+                        if own:
+                            state = self.step(case, lg, {"cmd": "action", "action": "choose_option",
+                                                         "args": {"option_index": own[0]["index"]}})
                     state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 300)
             finally:
                 self.finish(case, lg)
@@ -304,28 +342,41 @@ class Runner:
             if ev in seen:
                 continue
             seen.add(ev)
-            # The first page's options, then one run through each.
-            probe = Case("events", ev + "_probe")
-            lg = self.logic("events", ev + "_probe")
-            try:
-                self.new_run(probe, lg, seed=f"event-{ev}")
-                state = self.step(probe, lg, {"cmd": "enter_room", "type": "event", "event": ev})
-                options = [o["index"] for o in state.get("options") or [] if not o.get("is_locked")]
-                probe.notes.append(f"options {options}")
-            finally:
-                self.finish(probe, lg)
-            for k in options or [None]:
-                case = Case("events", f"{ev}_{k}")
-                lg = self.logic("events", f"{ev}_{k}")
+            # The event's option tree, breadth first (the same seed each
+            # time, so a path leads to the same pages): every option of
+            # every page up to 4 deep, at most 16 paths; each path then
+            # played out. Gold enough that its gold options are open.
+            paths = [[]]
+            done_paths = 0
+            while paths and done_paths < 16:
+                path = paths.pop(0)
+                name = f"{ev}_" + ("_".join(str(k) for k in path) if path else "probe")
+                case = Case("events", name)
+                lg = self.logic("events", name)
                 try:
                     self.new_run(case, lg, seed=f"event-{ev}")
+                    self.step(case, lg, {"cmd": "set_player", "gold": 500})
                     state = self.step(case, lg, {"cmd": "enter_room", "type": "event", "event": ev})
-                    if k is not None and state.get("decision") == "event_choice":
+                    ok = True
+                    for k in path:
+                        if state.get("decision") != "event_choice":
+                            ok = False
+                            break
                         state = self.step(case, lg, {"cmd": "action", "action": "choose_option",
                                                      "args": {"option_index": k}})
-                    self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 400)
+                    if ok and state.get("decision") == "event_choice" and len(path) < 4:
+                        opts = [o["index"] for o in state.get("options") or [] if not o.get("is_locked")]
+                        locked = [o["index"] for o in state.get("options") or [] if o.get("is_locked")]
+                        if locked:
+                            case.notes.append(f"locked at {path}: {locked}")
+                        paths += [path + [k] for k in opts]
+                    if path:
+                        done_paths += 1
+                        self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 400)
                 finally:
                     self.finish(case, lg)
+            if paths:
+                case.notes.append(f"{len(paths)} paths left unexplored")
 
     def suite_encounters(self, content):
         encs = []
@@ -333,18 +384,44 @@ class Runner:
             encs += [(e["id"], e["room"]) for e in a["encounters"]]
         encs += [(e, "Monster") for e in content["event_encounters"]]
         seen = set()
+        possible = content.get("encounter_monsters") or {}
+        todo = []
         for enc, room in self.limited(encs):
             if enc in seen:
                 continue
             seen.add(enc)
-            case = Case("encounters", enc)
-            lg = self.logic("encounters", enc)
+            todo.append((enc, room, 0))
+        met = collections.defaultdict(set)
+        while todo:
+            enc, room, attempt = todo.pop(0)
+            name = enc if attempt == 0 else f"{enc}_{attempt}"
+            case = Case("encounters", name)
+            lg = self.logic("encounters", name)
             try:
-                self.new_run(case, lg, seed=f"enc-{enc}")
+                self.new_run(case, lg, seed=f"enc-{enc}" + (f"-{attempt}" if attempt else ""))
                 kind = {"Boss": "elite", "Elite": "elite"}.get(room, "monster")
                 state = self.step(case, lg, {"cmd": "enter_room", "type": kind, "encounter": enc})
-                state = self.play_until(case, lg, state, lambda s: s.get("decision") in ("rewards", "map_select",
-                                                                                     "card_reward"), 600)
+                # Random play for a while (the moves), then the enemies' HP
+                # capped now and then (set_player enemy_hp) until they die of
+                # the game's own damage: every fight reaches its deaths, last
+                # phases and rewards (bosses outlasted 9999 HP of random play).
+                done = lambda s: s.get("decision") in ("rewards", "map_select", "card_reward", "game_over")
+                state = self.play_until(case, lg, state, done, 150)
+                for _ in range(12):
+                    if done(state):
+                        break
+                    if state.get("decision") == "combat_play":
+                        self.step(case, lg, {"cmd": "set_player", "hp": 9999, "enemy_hp": 12})
+                        state = self.step(case, lg, {"cmd": "get_state"})
+                    state = self.play_until(case, lg, state, done, 60)
+                # the monsters this fight had (spawns included); another seed
+                # while some of the encounter's possible ones never came
+                met[enc] |= case.monsters
+                missing = set(possible.get(enc) or []) - met[enc]
+                if missing and attempt < 7:
+                    todo.append((enc, room, attempt + 1))
+                elif missing:
+                    case.notes.append("never met: " + ", ".join(sorted(missing)))
                 if state.get("decision") not in ("rewards", "map_select", "card_reward", "game_over"):
                     case.notes.append(f"ended at {state.get('decision')}")
             finally:
@@ -444,7 +521,10 @@ def main():
     ap.add_argument("--fight", default="BYGONE_EFFIGY_ELITE", help="the encounter cards and potions are tried in")
     ap.add_argument("--act-runs", type=int, default=10)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--no-ledger", action="store_true", help="no presentation ledgers")
     a = ap.parse_args()
+    global LEDGER
+    LEDGER = not a.no_ledger
     os.makedirs(a.work, exist_ok=True)
     r = Runner(a)
     started = time.time()

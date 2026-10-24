@@ -7,6 +7,8 @@
 
 #include "../core/json.h"
 
+#include <string>
+
 namespace spire {
 
 class Node;
@@ -18,6 +20,11 @@ Node* make_card(SceneLibrary* lib, const Json& card);
 /* NCardHighlight.AnimShow / AnimHide in its default (cyan) colour: a card
  * picked on a selection screen. */
 void set_card_highlight(Node* card, bool on);
+
+/* NCard.ActivateRewardScreenGlow (the card reward and choose-a-card screens,
+ * the timeline's card unlocks): a rare card sparkles with NCardRareGlow
+ * behind it and highlights gold; an uncommon one has NCardUncommonGlow. */
+void card_reward_glow(SceneLibrary* lib, Node* card, const std::string& rarity);
 
 } /* namespace spire */
 

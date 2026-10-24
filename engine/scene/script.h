@@ -10,6 +10,9 @@
 
 #include "../core/base.h"
 
+#include <map>
+#include <string>
+
 namespace spire {
 
 class Node;
@@ -40,6 +43,14 @@ void register_script(const char* res_path, ScriptFactory factory);
 ScriptBehavior* create_script(const std::string& res_path, Node* node); /* NULL if none */
 void set_scripts_enabled(bool on);
 bool scripts_enabled();
+/* The scripts instantiated scenes named that have no port (a tool turns the
+ * count on: spire_gaps' "script without a port"), with how often. A screen
+ * may play such a node itself; the presentation audit has the verdicts. */
+void count_missing_scripts(bool on);
+/* A node with an unported script reached its first process without a
+ * behavior: counted under its script. */
+void note_unported_script(const std::string& res_path);
+const std::map<std::string, int>& missing_scripts();
 
 } /* namespace spire */
 

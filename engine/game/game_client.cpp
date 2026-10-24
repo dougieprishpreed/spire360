@@ -1,5 +1,6 @@
 #include "game_client.h"
 #include "../audio/game_audio.h"
+#include "../core/cue_ledger.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -627,8 +628,21 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     return NULL;
 }
 
+/* A cue of that type in the decision's steps (marked used). */
+static bool has_cue(const Json& d, const char* type) {
+    bool found = false;
+    for (size_t i = 0; i < d["steps"].size(); ++i)
+        for (size_t k = 0; k < d["steps"][i].size(); ++k)
+            if (d["steps"][i][k]["t"].str() == type) {
+                CueLedger::used(d["steps"][i][k]);
+                found = true;
+            }
+    return found;
+}
+
 void GameClient::show(const Json& d) {
     errors_ = 0; /* the retries after an error count per decision */
+    CueLedger::seen(d["steps"]);
     close_ftue();
     /* The deck's changes (NRun.GlobalUi's previews) play over whatever
      * screen comes next. */
@@ -637,6 +651,21 @@ void GameClient::show(const Json& d) {
     if (!previews->parent) tree_->root()->add_child(previews);
     deck_previews_->play(d["steps"], d["player"]["character"].str());
     play_global_cues(lib_, previews, d["steps"]);
+    /* NSimpleCardsViewScreen.ShowScreen (Pandora's Box): a capstone over
+     * whatever comes next */
+    for (size_t i = 0; i < d["steps"].size(); ++i)
+        for (size_t k = 0; k < d["steps"][i].size(); ++k) {
+            const Json& c = d["steps"][i][k];
+            if (c["t"].str() != "cards_view") continue;
+            CueLedger::used(c);
+            Json msg;
+            msg.set("type", Json::make_string("pile"));
+            msg.set("pile", Json::make_string("simple"));
+            msg.set("cards", c["cards"]);
+            msg.set("info", c["info"]);
+            open_piles(msg);
+            piles_button_ = 0;
+        }
     std::string prev_kind = decision_["decision"].str();
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];
@@ -658,9 +687,12 @@ void GameClient::show(const Json& d) {
         Json bar_state = d;
         Json bar_player = prev_player;
         bar_player.set("potions", d["player"]["potions"]);
+        /* the relics as now too: their counters and status */
+        bar_player.set("relics", d["player"]["relics"]);
         bar_state.set("player", bar_player);
         Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
         if (bar) screen_->add_child(bar);
+        if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
         potions_.attach(screen_, d["player"]);
         return;
     }
@@ -755,6 +787,7 @@ void GameClient::show(const Json& d) {
         }
         bool again = prev_kind == "rewards" || prev_kind == "card_reward";
         s->set_continuing(prev_kind != "rewards", again ? reward_focus_ : 0);
+        s->set_fresh(!again);
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {
@@ -883,6 +916,7 @@ void GameClient::show(const Json& d) {
         ShopScreen* s = new ShopScreen(lib_);
         bool again = prev_kind == "shop" || prev_kind == "card_select";
         s->set_state(again && shop_open_, shop_kind_, shop_index_);
+        s->set_again(again);
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {
@@ -944,6 +978,8 @@ void GameClient::show(const Json& d) {
     if (d["player"].is_object() && kind != "game_over") {
         Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
         if (bar) screen_->add_child(bar);
+        /* Player.AddPotionFailed: NPotionContainer.PlayAddFailedAnim */
+        if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
     }
     /* The room's screen shake target, unless a fight's room holds it. */
     if (ported_ && ported_->shake_target() && !ScreenShake::get().target())
@@ -979,10 +1015,13 @@ void GameClient::collect_room_cues(const Json& d) {
         for (size_t k = 0; k < steps[i].size(); ++k) {
             const Json& c = steps[i][k];
             const std::string& call = c["call"].str();
-            if (c["t"].str() == "event_portrait") event_portrait_ = c;
-            else if (c["t"].str() == "ui" && (call == "NMirrorVfx.Create" || call == "NRainVfx.Create") &&
-                     std::find(room_vfx_.begin(), room_vfx_.end(), call) == room_vfx_.end())
-                room_vfx_.push_back(call);
+            if (c["t"].str() == "event_portrait") {
+                event_portrait_ = c;
+                CueLedger::used(c);
+            } else if (c["t"].str() == "ui" && (call == "NMirrorVfx.Create" || call == "NRainVfx.Create")) {
+                CueLedger::used(c);
+                if (std::find(room_vfx_.begin(), room_vfx_.end(), call) == room_vfx_.end()) room_vfx_.push_back(call);
+            }
         }
 }
 
@@ -1131,11 +1170,14 @@ void GameClient::combat_input(const PadState& pad) {
     if ((pad.pressed & PadState::A) && focus >= 0 && focus < n) {
         const Json* in_hand = hand_card(focus);
         const Json& card = in_hand ? *in_hand : none;
-        /* NControllerCardPlay.Start: an unplayable card stays in the hand
-         * (NCardPlay.CannotPlayThisCardFtueCheck: too costly, the FTUE). */
+        /* NControllerCardPlay.Start: card_select.mp3; an unplayable card
+         * stays in the hand (NCardPlay.CannotPlayThisCardFtueCheck: too
+         * costly, the FTUE) and the player says why (1 s). */
+        if (lib_->audio()) lib_->audio()->ui("card_select.mp3");
         if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) {
             if (card["cost"].i() > decision_["energy"].i() && ftue_pending("cannot_play_card_ftue"))
                 open_ftue("cannot_play_card_ftue", std::vector<CanvasItem*>(1, screen_item("EndTurnButton")));
+            if (card["unplayable_line"].is_string()) combat_->think(card["unplayable_line"].str(), 1.0);
             return;
         }
         const std::string& type = card["target_type"].str();

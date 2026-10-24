@@ -19,6 +19,7 @@
 namespace spire {
 
 class Control;
+class Node2D;
 class SceneLibrary;
 
 class ShopScreen : public RunScreen, public FrameListener {
@@ -32,6 +33,9 @@ public:
         start_kind_ = kind;
         start_index_ = index;
     }
+    /* The decision before was this room's too (a purchase, the card
+     * removal): no welcome again. */
+    void set_again(bool again) { again_ = again; }
     /* Behind the card removal's selection (NOverlayStack): its focused
      * slot is not raised over it. */
     void set_behind() { behind_ = true; }
@@ -54,6 +58,33 @@ private:
         bool stocked;
     };
     void fill_slots(Node* inventory, const Json& d);
+    /* NMerchantDialogue.ShowRandom (the inventory's %Dialogue): a random
+     * line of its kind (openInventory, purchaseSuccess, purchaseFailureGold,
+     * ...) from the merchant's table, or the Fake Merchant's */
+    void say(const char* kind);
+    std::string line(const char* kind) const;
+    void sfx(const char* path);
+    /* NMerchantSlot.OnPurchaseFailed: its visual wiggles (0.4 s), the
+     * merchant's disappointment, a line of the failure */
+    void purchase_failed(const Slot& s, const char* kind);
+    /* NMerchant*.OnSuccessfulPurchase: the card flies to the deck, a relic
+     * or potion to the top bar (from its slot); the thank-yous; the next
+     * screen's success line */
+    void purchased(const Slot& s);
+    /* NMerchantButton.PlayDialogue: a speech bubble from the merchant */
+    void merchant_says(const std::string& text, double seconds);
+    bool fake_, again_;
+    Node2D* dialogue_;
+    Node2D* dialogue_box_;
+    Node2D* dialogue_bubble_;
+    class RichTextLabel* dialogue_text_;
+    struct Wiggle {
+        Node* node;
+        float x0;
+        double t;
+    };
+    std::vector<Wiggle> wiggles_;
+    double welcome_at_; /* NFakeMerchant.ShowWelcomeDialogue, < 0: none */
     void open_inventory(bool animate);
     void close_inventory();
     void focus_slot(int i);

@@ -78,6 +78,7 @@ Node* CardRewardScreen::build(const Json& d, std::string* error) {
         Control* h = (Control*)holder;
         Node* card = make_card(lib_, cards[(size_t)i]);
         if (card) h->add_child(card);
+        card_reward_glow(lib_, card, cards[(size_t)i]["rarity"].str());
         place(h, ((float)i - (float)(n - 1) / 2.0f) * CARD_X_OFFSET, 0, 0, 0);
         h->scale = Vec2(SMALL_SCALE, SMALL_SCALE);
         row->add_child(h);

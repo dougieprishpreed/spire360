@@ -20,7 +20,7 @@ static const float SMALL_SCALE = 0.8f, HOVER_SCALE = 1.0f;
 static const float SCROLL_LEFT = 150.0f, SCROLL_RIGHT = 200.0f, GRID_TOP = 80.0f;
 
 PileScreen::PileScreen(SceneLibrary* lib)
-    : lib_(lib), deck_(false), upgrades_(false), root_(NULL), rows_(NULL), focus_(-1), sorter_focus_(-1), columns_(1),
+    : lib_(lib), deck_(false), simple_(false), upgrades_(false), root_(NULL), rows_(NULL), focus_(-1), sorter_focus_(-1), columns_(1),
       top_(80), scroll_(0), scroll_to_(0), lim_lo_(0), lim_hi_(0), grid_h_(1000), tickbox_(NULL), inspect_(NULL), inspect_node_(NULL) {
     memset(sorters_, 0, sizeof(sorters_));
 }
@@ -32,6 +32,7 @@ Node* PileScreen::build(const Json& msg, std::string* error) {
     msg_ = msg;
     pile_ = msg["pile"].str();
     deck_ = pile_ == "deck";
+    simple_ = pile_ == "simple";
     upgrades_ = false;
     holders_.clear();
     order_.clear();
@@ -45,15 +46,17 @@ Node* PileScreen::build(const Json& msg, std::string* error) {
     priority_.push_back(COST * 2);
     priority_.push_back(ALPHABET * 2);
 
-    Control* root = full_rect_control(deck_ ? "DeckViewScreen" : "CardPileScreen");
+    Control* root = full_rect_control(deck_ ? "DeckViewScreen" : simple_ ? "SimpleCardsViewScreen" : "CardPileScreen");
     root_ = root;
-    Node* screen = instance(lib_, deck_ ? "scenes/screens/deck_view_screen.tscn" : "scenes/screens/card_pile_screen.tscn");
+    Node* screen = instance(lib_, deck_ ? "scenes/screens/deck_view_screen.tscn"
+                                  : simple_ ? "scenes/screens/simple_cards_view_screen.tscn"
+                                            : "scenes/screens/card_pile_screen.tscn");
     if (!screen) {
         if (error) *error = "no pile screen scene";
         delete root;
         return NULL;
     }
-    if (deck_) {
+    if (deck_ || simple_) {
         /* the shared backstop (NCapstoneContainer's) */
         ColorRect* back = (ColorRect*)SceneLibrary::create_node("ColorRect");
         back->name = "OverlayBackstop";
@@ -75,6 +78,12 @@ Node* PileScreen::build(const Json& msg, std::string* error) {
     if (info.empty()) hide(find_named(screen, "BottomText"));
     else set_label(label, "[center]" + info);
     show_glyph(lib_, find_named(screen->get_node("BackButton"), "HotkeyIcon"), "b");
+    if (simple_) {
+        /* _backButton.Disable(); the confirm button (ui_confirm) closes it */
+        hide(screen->get_node("BackButton"));
+        show_glyph(lib_, find_named(screen->get_node("ConfirmButton"), "HotkeyIcon"), "y");
+        set_label(screen->find_unique("ViewUpgradesLabel"), Loc::get("gameplay_ui", "VIEW_UPGRADES"));
+    }
 
     /* the sorters and View Upgrades (the deck) */
     static const char* const sorter_nodes[SORTS] = { "ObtainedSorter", "CardTypeSorter", "CostSorter", "AlphabeticalSorter" };
@@ -98,7 +107,7 @@ Node* PileScreen::build(const Json& msg, std::string* error) {
         tickbox_ = screen->find_unique("TickboxVisuals");
         set_visible(tickbox_ ? tickbox_->get_node("Ticked") : NULL, false);
         set_visible(tickbox_ ? tickbox_->get_node("NotTicked") : NULL, true);
-    } else {
+    } else if (!simple_) {
         hide(find_named(screen, "ViewUpgrades"));
     }
 
@@ -272,9 +281,9 @@ bool PileScreen::input(const PadState& pad, unsigned close_buttons) {
         }
         return true;
     }
-    if (pad.pressed & (PadState::B | close_buttons)) return false;
+    if (simple_ ? (pad.pressed & PadState::Y) != 0 : (pad.pressed & (PadState::B | close_buttons)) != 0) return false;
     int n = (int)order_.size();
-    if (deck_ && sorter_focus_ < 0 && focus_ >= 0 && focus_ < n && (pad.pressed & PadState::A)) {
+    if ((deck_ || simple_) && sorter_focus_ < 0 && focus_ >= 0 && focus_ < n && (pad.pressed & PadState::A)) {
         /* NDeckViewScreen: a card pressed opens NInspectCardScreen over the
          * cards shown */
         Json list = Json::make_array();

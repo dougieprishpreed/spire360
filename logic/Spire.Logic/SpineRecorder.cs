@@ -90,6 +90,15 @@ internal static class SpineRecorder
             {
                 Steps.Intercept = before;
             }
+            // BowlbugEgg.SetupSkins also sets up the spine sprite nested in its
+            // cocoon slot ((spine.BoundObject as Node).GetNodeOrNull(...), no
+            // node here): its egg1 skin and egg_idle_loop
+            if (cr.Monster is MegaCrit.Sts2.Core.Models.Monsters.BowlbugEgg)
+            {
+                const string cocoon = "CocoonSlotNode/Cocoon";
+                ops.Add(new() { ["op"] = "skin", ["skins"] = new List<string> { "egg1" }, ["node"] = cocoon });
+                ops.Add(new() { ["op"] = "set_animation", ["name"] = "egg_idle_loop", ["loop"] = true, ["track"] = 0, ["node"] = cocoon });
+            }
             return ops;
         });
     }

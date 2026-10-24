@@ -6,6 +6,7 @@
 #ifndef SPIRE_TOP_BAR_H
 #define SPIRE_TOP_BAR_H
 
+#include "../core/base.h"
 #include "../core/json.h"
 
 #include <string>
@@ -21,6 +22,14 @@ class SceneLibrary;
  * button is disabled there). before: the player as the decision before
  * had them (null for none): the potions gained or used since animate. */
 Node* make_top_bar(SceneLibrary* lib, const Json& decision, bool in_map_room, const Json& before = Json());
+/* AnimateRelic / AnimatePotion(startPosition): the next bar's new relic or
+ * potion of that id ("relic", "potion") comes from that global position and
+ * scale (a shop's slot) instead of rising into place. */
+void top_bar_acquire_from(const std::string& kind, const std::string& id, const Vec2& at, float scale);
+/* NPotionContainer.PlayAddFailedAnim: no room for a potion. */
+void top_bar_potions_full(Node* bar);
+/* The gold the bar shows: counted to (NTopBarGold.UpdateGoldAnim). */
+void set_top_bar_gold(Node* bar, int gold);
 /* NPotion (scenes/potions/potion.tscn, 60x60, pivot at its centre) showing
  * a potion's atlas image and outline; NULL without the scene. */
 Node* make_potion(SceneLibrary* lib, const std::string& potion_id);
@@ -31,6 +40,9 @@ void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id);
  * relic holder (relic.tscn) with its icon as the particles, freeing itself
  * after 3 s; position in the holder's canvas. NULL without the scene. */
 Node* make_relic_holder_flash(SceneLibrary* lib, Control* holder);
+/* NPotionFlashVfx over a potion node (potion.tscn) in the bar's canvas:
+ * its image flashing out; NULL without the scene. */
+Node* make_potion_flash(SceneLibrary* lib, Control* potion);
 /* A relic's icon name from the logic's relic: its icon_key ("icon_base":
  * RelicModel.IconBaseName), else its id. */
 std::string relic_icon_base(const Json& relic, const char* icon_key = "icon_base", const char* id_key = "id");

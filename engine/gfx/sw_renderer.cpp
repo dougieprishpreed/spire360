@@ -1111,6 +1111,24 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         out[3] = a;
         return;
     }
+    case EFFECT_LIQUID_OVERLAY: {
+        float t[4] = { 1, 1, 1, 1 }, d[4], ov[4], lut[4];
+        if (tex) sample(tex->img, u, v, flags, t);
+        float ia = t[3] > 0 ? 1.0f / t[3] : 0.0f;
+        float base[3] = { t[0] * ia, t[1] * ia, t[2] * ia }, hs[3];
+        for (int k = 0; k < 3; ++k)
+            hs[k] = (e.extra[k * 4] * base[0] + e.extra[k * 4 + 1] * base[1] + e.extra[k * 4 + 2] * base[2]) * col[k];
+        float a = clampf(t[3] * col[3], 0, 1);
+        effect_texel(e, 0, su * 10.0f + e.p[0], sv * 10.0f + e.p[1], d);
+        float db = d[3] > 0 ? d[2] / d[3] : 0.0f;
+        effect_texel(e, 0, su * 10.0f + e.p[4] + db * e.p[2], sv * 10.0f + e.p[5] + db * e.p[2], ov);
+        effect_texel(e, 1, ov[3] > 0 ? ov[0] / ov[3] : 0.0f, 0.5f, lut);
+        float il = lut[3] > 0 ? 1.0f / lut[3] : 0.0f;
+        float k = ov[3] * (a >= 0.5f ? 1.0f : 0.0f) * e.p[3];
+        for (int q = 0; q < 3; ++q) out[q] = clampf(hs[q] + (lut[q] * il * e.p[8 + q] - hs[q]) * k, 0, 1) * a;
+        out[3] = a;
+        return;
+    }
     case EFFECT_COLORIZE_ADD: {
         float t[4] = { 1, 1, 1, 1 };
         if (tex) sample(tex->img, u, v, flags, t);

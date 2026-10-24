@@ -23,6 +23,9 @@ public:
     void decision(const Json& decision);
     void menu();
     void ui(const std::string& path, float volume = 1);
+    /* Cues run on the clock as ever but nothing is decoded or mixed (a tool
+     * sweeping traces: spire_gaps --fast). */
+    void set_dry(bool dry) { dry_ = dry; }
     void stop_room_loops(const std::string& owner = std::string());
     AudioEvents& events() { return events_; }
 private:
@@ -36,6 +39,9 @@ private:
     AudioEvents events_;
     AudioOutput output_;
     std::map<std::string, Loop> loops_;
+    /* NDebugAudioManager.Play's handles (the logic's numbers) -> voices,
+     * for its Stop(handle, fadeTime) */
+    std::map<int, u32> debug_voices_;
     std::vector<Scheduled> pending_;
     std::string track_, ambience_, act_track_;
     u32 music_id_, ambience_id_, rng_;
@@ -47,6 +53,7 @@ private:
     Mutex lock_;
     Thread thread_;
     volatile bool stopping_;
+    bool dry_;
     static void thread_main(void* self);
 };
 }

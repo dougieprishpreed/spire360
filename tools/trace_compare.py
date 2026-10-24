@@ -40,6 +40,14 @@ DROP = {
     "crystal_sphere",  # the finished NCrystalSphereScreen under its rewards
     "spine_ops", "phobia_skin",  # MonsterModel.SetupSkins / OnPhobiaModeToggled on the spine sprite
     "anim_init", "play",  # what the CreatureAnimator plays
+    "unplayable_line",  # NControllerCardPlay.Start's thought bubble for a card that cannot be played
+    "unplayable_reason",  # CardModel.CanPlay's reason (the coverage's notes)
+    "mugged",  # NRewardsScreen's header (COMBAT_REWARD_HEADER_MUGGED)
+    "circle", "quest",  # NMapCircleVfx's look, NNormalMapPoint's quest icon
+    "relic_amount", "relic_status", "relic_wax", "relic_melted",  # NRelicInventoryHolder's counter and look
+    "second_phase",  # NCeremonialBeastBgVfx's state
+    "freed_repy",  # NQueenRepyBgVfx's
+    "boss_tint",  # NTopBarBossIcon's second boss icon colour
 }
 
 

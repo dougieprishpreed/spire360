@@ -84,6 +84,10 @@ public partial class RunDriver
                 ["event_encounters"] = ModelDb.AllEncounters.Where(e => !ModelDb.Acts.Any(a => a.AllEncounters.Contains(e)))
                     .Select(e => e.Id.Entry).ToList(),
                 ["monsters"] = ModelDb.Monsters.Select(m => m.Id.Entry).ToList(),
+                // EncounterModel.AllPossibleMonsters: an encounter that draws its
+                // monsters at random (Ruby Raiders: 3 of 5) needs several seeds
+                ["encounter_monsters"] = ModelDb.AllEncounters.ToDictionary(e => e.Id.Entry,
+                    e => (object?)e.AllPossibleMonsters.Select(m => m.Id.Entry).Distinct().ToList()),
                 ["powers"] = ModelDb.AllPowers.Count(),
                 ["epochs"] = EpochModel.AllEpochIds.ToList(),
             };
@@ -188,7 +192,10 @@ public partial class RunDriver
 
     /// <summary>
     /// In combat: cards generated into the hand (CardPileCmd.AddGeneratedCardToCombat,
-    /// upgraded on request) and energy (PlayerCmd.GainEnergy).
+    /// upgraded on request), energy (PlayerCmd.GainEnergy) and stars
+    /// (PlayerCmd.GainStars); "clear": the hand and the draw pile to the
+    /// discard pile first (cards whose own logic wants them empty: Grand
+    /// Finale, Clash).
     /// </summary>
     public Dictionary<string, object?> AddToHand(JsonElement cmd)
     {
@@ -199,6 +206,13 @@ public partial class RunDriver
             if (!CombatManager.Instance.IsInProgress || player.Creature?.CombatState == null) return Error("Not in combat");
             var combat = player.Creature.CombatState;
             bool upgraded = cmd.TryGetProperty("upgraded", out var up) && up.ValueKind == JsonValueKind.True;
+            if (cmd.TryGetProperty("clear", out var clear) && clear.ValueKind == JsonValueKind.True && player.PlayerCombatState != null)
+            {
+                var pcs = player.PlayerCombatState;
+                var rest = pcs.Hand.Cards.Concat(pcs.DrawPile.Cards).ToList();
+                if (rest.Count > 0) Sched.Run(() => CardPileCmd.Add(rest, PileType.Discard));
+                WaitForActionExecutor();
+            }
             if (cmd.TryGetProperty("cards", out var cs))
                 foreach (var c in cs.EnumerateArray())
                 {
@@ -211,6 +225,8 @@ public partial class RunDriver
                 }
             if (cmd.TryGetProperty("energy", out var en) && en.TryGetInt32(out var e) && e > 0)
                 Sched.Run(() => PlayerCmd.GainEnergy(e, player));
+            if (cmd.TryGetProperty("stars", out var st) && st.TryGetInt32(out var s) && s > 0)
+                Sched.Run(() => PlayerCmd.GainStars(s, player));
             WaitForActionExecutor();
             return DetectDecisionPoint();
         }

@@ -1,0 +1,474 @@
+# Presentation audit verdicts (tools/presentation_audit.py): one per line,
+# category<TAB>key pattern (fnmatch)<TAB>ported|n/a|open<TAB>where / why / what to do.
+# The first matching line wins; keep specific lines above the general ones.
+#
+# ---- not part of a single-player console game ----
+sound	*SplitVoteAnimation.*	n/a	multiplayer votes
+sound	NMapScreen.PingMapCoord *	n/a	multiplayer map ping
+scene	NAspectRatioDropdown *	n/a	PC display setting
+scene	NDisconnectConfirmPopup *	n/a	multiplayer
+scene	NEventOptionButton ui/multiplayer_vote_icon	n/a	multiplayer votes
+scene	NFailedJoinVfx *	n/a	multiplayer
+scene	NJoinFriendButton *	n/a	multiplayer
+scene	NReaction *	n/a	multiplayer reactions
+scene	NMapPingVfx *	n/a	multiplayer map ping
+scene	NHandImage *	n/a	the treasure room's multiplayer hands
+scene	NUiFlashVfx *	n/a	only multiplayer indicators create it
+scene	NFullscreenTextVfx *	n/a	debug input handlers only (_Input timescale / hide toggles)
+scene	NGlassOrbVfx *	n/a	only NOrbVfxTester (a debug scene) calls ShowPassiveImpact
+scene	NInputSettingsEntry *	n/a	keyboard rebinding (the PC input settings panel)
+scene	NErrorPopup *	n/a	network / mod / save-corruption errors of the PC build
+scene	NRun res://scenes/run.tscn	n/a	the run's root scene: the client builds its own screen stack
+scene	NEventRoom res://scenes/rooms/event_room.tscn	ported	engine/game/event_screen.cpp builds the event room from its layouts
+scene	NMapRoom res://scenes/rooms/map_room.tscn	ported	engine/game/map_screen.cpp
+testmode	PreloadManager.*	n/a	asset preloading (the client loads from the pack)
+testmode	NonInteractiveMode.*	n/a	the headless mode flag itself
+testmode	OneTimeInitialization.*	n/a	start-up
+testmode	Logger.*	n/a	logging
+testmode	*NeverEverCallThisOutsideOfTests*	n/a	test helpers
+testmode	Slither.set_TestEnergyCostOverride	n/a	test helper
+testmode	LocManager.*	n/a	localization set-up
+testmode	FontControlUtils.*	n/a	fonts (engine/game/text_scripts.cpp)
+testmode	SaveManager.*	n/a	saves (the logic's Profiles.cs)
+testmode	ProgressSaveManager.SeenPopup	n/a	saves
+testmode	RunRngSet.GetMockInstance	n/a	test helper
+testmode	RunManager.UpdateRichPresence	n/a	platform presence
+testmode	RunManager.InitializeShared	n/a	run set-up without presentation
+testmode	MendRestSiteOption.OnSelect	n/a	Mend: a multiplayer rest site option
+godot	AssetCache.*	n/a	asset cache
+godot	AtlasManager.*	n/a	atlas textures (the client reads the pack's atlases)
+godot	GodotControllerInputStrategy.*	n/a	input (the client reads the pad)
+godot	GodotTreeExtensions.*	n/a	node tree helpers
+godot	SceneHelper.Instantiate	n/a	scene helper
+godot	SpineNodeExtensions.*	n/a	spine helper
+godot	SignalAwaiterExtensions.*	n/a	awaiting helper
+godot	GlyphConverter.*	n/a	text helper
+godot	MegaLabelHelper.*	n/a	text helper
+godot	LocManager.*	n/a	localization
+godot	FontControlUtils.*	n/a	fonts
+godot	*SaveManager.*	n/a	save paths
+godot	UserDataPathProvider.*	n/a	save paths
+godot	GodotFileIo.*	n/a	files
+godot	MetricUtilities.*	n/a	metrics
+godot	*.DoRemotePostSelectVfx	n/a	another player's rest site choice (multiplayer)
+godot	MendRestSiteOption.OnSelect	n/a	multiplayer
+godot	CardPileCmd.GiveToAnotherPlayer	n/a	multiplayer
+godot	*.get_*Achievement	n/a	achievements
+godot	CrystalSphereItem.get_TexturePath	n/a	a name helper (engine/game/crystal_sphere_screen.cpp)
+godot	PileTypeExtensions.GetTargetPosition	ported	engine/game/combat_screen.cpp (the piles' positions)
+godot	CombatState.GodotTimerTask	n/a	timers (the logic's Sched)
+godot	Cmd.WaitInternal	n/a	waits (the logic's Steps waits)
+godot	ActionExecutor.ExecuteActions	n/a	action queue awaiting
+godot	CardCmd.GetTotalCardsBeingPreviewed	ported	engine/game/deck_previews.cpp (the preview boxes)
+#
+# ---- ported, confirmed ----
+scene	N*FormVfx vfx/forms/*	ported	engine/game/form_vfx.cpp (format of the form's name)
+scene	NHellraiserVfx *	ported	engine/game/combat_vfx.cpp spawn_hellraiser (its sword scenes)
+delegate	SovereignBlade.OnPlay -> *	ported	attack.hit_vfx_node / attacker_vfx_node wrap the delegates; engine/game/sovereign_blade.cpp
+delegate	GrandFinale.OnPlay -> *	ported	attack.hit_vfx_node (the call recorded); engine/game/combat_vfx.cpp
+delegate	GunkUp.OnPlay -> *	ported	attack.hit_vfx_node (the call recorded); engine/game/combat_vfx.cpp
+delegate	PhrogParasite.LashMove -> *	ported	attack.hit_vfx_node (the call recorded); engine/game/combat_vfx.cpp
+delegate	Wriggler.BiteMove -> *	ported	attack.hit_vfx_node (the call recorded); engine/game/combat_vfx.cpp
+delegate	AncientEventModel.GenerateInitialOptionsWrapper -> NEventRoom.Proceed	ported	the ancient's proceed option (RunDriver's event choices)
+#
+# ---- open: to port ----
+sound	NCreature.OnPowerIncreased event:/sfx/buff	ported	power_vfx cue's sound flag (ShouldPlayVfx, not ending): combat_screen plays buff / debuff and the debuff shake
+sound	NCreature.OnPowerIncreased *	open	buff / debuff sound on every power gain (and AnimShake on a debuff): engine power_vfx cue
+sound	NRewardsScreen._Ready victory.mp3	ported	rewards_screen: victory.mp3 on a fresh rewards screen (its delay kept)
+sound	NMapScreen.TravelToMapCoord event:/sfx/ui/wipe_map	ported	map_screen begin_travel: wipe_map, the circle and NMapNodeSelectVfx
+sound	NMerchantInventory.Open event:/sfx/npcs/merchant/merchant_welcome	ported	shop_screen: merchant_welcome and an openInventory line on opening; merchant_thank_yous and a purchaseSuccess line on a purchase
+sound	NMerchantInventory.* *	open	merchant welcome on open, thank-yous on a purchase
+sound	NMerchantRoom.FoulPotionThrown event:/sfx/npcs/merchant/merchant_thank_yous	ported	shop_screen: the foul_potion cue (thank-yous, a foulPotion line, a rumble, vfx_slime_impact)
+sound	NMerchantRoom.FoulPotionThrown *	open	Foul Potion thrown at the merchant
+sound	NMerchantSlot.OnPurchaseFailed event:/sfx/npcs/merchant/merchant_dissapointment	ported	shop_screen purchase_failed: the slot's visual wiggles, disappointment, a failure line (gold, a full belt)
+sound	NMerchantSlot.OnPurchaseFailed *	open	merchant disappointment (not enough gold)
+sound	NMouseCardPlay.StartCardDrag card_select.mp3	n/a	the mouse's drag; the pad's NControllerCardPlay.Start is ported
+sound	NControllerCardPlay.Start card_select.mp3	ported	game_client: card_select.mp3 when A picks a hand card (a card that cannot be played: its thought bubble)
+sound	NEpochSlot.*	open	timeline: the epoch slot's own hover / click sounds
+sound	NChapterPaginateButton.*	open	timeline paginate click sound
+sound	NEpochPaginateButton.*	open	timeline paginate click sound
+sound	NAcknowledgeButton.*	open	timeline acknowledge: ui_timeline_close_epoch
+sound	NCloseButton.*	open	timeline close: ui_timeline_close_epoch
+sound	NBestiaryModeButton.*	open	bestiary mode button: ui_timeline_close_epoch
+scene	NStarCounter vfx/star_gain_vfx	ported	combat_screen: star_gain_vfx behind the counter on a gain, StarCounterAnim
+scene	NPowerRemovedVfx res://scenes/vfx/power_removed_vfx.tscn	ported	combat_vfx spawn_power_removed on the power_removed cue
+scene	NPowerRemovedVfx *	open	"wears off" text when a power is removed (NCreature.OnPowerRemoved)
+scene	NRollingBoulderVfx vfx/vfx_rolling_boulder	ported	combat_vfx RollingBoulder, hits timed by boulder_hit marks (captured: work/cap69/boulder)
+scene	NRollingBoulderVfx *	open	Rolling Boulder: the boulder rolls over the enemies, each hit as it passes
+scene	NMinionDiveBombVfx vfx/vfx_minion_dive_bomb	ported	combat_vfx MinionDiveBomb (captured: work/cap69/dive)
+scene	NMinionDiveBombVfx *	open	Minion Dive Bomb's minion arcing to its target
+scene	NNightmareHandsVfx vfx/cards/nightmare_hands_vfx	ported	combat_vfx NightmareHands / SpookyHand (captured: work/cap69/nightmare)
+scene	NNightmareHandsVfx *	open	Nightmare's hands
+scene	NMapNodeSelectVfx res://scenes/vfx/map_node_select_vfx.tscn	ported	map_screen add_select_vfx on travel
+scene	NMapNodeSelectVfx *	open	map travel: the node select effect
+scene	NMapCircleVfx res://scenes/vfx/map_circle_vfx.tscn	ported	map_screen MapFx circles (visited points static, the travelled one drawn)
+scene	NMapCircleVfx *	open	NNormalMapPoint.ShowCircleVfx (the circle drawn round a visited point)
+scene	NCardRareGlow vfx/rare_glow_vfx	ported	card_view card_reward_glow (reward, card select, timeline)
+scene	NCardRareGlow *	open	card reward: the rare card's glow (NCard.ActivateRewardScreenGlow)
+scene	NCardUncommonGlow vfx/uncommon_glow_vfx	ported	card_view card_reward_glow
+scene	NCardUncommonGlow *	open	card reward: the uncommon card's glow
+scene	NDesaturateTransitionVfx vfx/desaturate_transition_vfx	ported	rest_site_screen post_select HEAL: the room to brightness 0.1 and back (saturation and contrast not modelled)
+scene	NDesaturateTransitionVfx *	open	the rest site's heal: desaturate transition (HealRestSiteOption.DoLocalPostSelectVfx)
+scene	NLiquidOverlayVfx vfx/vfx_liquid_overlay	ported	combat_vfx liquid_overlay: EFFECT_LIQUID_OVERLAY on the spine body 1 s (captured: work/cap71/flaskt)
+scene	NLiquidOverlayVfx *	open	the splash's liquid overlay on the creature (Bouncing Flask, PlaySplashVfx)
+scene	NSpikeSplashVfx *	open	Ceremonial Beast's crush / stomp, Crush Under, Mecha Knight's charge, Stomp
+scene	NPotionFlashVfx vfx/vfx_potion_flash	ported	top_bar make_potion_flash after a potion arrives (its image as the flash particle)
+scene	NPotionFlashVfx *	open	NPotion.DoFlash (a potion's flash in its slot)
+#
+# ---- answer: guard sites a null UI value skipped (Value@Site) ----
+answer	NCard.FindOnTable@CardCmd.*	ported	CombatScreen::sync_hand rebuilds a hand card whose data changed (NCard.UpdateVisuals)
+answer	NCard.FindOnTable@CardPileCmd.RemoveFromCombat	ported	card.remove_from_combat hook: card_burn cues -> spawn_card_exhaust (NCardExhaustVfx, card_exhaust.mp3)
+answer	NCard.FindOnTable@CardModel.OnPlayWrapper	ported	multi_play cue -> the played card's mp_t (NCard.AnimMultiCardPlay)
+answer	NCard.FindOnTable@SneckoOil.OnUse	ported	card.randomize_cost.snecko_oil -> card_randomize_cost cue (CostRoll)
+answer	NCard.FindOnTable@ConfusedPower.AfterCardDrawn	ported	card.randomize_cost.confused -> card_randomize_cost cue (CostRoll)
+answer	NCardPlayQueue.get_Instance@PlayCardAction.ExecuteAction	n/a	one card per command on the console: a card leaves the hand only before its play is queued, never while it waits
+answer	NCreature.get_OrbManager@*	ported	orbs / orb_activate cues -> CombatScreen::sync_orbs (new slots, evoked orbs fade 0.25 s, the layout tween), activate_orb
+answer	NPlayerHand.get_Instance@CardSelectCmd.*	ported	cardselect.kind.hand* hooks: the hand's own selection (NPlayerHand.SelectCards in CombatScreen)
+answer	NModalContainer.get_Instance@*	ported	the FTUEs in the client (ftue.cpp: combat rules, shuffle) from the profile's ftues
+answer	NRunMusicController.get_Instance@CombatManager.StartCombatInternal	ported	the combat rules FTUE and NCombatStartBanner in the client (ftue.cpp, the combat screen's banners)
+answer	NRunMusicController.get_Instance@WaterfallGiant.IncrementBuildUpAnimationTrack	ported	its _tracks/buildupN arrives as a spine anim cue (the ledger's ui list does not name it)
+answer	NRunMusicController.get_Instance@Queen.AfterDeath	open	the Queen's own death (queen_progress 5; tracks/empty on track 1) never ran: the coverage fights lost to her; the encounters suite now caps the enemies' HP (set_player enemy_hp) so bosses die
+answer	NGame.get_Instance@TheArchitect.*	ported	architect.line / architect.head / architect.parts hooks; event_screen plays the attacks
+answer	NCombatRoom.get_Instance@TheArchitect.*	ported	architect.line / architect.head / architect.parts hooks; event_screen plays the attacks
+answer	NRun.get_Instance@CardCmd.Upgrade	ported	deck.upgrade.begin + deck_card upgrade cues -> deck_previews UpgradePreview (NCardUpgradeVfx)
+answer	NRun.get_Instance@MerchantCardRemovalEntry.OnTryPurchase	ported	shop_screen: card_removal_used -> NMerchantCardRemoval's Used animation, no price, no focus
+answer	NRun.get_Instance@AncientEventModel.BeforeEventStarted	ported	neow.hp_lerp hook -> NTopBarHp.LerpAtNeow (room_cues)
+answer	NRun.get_Instance@LordsParasol.PurchaseEverything	open	shop pass: Lord's Parasol opens the inventory after 0.75 s and buys every item 0.25 s apart (its TestMode.IsOff block); check the shop shows the purchases one by one
+answer	NMapScreen.get_Instance@LordsParasol.PurchaseEverything	open	shop pass: see NRun.get_Instance@LordsParasol.PurchaseEverything
+answer	NRun.get_Instance@*Room.*	n/a	the client builds each room's screen from its decision
+answer	NCombatRoom.get_Instance@CombatRoom.StartCombat	n/a	the client builds each room's screen from its decision
+answer	NRun.get_Instance@RunManager.EnterAct	ported	map_screen: the marker on the last visited point (InitMarker); RefreshAllMapPointVotes is multiplayer voting
+answer	NMapScreen.get_Instance@RunManager.EnterAct	ported	map_screen: the marker on the last visited point (InitMarker); RefreshAllMapPointVotes is multiplayer voting
+answer	NCombatRoom.get_Instance@PunchOff.PunchEachOther	ported	event_screen: Punch-Off's sparring (attack, blunt hit, spark)
+answer	NCombatRoom.get_Instance@BigMushroom.Grow	ported	combat_screen builds the player at 1.5 scale (NCreature.ScaleTo(1.5, 0))
+answer	NEventRoom.get_Instance@Reflections.OnRoomEnter	ported	event.room_vfx.mirror hook -> NMirrorVfx in the event room
+answer	NEventRoom.get_Instance@SlipperyBridge.OnRoomEnter	ported	event.room_vfx.rain hook -> NRainVfx in the event room
+answer	NEventRoom.get_Instance@*	ported	StandIns answers NEventRoom.Instance outside combat (its VfxContainer 1920x1080): the events' own effects and sounds are recorded
+answer	NRestSiteRoom.get_Instance@KindleRestSiteOption.PlayKindleVfx	ported	rest_site_screen: KINDLE shakes the character and flashes Pumpkin Candle (NRelicFlashVfx)
+answer	NRelicFlashVfx.Create@KindleRestSiteOption.PlayKindleVfx	ported	rest_site_screen: KINDLE shakes the character and flashes Pumpkin Candle (NRelicFlashVfx)
+answer	NMonsterDeathVfx.Create@ReattachPower.DoFadeOutOnAllSegments	ported	combat_screen: the NMonsterDeathVfx.Create list fades every segment, then their nodes go (spawn_monster_death_group)
+answer	MegaAnimationState.GetCurrent@CreatureAnimator..ctor	n/a	the animator's state machine runs in the client from anim cues; Apply / Update / SetTrackTime are its spine runtime
+#
+# ---- cue: kinds the client saw and did not play (CueLedger) ----
+cue	hand	n/a	the card cues move the cards; the hand's order and looks come with the response's state (sync_hand)
+cue	intent	n/a	superseded: NCreature.RefreshIntents / UpdateIntent carry the intents the game's call showed
+cue	gold	ported	combat apply_state: set_top_bar_gold as it changes (a thief's steal)
+cue	ui:ActiveScreenContext.Update	n/a	input focus
+cue	ui:MegaAnimationState.GetCurrent	n/a	a query
+cue	ui:NCard.FindOnTable	n/a	a query (what its null skipped: the answer verdicts)
+cue	ui:NCardPlayQueue.UpdateCardBeforeExecution	n/a	the client plays one card at a time from its hand
+cue	ui:NCombatRoom.AddCreature	n/a	the spawn state cue adds the creature
+cue	ui:NCombatRoom.GetCreatureNode	n/a	a query
+cue	ui:NCombatRoom.RemoveCreatureNode	n/a	the death / despawn / escape cues remove it
+cue	ui:NCombatRoom.SetCreatureIsInteractable	ported	CombatScreen::fire -> ToggleIsInteractable
+cue	ui:NCombatRoom.TransitionToActiveCombat	n/a	the client builds the fight's screen from its first decision (its creatures interactable)
+cue	ui:NCombatRulesFtue.Create	n/a	the client opens the FTUE from the profile (ftue.cpp)
+cue	ui:NModalContainer.Add	n/a	the FTUEs' modal: the client's (ftue.cpp)
+cue	ui:NCreature.DisableInteractionForDeath	n/a	input
+cue	ui:NCreature.GetBottomOfHitbox	n/a	a query
+cue	ui:NCreature.GetSpecialNode	n/a	a query (the special node's own calls are cues)
+cue	ui:NCreature.SetAnimationTrigger	n/a	the anim cue plays it
+cue	ui:NCreature.StartDeathAnim	n/a	the death cue plays it
+cue	ui:NCreature.ToggleIsInteractable	ported	creature_call: the state display hidden / shown, effects skip it meanwhile
+cue	ui:NCreature.UpdateIntent	ported	CombatScreen::fire rebuilds the intents the call carries
+cue	ui:NCreatureVisuals.*	n/a	queries
+cue	ui:NDebugAudioManager.Stop	ported	GameAudio: Play's handle (the logic's number) -> its voice, faded out
+cue	ui:NGame.GetGameVersion	n/a	a query
+cue	ui:NGame.IsMainThread	n/a	a query
+cue	ui:NHoverTipSet.Clear	n/a	hover tips (the pad's own)
+cue	ui:NLiquidOverlayVfx.Create	ported	combat_vfx liquid_overlay: EFFECT_LIQUID_OVERLAY on the spine body for 1 s
+cue	ui:NSplashVfx.Create	ported	combat_vfx spawn_splash
+cue	ui:NMapScreen.SetTravelEnabled	n/a	input
+cue	ui:NPlayerHand.CancelAllCardPlay	n/a	input
+cue	ui:NRelicFlashVfx.Create	n/a	duplicate: the relic_flash cue draws it at each target (flash_relic)
+cue	ui:NRelicInventory.AnimateRelic	n/a	duplicate: the relic_flash cue flashes the holder (make_relic_holder_flash)
+cue	ui:NRunMusicController.*	n/a	the decision's context audio (track, bank, ambience, progress) drives the music
+cue	ui:NTopBarRoomIcon.DebugClearMapPointTypeOverride	n/a	debug
+cue	ui:TweenHelper.AwaitFinished	n/a	an await
+cue	ui:NCardEnchantVfx.Create	n/a	duplicate: the ui hook turns it into the deck_card enchant cue (deck_previews)
+cue	ui:NCardRewardSelectionScreen.ShowScreen	n/a	the card_reward decision is that screen
+cue	ui:NCrystalSphereScreen.ShowScreen	n/a	the crystal sphere decision is that screen
+cue	ui:NSimpleCardsViewScreen.ShowScreen	n/a	duplicate: the cards_view cue opens it (game_client)
+cue	ui:NEventRoom.SetPortrait	n/a	duplicate: the decision's room_portrait (event_screen)
+cue	ui:NEventLayout.*	n/a	duplicate: the decision's room_portrait (event_screen)
+cue	ui:NEventRoom.Create	n/a	the event decision is that room
+cue	ui:NTreasureRoom.Create	n/a	the treasure decision is that room
+cue	ui:NRun.SetCurrentRoom	n/a	each decision is its room
+cue	ui:NRestSiteRoom.BeforeExitingRoom	n/a	the rest site screen leaves on the next decision
+cue	ui:NMapScreen.SetMap	n/a	the map_select decision carries the map
+cue	ui:NMapScreen.Open	n/a	the map_select decision opens it
+cue	ui:NClickableControl.*	n/a	input (Lord's Parasol's top bar buttons)
+cue	ui:NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty	ported	deck_previews: the grid's columns
+cue	ui:NAbandonRunConfirmPopup.Create	ported	game_client: the abandon popup
+cue	ui:NCard.Create	n/a	the client makes its cards from the decisions
+#
+# ---- events: UI handlers of game events ----
+event	* -> NPingButton.*	n/a	multiplayer ping button
+event	* -> NReactionWheel.*	n/a	multiplayer reactions
+event	* -> NHandImageCollection.*	n/a	multiplayer hands
+event	* -> NMapDrawings.OnPlayerScreenChanged	n/a	multiplayer map drawings
+event	* -> NMapScreen.OnPlayerVote*	n/a	multiplayer votes
+event	* -> NEventLayout.OnPlayerVoteChanged	n/a	multiplayer votes
+event	* -> NTreasureRoom.RefreshVotes	n/a	multiplayer votes
+event	* -> NTreasureRoomRelicCollection.RefreshVotes	n/a	multiplayer votes
+event	* -> *.RemoteClientFailedToConnectToLocalHost	n/a	multiplayer
+event	* -> NCardPlayQueue.BeforeRemoteCardPlayResumedAfterPlayerChoice	n/a	multiplayer
+event	OnModDetected -> NGame.OnNewModDetected	n/a	mods
+event	Saved -> NSaveIndicator.SavedGame	ported	save.indicator hook -> saved cue: GAME_SAVED fades in and out in the top bar
+event	* -> NCreature.UpdateBounds	ported	engine/game/combat_screen.cpp (bounds at build and after scale changes)
+event	* -> NCreature.ShowCreatureHoverTips	open	hover tips of the focused creature refresh as its powers change (check the client's tips)
+event	* -> NPower.ShowPowerHoverTips	open	as NCreature.ShowCreatureHoverTips, for a focused power
+event	* -> NCreatureStateDisplay.OnCombatStateChanged	ported	the state display from each sync (refresh_state)
+event	* -> NCreatureStateDisplay.AnimateInBlock	ported	engine/game/combat_screen.cpp apply_state block (NHealthBar.AnimateInBlock)
+event	* -> NCreatureStateDisplay.OnBlockTrackingCreatureBlockChanged	ported	engine/game/combat_screen.cpp TrackBlockStatus
+event	* -> NCreatureStateDisplay.OnCreatureDied	n/a	mouse filter
+event	* -> NCreatureStateDisplay.OnCreatureRevived	n/a	mouse filter
+event	* -> NPower.OnOwnerDied	n/a	mouse filter
+event	* -> NPower.OnOwnerRevived	n/a	mouse filter
+event	* -> NPower.OnPowerRemoved	n/a	unsubscribes
+event	* -> NCreature.OnPowerApplied	n/a	subscribes to the power
+event	* -> NPowerContainer.OnPowerApplied	ported	engine/game/combat_screen.cpp make_powers (fades in a new power)
+event	* -> NPowerContainer.OnPowerRemoved	ported	engine/game/combat_screen.cpp make_powers
+event	* -> NEnergyCounter.*	ported	engine/game/combat_screen.cpp refresh_energy (label, dark orb, EnergyVfx restart on a gain)
+event	* -> NIntent.OnCombatStateChanged	ported	the intents from each sync
+event	* -> NOrbManager.OnCombatStateChanged	ported	the orbs from each sync (sync_orbs)
+event	* -> NPotionPopup.*	ported	engine/game/potion_menu.cpp (the use / discard options by the decision's rules)
+event	* -> NHandCardHolder.Flash	ported	engine/game/combat_screen.cpp card_flash
+event	* -> NCombatCardPile.AddCard	ported	engine/game/combat_screen.cpp land_on_pile (count and bump)
+event	* -> NCombatCardPile.RemoveCard	ported	engine/game/combat_screen.cpp refresh_counters (depart_)
+event	* -> NCard.OnAfflictionChanged	ported	the hand's card views from each sync
+event	* -> NCard.OnEnchantmentChanged	ported	the hand's card views from each sync
+event	* -> NCard.OnEnchantmentStatusChanged	ported	the hand's card views from each sync
+event	* -> NPlayerHand.OnCombatStateChanged	ported	the hand from each sync (playable glows)
+event	* -> NPlayerHand.OnPlayerActionsDisabledChanged	ported	the hand locks while actions run (hand_locked_until_)
+event	* -> NPlayerHand.OnPlayerUnendedTurn	n/a	un-ending the turn (multiplayer)
+event	* -> NPlayerHand.OnCombatEnded	ported	the hand clears at the combat's end
+event	* -> NPlayerHand.OnSelectModeSourceFinished	ported	engine/game/combat_screen.cpp hand selection
+event	* -> NTargetManager.OnCombatEnded	ported	targeting ends with the combat
+event	* -> NCombatRoom.RestrictControllerNavigation	ported	the client's pad focus
+event	CombatSetUp -> NCombatRoom.OnCombatSetUp	ported	engine/game/combat_screen.cpp build (UI, background)
+event	CombatWon -> NCombatUi.OnCombatWon	ported	rewards_ready (ShowRewards' wait)
+event	StarsChanged -> NStarCounter.OnStarsChanged	ported	StarCounterAnim, star_gain_vfx
+event	* -> NStarCounter.OnStarsChanged	open	star gain: star_gain_vfx, hsv flash, count lerp (SmoothDamp 0.1); a loss sets it at once
+event	PowerIncreased -> NCreature.OnPowerIncreased	ported	power_vfx cue (sound, debuff shake, the vfx flag)
+event	* -> NCreature.OnPowerIncreased	open	add the buff / debuff sound and AnimShake on a debuff to the power_vfx cue's playback
+event	PowerRemoved -> NCreature.OnPowerRemoved	ported	power_removed cue -> spawn_power_removed
+event	* -> NCreature.OnPowerRemoved	open	NPowerRemovedVfx ("wears off") on removal of a ShouldPlayVfx power
+event	* -> NCreature.OnPowerFlashed	ported	engine/game/combat_screen.cpp flash_power (NPowerFlashVfx)
+event	Flashed -> NPower.OnPowerFlashed	ported	power_flash cue -> power_row_flash
+event	* -> NPower.OnPowerFlashed	open	the power row icon's PowerFlash particles (with the flash cue)
+event	DisplayAmountChanged -> NPower.OnDisplayAmountChanged	ported	power amount change -> power_row_flash
+event	* -> NPower.OnDisplayAmountChanged	open	the power row icon's PowerFlash on a display amount change (needs a cue)
+event	PulsingStarted -> NPower.OnPulsingStarted	ported	power_pulse cue (pulsing_)
+event	* -> NPower.OnPulsingStarted	open	the power icon's pulse shader parameter (PowerModel.StartPulsing: needs a cue)
+event	PulsingStopped -> NPower.OnPulsingStopped	ported	power_pulse cue (pulsing_)
+event	* -> NPower.OnPulsingStopped	open	as OnPulsingStarted
+event	* -> NOrbVfx.OnPower*	open	orbs show the Focus state (UpdateFocusPowerState) from the player's powers
+event	* -> NOrbVfx.OnEvoke	open	check against engine activate_orb (evoke effect at the targets)
+event	* -> NOrbVfx.OnPassiveActivated	open	passive particles (and the focused ones with Focus)
+event	CombatSetUp -> NOrbManager.OnCombatSetup	ported	ui_event CombatSetUp: the orb slots from 0
+event	CombatSetUp -> NPotionContainer.OnCombatSetUp	ported	ui_event CombatSetUp: potion_shines_
+event	CombatSetUp -> NQueenRepyBgVfx.OnCombatSetUp	ported	combat_screen build: NQueenRepyBgVfx hidden when the run freed Repy (view.freed_repy)
+event	CombatStateChanged -> NCeremonialBeastBgVfx.UpdateState	ported	combat_screen update_beast_bg (ringing, progress, glow / skulls / flowers)
+event	CombatEnded -> NCombatUi.OnCombatEnded	ported	ui_event CombatEnded -> combat_ui_anim(false)
+event	CombatEnded -> NCreature.OnCombatEnded	ported	ui_event CombatEnded: intents fade, orbs to fading_orbs_
+event	AboutToSwitchToEnemyTurn -> NEndTurnButton.OnAboutToSwitchToEnemyTurn	ported	ui_event -> end_turn_state(0)
+event	PlayerEndedTurn -> NEndTurnButton.AfterPlayerEndedTurn	ported	ui_event -> end_turn_state(2)
+event	PlayerUnendedTurn -> NEndTurnButton.AfterPlayerUnendedTurn	n/a	multiplayer (a player taking back an ended turn)
+event	TurnStarted -> NEndTurnButton.OnTurnStarted	ported	ui_event -> end_turn_state(1)
+event	CombatStateChanged -> NEndTurnButton.OnCombatStateChanged	ported	refresh_end_glow at each state (GlowPulse when no card is playable)
+event	* -> NEndTurnButton.*	open	the end turn button: hides at the enemy turn, slides back in (Back Out 0.5 s), glows and pulses when no card is playable
+event	CardAddFinished -> NTopBarDeckButton.OnPileContentsChanged	ported	top_bar: the deck count's bump when it rises
+event	CardRemoveFinished -> NTopBarDeckButton.OnPileContentsChanged	ported	top_bar: the deck count's bump when it rises
+event	* -> NTopBarDeckButton.OnPileContentsChanged	open	the deck count's bump (1.5 -> 1, Expo Out 0.5 s) when it rises
+event	* -> NTopBarHp.UpdateHealth	ported	top bar HP from the decision (HpLerp at Neow)
+event	GoldChanged -> NTopBarGold.UpdateGold	ported	top_bar GoldCount (set_top_bar_gold), combat gold cues
+event	* -> NTopBarGold.UpdateGold	open	the gold popup (+N, counting down while the label counts up)
+event	* -> NRelicInventoryHolder.OnDisplayAmountChanged	ported	top bar relic counters from the decision (check ShowCounter)
+event	* -> NRelicInventoryHolder.OnRelicFlashed	ported	relic_flash
+event	StatusChanged -> NRelicInventoryHolder.OnStatusChanged	ported	top_bar relic_status / relic_wax / relic_melted
+event	* -> NRelicInventoryHolder.OnStatusChanged	open	relic status: Active pulses, Disabled greys (#808080) with is_used, wax, melted (RelicModel.UpdateTexture); needs the status in the decision
+event	* -> NSovereignBladeVfx.OnOwnerDied	ported	engine/game/sovereign_blade.cpp (the blade goes with its owner)
+event	* -> NCombatPileCardSelectScreen.UpdatePileContents	ported	engine/game/card_select_screen.cpp (rebuilt from each decision)
+event	* -> NCardPileScreen.OnPileContentsChanged	ported	engine/game/pile_screen.cpp (from the view_pile answer)
+event	* -> NDeckViewScreen.OnPileContentsChanged	ported	engine/game/pile_screen.cpp
+event	EntryUpdated -> NMerchantSlot.UpdateVisual	ported	engine/game/shop_screen.cpp (prices from each decision)
+event	GoldChanged -> NMerchantSlot.UpdateVisual	ported	engine/game/shop_screen.cpp (prices from each decision)
+event	PurchaseCompleted -> NMerchantCard.OnSuccessfulPurchase	ported	shop_screen purchased: the card to the deck (fly_to_deck)
+event	PurchaseCompleted -> NMerchantCardRemoval.OnSuccessfulPurchase	ported	the hand stays on the focused slot (point_hand)
+event	PurchaseCompleted -> NMerchantPotion.OnSuccessfulPurchase	ported	shop_screen purchased -> top_bar_acquire_from (the potion flies from its slot)
+event	PurchaseCompleted -> NMerchantRelic.OnSuccessfulPurchase	ported	shop_screen purchased -> top_bar_acquire_from (the relic flies from its slot)
+event	PurchaseCompleted -> NMerchantInventory.OnPurchaseCompleted	ported	shop_screen purchased: thank-yous; the next screen's purchaseSuccess line
+event	PurchaseFailed -> NMerchantSlot.OnPurchaseFailed	ported	shop_screen purchase_failed (wiggle, disappointment)
+event	PurchaseFailed -> NMerchantDialogue.ShowForPurchaseAttempt	ported	shop_screen say(purchaseFailureGold / purchaseFailureSpace)
+event	AddPotionFailed -> NPotionContainer.PlayAddFailedAnim	ported	potion_full cue -> top_bar_potions_full
+event	* -> NTopBar.MaxPotionsChanged	n/a	navigation
+event	* -> NTopBar.OnRelicsUpdated	n/a	navigation
+event	* -> NPotionContainer.OnRelicsUpdated	n/a	navigation
+event	* -> NPotionContainer.GrowPotionHolders	ported	top bar potion slots from the decision
+event	* -> NPotionContainer.Discard	ported	engine/game/top_bar.cpp (potions from the player, PotionModel discard)
+event	* -> NPotionContainer.OnPotionProcured	ported	engine/game/top_bar.cpp
+event	* -> NPotionContainer.OnUsedPotionRemoved	ported	engine/game/top_bar.cpp
+event	* -> NRelicInventory.OnRelicObtained	ported	engine/game/top_bar.cpp (AnimateRelic for new relics)
+event	* -> NRelicInventory.OnRelicRemoved	ported	engine/game/top_bar.cpp (from the player's relics)
+event	* -> NCrystalSphere*	ported	engine/game/crystal_sphere_screen.cpp
+event	BeforeChosen -> NEventRoom.BeforeOptionChosen	ported	options disabled while the choice runs (the client waits for the answer)
+event	EnteringEventCombat -> NEventRoom.OnEnteringEventCombat	ported	engine/game/event_screen.cpp (combat layout)
+event	StateChanged -> NEventRoom.RefreshEventState	ported	engine/game/event_screen.cpp (description and options from each decision)
+event	* -> NRestSiteRoom.*	n/a	other players' rest site choices (multiplayer)
+event	RewardsSkippedDuringRoomExit -> NRewardsScreen.BeforeRoomExit	n/a	the screen closes with the room
+event	RelicsAwarded -> NTreasureRoomRelicCollection.OnRelicsAwarded	ported	engine/game/treasure_screen.cpp
+event	* -> NTopBarBossIcon.*	ported	engine/game/top_bar.cpp (boss icons from the context)
+event	* -> NTopBarFloorIcon.UpdateIcon	ported	engine/game/top_bar.cpp
+event	* -> NTopBarRoomIcon.UpdateIcon	ported	engine/game/top_bar.cpp room_icon
+event	ActionEnqueued -> NCardPlayQueue.OnActionEnqueued	ported	engine/game/combat_screen.cpp (the local play queue)
+event	NodeMarkedChanged -> NNormalMapPoint.RefreshMarkedIconVisibility	ported	map_screen QuestIcon from the point's quest
+#
+# ---- TestMode reads ----
+testmode	CombatManager.Pause	n/a	the pause menu pauses the client (the logic waits for commands)
+testmode	CombatManager.Unpause	n/a	as Pause
+testmode	CombatManager.WaitForUnpause	n/a	as Pause
+testmode	ActionExecutor.WaitForUnpause	n/a	as Pause
+testmode	CombatState.GodotTimerTask	n/a	timers (the logic's Sched)
+testmode	CombatStateTracker.NotifyCombatStateChanged	n/a	the UI's state-changed notifications (the client syncs from each decision)
+testmode	CardCmd.PreviewInternal	ported	deck.preview / deck.preview_add hooks; engine/game/deck_previews.cpp
+testmode	CardPileCmd.AddDuringManualCardPlay	ported	card.pile_tween and the play pile (engine/game/combat_screen.cpp)
+testmode	CardPileCmd.GetTweenForCardsChangingPiles	ported	card.pile_tween (card_create, card_fly)
+testmode	CardSelectCmd.Reset	n/a	a warning
+testmode	CreatureCmd.Kill	ported	run.ended; the game over screen and its music (engine/game/game_over_screen.cpp)
+testmode	ForgeCmd.PreviewSovereignBlade	ported	forge.preview hook -> forge_preview cue: smith sparks on the hand's blades, the others previewed to their piles (silent)
+testmode	MapCmd.SetBossEncounter	ported	the top bar and map read the boss from each decision's context
+testmode	VfxCmd.GetSideCenter	ported	vfx.side_center (MechaKnight); the bestiary's
+testmode	VfxCmd.GetSideCenterFloor	ported	vfx.side_center_floor (End of Days): eN@side_floor, resolved by the client
+testmode	VfxCmd.PlayNonCombatVfx	ported	vfx.non_combat redirect -> room_cues
+testmode	Creature.CreateVisuals	n/a	the client builds the creatures' visuals
+testmode	MerchantPotionEntry.CalcCost	ported	testmode.game_flow (price variance)
+testmode	RestSiteOption.Generate	n/a	a test override
+testmode	ActionExecutor.ExecuteActions	n/a	action queue
+testmode	DiscardPotionGameAction.CancelAction	n/a	cancelling a discard (the client asks before it sends)
+testmode	UsePotionAction.CancelAction	n/a	as DiscardPotionGameAction.CancelAction
+testmode	PlayCardAction.CancelAction	n/a	cancelling a queued play (the client's queue)
+testmode	GameAction.Execute	n/a	error handling
+testmode	MoveToMapCoordAction.ExecuteAction	ported	map_screen begin_travel: wipe_map, NMapNodeSelectVfx, the drawn circle
+testmode	EventModel.GetAssetPaths	n/a	preloading
+testmode	MonsterModel.PerformMove	n/a	logging
+testmode	DecimillipedeSegment.AfterDeath	ported	combat_screen segment_phobia: the shriveled phobia texture while down
+testmode	ToughEgg.AfterAddedToRoom	n/a	HatchPos: nothing in the game sets it
+testmode	FoulPotion.ShowPotionVfx	ported	foul_potion cue: vfx_slime_impact at the merchant button (shop_screen)
+testmode	RollingBoulderPower.AfterPlayerTurnStart	ported	rolling_boulder.turn_start redirect (PresentationHooks) and combat_vfx RollingBoulder
+testmode	SandpitPower.AfterPowerAmountChanged	ported	testmode.presentation.is_on
+testmode	CallingBell.GenerateRewards	ported	testmode.game_flow
+testmode	Cauldron.GenerateRewards	ported	testmode.game_flow
+testmode	MerchantRoom.Exit	ported	testmode.game_flow
+testmode	LargeCapsule.Get*ForCharacter	n/a	the Deprived test character only
+testmode	ScrollBoxes.GetCardPool	n/a	the Deprived test character only
+testmode	PotionReward.CreateIcon	n/a	the client draws the rewards
+testmode	Reward.CreateIcon	n/a	the client draws the rewards
+testmode	RewardsSet.Offer	ported	logic/Spire.Logic/Rewards.cs
+testmode	MapRoom.EnterInternal	ported	engine/game/map_screen.cpp
+testmode	RunManager.ClearScreens	n/a	the client's screen stack
+testmode	RunManager.FadeIn	ported	the client's room transitions (engine/game/game_client.cpp transition_)
+testmode	RunManager.FadeOut	ported	as FadeIn
+testmode	RunManager.ReturnToMainMenuWithError	n/a	error handling
+#
+# ---- godot: game methods driving Godot objects ----
+godot	CardCmd.PreviewInternal	ported	deck.preview hooks; engine/game/deck_previews.cpp
+godot	CardCmd.Transform	ported	deck.transform.begin; engine/game/deck_previews.cpp (in combat: check the hand's card transform)
+godot	CardPileCmd.*	ported	card.pile_tween, card.shuffle, card.remove_from_combat, deck.remove; engine/game/combat_screen.cpp, deck_previews.cpp
+godot	Cmd.Wait	ported	the logic's Steps waits
+godot	CreatureCmd.Escape	ported	creature.escape
+godot	CreatureCmd.Heal	ported	testmode.presentation.is_off (the heal cross)
+godot	ForgeCmd.PlayCombatRoomForgeVfx	ported	blade.forge_vfx
+godot	OstyCmd.Summon	ported	osty.fade_in
+godot	VfxCmd.PlayFullScreenInCombat	ported	vfx.full_screen
+godot	VfxCmd.PlayVfx	ported	vfx.at_position
+godot	VfxCmd.PlayNonCombatVfx	ported	vfx.non_combat redirect -> room_cues
+godot	Creature.SetNodeVisible	ported	node_visible cue
+godot	KindleRestSiteOption.PlayKindleVfx	ported	engine/game/rest_site_screen.cpp
+godot	HoverTip.GetHoverTipAlignment	ported	engine/game/combat_screen.cpp hover tips
+godot	ActModel.CreateRestSiteBackground	ported	engine/game/rest_site_screen.cpp (the act's background)
+godot	AfflictionModel.CreateOverlay	open	check: an affliction's overlay on its card (card_view)
+godot	CardModel.CreateOverlay	open	check: a card's overlay (card_view)
+godot	CardModel.PlayPowerCardFlyVfx	ported	power_fly cue (NCardFlyPowerVfx)
+godot	FiendFire.OnPlay	ported	fiend_fire.on_play + the ui hook's scale per fire
+godot	SovereignBlade.GetVfxNode	ported	blade.attack_node
+godot	CharacterModel.CreateVisuals	n/a	the client builds the visuals
+godot	CharacterModel.get_Icon	n/a	the client's character icons
+godot	EncounterModel.CreateScene	ported	combat_screen encounter_slots_ (scenes/encounters/<id>, slot markers)
+godot	FabricatorNormal.SetBotFallPosition	ported	bot_fall cues
+godot	EventModel.CreateVfx	ported	engine/game/event_screen.cpp (the event's vfx from its portrait cue)
+godot	DenseVegetation.TrudgeOn	ported	NEventRoom stand-in + vfx.non_combat -> room_cues VfxCmd.PlayNonCombatVfx (random rotation)
+godot	PunchOff.PunchEachOther	ported	engine/game/event_screen.h
+godot	Trial.AddVfxAnchoredToPortrait	ported	event.trial_portrait
+godot	MonsterModel.CreateFallbackVisuals	n/a	the client builds the visuals
+godot	MonsterModel.CreateVisuals	n/a	the client builds the visuals
+godot	BowlbugEgg.SetupSkins	ported	SpineRecorder: the cocoon's ops with node CocoonSlotNode/Cocoon (setup_creature_spine)
+godot	*.SpitMove	ported	aim.* (PresentationHooks.cs)
+godot	*.SlashMove	ported	aim.*
+godot	*.BoomerangMove	ported	aim.*
+godot	*.StickyShotMove	ported	aim.*
+godot	*.MagicBombMove	ported	aim.*
+godot	*.RolloutMove	ported	aim.*
+godot	*.ThieveryMove	ported	aim.*
+godot	Tunneler.BelowMove	ported	aim.tunneler.below
+godot	FuzzyWurmCrawler.AcidGoop	ported	aim.fuzzy_wurm_crawler.acid_goop
+godot	Crusher.AfterAddedToRoom	n/a	Background.SetVisible(true): the crab is visible from its scene; its anims are kaiser_crab_call
+godot	Crusher.get_Background	n/a	the crab's calls are kaiser_crab_call
+godot	Crusher.*	open	check: the Kaiser Crab background's arms (Background.SetVisible) against kaiser_crab_call
+godot	Rocket.AfterAddedToRoom	n/a	as Crusher
+godot	Rocket.get_Background	n/a	as Crusher
+godot	Rocket.*	open	as Crusher
+godot	DecimillipedeSegment.AnimSegmentsAttack	ported	vfx.scene_at_screen
+godot	DecimillipedeSegment.ChangePhobiaModeTexture	ported	combat_screen segment_phobia (death / revive)
+godot	Flyconid.*	ported	testmode.presentation.is_off
+godot	LagavulinMatriarch.Sleep	open	check: NSleepingVfx at %SleepVfxPos (the special node) against the client's sleeping effect
+godot	SlumberingBeetle.AfterAddedToRoom	open	as LagavulinMatriarch.Sleep (and its sleep loop)
+godot	TestSubject.SetColor	ported	test_subject.set_color -> CanvasItem.SetSelfModulate on %CanvasGroup
+godot	TorchHeadAmalgam.OnDieToDoom	ported	torch_head.die_to_doom
+godot	TorchHeadAmalgam.SoulBeamMove	ported	aim.torch_head_amalgam.soul_beam
+godot	ToughEgg.AfterAddedToRoom	n/a	HatchPos: nothing in the game sets it
+godot	Vantom.ScaleTo	ported	vantom.scale_to
+godot	OrbModel.CreateSprite	n/a	the client builds the orbs
+godot	FoulPotion.ShowPotionVfx	ported	foul_potion cue: vfx_slime_impact at the merchant button (shop_screen)
+godot	DoomPower.PlayVfx	ported	DoomPower's cues (NDoomVfx, overlay, the waits)
+godot	DoomPower.StartDoomAnim	ported	AnimDisableUi, the hurt frame frozen (check)
+godot	ReattachPower.DoFadeOutOnAllSegments	ported	NMonsterDeathVfx.Create list -> spawn_monster_death_group (captured: work/cap69/segments)
+godot	RollingBoulderPower.AfterPlayerTurnStart	ported	rolling_boulder.turn_start redirect
+godot	SandpitPower.*	ported	sandpit.* hooks (see the testmode item for AfterPowerAmountChanged)
+godot	SurroundedPower.FlipScale	ported	surrounded.face
+godot	RelicModel.UpdateTexture	ported	top_bar relic status (pulse, is_used, wax, melted)
+godot	RelicReward.CreateIcon	open	check: the relic reward icon's material (outline shader?)
+godot	Reward.CreateIcon	n/a	the client draws the rewards
+#
+# ---- sounds and scenes of the UI's own screens (settled screen by screen) ----
+sound	NCharacterSelectButton.AnimateUnlock *	open	screen pass (character select): a character's unlock animation and its sounds
+sound	NFakeMerchant.ShowWelcomeDialogue event:/sfx/npcs/reverse_merchant/reverse_merchant_laugh	ported	shop_screen (fake_merchant): the laugh and a welcome line 0.75 s in
+sound	NFakeMerchant.ShowWelcomeDialogue *	open	screen pass (Fake Merchant event): the reverse merchant's laugh with its welcome line
+sound	NMapPointHistoryEntry.*	open	screen pass (run history): the map history entries animate in with their sounds
+sound	NMapScreen.OnClearMapDrawingButtonPressed *	open	screen pass (map): map drawing with the pad (NControllerMapDrawingInput) and its erase sound
+sound	NPeekButton.Wiggle deny.mp3	open	screen pass (card selection): the peek button's wiggle and deny sound
+sound	NSfxVolumeSlider.OnDragEnded dagger_throw.mp3	open	screen pass (settings): the SFX slider plays dagger_throw.mp3 when released
+sound	NTickbox.ForceToggleTick *	open	screen pass (settings and others): tickboxes' on / off sounds
+scene	NBounceSparkVfx *	n/a	no game code creates it
+scene	NGaseousScreenVfx *	n/a	no game code creates it
+scene	NHeavyBluntVfx *	n/a	no game code creates it
+scene	NScreamVfx *	n/a	no game code creates it
+scene	NSpookyScreamVfx *	n/a	no game code creates it
+scene	NStarryImpactVfx *	n/a	no game code creates it
+scene	NEpochSlotParticle *	n/a	no game code creates it
+scene	NPatchNotesScreen *	n/a	the PC build's patch notes
+scene	NEarlyAccessDisclaimer *	n/a	the PC early access disclaimer
+scene	NCard res://scenes/cards/card_canvas_group_*	open	check: the card's canvas group blur materials (when NCard uses them; card_view)
+scene	NCardFlyVfx vfx/vfx_card_fly	open	check: the client's card flights against vfx_card_fly (its trail and particles)
+scene	NControllerMapDrawingInput *	open	screen pass (map): drawing on the map with the pad
+scene	N*CustomRun* *	open	screen pass (main menu): the custom run mode and its modifiers (check whether the client offers it)
+scene	NRunModifierTickbox *	open	as the custom run screens
+scene	NTopBarModifier *	open	as the custom run screens (a run's modifiers in the top bar; daily runs too)
+scene	NEpochHighlightVfx *	open	screen pass (timeline): an epoch slot's highlight
+scene	NTimelineScreen *	open	screen pass (timeline): place_epoch_sparks
+scene	NGameOverScreen *	open	screen pass (game over): the run history from the game over screen
+scene	NHoverTip*	open	screen pass (hover tips): the tip sets and the card tips (a card a tip names)
+scene	NSettingsScreenPopup *	open	screen pass (settings): the reset tutorials popup
+scene	NTopBarBossIcon res://scenes/ui/top_bar/second_boss_icon.tscn	ported	top_bar: the second boss icon at (30, 22), tinted (boss_tint); only the second's at the first boss
+scene	NTopBarBossIcon *	open	check: the second boss icon (two bosses in an act)
+scene	NVerticalPopup *	ported	engine/game/confirm_popup.cpp (abandon run; the tutorials FTUE: check)

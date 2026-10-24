@@ -53,6 +53,35 @@ public partial class RunDriver
     private bool _turnStarted;
     private bool _combatEnded;
     private static readonly LocLookup _loc = new();
+
+    /// <summary>UnplayableReasonExtensions.GetPlayerDialogueLine (internal to
+    /// the game): what the player says when a card that cannot be played is
+    /// picked (NControllerCardPlay.Start's thought bubble).</summary>
+    private static LocString? UnplayableLine(UnplayableReason reason, AbstractModel? preventer)
+    {
+        if (reason.HasFlag(UnplayableReason.NoLivingAllies)) return new LocString("combat_messages", "NO_LIVING_ALLIES");
+        if (reason.HasFlag(UnplayableReason.EnergyCostTooHigh)) return new LocString("combat_messages", "NOT_ENOUGH_ENERGY");
+        if (reason.HasFlag(UnplayableReason.StarCostTooHigh)) return new LocString("combat_messages", "NOT_ENOUGH_STARS");
+        if (reason.HasFlag(UnplayableReason.BlockedByHook))
+        {
+            if (preventer == null) return new LocString("combat_messages", "UNPLAYABLE");
+            string? title = preventer switch
+            {
+                CardModel card => card.Title,
+                RelicModel relic => relic.Title.GetFormattedText(),
+                PowerModel power => power.Title.GetFormattedText(),
+                EnchantmentModel enchantment => enchantment.Title.GetFormattedText(),
+                AfflictionModel affliction => affliction.Title.GetFormattedText(),
+                _ => null,
+            };
+            var line = new LocString("combat_messages", "BLOCKED_BY_HOOK");
+            line.Add("BlockingHook", title ?? "<UNKNOWN>");
+            return line;
+        }
+        if (reason.HasFlag(UnplayableReason.HasUnplayableKeyword) || reason.HasFlag(UnplayableReason.BlockedByCardLogic))
+            return new LocString("combat_messages", "UNPLAYABLE");
+        return null;
+    }
     private bool _eventOptionChosen;
     private int _lastEventOptionCount;
 
@@ -267,6 +296,17 @@ public partial class RunDriver
                         idx++;
                     }
                 }
+            }
+
+            // Coverage: the fight's living enemies at most this much HP, so a
+            // fight ends in their deaths through the game's own damage (the
+            // bosses' last phases, their AfterDeath and music) instead of
+            // random play outlasting nothing.
+            if (args.TryGetValue("enemy_hp", out var ehpEl) && player.Creature?.CombatState != null)
+            {
+                int cap = ehpEl.GetInt32();
+                foreach (var e in player.Creature.CombatState.Enemies)
+                    if (e.IsAlive && e.CurrentHp > cap) SetField(e, "_currentHp", cap);
             }
 
             Log($"SetPlayer: hp={player.Creature?.CurrentHp} gold={player.Gold} relics={player.Relics.Count} deck={player.Deck?.Cards?.Count}");
@@ -1078,13 +1118,20 @@ public partial class RunDriver
 
     private Dictionary<string, object?> DoBuyRelic(Player player, Dictionary<string, object?>? args)
     {
-        if (_runState?.CurrentRoom is not MerchantRoom merchantRoom)
+        // a shop's inventory, or the Fake Merchant's
+        MerchantInventory? shopInv = _runState?.CurrentRoom switch
+        {
+            MerchantRoom mr => mr.GetLocalInventory(),
+            EventRoom when RunManager.Instance.EventSynchronizer?.GetLocalEvent() is MegaCrit.Sts2.Core.Models.Events.FakeMerchant fm => fm.Inventory,
+            _ => null,
+        };
+        if (shopInv == null)
             return Error("Not in a shop");
         if (args == null || !args.ContainsKey("relic_index"))
             return Error("buy_relic requires 'relic_index'");
 
         var idx = Convert.ToInt32(args["relic_index"]);
-        var entries = merchantRoom.GetLocalInventory().RelicEntries;
+        var entries = shopInv.RelicEntries;
         if (idx < 0 || idx >= entries.Count) return Error($"Invalid relic index {idx}");
 
         var entry = entries[idx];
@@ -1096,7 +1143,7 @@ public partial class RunDriver
             // The pickup effect can open a card_select (e.g. KIFUDA → enchant up to 3 with
             // Adroit, #80). The purchase runs until it awaits the selector's TCS; it then
             // resumes when select_cards completes that TCS.
-            var inv = merchantRoom.GetLocalInventory();
+            var inv = shopInv;
             // The entry forgets its model once bought; name it first.
             var relicName = entry.Model?.GetType().Name ?? "?";
             var cost = entry.Cost;
@@ -1264,8 +1311,10 @@ public partial class RunDriver
         var potionTargetType = potion.TargetType;
 
         // Self-targeting potions (Flex, Fortifier, etc.) ALWAYS target the player
-        // regardless of any target_index the caller provides
-        if (potionTargetType == TargetType.Self || potionTargetType == TargetType.TargetedNoCreature)
+        // regardless of any target_index the caller provides. TargetedNoCreature
+        // (Foul Potion thrown at a merchant) has none: PotionModel.EnqueueManualUse
+        // passes null, and UsePotionAction cancels a creature as invalid.
+        if (potionTargetType == TargetType.Self)
         {
             target = player.Creature;
         }
@@ -1772,14 +1821,28 @@ public partial class RunDriver
         if (map == null) return null;
         try
         {
-            Dictionary<string, object?> Point(MapPoint p) => new()
+            Dictionary<string, object?> Point(MapPoint p)
             {
-                ["col"] = (int)p.coord.col,
-                ["row"] = (int)p.coord.row,
-                ["type"] = p.PointType.ToString(),
-                ["children"] = (p.Children ?? Enumerable.Empty<MapPoint>())
-                    .Select(c => new List<int> { (int)c.coord.col, (int)c.coord.row }).ToList(),
-            };
+                var d = new Dictionary<string, object?>
+                {
+                    ["col"] = (int)p.coord.col,
+                    ["row"] = (int)p.coord.row,
+                    ["type"] = p.PointType.ToString(),
+                    ["children"] = (p.Children ?? Enumerable.Empty<MapPoint>())
+                        .Select(c => new List<int> { (int)c.coord.col, (int)c.coord.row }).ToList(),
+                };
+                // NNormalMapPoint.RefreshMarkedIconVisibility: Spoils Map, Fur Coat
+                if (p.Quests.Count > 0) d["quest"] = true;
+                if (_runState != null)
+                {
+                    // NMapCircleVfx._Ready: Rng(seed + row + 131 * row): the
+                    // circle's rotation, then its scale
+                    var crng = new MegaCrit.Sts2.Core.Random.Rng((ulong)((long)_runState.Rng.Seed + p.coord.row + 131L * p.coord.row));
+                    float rot = crng.NextFloat(360f);
+                    d["circle"] = new[] { rot, crng.NextFloat(0.85f, 0.9f) };
+                }
+                return d;
+            }
             var cur = _runState?.CurrentMapCoord;
             // NMapScreen.SetMap's jitter: the run seed's "map_jitter_<act>"
             // stream, two floats per point in GetAllMapPoints order.
@@ -2172,6 +2235,54 @@ public partial class RunDriver
     // NIntent.UpdateVisuals: the animation (IntentAnimData), the particle
     // texture and the value label.
     [System.Diagnostics.CodeAnalysis.DynamicDependency("get_SpritePath", typeof(MegaCrit.Sts2.Core.MonsterMoves.Intents.AbstractIntent))]
+    /// <summary>A monster's intents as the state shows them (type, the
+    /// intent's look, an attack's damage against the players).</summary>
+    internal static List<Dictionary<string, object?>> IntentsView(Creature e, List<Creature>? playerCreatures)
+    {
+        var intents = new List<Dictionary<string, object?>>();
+        try
+        {
+            if (e.Monster?.NextMove?.Intents != null)
+            {
+                foreach (var intent in e.Monster.NextMove.Intents)
+                {
+                    var intentInfo = new Dictionary<string, object?>
+                    {
+                        ["type"] = intent.IntentType.ToString(),
+                    };
+                    if (playerCreatures != null) AddIntentView(intentInfo, intent, playerCreatures, e);
+                    // Get damage for attack intents
+                    if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent atk && playerCreatures != null)
+                    {
+                        try
+                        {
+                            // For multi-hit attacks, expose per-hit `damage` (matching the
+                            // game's intent description, which pairs GetSingleDamage with
+                            // Repeat) plus an explicit `total_damage`. Reporting the total in
+                            // `damage` while also reporting `hits` let clients compute
+                            // damage*hits and double-count incoming damage (#67).
+                            var hits = atk.Repeats;
+                            if (hits > 1)
+                            {
+                                intentInfo["damage"] = atk.GetSingleDamage(playerCreatures, e);
+                                intentInfo["hits"] = hits;
+                                intentInfo["total_damage"] = atk.GetTotalDamage(playerCreatures, e);
+                            }
+                            else
+                            {
+                                intentInfo["damage"] = atk.GetTotalDamage(playerCreatures, e);
+                            }
+                        }
+                        catch { }
+                    }
+                    intents.Add(intentInfo);
+                }
+            }
+        }
+        catch { }
+        return intents;
+    }
+
     private static void AddIntentView(Dictionary<string, object?> d, MegaCrit.Sts2.Core.MonsterMoves.Intents.AbstractIntent intent,
                                       IEnumerable<Creature> targets, Creature owner)
     {
@@ -2240,6 +2351,9 @@ public partial class RunDriver
                 ["has_scene"] = enc.HasScene,
                 ["fully_center_players"] = enc.FullyCenterPlayers,
                 ["background"] = bg,
+                // NQueenRepyBgVfx: Repy on the Queen's background unless the
+                // run freed him (War Historian Repy)
+                ["freed_repy"] = _runState?.ExtraFields.FreedRepy ?? false,
             };
             return _combatView;
         }
@@ -2375,6 +2489,18 @@ public partial class RunDriver
                 if (pcs != null && pcs.Stars < starCost)
                     cardInfo["can_play"] = false;
             }
+            // NControllerCardPlay.Start on a card that cannot be played: the
+            // player's thought bubble with the reason (GetPlayerDialogueLine)
+            try
+            {
+                if (!c.CanPlay(out var why, out var preventer))
+                {
+                    cardInfo["unplayable_reason"] = why.ToString();
+                    if (UnplayableLine(why, preventer) is { } line)
+                        cardInfo["unplayable_line"] = line.GetFormattedText();
+                }
+            }
+            catch { }
             var kws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
             if (kws?.Count > 0) cardInfo["keywords"] = kws;
             if (c.Enchantment != null)
@@ -2399,48 +2525,7 @@ public partial class RunDriver
             .Where(e => e != null && e.IsAlive)
             .Select((e, i) =>
             {
-                // Extract detailed intent info
-                var intents = new List<Dictionary<string, object?>>();
-                try
-                {
-                    if (e.Monster?.NextMove?.Intents != null)
-                    {
-                        foreach (var intent in e.Monster.NextMove.Intents)
-                        {
-                            var intentInfo = new Dictionary<string, object?>
-                            {
-                                ["type"] = intent.IntentType.ToString(),
-                            };
-                            if (playerCreatures != null) AddIntentView(intentInfo, intent, playerCreatures, e);
-                            // Get damage for attack intents
-                            if (intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent atk && playerCreatures != null)
-                            {
-                                try
-                                {
-                                    // For multi-hit attacks, expose per-hit `damage` (matching the
-                                    // game's intent description, which pairs GetSingleDamage with
-                                    // Repeat) plus an explicit `total_damage`. Reporting the total in
-                                    // `damage` while also reporting `hits` let clients compute
-                                    // damage*hits and double-count incoming damage (#67).
-                                    var hits = atk.Repeats;
-                                    if (hits > 1)
-                                    {
-                                        intentInfo["damage"] = atk.GetSingleDamage(playerCreatures, e);
-                                        intentInfo["hits"] = hits;
-                                        intentInfo["total_damage"] = atk.GetTotalDamage(playerCreatures, e);
-                                    }
-                                    else
-                                    {
-                                        intentInfo["damage"] = atk.GetTotalDamage(playerCreatures, e);
-                                    }
-                                }
-                                catch { }
-                            }
-                            intents.Add(intentInfo);
-                        }
-                    }
-                }
-                catch { }
+                var intents = IntentsView(e, playerCreatures);
 
                 // Enemy powers
                 var ePowers = e.Powers?.Select(PowerView).ToList();
@@ -2685,6 +2770,14 @@ public partial class RunDriver
         // instead and let DetectDecisionPoint show the current options for the next choice.
         if (_eventOptionChosen) _eventOptionChosen = false;
 
+        // FakeMerchant (EventLayoutType.Custom): no options, so finished from
+        // the start (SetEventState), but its room (NFakeMerchant) stays a
+        // merchant's, its six relics for sale, until the player leaves or
+        // throws a Foul Potion (its fight)
+        if (localEvent is MegaCrit.Sts2.Core.Models.Events.FakeMerchant fakeMerchant && fakeMerchant.Inventory != null &&
+            !fakeMerchant.StartedFight)
+            return FakeMerchantState(fakeMerchant, _runState!.Players[0]);
+
         // If event is finished, proceed to map
         if (localEvent == null || localEvent.IsFinished)
         {
@@ -2708,6 +2801,8 @@ public partial class RunDriver
         if (currentOptions == null || currentOptions.Count == 0)
         {
             Log($"Event {localEvent.GetType().Name} has no options, auto-skipping");
+            // the audit lists what the client never got to show
+            Ledger.Skip("event_without_options", localEvent.GetType().Name);
             try { Sched.Run(() => RunManager.Instance.EnterRoom(new MapRoom())); Sched.Pump(); }
             catch { }
             return MapSelectState();
@@ -3084,7 +3179,7 @@ public partial class RunDriver
     private Dictionary<string, object?> ShopState(MerchantRoom merchantRoom, Player player)
     {
         var inv = merchantRoom.GetLocalInventory();
-        if (inv == null) { ForceToMap(); return MapSelectState(); }
+        if (inv == null) { Ledger.Skip("shop_without_inventory", ""); ForceToMap(); return MapSelectState(); }
 
         int characterCards = inv.CharacterCardEntries.Count;
         var cards = inv.CharacterCardEntries.Concat(inv.ColorlessCardEntries)
@@ -3168,6 +3263,40 @@ public partial class RunDriver
             ["potions"] = potions,
             ["card_removal_cost"] = removal?.Cost,
             ["card_removal_used"] = removal?.Used ?? true,
+            ["player"] = PlayerSummary(player),
+        };
+    }
+
+    /// <summary>The Fake Merchant's room (NFakeMerchant): a shop of its
+    /// inventory's relics (50 gold each); the client shows its own room.
+    /// Its node stands in for the UI's (EventModel.Node), so a Foul Potion
+    /// can be thrown at it (its fight).</summary>
+    private Dictionary<string, object?> FakeMerchantState(MegaCrit.Sts2.Core.Models.Events.FakeMerchant ev, Player player)
+    {
+        if (ev.Node == null)
+            typeof(EventModel).GetProperty("Node")?.SetValue(ev, StandIns.FakeMerchantNode());
+        var relics = ev.Inventory.RelicEntries.Select((e, i) => new Dictionary<string, object?>
+        {
+            ["index"] = i,
+            ["id"] = e.Model?.Id.Entry,
+            ["icon_base"] = RelicIconBase(e.Model),
+            ["name"] = _loc.Relic(e.Model?.Id.Entry ?? "?"),
+            ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
+            ["cost"] = e.Cost,
+            ["is_stocked"] = e.IsStocked,
+            ["inspect"] = e.Model != null ? InspectRelicView(e.Model, SaveManager.Instance.GenerateUnlockStateFromProgress().Relics.ToHashSet()) : null,
+        }).ToList();
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "decision",
+            ["decision"] = "shop",
+            ["context"] = RunContext(),
+            ["fake_merchant"] = true,
+            ["cards"] = new List<object?>(),
+            ["relics"] = relics,
+            ["potions"] = new List<object?>(),
+            ["card_removal_cost"] = null,
+            ["card_removal_used"] = true,
             ["player"] = PlayerSummary(player),
         };
     }
@@ -3350,7 +3479,7 @@ public partial class RunDriver
             {
                 var vars = new Dictionary<string, object?>();
                 try { foreach (var dv in r.DynamicVars.Values) vars[dv.Name] = (int)dv.BaseValue; } catch { }
-                return new Dictionary<string, object?>
+                var rd = new Dictionary<string, object?>
                 {
                     ["id"] = r.Id.Entry,
                     ["icon_base"] = RelicIconBase(r),
@@ -3359,6 +3488,17 @@ public partial class RunDriver
                     ["vars"] = vars.Count > 0 ? vars : null,
                     ["tips"] = Tips(() => r.HoverTips),
                 };
+                // NRelicInventoryHolder: the counter (RefreshAmount) and the
+                // status (RefreshStatus, RelicModel.UpdateTexture)
+                try
+                {
+                    if (r.ShowCounter) rd["relic_amount"] = r.DisplayAmount;
+                    rd["relic_status"] = r.Status.ToString();
+                    if (r.IsWax) rd["relic_wax"] = true;
+                    if (r.IsMelted) rd["relic_melted"] = true;
+                }
+                catch { }
+                return rd;
             }).ToList(),
             ["potions"] = player.Potions?.Select((p, i) =>
             {
@@ -3458,6 +3598,13 @@ public partial class RunDriver
             ctx["second_boss"] = act?.SecondBossEncounter?.Id.Entry;
             ctx["at_second_boss"] = point != null && point == _runState.Map?.SecondBossMapPoint;
             ctx["at_boss"] = point != null && point == _runState.Map?.BossMapPoint;
+            // NTopBarBossIcon.RefreshSecondBossIconColor: the act's traveled
+            // colour at either boss, its untraveled one elsewhere
+            if (act?.SecondBossEncounter != null)
+            {
+                var tint = (bool)ctx["at_boss"]! || (bool)ctx["at_second_boss"]! ? act.MapTraveledColor : act.MapUntraveledColor;
+                ctx["boss_tint"] = new[] { tint.R, tint.G, tint.B };
+            }
         }
         catch { }
 
@@ -3865,6 +4012,8 @@ internal static class CreatureViewExtensions
                 d["death_fade"] = c.Monster.ShouldFadeAfterDeath;
                 d["death_padding"] = new[] { c.Monster.ExtraDeathVfxPadding.X, c.Monster.ExtraDeathVfxPadding.Y };
                 d["death_anim_length"] = c.Monster.DeathAnimLengthOverride;
+                // NCeremonialBeastBgVfx.UpdateVfxAndMusic: the beast's phase
+                if (c.Monster is MegaCrit.Sts2.Core.Models.Monsters.CeremonialBeast beast) d["second_phase"] = beast.IsInSecondPhase;
                 // NCreatureVisuals.SetUpSkin / UpdatePhobiaMode
                 var ops = SpineRecorder.Ops(c);
                 if (ops.Count > 0) d["spine_ops"] = ops;

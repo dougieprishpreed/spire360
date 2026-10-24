@@ -53,6 +53,12 @@ public:
      * "kind name" -> count. */
     std::map<std::string, int> unsupported;
     void note(const std::string& what) { ++unsupported[what]; }
+    /* The scene files loaded so far (instanced, or instanced inside one),
+     * for spire_gaps' scenes the client never shows. */
+    void loaded_scenes(std::vector<std::string>& out) const {
+        for (std::map<std::string, SceneFile*>::const_iterator it = files_.begin(); it != files_.end(); ++it)
+            if (it->second) out.push_back(it->first);
+    }
 
 private:
     Resource* build(const std::string& cls, const Json& props, const SceneFile* ctx, const std::string& path);

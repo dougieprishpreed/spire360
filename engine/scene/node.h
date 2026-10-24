@@ -29,7 +29,11 @@ struct PropCtx {
 
 /* NF_PROCESS: the class has a process() of its own (the tree calls no
  * other node's). */
-enum NodeFlags { NF_CANVAS_ITEM = 1, NF_CONTROL = 2, NF_NODE2D = 4, NF_CONTAINER = 8, NF_CANVAS_LAYER = 16, NF_PROCESS = 32 };
+/* NF_SCRIPT_UNPORTED: its script has no registered port; the tree checks
+ * at its first process whether code gave it a behavior since
+ * (count_missing_scripts) */
+enum NodeFlags { NF_CANVAS_ITEM = 1, NF_CONTROL = 2, NF_NODE2D = 4, NF_CONTAINER = 8, NF_CANVAS_LAYER = 16, NF_PROCESS = 32,
+                 NF_SCRIPT_UNPORTED = 64 };
 
 class Node {
 public:

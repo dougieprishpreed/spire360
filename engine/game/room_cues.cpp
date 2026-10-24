@@ -1,5 +1,6 @@
 #include "room_cues.h"
 #include "combat_vfx.h"
+#include "../core/cue_ledger.h"
 #include "screen_shake.h"
 #include "top_bar.h"
 #include "ui_util.h"
@@ -72,6 +73,29 @@ private:
 
 /* NTopBarHp.LerpAtNeow: "0/max", then after 0.5 s the HP counting up to
  * the player's (Cubic InOut, 1 s). */
+void add_under_bar(Node* screen, Node* fx);
+
+/* A node added to its parent after its moment in the steps (their waits,
+ * as GameAudio schedules the sounds); deleted with the holder if never. */
+class AddLater : public ScriptBehavior {
+public:
+    AddLater(Node* fx, double delay) : fx_(fx), delay_(delay) {}
+    ~AddLater() { delete fx_; }
+    virtual void process(Node* n, double dt) {
+        if (!fx_ || n->queued_for_deletion()) return;
+        delay_ -= dt;
+        if (delay_ > 0) return;
+        if (n->parent) add_under_bar(n->parent, fx_);
+        else delete fx_;
+        fx_ = NULL;
+        n->queue_free();
+    }
+
+private:
+    Node* fx_;
+    double delay_;
+};
+
 class HpLerp : public ScriptBehavior {
 public:
     HpLerp(Node* label, int hp, int max) : label_(label), hp_(hp), max_(max), t_(0) {}
@@ -231,8 +255,10 @@ void play_global_cues(SceneLibrary* lib, Node* layer, const Json& steps) {
     for (size_t i = 0; i < steps.size(); ++i)
         for (size_t k = 0; k < steps[i].size(); ++k) {
             const Json& c = steps[i][k];
-            if (c["t"].str() == "ui" && c["call"].str() == "NGainEpochVfx.Create" && c["args"].size() > 0)
+            if (c["t"].str() == "ui" && c["call"].str() == "NGainEpochVfx.Create" && c["args"].size() > 0) {
                 show_epoch_gain(lib, layer, model_id(c["args"][(size_t)0].str()));
+                CueLedger::used(c);
+            }
         }
 }
 
@@ -241,10 +267,12 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
     /* an event's combat room plays its own cues (EventScreen) */
     bool room = d["layout"].str() == "Combat";
     NoCreatures anchors;
+    double at = 0; /* the steps' time: their waits */
     for (size_t i = 0; i < steps.size(); ++i)
         for (size_t k = 0; k < steps[i].size(); ++k) {
             const Json& c = steps[i][k];
             const std::string& t = c["t"].str();
+            if (t == "wait") at += c["ms"].num() / 1000.0;
             if (t == "relic_flash" && !room) {
                 Node* bar = screen->get_node("TopBarLayer");
                 Node* row = bar ? find_named(bar, "RelicInventory") : NULL;
@@ -254,6 +282,7 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
                 later->name = "RelicFlash";
                 later->behavior = new HolderFlashLater(lib, (Control*)row->children[(size_t)index]);
                 bar->add_child(later);
+                CueLedger::used(c);
                 continue;
             }
             if (t != "ui") continue;
@@ -262,17 +291,45 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
             if (room && call != "PlayerFullscreenHealVfx.Play") continue;
             if (ScreenShake::get().cue(call, args)) {
                 /* NGame.ScreenShake / ScreenRumble / ScreenShakeTrauma on the room */
+                CueLedger::used(c);
             } else if (call == "PlayerHurtVignetteHelper.Play") {
                 spawn_combat_vfx(lib, screen, call, args, anchors);
+                CueLedger::used(c);
             } else if (call == "NDamageNumVfx.Create" && args.size() >= 2 && args[(size_t)0].str() == "player" &&
                        args[1].is_number()) {
                 /* NDamageNumVfx.Create(target, damage): no interactable
                  * node, the local player: at viewport * (0.25, 0.5). */
                 Node* num = make_damage_number(lib, Vec2(480, 540), args[1].i());
                 if (num) add_under_bar(screen, num);
+                CueLedger::used(c);
+            } else if (call == "VfxCmd.PlayNonCombatVfx" && args.size() >= 3) {
+                /* an event's effect at a position in its room (Dense
+                 * Vegetation's slashes, turned by a random -180..0 degrees
+                 * there; Jungle Maze's hits) */
+                Node* fx = instance(lib, "scenes/" + args[(size_t)0].str() + ".tscn");
+                if (fx && fx->is_node2d()) {
+                    Node2D* n = (Node2D*)fx;
+                    n->position = Vec2(args[1].f(), args[2].f());
+                    const std::string& path = args[(size_t)0].str();
+                    if (path == "vfx/vfx_attack_slash" || path == "vfx/events/dense_vegetation_slice_vfx")
+                        n->rotation = -(float)(chaotic_rand() % 1001) / 1000.0f * 3.14159265f;
+                    if (at > 0) {
+                        Node* later = SceneLibrary::create_node("Node");
+                        later->name = "AddLater";
+                        later->behavior = new AddLater(fx, at + c["delay"].num(0) / 1000.0);
+                        screen->add_child(later);
+                    } else {
+                        add_under_bar(screen, fx);
+                    }
+                    CueLedger::used(c);
+                } else {
+                    delete fx;
+                }
             } else if (call == "PlayerFullscreenHealVfx.Play" && args.size() >= 2) {
                 heal_vfx(lib, screen, d["player"], args[1].num());
+                CueLedger::used(c);
             } else if (call == "NTopBarHp.LerpAtNeow") {
+                CueLedger::used(c);
                 Node* bar = screen->get_node("TopBarLayer");
                 Node* label = bar ? bar->find_unique("HpLabel") : NULL;
                 if (!label) continue;

@@ -324,6 +324,15 @@ enum EffectId {
      * colour) whose rgb lies within 0.5 of p0..2 (initial_color) becomes
      * p4..6 (map_color); the rest as it is. */
     EFFECT_MAP_POINT = 60,
+    /* shaders/vfx/potion/vfx_potion_liquid_overlay_shader.gdshader (a
+     * creature's spine body while a thrown potion's liquid runs down it):
+     * the texel hue-shifted by extra[0..11] (Canvas::hsv_matrix of h, s,
+     * v) times the vertex colour, mixed with lut (tex1) at the overlay's
+     * red, times the tint p8..10, by the overlay's alpha (tex0 at
+     * SCREEN_UV * 10 + p4p5, distorted by its blue at SCREEN_UV * 10 +
+     * p0p1 times p2) times the influence p3, opaque texels only (alpha
+     * 0.5 or more); tex0 repeats. */
+    EFFECT_LIQUID_OVERLAY = 61,
     EFFECT_COUNT
 };
 

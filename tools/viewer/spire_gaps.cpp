@@ -1,6 +1,9 @@
 /* spire_gaps: what the presentation cannot show yet, over protocol traces.
  *
- *   spire_gaps [--dt SECONDS] [--sample N] <pack.s3p> <report.json> <trace.jsonl> [more traces...]
+ *   spire_gaps [--dt SECONDS] [--sample N] [--fast] <pack.s3p> <report.json> <trace.jsonl> [more traces...]
+ *
+ * --fast: no drawing and no audio decoding (the cues, scenes and scripts
+ * are still counted; "not drawn" gaps are not).
  *
  * --dt: the playback step (default 1/30 s); a coarser one sweeps many
  * traces faster.
@@ -11,7 +14,12 @@
  * The report counts, over all traces, the items not drawn (shaders without
  * a port), the node types and Spine features without support, the warnings
  * (pack paths missing, audio events absent, logic errors) and the decision
- * kinds shown as the plain list, each with the first trace that had it. */
+ * kinds shown as the plain list, each with the first trace that had it.
+ * "cues": each kind of cue the responses brought (CueLedger: "ui:<call>"
+ * or the cue's type) with how often it came, how often a screen played it
+ * and how often one left it; kinds never played are presentation the
+ * client leaves out (tools/presentation_audit.py reads them). */
+#include "../../engine/core/cue_ledger.h"
 #include "../../engine/core/pack.h"
 #include "../../engine/audio/game_audio.h"
 #include "../../engine/game/game.h"
@@ -83,9 +91,17 @@ static std::string json_escape(const std::string& s) {
 
 static double g_dt = 1.0 / 30.0;
 static int g_sample = 1;
+static bool g_fast = false;
 
 int main(int argc, char** argv) {
-    while (argc > 2 && (strcmp(argv[1], "--dt") == 0 || strcmp(argv[1], "--sample") == 0)) {
+    while (argc > 1 && (strcmp(argv[1], "--fast") == 0 ||
+                        (argc > 2 && (strcmp(argv[1], "--dt") == 0 || strcmp(argv[1], "--sample") == 0)))) {
+        if (strcmp(argv[1], "--fast") == 0) {
+            g_fast = true;
+            ++argv;
+            --argc;
+            continue;
+        }
         if (strcmp(argv[1], "--dt") == 0) {
             g_dt = atof(argv[2]);
             if (g_dt <= 0) g_dt = 1.0 / 30.0;
@@ -96,7 +112,7 @@ int main(int argc, char** argv) {
         argc -= 2;
     }
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_gaps [--dt SECONDS] [--sample N] <pack.s3p> <report.json> <trace.jsonl> [more traces...]\n");
+        fprintf(stderr, "usage: spire_gaps [--dt SECONDS] [--sample N] [--fast] <pack.s3p> <report.json> <trace.jsonl> [more traces...]\n");
         return 2;
     }
     Pack pack;
@@ -112,11 +128,14 @@ int main(int argc, char** argv) {
     SceneLibrary lib(&pack);
     GameAudio audio(&pack);
     if (audio.events().available()) lib.set_audio(&audio);
+    audio.set_dry(g_fast);
     FontLibrary fonts(&pack);
     FontLibrary::set_current(&fonts);
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
     set_log_sink(sink);
+    CueLedger::enabled = true;
+    count_missing_scripts(true);
     int decisions = 0;
     std::map<std::string, int> kinds;
     for (int file = 3; file < argc; ++file) {
@@ -143,6 +162,7 @@ int main(int argc, char** argv) {
             ++n;
             ++decisions;
             g_where = format("%s:%d", argv[file], n);
+            CueLedger::where = g_where;
             int seen;
             {
                 std::string err;
@@ -162,7 +182,7 @@ int main(int argc, char** argv) {
                 tree.process(g_dt);
                 audio.update(g_dt);
                 tree.layout(1);
-                if (f % every == 0) {
+                if (!g_fast && f % every == 0) {
                     sw.begin(480, 270, Color(0, 0, 0, 1));
                     tree.render(canvas);
                     sw.end();
@@ -181,6 +201,8 @@ int main(int argc, char** argv) {
         fflush(stdout);
     }
     set_log_sink(NULL);
+    for (std::map<std::string, int>::const_iterator it = missing_scripts().begin(); it != missing_scripts().end(); ++it)
+        add_gap("script without a port: " + it->first, it->second);
     FILE* out = fopen(argv[2], "wb");
     if (!out) {
         fprintf(stderr, "cannot write %s\n", argv[2]);
@@ -199,8 +221,32 @@ int main(int argc, char** argv) {
                 json_escape(it->first).c_str(), it->second.count, json_escape(it->second.first).c_str());
         first = false;
     }
-    fprintf(out, "\n ]\n}\n");
+    fprintf(out, "\n ],\n \"cues\": [\n");
+    first = true;
+    int never = 0;
+    const std::map<std::string, CueLedger::Counts>& cues = CueLedger::counts();
+    for (std::map<std::string, CueLedger::Counts>::const_iterator it = cues.begin(); it != cues.end(); ++it) {
+        if (it->second.seen == 0) continue;
+        if (it->second.used == 0) ++never;
+        fprintf(out, "%s  {\"kind\": \"%s\", \"seen\": %d, \"used\": %d, \"dropped\": %d, \"first\": \"%s\"}",
+                first ? "" : ",\n", json_escape(it->first).c_str(), it->second.seen, it->second.used, it->second.dropped,
+                json_escape(it->second.first).c_str());
+        first = false;
+    }
+    /* the pack's scenes, and the ones the replays loaded */
+    fprintf(out, "\n ],\n \"scenes_loaded\": [");
+    std::vector<std::string> loaded;
+    lib.loaded_scenes(loaded);
+    for (size_t i = 0; i < loaded.size(); ++i) fprintf(out, "%s\"%s\"", i ? ", " : "", json_escape(loaded[i]).c_str());
+    fprintf(out, "],\n \"pack_scenes\": [");
+    first = true;
+    for (size_t i = 0; i < pack.count(); ++i) {
+        if (pack.entry(i).type != PACK_SCENE) continue;
+        fprintf(out, "%s\"%s\"", first ? "" : ", ", json_escape(pack.name_of(&pack.entry(i))).c_str());
+        first = false;
+    }
+    fprintf(out, "]\n}\n");
     fclose(out);
-    printf("%d decisions, %d gaps -> %s\n", decisions, (int)g_gaps.size(), argv[2]);
+    printf("%d decisions, %d gaps, %d cue kinds never played -> %s\n", decisions, (int)g_gaps.size(), never, argv[2]);
     return 0;
 }

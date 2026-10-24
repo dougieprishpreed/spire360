@@ -87,6 +87,10 @@ void SceneTree::layout(int passes) {
 void SceneTree::process_node(Node* n, double dt) {
     g_trace_node = n;
     if (n->queued_for_deletion()) return;
+    if (n->flags & NF_SCRIPT_UNPORTED) {
+        n->flags &= ~(u32)NF_SCRIPT_UNPORTED;
+        if (!n->behavior) note_unported_script(n->script);
+    }
     if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
     if (n->behavior) n->behavior->process(n, dt);
     if (n->flags & NF_PROCESS) n->process(dt);

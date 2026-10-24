@@ -32,16 +32,110 @@ private:
 /* The bar's own animations (the potions' and relics'), run by the bar's
  * node: its tweens go with it. A new relic's holder flashes when its icon
  * is in place (PlayNewlyAcquiredAnimation's DoFlash callback). */
+/* NTopBarGold.UpdateGoldAnim: a change counts the gold label from what
+ * it was, 0.4 s after it (the popup's tweens: the popup itself stays
+ * hidden), by 75 while more than 100 is left, 10 while more than 50, else 1,
+ * each step after Lerp(10, 20, max(0, 10 - left)) ms; a change while it
+ * counts starts from the last total. */
+class GoldCount : public ScriptBehavior {
+public:
+    GoldCount(Node* label, int gold) : label_(label), target_(gold), left_(0), running_(false), t_(0), next_(0) {}
+    void set(int gold) {
+        if (gold == target_) return;
+        left_ = gold - target_;
+        target_ = gold;
+        set_label(label_, format("%d", target_ - left_));
+        if (running_) return;
+        running_ = true;
+        t_ = 0;
+        next_ = 0.4;
+    }
+    virtual void process(Node*, double dt) {
+        if (!running_) return;
+        t_ += dt;
+        while (running_ && t_ >= next_) {
+            if (left_ == 0) {
+                running_ = false;
+                set_label(label_, format("%d", target_));
+                break;
+            }
+            int a = left_ < 0 ? -left_ : left_;
+            int n = a > 100 ? 75 : a > 50 ? 10 : 1;
+            if (n > a) n = a;
+            left_ += left_ > 0 ? -n : n;
+            set_label(label_, format("%d", target_ - left_));
+            a = left_ < 0 ? -left_ : left_;
+            int w = 10 - a > 0 ? 10 - a : 0;
+            next_ += (10.0 + 10.0 * w) / 1000.0;
+            if (left_ == 0) next_ += 0.25;
+        }
+    }
+
+private:
+    Node* label_;
+    int target_, left_;
+    bool running_;
+    double t_, next_;
+};
+
+/* top_bar_acquire_from: one pending flight */
+static std::string g_from_kind, g_from_id;
+static Vec2 g_from_at;
+static float g_from_scale = 1;
+
+} /* namespace */
+
+void top_bar_acquire_from(const std::string& kind, const std::string& id, const Vec2& at, float scale) {
+    g_from_kind = kind;
+    g_from_id = id;
+    g_from_at = at;
+    g_from_scale = scale;
+}
+
+namespace {
+
+/* the pending flight of this kind and id, taken */
+static bool take_acquire_from(const char* kind, const std::string& id, Vec2* at, float* scale) {
+    if (g_from_kind != kind || g_from_id != id) return false;
+    *at = g_from_at;
+    *scale = g_from_scale;
+    g_from_kind.clear();
+    return true;
+}
+
 class BarAnimations : public ScriptBehavior {
 public:
     struct Flash {
-        Control* holder;
+        Control* holder; /* a relic holder, or (potion) a potion's node */
         float at;
+        bool potion;
+    };
+    /* PlayNewlyAcquiredAnimation(startLocation): from there (global) and
+     * that scale back to its place in 0.35 s (a relic Sine Out, a potion
+     * Quad Out); its place known once the bar is laid out (first frame) */
+    struct Fly {
+        Control* node;
+        Vec2 from;
+        float scale;
+        TweenTrans trans;
     };
     BarAnimations(SceneLibrary* lib) : lib_(lib), time_(0) {}
     TweenSet tweens;
     std::vector<Flash> flashes;
+    std::vector<Fly> flights;
     virtual void process(Node* n, double dt) {
+        for (size_t i = 0; i < flights.size(); ++i) {
+            Control* c = flights[i].node;
+            Vec2 now = c->global_transform().origin, d = flights[i].from - now;
+            for (int s = 0; s < 4; ++s) {
+                float o = c->offset[s];
+                c->offset[s] = o + (s == SIDE_LEFT || s == SIDE_RIGHT ? d.x : d.y);
+                tweens.tween(&c->offset[s], o, 0.35f, flights[i].trans, EASE_OUT);
+            }
+            c->modulate.a = 1;
+            tweens.tween_from(&c->scale, Vec2(flights[i].scale, flights[i].scale), Vec2(1, 1), 0.35f, flights[i].trans, EASE_OUT);
+        }
+        flights.clear();
         tweens.update(dt);
         time_ += (float)dt;
         for (size_t i = 0; i < flashes.size();) {
@@ -49,7 +143,7 @@ public:
                 ++i;
                 continue;
             }
-            Node* fx = make_relic_holder_flash(lib_, flashes[i].holder);
+            Node* fx = flashes[i].potion ? make_potion_flash(lib_, flashes[i].holder) : make_relic_holder_flash(lib_, flashes[i].holder);
             if (fx && n->parent) n->parent->add_child(fx);
             else delete fx;
             flashes.erase(flashes.begin() + (long)i);
@@ -61,6 +155,84 @@ private:
     float time_;
 };
 } /* namespace */
+
+namespace {
+/* NPotionContainer.PlayAddFailedAnim: the potions shake (3 sin(5u) sin(u/2)
+ * px, u 0 -> 2 pi over 0.5 s; here each potion in its holder, which the
+ * holders' row lays out) while PotionErrorBg flashes in (0.15 s) and out
+ * (0.5 s after 0.35 s). A child of the bar: gone with it. */
+class PotionsFull : public ScriptBehavior {
+public:
+    PotionsFull(CanvasItem* error, const std::vector<Control*>& potions) : error_(error), potions_(potions), t_(0) {
+        for (size_t i = 0; i < potions_.size(); ++i) {
+            left_.push_back(potions_[i]->offset[SIDE_LEFT]);
+            right_.push_back(potions_[i]->offset[SIDE_RIGHT]);
+        }
+    }
+    virtual void process(Node* n, double dt) {
+        t_ += dt;
+        float u = (float)(t_ < 0.5 ? t_ / 0.5 : 1.0) * 6.2831853f;
+        float dx = t_ < 0.5 ? 3.0f * sinf(u * 5.0f) * sinf(u * 0.5f) : 0.0f;
+        for (size_t i = 0; i < potions_.size(); ++i) {
+            potions_[i]->offset[SIDE_LEFT] = left_[i] + dx;
+            potions_[i]->offset[SIDE_RIGHT] = right_[i] + dx;
+        }
+        if (error_) error_->modulate.a = t_ < 0.15 ? (float)(t_ / 0.15) : t_ < 0.35 ? 1.0f : t_ < 0.85 ? (float)(1.0 - (t_ - 0.35) / 0.5) : 0.0f;
+        if (t_ >= 0.85 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    CanvasItem* error_;
+    std::vector<Control*> potions_;
+    std::vector<float> left_, right_;
+    double t_;
+};
+} /* namespace */
+
+void top_bar_potions_full(Node* bar) {
+    Node* holders = bar ? find_named(bar, "PotionHolders") : NULL;
+    if (!holders) return;
+    std::vector<Control*> potions;
+    for (size_t i = 0; i < holders->children.size(); ++i) {
+        Node* h = holders->children[i];
+        for (size_t k = 0; k < h->children.size(); ++k)
+            if (h->children[k]->name == "Potion" && h->children[k]->is_control()) potions.push_back((Control*)h->children[k]);
+    }
+    Node* error = find_named(bar, "PotionErrorBg");
+    Node* fx = SceneLibrary::create_node("Node");
+    fx->name = "PotionsFull";
+    fx->behavior = new PotionsFull(error && error->is_canvas_item() ? (CanvasItem*)error : NULL, potions);
+    bar->add_child(fx);
+}
+
+void set_top_bar_gold(Node* bar, int gold) {
+    Node* label = bar ? find_named(bar, "GoldLabel") : NULL;
+    Node* holder = label ? label->parent : NULL;
+    if (holder && holder->name == "TopBarGold" && holder->behavior) ((GoldCount*)holder->behavior)->set(gold);
+    else set_label(label, format("%d", gold));
+}
+
+/* NPotionFlashVfx (vfx_potion_flash.tscn): its %Flash particle, the
+ * potion's image (the game draws the potion into a SubViewport for it),
+ * over the potion's 60 px; freed after 2 s */
+Node* make_potion_flash(SceneLibrary* lib, Control* potion) {
+    Node* fx = instance(lib, "scenes/vfx/vfx_potion_flash.tscn");
+    if (!fx || !fx->is_node2d()) {
+        delete fx;
+        return NULL;
+    }
+    ((Node2D*)fx)->position = potion->global_transform().origin;
+    ((Node2D*)fx)->scale = potion->scale;
+    Node* image = potion->find_unique("Image");
+    Node* p = fx->find_unique("Flash");
+    if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D")) {
+        if (image && image->type == "TextureRect" && ((TextureRect*)image)->texture)
+            ((Particles2D*)p)->texture = ((TextureRect*)image)->texture;
+        ((Particles2D*)p)->restart();
+    }
+    fx->behavior = new FreeAfter(2.0);
+    return fx;
+}
 
 Node* make_relic_holder_flash(SceneLibrary* lib, Control* holder) {
     Node* fx = instance(lib, "scenes/vfx/relic_inventory_flash_vfx.tscn");
@@ -218,7 +390,8 @@ static Control* holder_potion(SceneLibrary* lib, Node* holder, const std::string
  * in (NPotion.PlayNewlyAcquiredAnimation: its container from 40 px lower,
  * fading in), one gone shrinks away (NPotionHolder.RemoveUsedPotion: to
  * scale 0 in 0.2 s, then the empty slot fades in). */
-static void make_potions(SceneLibrary* lib, Node* bar, const Json& player, const Json& before, TweenSet* tweens) {
+static void make_potions(SceneLibrary* lib, Node* bar, const Json& player, const Json& before, TweenSet* tweens,
+                         BarAnimations* anims) {
     Node* holders = bar->find_unique("PotionHolders");
     if (!holders) holders = find_named(bar, "PotionHolders");
     if (!holders) return;
@@ -247,7 +420,17 @@ static void make_potions(SceneLibrary* lib, Node* bar, const Json& player, const
         if (pot) {
             Control* pc = holder_potion(lib, h, (*pot)["id"].str());
             Control* box = pc ? as_ctl(pc->get_node("Container")) : NULL;
-            if (gained && tweens && box) {
+            Vec2 from;
+            float from_scale = 1;
+            if (gained && anims && pc) {
+                /* PlayNewlyAcquiredAnimation's DoFlash: NPotionFlashVfx */
+                BarAnimations::Flash fl = { pc, 0.35f, true };
+                anims->flashes.push_back(fl);
+            }
+            if (gained && anims && box && take_acquire_from("potion", (*pot)["id"].str(), &from, &from_scale)) {
+                BarAnimations::Fly f = { box, from, 1.0f, TRANS_QUAD };
+                anims->flights.push_back(f);
+            } else if (gained && tweens && box) {
                 tweens->tween_from(&box->modulate.a, 0.0f, 1.0f, 0.1f);
                 float top = box->offset[SIDE_TOP], bottom = box->offset[SIDE_BOTTOM];
                 tweens->tween_from(&box->offset[SIDE_TOP], top + 40, top, 0.35f, TRANS_BACK, EASE_OUT);
@@ -282,7 +465,7 @@ static Node* make_relics(SceneLibrary* lib, const Json& player, const Json& befo
     row->mouse_filter = 2;
     const Json& relics = player["relics"];
     for (size_t i = 0; i < relics.size(); ++i) {
-        Node* r = instance(lib, "scenes/relics/relic.tscn");
+        Node* r = instance(lib, "scenes/relics/relic_inventory_holder.tscn");
         if (!r || !r->is_control()) {
             delete r;
             break;
@@ -290,14 +473,38 @@ static Node* make_relics(SceneLibrary* lib, const Json& player, const Json& befo
         ((Control*)r)->custom_minimum_size = Vec2(68, 68);
         Node* icon = r->find_unique("Icon");
         set_relic_icon(lib, icon, relic_icon_base(relics[i]));
+        /* NRelicInventoryHolder.RefreshAmount: the counter while ShowCounter */
+        Node* amount = r->find_unique("AmountLabel");
+        set_visible(amount, relics[i]["relic_amount"].is_number());
+        if (relics[i]["relic_amount"].is_number()) set_label(amount, format("%d", relics[i]["relic_amount"].i()));
+        /* RefreshStatus / RelicModel.UpdateTexture: Disabled greys (#808080)
+         * and is_used, Active pulses, wax tints; melted is dark red */
+        if (icon && icon->is_canvas_item()) {
+            CanvasItem* ic = (CanvasItem*)icon;
+            const std::string& status = relics[i]["relic_status"].str();
+            bool melted = relics[i]["relic_melted"].b();
+            ic->modulate = status == "Disabled" ? hex(0x808080) : Color(1, 1, 1, 1);
+            ic->shader_params["is_wax"] = relics[i]["relic_wax"].b() ? 1.0f : 0.0f;
+            ic->shader_params["pulse"] = !melted && status == "Active" ? 1.0f : 0.0f;
+            ic->shader_params["is_used"] = !melted && status == "Disabled" ? 1.0f : 0.0f;
+            if (melted) ic->self_modulate = Color(0.545098f, 0, 0, 1); /* Colors.DarkRed */
+        }
         const std::string& id = relics[i]["id"].str();
-        if (anims && icon && icon->is_control() && count_id(relics, id, i + 1) > count_id(before["relics"], id, before["relics"].size())) {
+        Vec2 from;
+        float from_scale = 1;
+        bool gained = anims && icon && icon->is_control() && count_id(relics, id, i + 1) > count_id(before["relics"], id, before["relics"].size());
+        if (gained && take_acquire_from("relic", id, &from, &from_scale)) {
+            BarAnimations::Fly f = { (Control*)icon, from, from_scale, TRANS_SINE };
+            anims->flights.push_back(f);
+            BarAnimations::Flash fl = {(Control*)r, 0.35f, false};
+            anims->flashes.push_back(fl);
+        } else if (gained) {
             Control* ic = (Control*)icon;
             float top = ic->offset[SIDE_TOP], bottom = ic->offset[SIDE_BOTTOM];
             anims->tweens.tween_from(&ic->modulate.a, 0.0f, 1.0f, 0.1f);
             anims->tweens.tween_from(&ic->offset[SIDE_TOP], top + 40, top, 0.35f, TRANS_BACK, EASE_OUT);
             anims->tweens.tween_from(&ic->offset[SIDE_BOTTOM], bottom + 40, bottom, 0.35f, TRANS_BACK, EASE_OUT);
-            BarAnimations::Flash f = {(Control*)r, 0.35f};
+            BarAnimations::Flash f = {(Control*)r, 0.35f, false};
             anims->flashes.push_back(f);
         }
         row->add_child(r);
@@ -337,9 +544,19 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
 
     /* HP and gold. */
     set_label(bar->find_unique("HpLabel"), format("%d/%d", player["hp"].i(), player["max_hp"].i()));
-    set_label(bar->find_unique("GoldLabel"), format("%d", player["gold"].i()));
+    Node* gold = bar->find_unique("GoldLabel");
+    if (gold && gold->parent && gold->parent->name == "TopBarGold" && !gold->parent->behavior) {
+        /* the count starts from the gold the decision before had */
+        int was = before.is_object() && before["gold"].is_number() ? before["gold"].i() : player["gold"].i();
+        set_label(gold, format("%d", was));
+        GoldCount* count = new GoldCount(gold, was);
+        gold->parent->behavior = count;
+        count->set(player["gold"].i());
+    } else {
+        set_label(gold, format("%d", player["gold"].i()));
+    }
 
-    make_potions(lib, bar, player, before, anims ? &anims->tweens : NULL);
+    make_potions(lib, bar, player, before, anims ? &anims->tweens : NULL, anims);
     Node* shortcut = find_named(bar, "PotionShortcutButton");
     show_glyph(lib, shortcut ? shortcut->find_unique("HotkeyIcon") : NULL, "x");
 
@@ -349,17 +566,62 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
     set_label(find_named(bar, "FloorNumLabel"), format("%d", ctx["total_floor"].i(ctx["floor"].i())));
     Node* boss = find_named(bar, "BossIcon");
     if (boss) {
+        /* NTopBarBossIcon.OnRoomEntered / RefreshBossIcon: hidden in a boss
+         * room, unless it is the first of two (then the second's icon
+         * only); with two bosses the second's icon (second_boss_icon.tscn,
+         * its tint the act's traveled colour at a boss, else untraveled)
+         * at (30, 22) behind the first */
         bool in_boss_room = ctx["room_type"].str() == "Boss";
-        if (in_boss_room) hide(boss);
-        else if (ctx["boss"]["id"].is_string())
-            set_room_icon(lib, boss->get_node("Icon"), "images/ui/run_history/" + lower(ctx["boss"]["id"].str()) + ".png");
+        bool two = ctx["second_boss"].is_string();
+        bool only_second = two && ctx["at_boss"].b();
+        Node* icon = boss->get_node("Icon");
+        if (in_boss_room && !only_second) {
+            hide(boss);
+        } else if (only_second) {
+            set_room_icon(lib, icon, "images/ui/run_history/" + lower(ctx["second_boss"].str()) + ".png");
+        } else if (ctx["boss"]["id"].is_string()) {
+            set_room_icon(lib, icon, "images/ui/run_history/" + lower(ctx["boss"]["id"].str()) + ".png");
+            Node* second = two && icon ? instance(lib, "scenes/ui/top_bar/second_boss_icon.tscn") : NULL;
+            if (second && second->is_control()) {
+                icon->add_child(second);
+                place((Control*)second, 30, 22, 44, 44);
+                set_room_icon(lib, second, "images/ui/run_history/" + lower(ctx["second_boss"].str()) + ".png");
+                set_visible(second, true);
+                const Json& tint = ctx["boss_tint"];
+                Node* tinted[2] = { second, second->find_unique("Outline") };
+                for (int k = 0; k < 2 && tint.size() >= 3; ++k) {
+                    if (!tinted[k] || !tinted[k]->is_canvas_item()) continue;
+                    CanvasItem* c = (CanvasItem*)tinted[k];
+                    c->shader_params["tint_color.r"] = tint[(size_t)0].f(1);
+                    c->shader_params["tint_color.g"] = tint[1].f(1);
+                    c->shader_params["tint_color.b"] = tint[2].f(1);
+                }
+            } else {
+                delete second;
+            }
+        }
     }
     hide(find_named(bar, "Modifiers"));
 
     /* Right side: the save indicator is transparent at rest, the timer
      * hidden (shown only with the map or a capstone screen open). */
     Node* save = find_named(bar, "SaveIndicator");
-    if (save && save->is_canvas_item()) ((CanvasItem*)save)->modulate.a = 0;
+    if (save && save->is_canvas_item()) {
+        CanvasItem* s = (CanvasItem*)save;
+        s->modulate = Color(1, 1, 1, 0);
+        set_label(save->get_node("Label"), Loc::get("gameplay_ui", "GAME_SAVED"));
+        /* NSaveIndicator.SavedGame (SaveManager.Saved): white 0.5 s on (in
+         * 1 s), 0.5 s held, then out (1 s) */
+        bool saved = false;
+        const Json& steps = d["steps"];
+        for (size_t i = 0; i < steps.size() && !saved; ++i)
+            for (size_t k = 0; k < steps[i].size(); ++k)
+                if (steps[i][k]["t"].str() == "saved") saved = true;
+        if (saved && anims) {
+            anims->tweens.tween(&s->modulate.a, 1.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
+            anims->tweens.tween(&s->modulate.a, 0.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 2.0f);
+        }
+    }
     Node* timer = find_named(bar, "TimerContainer");
     hide(timer);
     if (timer && timer->parent && !timer->parent->behavior && ctx["run_time"].is_number())
@@ -369,7 +631,16 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
     top_button(lib, find_named(bar, "Deck"), "lb", true);
     top_button(lib, find_named(bar, "PauseButton"), "start", true);
     Node* deck = find_named(bar, "Deck");
-    set_label(find_named(deck, "DeckCardCount"), format("%d", player["deck_size"].i()));
+    Node* deck_count = find_named(deck, "DeckCardCount");
+    set_label(deck_count, format("%d", player["deck_size"].i()));
+    if (anims && deck_count && deck_count->is_control() && before["deck_size"].is_number() &&
+        player["deck_size"].i() > before["deck_size"].i()) {
+        /* NTopBarDeckButton.OnPileContentsChanged: a bigger deck bumps the
+         * count (1.5 -> 1, 0.5 s Expo Out, about its centre) */
+        Control* c = (Control*)deck_count;
+        c->pivot_offset = Vec2(c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP]) * 0.5f;
+        anims->tweens.tween_from(&c->scale, Vec2(1.5f, 1.5f), Vec2(1, 1), 0.5f, TRANS_EXPO, EASE_OUT);
+    }
     hide(find_named(bar, "GoldPopup"));
 
     Control* root = full_rect_control("TopBarLayer");

@@ -6,22 +6,20 @@
 #include "../scene/scene.h"
 #include "../scene/text_nodes.h"
 #include "loc.h"
+#include "ui_util.h"
+#include "../scene/script.h"
+#include "../scene/tween.h"
 
 #include <ctype.h>
 
 namespace spire {
-
-static std::string lower(std::string s) {
-    for (size_t i = 0; i < s.size(); ++i) s[i] = (char)tolower((unsigned char)s[i]);
-    return s;
-}
 
 static std::string upper(std::string s) {
     for (size_t i = 0; i < s.size(); ++i) s[i] = (char)toupper((unsigned char)s[i]);
     return s;
 }
 
-static Color hex(unsigned v, float a = 1.0f) {
+static Color hexa(unsigned v, float a = 1.0f) {
     return Color(((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f, a);
 }
 
@@ -67,25 +65,25 @@ static void colors(CanvasItem* n, const Color& font, const Color& outline) {
  * outline (StsColors.cardTitleOutline*). */
 static void rarity_style(const std::string& rarity, std::string& banner, Color& outline) {
     banner = "common";
-    outline = hex(0x4D4B40);
+    outline = hexa(0x4D4B40);
     if (rarity == "Uncommon") {
         banner = "uncommon";
-        outline = hex(0x005C75);
+        outline = hexa(0x005C75);
     } else if (rarity == "Rare") {
         banner = "rare";
-        outline = hex(0x6B4B00);
+        outline = hexa(0x6B4B00);
     } else if (rarity == "Curse") {
         banner = "curse";
-        outline = hex(0x550B9E);
+        outline = hexa(0x550B9E);
     } else if (rarity == "Status") {
         banner = "status";
-        outline = hex(0x4F522F);
+        outline = hexa(0x4F522F);
     } else if (rarity == "Event") {
         banner = "event";
-        outline = hex(0x1B6131);
+        outline = hexa(0x1B6131);
     } else if (rarity == "Quest") {
         banner = "quest";
-        outline = hex(0x7E3E15);
+        outline = hexa(0x7E3E15);
     } else if (rarity == "Ancient") {
         banner = "ancient";
     }
@@ -94,14 +92,14 @@ static void rarity_style(const std::string& rarity, std::string& banner, Color& 
 /* CardCostHelper colours: Increased, Decreased, InsufficientResources. */
 static bool cost_color(const std::string& state, bool just_upgraded, Color& font, Color& outline) {
     if (just_upgraded || state == "Decreased") {
-        font = hex(0x7FFF00);
-        outline = hex(0x1F5923);
+        font = hexa(0x7FFF00);
+        outline = hexa(0x1F5923);
     } else if (state == "Increased") {
-        font = hex(0x40FFFF);
-        outline = hex(0x20595C);
+        font = hexa(0x40FFFF);
+        outline = hexa(0x20595C);
     } else if (state == "InsufficientResources") {
-        font = hex(0xFF5555);
-        outline = hex(0x501717);
+        font = hexa(0xFF5555);
+        outline = hexa(0x501717);
     } else {
         return false;
     }
@@ -157,7 +155,7 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
     /* Title: cream with the rarity's outline; green once upgraded. */
     CanvasItem* title = item(card, "TitleLabel");
     set_text(title, c["title"].is_string() ? c["title"].str() : c["name"].str());
-    if (c["upgrade_level"].i() > 0) colors(title, hex(0x7FFF00), hex(0x1B6131));
+    if (c["upgrade_level"].i() > 0) colors(title, hexa(0x7FFF00), hexa(0x1B6131));
     else colors(title, CREAM, title_outline);
 
     /* Description: the game's own formatted text. */
@@ -185,7 +183,7 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
             set_texture(lib, energy, "images/atlases/ui_atlas.sprites/card/energy_" + c["energy_icon"].str() + ".tres");
         CanvasItem* label = item(card, "EnergyLabel");
         set_text(label, cost);
-        Color font = CREAM, outline = rgba(c["energy_outline"], hex(0x5C5440));
+        Color font = CREAM, outline = rgba(c["energy_outline"], hexa(0x5C5440));
         cost_color(c["cost_color"].str(), c["cost_just_upgraded"].b(), font, outline);
         colors(label, font, outline);
         CanvasItem* unplayable = item(card, "UnplayableEnergyIcon");
@@ -197,7 +195,7 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
         star->visible = sc == "X" || (!sc.empty() && sc[0] != '-');
         CanvasItem* label = item(card, "StarLabel");
         set_text(label, sc);
-        Color font = CREAM, outline = hex(0x175561, 0xDC / 255.0f);
+        Color font = CREAM, outline = hexa(0x175561, 0xDC / 255.0f);
         cost_color(c["star_color"].str(), c["star_just_upgraded"].b(), font, outline);
         colors(label, font, outline);
         CanvasItem* unplayable = item(card, "UnplayableStarIcon");
@@ -305,7 +303,50 @@ void set_card_highlight(Node* card, bool on) {
     if (!glow) return;
     glow->visible = on;
     glow->shader_params["width"] = on ? 0.075f : 0.0f;
-    glow->modulate = Color(0, 0.957f, 0.988f, 0.98f);
+    /* NCardHighlight.playableColor, gold for a rare reward card */
+    glow->modulate = find_named(card, "RareGlow") ? Color(1, 0.784f, 0, 0.98f) : Color(0, 0.957f, 0.988f, 0.98f);
+}
+
+namespace {
+/* NCardRareGlow._Ready: after a random 0..0.2 s, to 0.92 of its scale and
+ * alpha 0.9 over 1 s (Cubic In); NCardUncommonGlow: its alpha only, at
+ * once. */
+class RewardGlow : public ScriptBehavior {
+public:
+    RewardGlow(Node2D* n, bool rare)
+        : n_(n), rare_(rare), from_(n->scale), t_(rare ? -(double)(chaotic_rand() % 201) / 1000.0 : 0) {}
+    virtual void process(Node*, double dt) {
+        if (t_ > 1.0) return;
+        t_ += dt;
+        if (t_ < 0) return;
+        float k = tween_interpolate(TRANS_CUBIC, EASE_IN, clampf((float)t_, 0, 1), 0, 1, 1);
+        if (rare_) n_->scale = from_ + (from_ * 0.92f - from_) * k;
+        n_->modulate.a = 1.0f - 0.1f * k;
+    }
+
+private:
+    Node2D* n_;
+    bool rare_;
+    Vec2 from_;
+    double t_;
+};
+} /* namespace */
+
+void card_reward_glow(SceneLibrary* lib, Node* card, const std::string& rarity) {
+    bool rare = rarity == "Rare";
+    if (!card || (!rare && rarity != "Uncommon")) return;
+    Node* body = card->find_unique("CardContainer");
+    if (!body) return;
+    if (rare) set_visible(body->get_node("CardSparkles"), true);
+    Node* fx = instance(lib, rare ? "scenes/vfx/rare_glow_vfx.tscn" : "scenes/vfx/uncommon_glow_vfx.tscn");
+    if (!fx || !fx->is_node2d()) {
+        delete fx;
+        return;
+    }
+    fx->behavior = new RewardGlow((Node2D*)fx, rare);
+    /* Body.MoveChildSafely(glow, 1) */
+    if (body->children.size() > 1) body->add_child_before(fx, body->children[1]);
+    else body->add_child(fx);
 }
 
 } /* namespace spire */

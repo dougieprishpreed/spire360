@@ -570,6 +570,42 @@
       "note": "PowerModel.Flash: only UI subscribers (NCreature's NPowerFlashVfx, NPower's icon particles). Recorded as a power_flash cue when the power would play its VFX."
     },
     {
+      "id": "rolling_boulder.turn_start",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Models.Powers.RollingBoulderPower",
+      "method": "AfterPlayerTurnStart",
+      "note": "RollingBoulderPower.AfterPlayerTurnStart: TestMode damages every hittable enemy at once; the game rolls NRollingBoulderVfx over them and damages each as it passes (its HitCreature signal). The hook plays that branch: the boulder's cue, then each enemy's own damage after a boulder_hit mark the client times by the boulder's path."
+    },
+    {
+      "id": "potion.add_failed",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Entities.Players.Player",
+      "method": "AddPotionInternal",
+      "note": "Player.AddPotionInternal: a potion that does not fit raises AddPotionFailed (unless silent), which NPotionContainer.PlayAddFailedAnim answers (the holders shake, the error backdrop flashes). Recorded as a potion_full cue."
+    },
+    {
+      "id": "power.pulse_start",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.PowerModel",
+      "method": "StartPulsing",
+      "note": "PowerModel.StartPulsing / StopPulsing: the PulsingStarted / PulsingStopped events NPower answers with its icon's pulse shader parameter (Escape Artist). Recorded as power_pulse cues."
+    },
+    {
+      "id": "power.pulse_stop",
+      "action": "call_after",
+      "type": "MegaCrit.Sts2.Core.Models.PowerModel",
+      "method": "StopPulsing",
+      "note": "See power.pulse_start."
+    },
+    {
+      "id": "power.removed",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Entities.Creatures.Creature",
+      "method": "RemovePowerInternal",
+      "optional": true,
+      "note": "Creature.RemovePowerInternal(power): the PowerRemoved event NCreature.OnPowerRemoved answers with NPowerRemovedVfx (the power's big icon, its title and 'wears off'). Recorded as a power_removed cue."
+    },
+    {
       "id": "power.modified",
       "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Entities.Creatures.Creature",
@@ -789,9 +825,12 @@
         "MegaCrit.Sts2.Core.Saves.SaveManager::IncrementNumReloads",
         "MegaCrit.Sts2.Core.Runs.RunManager::ShouldApplyTutorialModifications",
         "MegaCrit.Sts2.Core.Runs.RunManager::TryGetRoomTypeForTutorial",
-        "MegaCrit.Sts2.Core.Runs.RunManager::UpdatePlayerStatsInMapPointHistory"
+        "MegaCrit.Sts2.Core.Runs.RunManager::UpdatePlayerStatsInMapPointHistory",
+        "MegaCrit.Sts2.Core.Models.Relics.CallingBell::GenerateRewards",
+        "MegaCrit.Sts2.Core.Models.Relics.Cauldron::GenerateRewards",
+        "MegaCrit.Sts2.Core.Rooms.MerchantRoom::Exit"
       ],
-      "note": "The adapter runs the game with TestMode on, and some rules depend on it: a new profile's first act is an undiscovered alternate act (ActModel.GetRandomList), shop potion prices vary by +/-5% (MerchantPotionEntry, a Shops RNG draw), bosses and encounters follow the discovery order and a first run's unknown rooms are events (RunManager's tutorial rules), the run history records HP and gold per floor and reloads are counted. Runs that follow the game's own flow (start_game_run) see TestMode off at exactly these sites; other runs see the real value, unchanged."
+      "note": "The adapter runs the game with TestMode on, and some rules depend on it: a new profile's first act is an undiscovered alternate act (ActModel.GetRandomList), shop potion prices vary by +/-5% (MerchantPotionEntry, a Shops RNG draw), bosses and encounters follow the discovery order and a first run's unknown rooms are events (RunManager's tutorial rules), the run history records HP and gold per floor and reloads are counted, Calling Bell offers a common, an uncommon and a rare relic and Cauldron random potions (TestMode: fixed test ones), and leaving a shop records what it had left in the run history (MerchantRoom.Exit). Runs that follow the game's own flow (start_game_run) see TestMode off at exactly these sites; other runs see the real value, unchanged."
     },
     {
       "id": "testmode.game_flow.is_on",
@@ -804,9 +843,62 @@
         "MegaCrit.Sts2.Core.Saves.SaveManager::IncrementNumReloads",
         "MegaCrit.Sts2.Core.Runs.RunManager::ShouldApplyTutorialModifications",
         "MegaCrit.Sts2.Core.Runs.RunManager::TryGetRoomTypeForTutorial",
-        "MegaCrit.Sts2.Core.Runs.RunManager::UpdatePlayerStatsInMapPointHistory"
+        "MegaCrit.Sts2.Core.Runs.RunManager::UpdatePlayerStatsInMapPointHistory",
+        "MegaCrit.Sts2.Core.Models.Relics.CallingBell::GenerateRewards",
+        "MegaCrit.Sts2.Core.Models.Relics.Cauldron::GenerateRewards",
+        "MegaCrit.Sts2.Core.Rooms.MerchantRoom::Exit"
       ],
       "note": "See testmode.game_flow.is_off."
+    },
+    {
+      "id": "vfx.non_combat",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "PlayNonCombatVfx",
+      "note": "VfxCmd.PlayNonCombatVfx(container, position, path): an event's effect at a position in its room (Dense Vegetation, Jungle Maze); null in TestMode, which Dense Vegetation then sets a rotation on. Recorded as a ui cue (the path and the position); a stand-in Node2D comes back."
+    },
+    {
+      "id": "save.indicator",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager",
+      "method": "SaveRun",
+      "params": ["MegaCrit.Sts2.Core.Saves.SerializableRun", "System.Boolean"],
+      "note": "RunSaveManager.SaveRun raises Saved, which NSaveIndicator.SavedGame answers (GAME_SAVED fades in and out in the top bar's corner). Recorded as a saved cue."
+    },
+    {
+      "id": "forge.preview",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Commands.ForgeCmd",
+      "method": "PreviewSovereignBlade",
+      "note": "ForgeCmd.PreviewSovereignBlade (after a Forge): NCardSmithVfx on each Sovereign Blade in the hand, and one showing the others before they fly back to their piles; no sound. It returns at once in TestMode. Recorded as a forge_preview cue."
+    },
+    {
+      "id": "foul_potion.on_use",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Potions.FoulPotion",
+      "method": "OnUse",
+      "note": "Foul Potion thrown at a merchant out of combat: NMerchantRoom.FoulPotionThrown (thank-yous, a foulPotion line, a rumble) or NFakeMerchant.FoulPotionThrown (its line before the fight), with vfx_slime_impact at the merchant button (ShowPotionVfx). NRun.Instance is null headless, so the shop's never run. Recorded as a foul_potion cue."
+    },
+    {
+      "id": "fiend_fire.on_play",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Cards.FiendFire",
+      "method": "OnPlay",
+      "note": "Fiend Fire's hits each make an NGroundFireVfx 0.1 bigger than the last, from 0.8 (its Scale set in the BeforeDamage lambda). The hook starts the count; the 'ui' hook adds each fire's scale to its cue while the card is in the play pile."
+    },
+    {
+      "id": "test_subject.set_color",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.TestSubject",
+      "method": "SetColor",
+      "note": "TestSubject.SetColor(color): its %CanvasGroup's self modulate (half transparent while Intangible, white again after; the revives), a Godot call on its special node. Recorded as a CanvasItem.SetSelfModulate cue on that node."
+    },
+    {
+      "id": "aim.torch_head_amalgam.soul_beam",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Monsters.TorchHeadAmalgam",
+      "method": "SoulBeamMove",
+      "note": "See aim.bowlbug_silk.spit: Soul Beam's Visuals/LaserControlBone 400 * Visuals.Scale.X past the first target (or 3000 to the left without one)."
     },
     {
       "id": "aim.bowlbug_silk.spit",
@@ -1197,6 +1289,16 @@
       "note": "See spine.access.get_state."
     },
     {
+      "id": "vfx.side_center_floor",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
+      "method": "GetSideCenterFloor",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Cards.EndOfDays"
+      ],
+      "note": "VfxCmd.GetSideCenterFloor is null in TestMode, and End of Days makes its NLargeMagicMissileVfx (and waits its WaitTime) only with a position. Answered with a position the client resolves as the game computes it (eN@side_floor: the side's hittable creatures' mean bottom x, their lowest bottom)."
+    },
+    {
       "id": "vfx.side_center",
       "action": "replace_calls",
       "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",
@@ -1250,7 +1352,8 @@
         "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetCreatureNode",
         "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetVfxContainer",
         "MegaCrit.Sts2.Core.Entities.Creatures.Creature::GetBackVfxContainer",
-        "MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment::AnimSegmentsAttack"
+        "MegaCrit.Sts2.Core.Models.Monsters.DecimillipedeSegment::AnimSegmentsAttack",
+        "MegaCrit.Sts2.Core.Models.Powers.SandpitPower::AfterPowerAmountChanged"
       ],
       "note": "Creature.GetCreatureNode returns null in TestMode; in every run here it reaches the UI stand-ins (NCombatRoom.GetCreatureNode, NBestiary.GetCreatureNode), so the monsters' calls on their creature nodes become cues. Creature.GetVfxContainer / GetBackVfxContainer likewise answer the room's stand-in containers: the game writes container?.AddChildSafely(X.Create(...)), whose effect is not even made when the container is null (the block spark and Blocked text, heal numbers, every attack's custom hit effect: Shiv, Claw, Perfected Strike, ...). DecimillipedeSegment.AnimSegmentsAttack: the segments' AttackShake (special nodes) and the rocks scene (its asset is null headless, so nothing is made in the logic) before a 0.5 s wait. Presentation only: the nodes are stand-ins whose calls are redirected."
     },

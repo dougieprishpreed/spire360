@@ -3,11 +3,17 @@
 // never runs: the same moments recorded as cues for the client (the
 // audit's list: notes/UI_AUDIT.md). The patches are in patches.json under
 // the ids registered here.
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Spire.Logic;
 
@@ -28,6 +34,7 @@ internal static partial class Hooks
         ("slumbering_beetle.rollout", "Visuals/SpineBoneNode", 750f, true),
         ("tunneler.below", "Visuals/SpineBoneNode", 400f, false),
         ("thieving_hopper.thievery", "Visuals/SpineBoneNode", 900f, false),
+        ("torch_head_amalgam.soul_beam", "Visuals/LaserControlBone", 400f, false),
     };
 
     private static void SpecialCall(string call, Creature c, string node, params object?[] args)
@@ -83,8 +90,36 @@ internal static partial class Hooks
         ("time_scale", "MegaAnimationState", "SetTimeScale"),
     };
 
+    private static MethodInfo? _powerFlash;
+
+    /// <summary>RollingBoulderPower.AfterPlayerTurnStart as the game plays it
+    /// outside TestMode: the boulder (NRollingBoulderVfx) rolls over the
+    /// enemies and its HitCreature signal damages each as it passes, each
+    /// its own damage (TestMode damages them all at once). The client times
+    /// each boulder_hit mark by where the boulder meets that enemy (the
+    /// logic cannot see where they stand), and boulder_done when it has
+    /// rolled out (all hit, then 1 s).</summary>
+    [DynamicDependency("Flash", typeof(PowerModel))]
+    private static async Task RollingBoulderTurn(RollingBoulderPower p, PlayerChoiceContext ctx, Player player)
+    {
+        if (player != p.Owner.Player) return;
+        _powerFlash ??= typeof(PowerModel).GetMethod("Flash", BindingFlags.Instance | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+        _powerFlash?.Invoke(p, null);
+        var targets = p.Owner.CombatState?.HittableEnemies.ToList() ?? new List<Creature>();
+        CreatureCall("NRollingBoulderVfx.Create", targets.Select(c => (object?)Steps.Who(c)).ToList(), p.Amount);
+        foreach (var t in targets)
+        {
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "boulder_hit", ["who"] = Steps.Who(t) });
+            await CreatureCmd.Damage(ctx, new[] { t }, p.Amount, ValueProp.Unpowered, p.Owner);
+        }
+        Steps.Cue(new Dictionary<string, object?> { ["t"] = "boulder_done" });
+        p.SetAmount(p.Amount + p.DynamicVars.Damage.IntValue);
+    }
+
     private static void InstallPresentation()
     {
+        Bridge.Register("rolling_boulder.turn_start", a =>
+            RollingBoulderTurn((RollingBoulderPower)a[0]!, (PlayerChoiceContext)a[1]!, (Player)a[2]!));
         // SpineAnimationAccess's calls on a creature's stand-in sprite and
         // animation state: through the 'ui' hook as if redirected (the
         // state's calls recorded with the creature as their receiver).
@@ -172,6 +207,15 @@ internal static partial class Hooks
                                                                        : state.Enemies.FirstOrDefault(e => e.IsAlive);
             return c == null ? null : (Godot.Vector2?)StandIns.CenterOf(c);
         });
+        // VfxCmd.GetSideCenterFloor(side, combatState) in End of Days: the
+        // side's floor, resolved by the client
+        Bridge.Register("vfx.side_center_floor", a =>
+        {
+            if (a.Length < 2 || a[0] is not MegaCrit.Sts2.Core.Combat.CombatSide side || a[1] is not ICombatState state) return null;
+            var c = side == MegaCrit.Sts2.Core.Combat.CombatSide.Player ? state.PlayerCreatures.FirstOrDefault()
+                                                                       : state.Enemies.FirstOrDefault(e => e.IsAlive);
+            return c == null ? null : (Godot.Vector2?)StandIns.SideFloorOf(c);
+        });
         foreach (var (id, node, k, leftmost) in Aims)
         {
             Spire.HookBridge.Hooks.RegisterBefore("aim." + id, a =>
@@ -180,8 +224,10 @@ internal static partial class Hooks
                 if (!CombatManager.Instance.IsInProgress || m.Creature.IsDead) return;
                 if (targets.Count == 0)
                 {
-                    // Tunneler.BelowMove with no target: Position = Left * 400
+                    // Tunneler.BelowMove with no target: Position = Left * 400;
+                    // TorchHeadAmalgam.SoulBeamMove: Left * 3000
                     if (id == "tunneler.below") SpecialCall("SpecialNode.SetPosition", m.Creature, node, -400f, 0f);
+                    if (id == "torch_head_amalgam.soul_beam") SpecialCall("SpecialNode.SetPosition", m.Creature, node, -3000f, 0f);
                     return;
                 }
                 IEnumerable<Creature> aimAt = targets;
@@ -193,6 +239,13 @@ internal static partial class Hooks
                 SpecialCall("SpecialNode.AimAt", m.Creature, node, aimAt.Select(t => (object?)Steps.Who(t)).ToList(), k);
             });
         }
+        // TestSubject.SetColor: %CanvasGroup.SetSelfModulate(color)
+        Spire.HookBridge.Hooks.RegisterBefore("test_subject.set_color", a =>
+        {
+            if (a.Length < 2 || a[0] is not MonsterModel m || a[1] is not Godot.Color c || !CombatManager.Instance.IsInProgress) return;
+            static int B(float v) => (int)Math.Round(Math.Clamp(v, 0f, 1f) * 255f);
+            SpecialCall("CanvasItem.SetSelfModulate", m.Creature, "%CanvasGroup", $"#{B(c.R):x2}{B(c.G):x2}{B(c.B):x2}{B(c.A):x2}");
+        });
         // FuzzyWurmCrawler.AcidGoop: Position = Left * (its x - the first target's x)
         Spire.HookBridge.Hooks.RegisterBefore("aim.fuzzy_wurm_crawler.acid_goop", a =>
         {
