@@ -259,7 +259,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), deck_previews_(NULL), event_finishing_(false),
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), deck_previews_(NULL), event_finishing_(false), shop_auto_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
@@ -307,18 +307,23 @@ GameClient::~GameClient() {
 }
 
 void GameClient::start_run(const std::string& character, const std::string& seed) {
+    MapScreen::clear_drawings();
     std::string cmd = "{\"cmd\":\"start_run\",\"character\":" + quoted(character) + ",\"seed\":" + quoted(seed) + "}";
     if (ready_) send(cmd);
     else pending_start_ = cmd; /* sent after the logic's "ready" */
 }
 
 void GameClient::start_game_run(const std::string& character, int ascension, const std::string& seed) {
+    MapScreen::clear_drawings();
     std::string cmd = "{\"cmd\":\"start_game_run\",\"character\":" + quoted(character) + format(",\"ascension\":%d", ascension);
     if (!seed.empty()) cmd += ",\"seed\":" + quoted(seed);
     queue_or_send(cmd + "}");
 }
 
-void GameClient::continue_run() { queue_or_send("{\"cmd\":\"continue_run\"}"); }
+void GameClient::continue_run() {
+    MapScreen::clear_drawings(); /* the save keeps no drawings here */
+    queue_or_send("{\"cmd\":\"continue_run\"}");
+}
 
 void GameClient::request(const std::string& command) { queue_or_send(command); }
 
@@ -370,6 +375,8 @@ void GameClient::start_room_transition() {
     if (!transition_->parent) tree_->root()->add_child(transition_);
     transition_->start_out();
 }
+
+static Json sold_out(const Json& shop, const Json& steps);
 
 void GameClient::update(const PadState& pad) {
     std::string line;
@@ -490,9 +497,23 @@ void GameClient::update(const PadState& pad) {
         if (!ftue_) combat_->set_paused(false);
         return;
     }
+    if (shop_auto_ && ported_) {
+        /* the top bar follows the shop's purchases */
+        std::string kind, id;
+        while (((ShopScreen*)ported_)->take_bought(&kind, &id)) auto_bar(kind, id);
+    }
     if (!finishing_.is_null()) {
         /* The killing blow is playing: then the decision after it. */
         if ((room_ && room_->busy()) || (combat_ && combat_->busy())) return;
+        if (shop_auto_ && ported_ && ported_->busy()) return;
+        if (shop_auto_) {
+            /* the room behind what comes next, sold out; its top bar as it
+             * stands (nothing to fly in again) */
+            shop_auto_ = false;
+            last_shop_ = sold_out(last_shop_, auto_steps_);
+            decision_.set("player", auto_player_);
+            auto_steps_ = Json();
+        }
         if (event_finishing_ && ported_ && ((EventScreen*)ported_)->room_playing()) return;
         if (combat_ && finishing_["decision"].str() == "rewards" &&
             !combat_->rewards_ready(finishing_["context"]["room_type"].str() == "Boss"))
@@ -589,6 +610,20 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
         if (aftermath) room_->set_aftermath(d["player"]);
         return room_->build(last_combat_, &err);
     }
+    if (in_fight && d["room_view"].is_object()) {
+        /* CombatRoom.StartPreFinishedCombat (a continued run): the room in
+         * FinishedCombat mode, its background and the player, no enemies */
+        Json room = d;
+        room.set("view", d["room_view"]);
+        room_ = new CombatScreen(lib_);
+        room_->set_aftermath(d["player"]);
+        Node* n = room_->build(room, &err);
+        if (!n) {
+            delete room_;
+            room_ = NULL;
+        }
+        return n;
+    }
     if (rt == "RestSite" && !last_rest_.is_null()) {
         /* The rest site as it was (the smith's upgrade, a relic's choice). */
         RestSiteScreen* r = new RestSiteScreen(lib_);
@@ -628,6 +663,83 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     return NULL;
 }
 
+/* The first cue of that type in the decision's steps; NULL: none. */
+static const Json* cue_of(const Json& d, const char* type) {
+    for (size_t i = 0; i < d["steps"].size(); ++i)
+        for (size_t k = 0; k < d["steps"][i].size(); ++k)
+            if (d["steps"][i][k]["t"].str() == type) return &d["steps"][i][k];
+    return NULL;
+}
+
+/* A shop's decision whose steps buy its items by themselves
+ * (LordsParasol.PurchaseEverything's auto merchant_purchase cues). */
+static bool auto_shop(const Json& d) {
+    if (d["context"]["room_type"].str() != "Shop") return false;
+    for (size_t i = 0; i < d["steps"].size(); ++i)
+        for (size_t k = 0; k < d["steps"][i].size(); ++k) {
+            const Json& c = d["steps"][i][k];
+            if (c["t"].str() == "merchant_purchase" && c["auto"].b() && c["kind"].str() != "removal") return true;
+        }
+    return false;
+}
+
+/* The shop's decision with what the auto purchases bought sold. */
+static Json sold_out(const Json& shop, const Json& steps) {
+    Json out = shop;
+    static const char* const kinds[3][2] = { { "card", "cards" }, { "relic", "relics" }, { "potion", "potions" } };
+    for (int n = 0; n < 3; ++n) {
+        const Json& list = shop[kinds[n][1]];
+        Json sold = Json::make_array();
+        for (size_t i = 0; i < list.size(); ++i) {
+            Json e = list[i];
+            for (size_t g = 0; g < steps.size(); ++g)
+                for (size_t k = 0; k < steps[g].size(); ++k) {
+                    const Json& c = steps[g][k];
+                    if (c["t"].str() == "merchant_purchase" && c["kind"].str() == kinds[n][0] &&
+                        c["index"].i(-1) == e["index"].i((int)i))
+                        e.set("is_stocked", Json::make_bool(false));
+                }
+            sold.append(e);
+        }
+        out.set(kinds[n][1], sold);
+    }
+    return out;
+}
+
+/* The top bar as the auto purchases fill it: the item just bought joins
+ * auto_player_ (the entry the decision after them has for it), the bar
+ * rebuilt from the player before (a relic or potion flies in from its
+ * slot: ShopScreen::purchased; the deck count bumps). */
+void GameClient::auto_bar(const std::string& kind, const std::string& id) {
+    Json before = auto_player_;
+    const Json& last = finishing_["player"];
+    if (kind == "card") {
+        auto_player_.set("deck_size", Json::make_number(auto_player_["deck_size"].i() + 1));
+    } else {
+        const char* key = kind == "relic" ? "relics" : "potions";
+        Json list = auto_player_[key];
+        int have = 0, seen = 0;
+        for (size_t i = 0; i < list.size(); ++i)
+            if (list[i]["id"].str() == id) ++have;
+        for (size_t i = 0; i < last[key].size(); ++i) {
+            if (last[key][i]["id"].str() != id || seen++ < have) continue;
+            list.append(last[key][i]);
+            break;
+        }
+        auto_player_.set(key, list);
+    }
+    if (!screen_) return;
+    Node* old = screen_->get_node("TopBarLayer");
+    if (old) {
+        screen_->remove_child(old);
+        delete old;
+    }
+    Json state = finishing_;
+    state.set("player", auto_player_);
+    Node* bar = make_top_bar(lib_, state, false, before);
+    if (bar) screen_->add_child(bar);
+}
+
 /* A cue of that type in the decision's steps (marked used). */
 static bool has_cue(const Json& d, const char* type) {
     bool found = false;
@@ -643,6 +755,13 @@ static bool has_cue(const Json& d, const char* type) {
 void GameClient::show(const Json& d) {
     errors_ = 0; /* the retries after an error count per decision */
     CueLedger::seen(d["steps"]);
+    /* the client's own purchases flew as it made them (ShopScreen::
+     * purchased); a used card removal shows in the rebuilt shop */
+    for (size_t i = 0; i < d["steps"].size(); ++i)
+        for (size_t k = 0; k < d["steps"][i].size(); ++k) {
+            const Json& c = d["steps"][i][k];
+            if (c["t"].str() == "merchant_purchase" && (!c["auto"].b() || c["kind"].str() == "removal")) CueLedger::used(c);
+        }
     close_ftue();
     /* The deck's changes (NRun.GlobalUi's previews) play over whatever
      * screen comes next. */
@@ -670,6 +789,27 @@ void GameClient::show(const Json& d) {
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];
     const std::string& kind = d["decision"].str();
+    if (!shop_auto_ && auto_shop(d)) {
+        /* LordsParasol.PurchaseEverything: the merchant's room as entered
+         * (its shop_entry cue) or as the last decision left it buys by
+         * itself, its input blocked; then the decision it led to (the card
+         * removal's selection, ...) over the room */
+        const Json* entry = cue_of(d, "shop_entry");
+        Json shop = entry ? (*entry)["shop"] : last_shop_;
+        if (shop.is_object()) {
+            if (entry) CueLedger::used(*entry);
+            else shop.set("player", prev_player);
+            shop.set("steps", Json::make_array());
+            shop_auto_ = true;
+            auto_steps_ = d["steps"];
+            auto_player_ = shop["player"];
+            show(shop);
+            --decisions_; /* not a decision of the logic's */
+            if (lib_->audio()) lib_->audio()->steps(d["steps"]);
+            finishing_ = d;
+            return;
+        }
+    }
     if (combat_ && prev_kind == "combat_play" && kind == "combat_play") {
         if (lib_->audio()) lib_->audio()->decision(d);
         potions_.detach();
@@ -917,6 +1057,7 @@ void GameClient::show(const Json& d) {
         bool again = prev_kind == "shop" || prev_kind == "card_select";
         s->set_state(again && shop_open_, shop_kind_, shop_index_);
         s->set_again(again);
+        if (shop_auto_) s->set_auto(auto_steps_);
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {
@@ -1447,7 +1588,8 @@ bool GameClient::piles_input(const PadState& pad) {
         return true;
     }
     if (map_view_) {
-        if (pad.pressed & (PadState::B | PadState::BACK)) {
+        /* B is the drawing's while it or the tools have the pad */
+        if ((pad.pressed & (PadState::B | PadState::BACK)) && !map_view_->drawing_active()) {
             if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_close");
             close_piles();
         } else {

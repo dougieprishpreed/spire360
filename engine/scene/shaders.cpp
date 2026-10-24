@@ -1669,6 +1669,18 @@ bool shader_begin(Canvas& c, const MaterialRes* m, const CanvasItem* item) {
         c.renderer()->set_fire(&f);
         return true;
     }
+    if (m->shader == "shaders/map_drawing/line_draw.gdshader") {
+        /* NMapDrawings' lines: COLOR (texel * colour) with its alpha times
+         * the texel's alpha again (render_mode blend_mix); drawn as the
+         * default item, the second alpha factor (softer edges) left out */
+        return true;
+    }
+    if (m->shader == "shaders/map_drawing/line_erase.gdshader") {
+        /* the eraser's lines: COLOR.rgb times the texel's alpha, render_mode
+         * blend_sub (shader_blend): they take away the lines drawn before
+         * them in the drawing viewport; the rgb factor left out */
+        return true;
+    }
     if (vfx_shader(c, m)) return true;
     bool ok = true;
     if (effect_shader(c, m, &ok)) return ok;
@@ -1699,7 +1711,8 @@ bool shader_blend(const MaterialRes* m, BlendMode* out) {
         *out = BLEND_ADD;
         return true;
     }
-    if (m && m->kind == Resource::RES_SHADER_MATERIAL && m->shader == "shaders/vfx/common/vfx_common_subtractive.gdshader") {
+    if (m && m->kind == Resource::RES_SHADER_MATERIAL && (m->shader == "shaders/vfx/common/vfx_common_subtractive.gdshader" ||
+                                                         m->shader == "shaders/map_drawing/line_erase.gdshader")) {
         *out = BLEND_SUB;
         return true;
     }

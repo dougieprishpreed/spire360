@@ -50,6 +50,9 @@ internal static class StandIns
     // are recorded; what is added is null)
     private static Godot.Control? _vfxBox, _backVfxBox, _eventVfxBox;
     private static MegaCrit.Sts2.Core.Nodes.Rooms.NEventRoom? _eventRoom;
+    /// <summary>Steps.InCombat: the creatures' AfterAddedToRoom (Slumbering
+    /// Beetle's sleep, ...) runs before IsInProgress.</summary>
+    private static bool InCombat => Steps.InCombat;
     private static NMerchantRoom? _merchantRoom;
     private static MegaCrit.Sts2.Core.Nodes.Screens.Shops.NMerchantInventory? _merchantInventory;
     private static NMerchantButton? _merchantButton;
@@ -95,6 +98,8 @@ internal static class StandIns
         [typeof(MegaCrit.Sts2.Core.Nodes.Animation.NDecimillipedeSegmentDriver).FullName!] =
             () => Blank<MegaCrit.Sts2.Core.Nodes.Animation.NDecimillipedeSegmentDriver>(),
         [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NMyteVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NMyteVfx>(),
+        // a position marker (%SleepVfxPos): its GlobalPosition names it (NodePlace)
+        [typeof(Godot.Marker2D).FullName!] = () => new Godot.Marker2D(),
         [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NSnappingJaxfruitVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSnappingJaxfruitVfx>(),
         [typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NFlyconidSporesVfx).FullName!] = () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NFlyconidSporesVfx>(),
     };
@@ -123,6 +128,7 @@ internal static class StandIns
             Specials[key] = o;
             SpecialNames.AddOrUpdate(o, key);
         }
+        if (o is Godot.Marker2D marker) marker.GlobalPosition = NodePlace(c, path);
         return o;
     }
 
@@ -219,7 +225,7 @@ internal static class StandIns
             // Days' missile (its WaitTime), Fiend Fire's attack_fire per hit.
             // The calls themselves are cues already; a stand-in lets the code
             // after its null check run.
-            if (CombatManager.Instance.IsInProgress)
+            if (InCombat)
                 switch (id[(id.LastIndexOf('.', sep) + 1)..])
                 {
                     case "NHyperbeamVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NHyperbeamVfx>();
@@ -260,19 +266,19 @@ internal static class StandIns
                 // effect stand-ins added to it stay its children: keep it small
                 if (_vfxBox != null && _vfxBox.GetChildCount() > 32)
                     foreach (var child in _vfxBox.GetChildren()) _vfxBox.RemoveChild(child);
-                return CombatManager.Instance.IsInProgress ? _vfxBox ??= new Godot.Control() : null;
+                return InCombat ? _vfxBox ??= new Godot.Control() : null;
             }
             if (id.EndsWith("NCombatRoom::get_BackCombatVfxContainer", StringComparison.Ordinal))
-                return CombatManager.Instance.IsInProgress ? _backVfxBox ??= new Godot.Control() : null;
+                return InCombat ? _backVfxBox ??= new Godot.Control() : null;
             if (id.EndsWith("NCombatRoom::get_Background", StringComparison.Ordinal))
-                return CombatManager.Instance.IsInProgress ? _background ??= Blank<NCombatBackground>() : null;
+                return InCombat ? _background ??= Blank<NCombatBackground>() : null;
             if (id.EndsWith("NCombatRoom::get_Instance", StringComparison.Ordinal))
-                return CombatManager.Instance.IsInProgress ? (_room ??= new NCombatRoom()) : null;
+                return InCombat ? (_room ??= new NCombatRoom()) : null;
             if (id.EndsWith("NCombatRoom::GetCreatureNode", StringComparison.Ordinal))
             {
                 foreach (var x in a)
                     if (x is Creature c)
-                        return c.CombatState != null && CombatManager.Instance.IsInProgress ? Node(c) : null;
+                        return c.CombatState != null && InCombat ? Node(c) : null;
                 return null;
             }
             if (method == "GetAnimationState" && a.Length > 0 && TryCreature(a[0], out var sc2))
@@ -369,6 +375,22 @@ internal static class StandIns
     /// the client takes its hittable creatures' floor).</summary>
     public static Godot.Vector2 SideFloorOf(Creature c) => Encode(c, 6);
 
+    // A creature's node by its path ("eN@node:%SleepVfxPos"): anchors from
+    // NodeAnchorBase on, one per path met
+    private const int NodeAnchorBase = 100;
+    private static readonly List<string> NodeAnchors = new();
+
+    private static Godot.Vector2 NodePlace(Creature c, string path)
+    {
+        int i = NodeAnchors.IndexOf(path);
+        if (i < 0)
+        {
+            NodeAnchors.Add(path);
+            i = NodeAnchors.Count - 1;
+        }
+        return Encode(c, NodeAnchorBase + i);
+    }
+
     /// <summary>The creature a stand-in node stands for (its node, spine
     /// sprite or animation state, or a SpineAnimationAccess on its sprite).</summary>
     public static bool TryCreature(object? o, out Creature creature)
@@ -420,9 +442,10 @@ internal static class StandIns
         int slot = (int)Math.Round((v.X - Base) / Step);
         int anchor = (int)Math.Round((-v.Y - Base) / Step);
         float dx = v.X - (Base + slot * Step), dy = v.Y - (-Base - anchor * Step);
-        if (slot < 0 || slot >= Slots.Count || anchor < 0 || anchor >= Anchors.Length) return null;
+        bool node = anchor >= NodeAnchorBase && anchor - NodeAnchorBase < NodeAnchors.Count;
+        if (slot < 0 || slot >= Slots.Count || anchor < 0 || (anchor >= Anchors.Length && !node)) return null;
         if (Math.Abs(dx) > Slack || Math.Abs(dy) > Slack) return null;
-        var s = Steps.Who(Slots[slot]) + "@" + Anchors[anchor];
+        var s = Steps.Who(Slots[slot]) + "@" + (node ? "node:" + NodeAnchors[anchor - NodeAnchorBase] : Anchors[anchor]);
         if (Math.Abs(dx) > 0.01f || Math.Abs(dy) > 0.01f) s += $"{dx:+0.##;-0.##;+0},{dy:+0.##;-0.##;+0}";
         return s;
     }

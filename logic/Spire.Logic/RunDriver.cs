@@ -1107,6 +1107,7 @@ public partial class RunDriver
         var cardCost = entry.Cost;
         try
         {
+            Steps.PlayerPurchases.Add(entry);
             Sched.Run(() => entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
             Sched.Pump();
             Log($"Bought card: {cardName} for {cardCost}g");
@@ -1148,6 +1149,7 @@ public partial class RunDriver
             var relicName = entry.Model?.GetType().Name ?? "?";
             var cost = entry.Cost;
             // Single-threaded: runs until it completes or waits on a selection.
+            Steps.PlayerPurchases.Add(entry);
             Sched.Run(() => entry.OnTryPurchaseWrapper(inv));
             if (_cardSelector.HasPending || _cardSelector.HasPendingReward || _pendingBundles != null)
             {
@@ -1182,6 +1184,7 @@ public partial class RunDriver
         var potionCost = entry.Cost;
         try
         {
+            Steps.PlayerPurchases.Add(entry);
             Sched.Run(() => entry.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
             Sched.Pump();
             Log($"Bought potion: {potionName} for {potionCost}g");
@@ -1203,6 +1206,7 @@ public partial class RunDriver
         try
         {
             // Single-threaded: runs until it completes or waits on a selection.
+            Steps.PlayerPurchases.Add(removal);
             Sched.Run(() => removal.OnTryPurchaseWrapper(merchantRoom.GetLocalInventory()));
             if (_cardSelector.HasPending)
             {
@@ -1899,6 +1903,10 @@ public partial class RunDriver
                 ["cols"] = map.GetColumnCount(),
                 ["rows"] = map.GetRowCount(),
                 ["look"] = look,
+                // NMapDrawings.CreateLineForPlayer: Character.MapDrawingColor
+                ["drawing_color"] = _runState?.Players[0].Character is { } ch
+                    ? new[] { ch.MapDrawingColor.R, ch.MapDrawingColor.G, ch.MapDrawingColor.B, ch.MapDrawingColor.A }
+                    : null,
                 ["points"] = points,
                 ["start"] = Point(map.StartingMapPoint),
                 ["boss"] = Point(map.BossMapPoint),
@@ -1961,7 +1969,13 @@ public partial class RunDriver
             }
             else
             {
-                choices = (currentPoint.Children ?? Enumerable.Empty<MapPoint>())
+                // NMapScreen's travelable points (MapTravel.GetTravelablePointsFrom):
+                // the children, or the whole next row while a relic allows free
+                // travel (Winged Boots, the Flight modifier)
+                IEnumerable<MapPoint> next;
+                try { next = MegaCrit.Sts2.Core.Map.MapTravel.GetTravelablePointsFrom(_runState, currentPoint); }
+                catch { next = currentPoint.Children ?? Enumerable.Empty<MapPoint>(); }
+                choices = (next ?? Enumerable.Empty<MapPoint>())
                     .Select(child => new Dictionary<string, object?>
                     {
                         ["col"] = (int)child.coord.col,
@@ -2054,6 +2068,11 @@ public partial class RunDriver
     /// debuff look), duplicates removed as the game does; card previews are
     /// not included. Null when there are none.
     /// </summary>
+    /// <summary>The driver the static views use (the card tips' card views).</summary>
+    private static RunDriver? _current;
+
+    public RunDriver() => _current = this;
+
     private static List<Dictionary<string, object?>>? Tips(Func<IEnumerable<MegaCrit.Sts2.Core.HoverTips.IHoverTip>> get)
     {
         try
@@ -2061,6 +2080,12 @@ public partial class RunDriver
             var list = new List<Dictionary<string, object?>>();
             foreach (var t in MegaCrit.Sts2.Core.HoverTips.IHoverTip.RemoveDupes(get()))
             {
+                // NHoverTipCardContainer: a card the tip names (Add a Shiv, ...)
+                if (t is MegaCrit.Sts2.Core.HoverTips.CardHoverTip ct && _current != null)
+                {
+                    list.Add(new Dictionary<string, object?> { ["card"] = _current.DeckCardView(ct.Card) });
+                    continue;
+                }
                 if (t is not MegaCrit.Sts2.Core.HoverTips.HoverTip h) continue;
                 list.Add(new Dictionary<string, object?>
                 {
@@ -2110,8 +2135,14 @@ public partial class RunDriver
                 };
             }
             // NCard.ReloadOverlay: the affliction's overlay scene, else the card's own (if it has one).
+            // AfflictionModel.HasOverlay is a resource check (false headless):
+            // the client takes the card's own when the pack lacks the affliction's.
             if (c.Affliction != null) d["overlay"] = Res(c.Affliction.OverlayPath);
-            else if (c.HasBuiltInOverlay) d["overlay"] = Res(c.OverlayPath);
+            if (c.HasBuiltInOverlay)
+            {
+                if (c.Affliction == null) d["overlay"] = Res(c.OverlayPath);
+                else d["card_overlay"] = Res(c.OverlayPath);
+            }
             d["energy_icon"] = c.VisualCardPool.EnergyColorName;
             d["cost_display"] = c.EnergyCost.CostsX ? "X" : c.EnergyCost.GetWithModifiers(CostModifiers.All).ToString();
             d["cost_just_upgraded"] = c.EnergyCost.WasJustUpgraded;
@@ -2655,6 +2686,11 @@ public partial class RunDriver
                 // generated rewards live on rewardsSet.Rewards afterwards.
                 Sched.Run(() => rewardsSet.GenerateWithoutOffering());
                 Sched.Pump();
+                // CombatRoom.OfferRoomEndRewards (NCombatUi calls it after a
+                // victory): the hook before the set is offered (Lasting
+                // Candy counts the combat rewards it has seen)
+                Sched.Run(() => MegaCrit.Sts2.Core.Hooks.Hook.BeforeCombatRewardOffered(rewardsSet, _runState!, combatRoom));
+                Sched.Pump();
                 ClearRewards();
                 _rewardList = rewardsSet.Rewards.ToList();
                 if (_rewardList.Count > 0)
@@ -2879,7 +2915,8 @@ public partial class RunDriver
                     {
                         var parts = opt.TextKey.Split('.');
                         var optionId = parts.Length > 0 ? parts[^1] : opt.TextKey;
-                        var relicModel = ModelDb.GetById<RelicModel>(new ModelId("RELIC", optionId));
+                        // OrNull: most options name no relic (an exception each was slow)
+                        var relicModel = ModelDb.GetByIdOrNull<RelicModel>(new ModelId("RELIC", optionId));
                         if (relicModel != null)
                         {
                             optVars ??= new Dictionary<string, object?>();
@@ -3174,6 +3211,16 @@ public partial class RunDriver
             ["background"] = background,
             ["player"] = PlayerSummary(player),
         };
+    }
+
+    /// <summary>The merchant's room as it stands (a shop_entry cue's view:
+    /// Lord's Parasol buys it out before the next decision); null outside a
+    /// shop with an inventory.</summary>
+    public Dictionary<string, object?>? ShopView()
+    {
+        var player = _runState?.Players[0];
+        if (player == null || _runState!.CurrentRoom is not MerchantRoom room || room.GetLocalInventory() == null) return null;
+        return ShopState(room, player);
     }
 
     private Dictionary<string, object?> ShopState(MerchantRoom merchantRoom, Player player)
@@ -3564,6 +3611,8 @@ public partial class RunDriver
             ["act_name"] = _loc.Act(_runState.Act?.Id.Entry ?? "OVERGROWTH"),
             ["floor"] = _runState.ActFloor,
             ["room_type"] = _runState.CurrentRoom?.RoomType.ToString(),
+            // NPeekButton: enabled while a fight is in progress
+            ["peek"] = CombatManager.Instance.IsInProgress,
         };
         // NRunTimer's time (RunManager.RunTime, seconds)
         try { ctx["run_time"] = MegaCrit.Sts2.Core.Runs.RunManager.Instance.RunTime; } catch { }
@@ -4018,6 +4067,10 @@ internal static class CreatureViewExtensions
                 var ops = SpineRecorder.Ops(c);
                 if (ops.Count > 0) d["spine_ops"] = ops;
                 if (SpineRecorder.HasPhobiaSkin(c)) d["phobia_skin"] = true;
+                // ThievingHopper.ThieveryMove's NCard under its %StolenCardPos
+                if (c.Monster is MegaCrit.Sts2.Core.Models.Monsters.ThievingHopper && Hooks.Driver != null &&
+                    c.Powers.OfType<SwipePower>().FirstOrDefault(p => p.StolenCard != null)?.StolenCard is { } stolen)
+                    d["held_card"] = Hooks.Driver.DeckCardView(stolen);
             }
         }
         catch (Exception ex) { Console.Error.WriteLine($"[SIM] CreatureView: {ex.Message}"); }

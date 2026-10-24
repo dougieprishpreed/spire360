@@ -33,6 +33,23 @@ static const char* scene_for(const std::string& kind) {
 
 static Control* control(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
+/* NCardGridSelectionScreen.SetPeekButtonTargets: the grid and the screen's
+ * PeekButtonTargets (the deck screen's preview, close and confirm buttons;
+ * the combat pile's bottom text, ...). */
+static const char* const* grid_peek_targets(const std::string& kind) {
+    static const char* const pile[] = { "BottomText", NULL };
+    static const char* const deck[] = { "PreviewContainer", "Close", "Confirm", NULL };
+    static const char* const transform[] = { "PreviewContainer", "Close", "BottomText", NULL };
+    static const char* const upgrade[] = { "UpgradeSinglePreviewContainer", "UpgradeMultiPreviewContainer", "Close", NULL };
+    static const char* const enchant[] = { "EnchantSinglePreviewContainer", "EnchantMultiPreviewContainer",
+                                           "EnchantmentDescriptionContainer", "Close", "BottomText", NULL };
+    if (kind == "combat_pile" || kind == "simple_grid") return pile;
+    if (kind == "transform") return transform;
+    if (kind == "upgrade") return upgrade;
+    if (kind == "enchant") return enchant;
+    return deck;
+}
+
 CardSelectScreen::CardSelectScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), row_(false), min_(0), max_(1), cancelable_(false), focus_(-1), columns_(1),
       rows_(NULL), scroll_(0), scroll_to_(0), lim_lo_(0), lim_hi_(0), grid_h_(1000), preview_(false), preview_box_(NULL),
@@ -118,7 +135,7 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
             delete root;
             return NULL;
         }
-        hide(screen->find_unique("PeekButton"));
+        peek_.setup(lib_, screen->find_unique("PeekButton"), d["context"]["peek"].b());
         hide(find_named(screen, "ViewUpgrades"));
         hide(screen->find_unique("CombatPiles"));
         hide(find_named(screen, "CombatPiles"));
@@ -209,8 +226,16 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
         confirm_ = button(confirm, true);
         show_button(close_, cancelable_, true);
         show_button(confirm_, (min_ != max_ || manual_confirm_ || max_ == 0) && 0 >= min_, true);
+        peek_.add_target(grid);
+        for (const char* const* t = grid_peek_targets(kind_); *t; ++t) {
+            std::string name = *t;
+            Node* n = name == "Close" ? close_.node : name == "Confirm" ? confirm_.node : screen->find_unique(name);
+            peek_.add_target(n ? n : find_named(screen, *t));
+        }
         if (!holders_.empty()) focus(0);
     }
+    /* NOverlayStack.HideBackstop while peeking */
+    peek_.add_target(back);
     root->add_child(screen);
     root->add_child(frame_driver(this));
     return root;
@@ -223,7 +248,12 @@ Node* CardSelectScreen::build_row(const Json& d) {
     Node* banner = screen->get_node("Banner");
     if (banner) set_label(banner->find_unique("Label"), Loc::get("gameplay_ui", "CHOOSE_CARD_HEADER"));
     hide(screen->find_unique("CombatPiles"));
-    hide(screen->find_unique("PeekButton"));
+    /* the peek button's targets: the banner, the row, Skip and the prompt */
+    peek_.setup(lib_, screen->find_unique("PeekButton"), d["context"]["peek"].b());
+    peek_.add_target(banner);
+    peek_.add_target(screen->get_node("CardRow"));
+    peek_.add_target(screen->get_node("SkipButton"));
+    peek_.add_target(screen->find_unique("InspectPrompt"));
     setup_inspect_prompt(lib_, screen->find_unique("InspectPrompt"));
     Node* row = screen->get_node("CardRow");
     if (!row) row = screen;
@@ -424,6 +454,14 @@ std::string CardSelectScreen::input(const PadState& pad) {
         }
         return std::string();
     }
+    /* NPeekButton's hotkey: peeking, the fight shows and the screen waits */
+    if ((pad.pressed & PadState::LS) && peek_.enabled()) {
+        peek_.toggle();
+        if (peek_.peeking()) tips_.hide();
+        else if (!preview_ && focus_ >= 0) focus(focus_);
+        return std::string();
+    }
+    if (peek_.peeking()) return std::string();
     if (row_ && (pad.pressed & PadState::Y) && focus_ >= 0 && focus_ < n) {
         Json list = Json::make_array();
         list.append(decision_["cards"][(size_t)focus_]);
@@ -477,6 +515,7 @@ std::string CardSelectScreen::input(const PadState& pad) {
 
 void CardSelectScreen::frame(double dt) {
     tweens_.update(dt);
+    peek_.frame(dt);
     tips_.frame();
     if (!rows_) return;
     /* NCardGrid.UpdateScrollPosition: lerp at 15/s, snapping close in. */

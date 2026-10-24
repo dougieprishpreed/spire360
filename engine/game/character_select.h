@@ -48,6 +48,12 @@ public:
     std::string selected() const;
     /* After A: the buttons disabled while the run starts. */
     void set_starting();
+    /* A command for the logic the screen made ("" none): taken once. */
+    std::string take_command() {
+        std::string c = command_;
+        command_.clear();
+        return c;
+    }
     virtual void frame(double dt);
     /* Its tree was deleted (back to the menu, or a run started): forget
      * the nodes; build() makes a new one. */
@@ -84,6 +90,16 @@ private:
     std::string embark_id_;
     float info_left_, info_right_;
     TweenSet tweens_;
+    /* NCharacterSelectScreen.PlayUnlockCharacterAnimation (the profile's
+     * pending unlock): unlock_t_ < -100 none, else its time (from -0.3) */
+    void start_unlock(int i);
+    void unlock_frame(double dt);
+    Control* backstop_;
+    int unlock_i_;
+    double unlock_t_;
+    bool unlock_played_, unlock_charged_, unlock_done_;
+    Vec2 lock_origin_;
+    std::string command_;
 };
 
 } /* namespace spire */

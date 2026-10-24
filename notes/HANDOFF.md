@@ -10,6 +10,137 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Completeness audit, part 2 (2026-10-24): static audits, and the bugs they named
+
+Coverage only shows what it drives. Three static audits now list
+everything the game does that the port has to answer, so what no run
+reached is named instead of found in a play test (each exits 1 while
+something is unanswered; run them after a game update too):
+
+- `tools/testmode_audit.py`: every TestMode.IsOn / IsOff read in the game's
+  logic (130), each answered by a patch on its method or a testmode /
+  godot verdict. 0 without an answer. It named Lord's Parasol's shop
+  sequence (below); the rest were multiplayer, mods, leaderboards and test
+  helpers.
+- `tools/hook_caller_audit.py`: every Hook.* the game's rules run through
+  (148) that only the UI reaches (directly, or through a game method only
+  the UI calls). Headless the UI never runs, so the driver must. It named
+  **Winged Boots** (MapTravel.GetTravelablePointsFrom: the map offered only
+  connected rooms, the relic never flew). The same class, found by the
+  continue scenario: **Lasting Candy** never counted its combat rewards
+  (Hook.BeforeCombatRewardOffered, which only NCombatUi's
+  OfferRoomEndRewards path runs; the driver generated the rewards without
+  it). Both fixed; the remaining three are verdicts (`hook` rows: the
+  Hoarder modifier, hooks nothing implements).
+- `tools/ui_reach_audit.py --runs work/covNN [--runs work/scenNN]`: every
+  read of a UI singleton (486) by the method that makes it, against the
+  methods the ledgers saw run. The unreached ones were pre-empted by
+  patches, UI-driven or multiplayer, or real coverage gaps, now driven:
+  powers' turn triggers (the card suite follows each power with two
+  turns; an unplayable card stays in hand through an end of turn), The
+  Insatiable's death (its Sandpit kills outright: a lost encounter runs
+  again with the HP cap after 10 steps), the player's death (scenario
+  `death`), Save and Quit / Continue (scenario `continue`).
+
+Bugs found and fixed in this pass:
+
+- **Continue at a won fight's rewards offered them twice** (the game's
+  StartPreFinishedCombat offered the room's set; when it was taken the
+  driver generated its own). A fight's own set is now the driver's
+  terminal rewards screen, and the rewards decision carries `room_view`
+  (the room in FinishedCombat mode behind them: background, the player,
+  no enemies; it was a blank screen). (Quitting at the map after taking
+  rewards returns to the rewards with the state before them: the game
+  saves only at a victory and on entering a room, so that matches it.)
+- **The rewards' card icon** was always the plain one for a fight's
+  reward (CardReward.ToSerializable refuses a reward with creation flags;
+  the logic threw and fell back): Reward.IconPath is read by reflection.
+- Event options' relic probes use ModelDb.GetByIdOrNull (GRAB_SWORD and
+  other ids that are not models threw on every event page).
+- **Relic icons were missing from the top bar since 835b0be**: the row
+  moved to relic_inventory_holder.tscn (its counters) and the icon lookup
+  (`%Icon`, unique in the holder's %Relic instance, not the holder) found
+  nothing. `holder_relic_icon`; spire_check now checks every holder's icon
+  after each response (3,828 checks).
+- **Screen shake pinned a new room at zero size** when its first update
+  came before the room's first layout (set_position keeps the current
+  size): the shake now adds its displacement to the target's offsets. Seen
+  as the shop drawn small in a corner during Lord's Parasol.
+- **Affliction overlays**: AfflictionModel.HasOverlay is a
+  ResourceLoader.Exists check, false headless; the logic sends the card's
+  own overlay beside the affliction's and the client takes the one the
+  pack has (NCard.ReloadOverlay). The other Exists checks are the UI's.
+- The act suite always began in Underdocks (a new profile's first act is
+  the undiscovered alternate): odd runs now use `discover_acts`.
+- The save indicator ("Game saved") showed only when the top bar had a
+  state before to animate from, and its cue was never marked played:
+  NSaveIndicator.SavedGame's sequence now runs on the indicator itself.
+
+Ported in this pass:
+
+- Lord's Parasol at a shop (`testmode.presentation.is_off` for
+  PurchaseEverything; `parasol.purchase_everything` records the shop as
+  entered, `merchant.purchase_completed` each purchase, auto when no buy
+  command made it): the client holds the decision, shows the shop, opens
+  its inventory after 0.75 s, plays each purchase on its delay (cards to
+  the deck, relics and potions to a top bar rebuilt as each lands, the
+  thank-yous and a line), then the card removal over the bought-out shop.
+  Captured (work/cap78/parasol).
+- The peek button (left stick, MegaInput.peek; PadState::LS on the console
+  and `LS` in the tools): in a fight's card selection the selection and
+  backstop hide to show the fight; in the hand's selection mode every hand
+  card shows, the creatures can be focused, a card pressed wiggles it
+  (deny.mp3, Medium pitch variance). Captured (work/cap78/peek).
+- Map drawing (RB: the tools; draw / erase with a cursor the D-pad moves,
+  A held draws into map_drawing.tscn's viewport, B stops; clear with
+  map_erase; the lines stay for the act). The software renderer's
+  blend_sub takes alpha too (D3D9 and Godot do): the eraser. Captured
+  (work/cap78/draw). The cursors (cursor_quill.png, ...) are Image
+  imports the converter did not pack: it does now (GDIM .image files);
+  until the pack is rebuilt the tools' own quill and eraser stand in.
+- The Thieving Hopper's stolen card (ThieveryMove: NCard.Create under its
+  %StolenCardPos, UpdateVisuals(Deck, Normal)): the logic's `held_card`
+  cue when it steals and `held_card` on the hopper's state (rebuilt
+  rooms); the card hangs from its card bone behind its body and goes with
+  it. Captured (work/cap80/hopper).
+- The timeline's chapter paginators, the unlock info as the game shows it,
+  the titles' fades; the obtained slots' NEpochHighlightVfx and
+  NEpochOffscreenVfx. Creature hover tips refresh at each sync.
+
+Tools: `spire_play --pad` takes combos and holds (`A+RIGHT*40`) and WAIT
+is a second in a run too; scenarios `parasol`, `queen`, `death`,
+`continue`, `continue2` (quit mid-fight: the fight again from its start;
+in an event; at a rest site), `candy`, `boots`, `powers`, `hopper`.
+spire_check skips a death whose body stays (`keep`: the Eye With Teeth
+stunned until it heals was reported as a dead enemy left visible).
+
+Checks: seeded traces against the new baseline traces/base6 (the Winged
+Boots fix changes the Defect run that has them: its map choices; checked
+to be the only difference), differences 0 (traces/new80); spire_check on
+new80 and scen80: 2,433 responses, 84 death checks, 4,539 relic icon
+checks, 0 failures; strict C++98 builds. The 5 absent event calls are the
+game's own (vine_shambler_cast, slithering_strangler_tail and
+brute_ruby_raider_cast: MonsterModel.CastSfx's default path, not in the
+banks). Content coverage cov79 (before engine / logic 80): all ok, 105
+encounters, the sweep 41,664 decisions.
+
+Audit (cov79 + scen80, verdicts added for what this pass answered): open
+is only the custom run screens. Unclassified: two exceptions in cov79's
+ledgers that logic 80 fixes (GRAB_SWORD, CardReward.ToSerializable:
+confirm with the next coverage run), two to look at (RoomSet.Ancient
+read before GenerateRooms, ModelDb.Get CHARACTER.IRONCLAD: 12 cases),
+content Slither (NCard.PlayRandomizeCostAnim), Byrdpip and Pael's
+Legion (their skins), and the call (172), script (163) and asset (123)
+review lists, still to be gone through.
+
+Still open: custom and daily runs (the singleplayer submenu, the modifier
+screens, a seed keyboard); the game's .pck is no longer at
+`F:\Program Files (x86)\Slay the Spire 2`, so the pack cannot be rebuilt
+with the cursor images until it is back.
+
+Next console build: logic (all stages: patches.json changed), engine; a
+pack rebuild for the map drawing cursors when the game files are back.
+
 ## Completeness audit (2026-10-24): why gaps kept surfacing, and the loop that finds them
 
 The user asked for the Rolling Boulder, Minion Dive Bomb, the

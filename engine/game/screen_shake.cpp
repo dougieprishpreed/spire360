@@ -71,19 +71,30 @@ float fbm(float x, float frequency, int seed) {
 ScreenShake::ScreenShake()
     : target_(NULL), multiplier_(1), punch_(false), punch_strength_(0), punch_angle_(0), punch_t_(0), punch_len_(0),
       rumble_(false), drunk_(false), rumble_strength_(0), rumble_freq_(0), rumble_offset_(0), rumble_t_(0),
-      rumble_len_(0), trauma_(0), trauma_t_(0), trauma_seed_((int)(chaotic_rand() % 999999)) {}
+      rumble_len_(0), trauma_(0), trauma_t_(0), trauma_seed_((int)(chaotic_rand() % 999999)) {
+    base_[0] = base_[1] = base_[2] = base_[3] = 0;
+}
 
 ScreenShake& ScreenShake::get() {
     static ScreenShake s;
     return s;
 }
 
+void ScreenShake::place_target(const Vec2& v) {
+    if (!target_) return;
+    target_->offset[SIDE_LEFT] = base_[SIDE_LEFT] + v.x;
+    target_->offset[SIDE_RIGHT] = base_[SIDE_RIGHT] + v.x;
+    target_->offset[SIDE_TOP] = base_[SIDE_TOP] + v.y;
+    target_->offset[SIDE_BOTTOM] = base_[SIDE_BOTTOM] + v.y;
+}
+
 void ScreenShake::set_target(Control* target) {
     if (target_ == target) return;
-    if (target_) target_->set_position(origin_);
+    place_target(Vec2(0, 0));
     target_ = target;
     punch_ = rumble_ = false;
-    if (target) origin_ = target->position;
+    if (target)
+        for (int k = 0; k < 4; ++k) base_[k] = target->offset[k];
 }
 
 void ScreenShake::clear_target(Control* target) {
@@ -157,7 +168,7 @@ void ScreenShake::update(double dt) {
         trauma_ = maxf(trauma_ - (float)(2.0 * dt), 0);
     }
     offset_ = v;
-    if (target_) target_->set_position(origin_ + v);
+    place_target(v);
 }
 
 namespace {
@@ -169,8 +180,10 @@ public:
         ScreenShake& s = ScreenShake::get();
         if (s.target() != target_) return;
         s.update(dt);
+        /* the top bar stays put (once laid out: a position set before
+         * would keep its size 0) */
         Node* bar = target_->get_node("TopBarLayer");
-        if (bar && bar->is_control()) ((Control*)bar)->set_position(s.offset() * -1.0f);
+        if (bar && bar->is_control() && ((Control*)bar)->size.x > 0) ((Control*)bar)->set_position(s.offset() * -1.0f);
     }
 
 private:

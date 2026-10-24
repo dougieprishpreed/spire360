@@ -880,6 +880,20 @@
       "note": "Foul Potion thrown at a merchant out of combat: NMerchantRoom.FoulPotionThrown (thank-yous, a foulPotion line, a rumble) or NFakeMerchant.FoulPotionThrown (its line before the fight), with vfx_slime_impact at the merchant button (ShowPotionVfx). NRun.Instance is null headless, so the shop's never run. Recorded as a foul_potion cue."
     },
     {
+      "id": "parasol.purchase_everything",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Models.Relics.LordsParasol",
+      "method": "PurchaseEverything",
+      "note": "Lord's Parasol at a shop buys every item one by one (cards, relics, potions, 0.25 s apart), then the card removal; the decision after it shows them all sold. Recorded as a shop_entry cue: the shop as entered, for the client to play the purchases on."
+    },
+    {
+      "id": "merchant.purchase_completed",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Entities.Merchant.MerchantEntry",
+      "method": "InvokePurchaseCompleted",
+      "note": "MerchantEntry.InvokePurchaseCompleted: NMerchantInventory.OnPurchaseCompleted animates the slot (a card to the deck, a relic or potion to the top bar). Recorded as a merchant_purchase cue (kind, index), auto when no buy command made it (Lord's Parasol)."
+    },
+    {
       "id": "fiend_fire.on_play",
       "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Models.Cards.FiendFire",
@@ -1329,7 +1343,8 @@
         "MegaCrit.Sts2.Core.Models.Monsters.BygoneEffigy::WakeMove",
         "MegaCrit.Sts2.Core.Models.Powers.InfestedPower::RevealWrigglersAfterDeathAnim",
         "MegaCrit.Sts2.Core.Models.Cards.BouncingFlask::OnPlay",
-        "MegaCrit.Sts2.Core.Models.Cards.HandOfGreed::OnPlay"
+        "MegaCrit.Sts2.Core.Models.Cards.HandOfGreed::OnPlay",
+        "MegaCrit.Sts2.Core.Models.Relics.LordsParasol::PurchaseEverything"
       ],
       "note": "Presentation the game skips in TestMode, with no effect on the rules: the potion thrown from the player to its target (NItemThrowVfx, then a 0.5 s wait), the rest site's healing cross, and the monsters' calls on their special nodes (the Myte's and Snapping Jaxfruit's targets, the Flyconid's spore kind); the Tunneler's attack from below (sound, animation, 1 s), Vantom's charge-ups (waits, sounds, its track-1 animations, the music's progress), the Waterfall Giant's build-up (music, ambience, track-1 animation; its PressureBuildupIdx only decides whether its body fades after death), the elites' second-phase music (Bygone Effigy, Infested), Bouncing Flask's throws and splashes (0.5 s each), Hand of Greed's target position for its coins. TestMode reads off there in every run, so it reaches the steps as cues (the UI calls stay redirected)."
     },

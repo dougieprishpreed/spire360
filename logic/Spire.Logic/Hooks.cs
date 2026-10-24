@@ -158,7 +158,7 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterBefore("power.modified", a =>
         {
             if (a.Length < 4 || a[1] is not PowerModel pw || a[2] is not int change || a[3] is not bool silent) return;
-            if (silent || pw.Owner == null || !CombatManager.Instance.IsInProgress) return;
+            if (silent || pw.Owner == null || !Steps.InCombat) return;
             bool rise = change > 0 || (pw.StackType == PowerStackType.Counter && pw.AllowNegative && change < 0);
             if (!rise) return;
             string id = pw.Id.Entry.ToLowerInvariant();
@@ -211,6 +211,47 @@ internal static partial class Hooks
                 : null;
             if (where != null) Steps.Cue(new Dictionary<string, object?> { ["t"] = "foul_potion", ["where"] = where });
         });
+        // LordsParasol.PurchaseEverything: the shop as entered, before it is
+        // bought out (the decision after it shows every slot sold)
+        Spire.HookBridge.Hooks.RegisterBefore("parasol.purchase_everything", a =>
+        {
+            var view = Driver?.ShopView();
+            if (view != null) Steps.Cue(new Dictionary<string, object?> { ["t"] = "shop_entry", ["shop"] = view });
+        });
+        // MerchantEntry.InvokePurchaseCompleted: NMerchantInventory's slot
+        // (OnPurchaseCompleted: the card to the deck, a relic or potion to
+        // the top bar, the thank-yous). auto: the shop bought it by itself
+        // (Lord's Parasol), not a buy command the client made
+        Spire.HookBridge.Hooks.RegisterBefore("merchant.purchase_completed", a =>
+        {
+            if (a.Length < 1 || a[0] is not MegaCrit.Sts2.Core.Entities.Merchant.MerchantEntry e) return;
+            bool auto = !Steps.PlayerPurchases.Remove(e);
+            var inv = (MegaCrit.Sts2.Core.Runs.RunManager.Instance.DebugOnlyGetState()?.CurrentRoom as MegaCrit.Sts2.Core.Rooms.MerchantRoom)?.GetLocalInventory();
+            if (inv == null) return;
+            string? kind = null;
+            int index = -1;
+            switch (e)
+            {
+                case MegaCrit.Sts2.Core.Entities.Merchant.MerchantCardEntry c:
+                    kind = "card";
+                    index = inv.CharacterCardEntries.Concat(inv.ColorlessCardEntries).ToList().IndexOf(c);
+                    break;
+                case MegaCrit.Sts2.Core.Entities.Merchant.MerchantRelicEntry r:
+                    kind = "relic";
+                    index = inv.RelicEntries.ToList().IndexOf(r);
+                    break;
+                case MegaCrit.Sts2.Core.Entities.Merchant.MerchantPotionEntry p:
+                    kind = "potion";
+                    index = inv.PotionEntries.ToList().IndexOf(p);
+                    break;
+                default:
+                    if (ReferenceEquals(e, inv.CardRemovalEntry)) kind = "removal";
+                    index = 0;
+                    break;
+            }
+            if (kind != null && index >= 0)
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "merchant_purchase", ["kind"] = kind, ["index"] = index, ["auto"] = auto });
+        });
         Spire.HookBridge.Hooks.RegisterBefore("fiend_fire.on_play", a =>
         {
             _fiendFire = a.Length > 0 ? a[0] as CardModel : null;
@@ -235,7 +276,7 @@ internal static partial class Hooks
         // creature's node still is.
         Spire.HookBridge.Hooks.RegisterBefore("power.removed", a =>
         {
-            if (a.Length < 2 || a[1] is not PowerModel pw || pw.Owner == null || !CombatManager.Instance.IsInProgress) return;
+            if (a.Length < 2 || a[1] is not PowerModel pw || pw.Owner == null || !Steps.InCombat) return;
             if (!pw.ShouldPlayVfx || pw.Owner.IsDead) return;
             string id = pw.Id.Entry.ToLowerInvariant();
             Steps.CueAsIs(new Dictionary<string, object?>
@@ -588,6 +629,13 @@ internal static partial class Hooks
                     ["cards"] = shown.Select(r => (object?)Driver.DeckCardView(r.cardAdded)).ToList(),
                     ["info"] = a[1] is LocString info ? info.GetFormattedText() : null,
                 });
+            // ThievingHopper.ThieveryMove: NCard.Create(stolen) added under the
+            // %StolenCardPos it asked for just before (the card in its hand)
+            if (id.EndsWith("NCard::Create", StringComparison.Ordinal) && _stolenCardHolder != null && Driver != null &&
+                a.Length > 0 && a[0] is CardModel stolen)
+                Steps.Cue(new Dictionary<string, object?> { ["t"] = "held_card", ["who"] = _stolenCardHolder, ["card"] = Driver.DeckCardView(stolen) });
+            _stolenCardHolder = id.Contains("NCreature::GetSpecialNode", StringComparison.Ordinal) && a.Length > 1 &&
+                a[1] as string == "%StolenCardPos" && StandIns.TryCreature(a[0], out var holder) ? Steps.Who(holder) : null;
             Driver?.OnUiCall(id, a);
             var answer = StandIns.Answer(id, a);
             // NDebugAudioManager.Play's handle (Dense Vegetation stops its
@@ -629,6 +677,8 @@ internal static partial class Hooks
     /// <summary>The Fiend Fire being played and its next fire's scale.</summary>
     private static CardModel? _fiendFire;
     private static int _debugAudioHandle;
+    /// <summary>The creature whose %StolenCardPos the last UI call asked for.</summary>
+    private static string? _stolenCardHolder;
     private static float _fiendFireScale;
 
     /// <summary>NCardFlyPowerVfx.GetDuration with the play pile and the

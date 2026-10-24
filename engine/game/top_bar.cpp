@@ -2,6 +2,7 @@
 #include "ui_util.h"
 #include "loc.h"
 
+#include "../core/cue_ledger.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
@@ -27,6 +28,23 @@ public:
 
 private:
     double left_;
+};
+
+/* NSaveIndicator.SavedGame: after 0.5 s to white (1 s), held 0.5 s, then
+ * transparent (1 s); one tween sequence (a second tween on the same
+ * property would replace the first). */
+class SavedFade : public ScriptBehavior {
+public:
+    SavedFade() : t_(0) {}
+    virtual void process(Node* n, double dt) {
+        t_ += dt;
+        if (!n->is_canvas_item()) return;
+        float a = t_ < 0.5 ? 0.0f : t_ < 1.5 ? (float)(t_ - 0.5) : t_ < 2.0 ? 1.0f : t_ < 3.0 ? (float)(3.0 - t_) : 0.0f;
+        ((CanvasItem*)n)->modulate.a = a;
+    }
+
+private:
+    double t_;
 };
 
 /* The bar's own animations (the potions' and relics'), run by the bar's
@@ -241,7 +259,7 @@ Node* make_relic_holder_flash(SceneLibrary* lib, Control* holder) {
         return NULL;
     }
     ((Node2D*)fx)->position = holder->global_transform().xform(holder->size * 0.5f);
-    Node* hi = holder->find_unique("Icon");
+    Node* hi = holder_relic_icon(holder);
     Node* p = fx->get_node("Particles");
     if (p && (p->type == "GPUParticles2D" || p->type == "CPUParticles2D")) {
         if (hi && hi->type == "TextureRect" && ((TextureRect*)hi)->texture) ((Particles2D*)p)->texture = ((TextureRect*)hi)->texture;
@@ -355,6 +373,13 @@ Node* make_potion(SceneLibrary* lib, const std::string& potion_id) {
 
 std::string relic_icon_base(const Json& relic, const char* icon_key, const char* id_key) {
     return relic[icon_key].is_string() ? relic[icon_key].str() : relic[id_key].str();
+}
+
+Node* holder_relic_icon(Node* holder) {
+    if (!holder) return NULL;
+    Node* relic = holder->find_unique("Relic");
+    Node* icon = relic ? relic->find_unique("Icon") : NULL;
+    return icon ? icon : holder->find_unique("Icon");
 }
 
 void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id) {
@@ -471,7 +496,7 @@ static Node* make_relics(SceneLibrary* lib, const Json& player, const Json& befo
             break;
         }
         ((Control*)r)->custom_minimum_size = Vec2(68, 68);
-        Node* icon = r->find_unique("Icon");
+        Node* icon = holder_relic_icon(r);
         set_relic_icon(lib, icon, relic_icon_base(relics[i]));
         /* NRelicInventoryHolder.RefreshAmount: the counter while ShowCounter */
         Node* amount = r->find_unique("AmountLabel");
@@ -614,13 +639,13 @@ Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Jso
          * 1 s), 0.5 s held, then out (1 s) */
         bool saved = false;
         const Json& steps = d["steps"];
-        for (size_t i = 0; i < steps.size() && !saved; ++i)
+        for (size_t i = 0; i < steps.size(); ++i)
             for (size_t k = 0; k < steps[i].size(); ++k)
-                if (steps[i][k]["t"].str() == "saved") saved = true;
-        if (saved && anims) {
-            anims->tweens.tween(&s->modulate.a, 1.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
-            anims->tweens.tween(&s->modulate.a, 0.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 2.0f);
-        }
+                if (steps[i][k]["t"].str() == "saved") {
+                    saved = true;
+                    CueLedger::used(steps[i][k]);
+                }
+        if (saved && !s->behavior) s->behavior = new SavedFade();
     }
     Node* timer = find_named(bar, "TimerContainer");
     hide(timer);

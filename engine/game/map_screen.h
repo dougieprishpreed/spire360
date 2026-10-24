@@ -4,8 +4,12 @@
  * Left / right move between the rooms that can be chosen (the pulsing
  * ones), A travels.
  *
- * Up / down scroll the map. Not yet: the boss node's Spine silhouette and
- * drawing on the map. */
+ * Up / down scroll the map. RB: the drawing tools (NMapDrawButton,
+ * NMapEraseButton, NMapClearButton); drawing or erasing, a cursor the D-pad
+ * moves 700 px a second (NControllerMapDrawingInput), A held draws into
+ * NMapDrawings (map_drawing.tscn's SubViewport at half the map's size), B
+ * stops. The lines stay for the act: every map screen shows them. Not yet:
+ * the boss node's Spine silhouette. */
 #ifndef SPIRE_MAP_SCREEN_H
 #define SPIRE_MAP_SCREEN_H
 
@@ -39,6 +43,10 @@ public:
     }
     /* NMapScreen._startingPointNode (the act's start: the Ancient) */
     Control* start_point() const { return start_point_; }
+    /* The drawing tools or a drawing have the pad (B is theirs). */
+    bool drawing_active() const { return draw_mode_ != 0 || tool_focus_ >= 0; }
+    /* A new run: no lines (NMapScreen.SetMap with clearDrawings). */
+    static void clear_drawings();
 
 private:
     struct Point {
@@ -63,6 +71,30 @@ private:
         Control* node;
     };
     void focus(int i);
+    /* the drawing tools and NControllerMapDrawingInput */
+    void build_drawings(Node* root, const Json& d);
+    void focus_tool(int i);
+    void tools_input(const PadState& pad);
+    void drawing_input(const PadState& pad);
+    void start_drawing(int mode);
+    void stop_drawing();
+    void pen(bool down);
+    class Line2D* add_line(bool erase, const std::vector<Vec2>& points);
+    Control* tools_;          /* %DrawingTools */
+    Control* tool_icons_[3];  /* draw, erase, clear: their Icon */
+    Control* tool_tip_;
+    int tool_focus_;          /* -1: the map's points have the focus */
+    int draw_mode_;           /* 0 none, 1 drawing, 2 erasing */
+    Control* drawings_;       /* TheMap/Drawings */
+    Node* draw_vp_;           /* map_drawing.tscn's DrawViewport */
+    Node* session_;           /* controller_map_drawing_input.tscn */
+    Control* cursor_;
+    Control* cursor_icon_;
+    Vec2 cursor_dir_;
+    bool pen_;
+    bool pen_wait_;           /* the A that started it not let go yet */
+    class Line2D* line_;
+    Color draw_color_;        /* Character.MapDrawingColor */
     SceneLibrary* lib_;
     std::vector<Point> points_;
     Control* start_point_;

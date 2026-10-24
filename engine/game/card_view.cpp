@@ -232,11 +232,15 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
         }
     }
 
-    /* NCard.ReloadOverlay: the affliction's overlay, else the card's own. */
-    if (c["overlay"].is_string()) {
+    /* NCard.ReloadOverlay: the affliction's overlay when it has one
+     * (AfflictionModel.HasOverlay: its scene in the pack), else the card's
+     * own (card_overlay beside an affliction's). */
+    std::string overlay_path = c["overlay"].str();
+    if (!overlay_path.empty() && !lib->ext(overlay_path)) overlay_path = c["card_overlay"].str();
+    if (!overlay_path.empty() && lib->ext(overlay_path)) {
         Node* holder = card->get_node("CardContainer/OverlayContainer");
         std::string oerr;
-        Node* overlay = lib->ext(c["overlay"].str()) ? lib->instantiate(c["overlay"].str(), &oerr) : NULL;
+        Node* overlay = lib->instantiate(overlay_path, &oerr);
         if (holder && overlay) holder->add_child(overlay);
         else delete overlay;
     }

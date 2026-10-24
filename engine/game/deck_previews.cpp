@@ -542,7 +542,7 @@ private:
             /* RelicModel.Flash: the top bar holder's flash */
             Node* hf = make_relic_holder_flash(layer_->lib, (Control*)holder);
             if (hf) layer_->layer_node->add_child(hf);
-            Node* hi = holder->find_unique("Icon");
+            Node* hi = holder_relic_icon(holder);
             Texture2DRes* icon = hi && hi->type == "TextureRect" ? ((TextureRect*)hi)->texture : NULL;
             if (!body || !body->is_control()) continue;
             Node* fx = instance(layer_->lib, "scenes/vfx/relic_flash_vfx.tscn");

@@ -36,6 +36,10 @@ Node* make_potion(SceneLibrary* lib, const std::string& potion_id);
 /* A relic's atlas icon and outline on relic.tscn's %Icon (or any
  * TextureRect with an %Outline child). */
 void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id);
+/* A top bar holder's (relic_inventory_holder.tscn) icon: the TextureRect
+ * %Icon of its %Relic (relic.tscn), unique in that instance, not in the
+ * holder. */
+Node* holder_relic_icon(Node* holder);
 /* NRelicInventoryHolder.DoFlash: relic_inventory_flash_vfx.tscn over a
  * relic holder (relic.tscn) with its icon as the particles, freeing itself
  * after 3 s; position in the holder's canvas. NULL without the scene. */

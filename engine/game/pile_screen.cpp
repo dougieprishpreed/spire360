@@ -1,6 +1,7 @@
 #include "pile_screen.h"
 
 #include "inspect_screens.h"
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "card_view.h"
@@ -339,8 +340,9 @@ bool PileScreen::input(const PadState& pad, unsigned close_buttons) {
         focus_sorter(0);
     }
     if (deck_ && (pad.pressed & PadState::Y)) {
-        /* NUpgradePreviewTickbox */
+        /* NUpgradePreviewTickbox (NTickbox.ForceToggleTick) */
         upgrades_ = !upgrades_;
+        if (lib_->audio()) lib_->audio()->ui(upgrades_ ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
         set_visible(tickbox_ ? tickbox_->get_node("Ticked") : NULL, upgrades_);
         set_visible(tickbox_ ? tickbox_->get_node("NotTicked") : NULL, !upgrades_);
         int f = focus_;

@@ -36,6 +36,19 @@ public partial class RunDriver
         var driver = Hooks.Driver;
         if (driver == null || driver._autoRewards)
             return OfferRewardsAll(set);
+        // A fight's own rewards (CombatRoom.OfferRoomEndRewards: a continued
+        // run's finished fight, StartPreFinishedCombat): the driver's
+        // post-combat rewards screen, terminal until Proceed, not offered
+        // again once they are taken
+        if (set.Room is CombatRoom room && ReferenceEquals(room, driver._runState?.CurrentRoom))
+        {
+            // taken through the driver's list: not complete when this returns
+            set.ThrowInTestIfRewardsNotTaken = false;
+            driver.ClearRewards();
+            driver._goldBeforeCombat = set.Player.Gold;
+            driver._rewardList = set.Rewards.ToList();
+            return Task.CompletedTask;
+        }
         return driver.BeginRewardsSet(set);
     }
 
@@ -146,6 +159,10 @@ public partial class RunDriver
         };
         var sphere = CrystalSphereBehind();
         if (sphere != null) state["crystal_sphere"] = sphere;
+        // CombatRoom.StartPreFinishedCombat (a continued run): NCombatRoom in
+        // FinishedCombat mode behind the rewards, its background without the
+        // enemies; the client has no fight decision to build it from
+        if (_runState.CurrentRoom is CombatRoom) state["room_view"] = CombatView();
         // NRewardsScreen's header after a combat in which loot was stolen
         try
         {
@@ -182,6 +199,7 @@ public partial class RunDriver
     };
 
     // Reward.IconPath (protected) as the game picks it.
+    [System.Diagnostics.CodeAnalysis.DynamicDependency("get_IconPath", typeof(CardReward))]
     private static string? RewardIconPath(Reward r)
     {
         const string dir = "res://images/ui/reward_screen/";
@@ -192,6 +210,15 @@ public partial class RunDriver
             case CardRemovalReward: return dir + "reward_icon_card_removal.png";
             case CardReward cr:
             {
+                // CardReward.IconPath itself (its Options: a combat's reward
+                // has creation flags, which ToSerializable refuses)
+                try
+                {
+                    if (typeof(CardReward).GetProperty("IconPath", System.Reflection.BindingFlags.Instance |
+                            System.Reflection.BindingFlags.NonPublic)?.GetValue(cr) is string own && own.Length > 0)
+                        return own;
+                }
+                catch { }
                 try
                 {
                     var s = cr.ToSerializable();

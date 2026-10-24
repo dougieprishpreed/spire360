@@ -463,10 +463,34 @@ def _worker_init(pack_path, scale):
     _worker["scale"] = scale
 
 
+class GdimImage:
+    """An image the game imports as an Image, not a texture (the map
+    drawing's cursors: PreloadManager.GetAsset<Image>, then
+    ImageTexture.CreateFromImage): its .image is "GDIM", a u32 version,
+    "png" and the PNG. What texture.convert reads of a ctex.Ctex."""
+
+    def __init__(self, raw):
+        import io
+
+        import numpy as np
+        from PIL import Image
+
+        at = raw.find(b"\x89PNG")
+        if raw[:4] != b"GDIM" or at < 0:
+            raise ValueError("not a GDIM png image")
+        self.rgba = np.asarray(Image.open(io.BytesIO(raw[at:])).convert("RGBA"))
+        self.height, self.width = self.rgba.shape[:2]
+        self.format, self.format_name, self.data_format, self.has_mipmaps = None, "GDIM png", None, False
+
+    def decode(self, level=0):
+        return self.rgba
+
+
 def _convert_texture(name):
     try:
         src, res = _worker["src"], _worker["res"]
-        t = ctex.load(src.read(res.resolve(name)))
+        raw = src.read(res.resolve(name))
+        t = GdimImage(raw) if raw[:4] == b"GDIM" else ctex.load(raw)
         out = texture.convert(t, _worker["scale"])
         return name, s3p.texture_payload(out), {"src": t.format_name, "fmt": texture.FORMAT_NAMES[out.format],
                                                 "w": out.width, "h": out.height, "ow": out.orig_width,
@@ -523,7 +547,8 @@ def cmd_build(a):
             if not imp:
                 continue
             importer, type_ = imp
-            if importer in ("texture",) and res.resolve(p):
+            # an Image import is packed as a texture too (the engine draws it)
+            if importer in ("texture", "image") and res.resolve(p):
                 textures.append(p)
             elif type_ == "FontFile" and res.resolve(p):
                 fonts.append(p)

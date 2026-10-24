@@ -847,6 +847,7 @@ void CombatScreen::setup_combat_ui(Node* root, const Json& d) {
     }
 
     /* At rest these are hidden or off screen (multiplayer, selection modes). */
+    /* (the peek button shows in the hand's selection mode) */
     static const char* const hidden[] = { "PingButton", "PeekButton", "SelectionHeader", "SelectModeConfirmButton",
                                           "SelectModeBackstop", "UpgradePreviewContainer" };
     for (size_t i = 0; i < sizeof(hidden) / sizeof(hidden[0]); ++i) {
@@ -1491,6 +1492,7 @@ void CombatScreen::process(double dt) {
     }
     float t = (float)dt;
     tweens_.update(dt);
+    peek_.frame(dt);
     for (size_t i = fading_trails_.size(); i-- > 0;) {
         Trail& tr = fading_trails_[i];
         tr.t += dt;
@@ -2201,7 +2203,10 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
             for (size_t k = 0; k < n->children.size(); ++k) stack.push_back(n->children[k]);
         }
     }
-    for (size_t i = 0; i < enemies_.size(); ++i) setup_creature_spine(enemies_[i].visuals, enemies_[i].data);
+    for (size_t i = 0; i < enemies_.size(); ++i) {
+        setup_creature_spine(enemies_[i].visuals, enemies_[i].data);
+        hold_card(enemies_[i], enemies_[i].data["held_card"]);
+    }
     for (size_t i = 0; i < ghosts_.size(); ++i) setup_creature_spine(ghosts_[i].c.visuals, ghosts_[i].c.data);
     if (player_.node && !aftermath_) setup_creature_spine(player_.visuals, player_.data);
     if (visual_only_) {
@@ -2718,6 +2723,10 @@ bool CombatScreen::apply_state(const Json& ch) {
         return true;
     }
     if (type == "card_create") { create_at_pile(ch); return true; }
+    if (type == "held_card") {
+        if (c) hold_card(*c, ch["card"]);
+        return true;
+    }
     if (type == "escape") {
         /* CreatureCmd.Escape: RemoveCreatureNode, ToggleIsInteractable(false),
          * Visible = false */
@@ -2938,6 +2947,17 @@ bool CombatScreen::apply_state(const Json& ch) {
         refresh_state(*c, true);
         /* NPower.OnDisplayAmountChanged: its flash */
         if (exists && !ch["removed"].b() && ch["to"].i() != ch["from"].i()) power_row_flash(ch["who"].str(), ch["power"].str());
+        /* NOrbVfx.OnPowerApplied / Increased / Decreased: the orbs' focused
+         * particles follow the player's Focus as it changes */
+        if (c == &player_ && ch["power"].str() == "FOCUS_POWER") {
+            bool focus = ch["to"].i() > 0 && !ch["removed"].b();
+            for (size_t i = 0; i < orbs_.size(); ++i) {
+                const Json& m = orbs_[i].data;
+                if (m.is_null()) continue;
+                bool glass = lower(m["id"].str()) == "glass_orb";
+                orb_particles(orb_export(orbs_[i].sprite, "_focusedParticles"), false, focus && (!glass || m["passive"].i() > 0));
+            }
+        }
     } else if (type == "spawn" || type == "revive") {
         std::vector<std::string>::iterator d = std::find(dying_.begin(), dying_.end(), ch["who"].str());
         if (d != dying_.end()) dying_.erase(d);
@@ -2988,6 +3008,9 @@ void CombatScreen::finish_state(const Json& d, bool finishing) {
         if (state_["orbs"] != d["orbs"] || state_["orb_slots"] != d["orb_slots"])
             sync_orbs(d["orbs"], d["orb_slots"].i(), true);
         state_ = d;
+        /* a creature focused while the cues played: its tips as they are now */
+        Creature* focused = creature_of(creature_focus_);
+        if (focused) show_creature_tips(*focused);
     } else {
         sync_hand(Json(), true);
         hide(find_named(root_, "CombatUi"));
@@ -4528,7 +4551,7 @@ void CombatScreen::flash_relic(const Json& cue) {
     Node* row = bar ? find_named(bar, "RelicInventory") : NULL;
     Node* holder = row && index < (int)row->children.size() ? row->children[(size_t)index] : NULL;
     if (holder && holder->is_control()) {
-        Node* hi = holder->find_unique("Icon");
+        Node* hi = holder_relic_icon(holder);
         if (hi && hi->type == "TextureRect") icon = ((TextureRect*)hi)->texture;
         Node* fx = make_relic_holder_flash(lib_, (Control*)holder);
         if (fx) root_->add_child(fx);
@@ -4617,8 +4640,19 @@ void CombatScreen::show_creature_focus(bool on) {
     if (!c) return;
     show_nameplate(*c, on);
     select_reticle(*c, on);
-    if (!on || !root_) return;
-    const Json& tips = c->player ? state_["player_tips"] : c->data["tips"];
+    if (on) show_creature_tips(*c);
+}
+
+/* NCreature.ShowHoverTips; again as the focused creature's powers change
+ * (NCreature.OnPowerApplied / Removed refresh them): at each sync */
+void CombatScreen::show_creature_tips(Creature& c) {
+    if (creature_tips_) {
+        if (creature_tips_->parent) creature_tips_->parent->remove_child(creature_tips_);
+        delete creature_tips_;
+        creature_tips_ = NULL;
+    }
+    if (!root_) return;
+    const Json& tips = c.player ? state_["player_tips"] : c.data["tips"];
     Node* t = make_tip_set(lib_, tips);
     creature_tips_ = t && t->is_control() ? (Control*)t : NULL;
     if (t && !creature_tips_) delete t;
@@ -4706,22 +4740,35 @@ void CombatScreen::begin_hand_select(const Json& d) {
         show_glyph(lib_, find_named(c, "HotkeyIcon"), "y");
         sel_confirm_shown_ = false;
     }
-    /* UpdateSelectModeCardVisibility: only the cards the filter takes */
-    const Json& cs = d["cards"];
-    for (size_t i = 0; i < holders_.size(); ++i) {
-        bool ok = false;
-        for (size_t k = 0; k < cs.size(); ++k)
-            if (cs[k]["instance_id"].i(-1) == holders_[i].id) ok = true;
-        holders_[i].node->visible = ok;
-    }
+    /* PeekButton.Enable; its targets the selection's parts */
+    peek_.setup(lib_, hand->find_unique("PeekButton"), true);
+    static const char* const peek_targets[] = { "SelectModeBackstop", "UpgradePreviewContainer", "SelectModeConfirmButton",
+                                                "SelectionHeader", "SelectedHandCardContainer" };
+    for (size_t i = 0; i < sizeof(peek_targets) / sizeof(peek_targets[0]); ++i)
+        peek_.add_target(hand->find_unique(peek_targets[i]));
+    sel_filter();
     hand_focus_ = -1;
     sel_layout();
     layout_hand();
     refresh_tips();
 }
 
+/* UpdateSelectModeCardVisibility: only the cards the filter takes; all of
+ * them while peeking */
+void CombatScreen::sel_filter() {
+    const Json& cs = sel_["cards"];
+    for (size_t i = 0; i < holders_.size(); ++i) {
+        bool ok = peek_.peeking();
+        for (size_t k = 0; k < cs.size() && !ok; ++k)
+            if (cs[k]["instance_id"].i(-1) == holders_[i].id) ok = true;
+        holders_[i].node->visible = ok;
+    }
+}
+
 void CombatScreen::end_hand_select() {
     if (!sel_mode_) return;
+    /* PeekButton.Disable */
+    peek_.set_peeking(false);
     /* OnSelectModeSourceFinished: the picked cards go back to the hand */
     while (!selected_.empty()) sel_unpick((int)selected_.size() - 1);
     for (size_t i = 0; i < holders_.size(); ++i) holders_[i].node->visible = true;
@@ -4732,6 +4779,7 @@ void CombatScreen::end_hand_select() {
         set_visible(hand->find_unique("SelectionHeader"), false);
         set_visible(hand->find_unique("UpgradePreviewContainer"), false);
     }
+    peek_.setup(lib_, hand ? hand->find_unique("PeekButton") : NULL, false);
     if (sel_confirm_) sel_confirm_->visible = false;
     sel_mode_ = 0;
     sel_row_ = false;
@@ -4864,6 +4912,37 @@ void CombatScreen::sel_layout() {
 
 std::string CombatScreen::hand_select_input(const PadState& pad) {
     if (!sel_mode_) return std::string();
+    /* NPeekButton (the left stick): the fight without the selection, every
+     * hand card shown (OnPeekButtonToggled) */
+    if ((pad.pressed & PadState::LS) && peek_.enabled()) {
+        peek_.toggle();
+        unfocus_creatures();
+        sel_row_ = false;
+        hand_focus_ = -1;
+        sel_filter();
+        sel_layout();
+        layout_hand();
+        refresh_tips();
+        return std::string();
+    }
+    if (peek_.peeking()) {
+        /* the fight's navigation: the creatures (up) and the hand; a card
+         * pressed wiggles the button (NPlayerHand.OnHolderPressed) */
+        if (creatures_focused()) {
+            if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) move_creature_focus((pad.pressed & PadState::LEFT) ? -1 : 1);
+            else if (pad.pressed & (PadState::DOWN | PadState::B)) unfocus_creatures();
+            return std::string();
+        }
+        if (pad.pressed & PadState::UP) {
+            focus_creatures();
+            return std::string();
+        }
+        if (pad.pressed & PadState::A) {
+            peek_.wiggle();
+            return std::string();
+        }
+        if (!(pad.pressed & (PadState::LEFT | PadState::RIGHT))) return std::string();
+    }
     int n = (int)selected_.size();
     if (pad.pressed & PadState::Y) {
         /* OnSelectModeConfirmButtonPressed */
@@ -4994,6 +5073,16 @@ void CombatScreen::burn_play_pile() {
  * exhaust pile: made at full size at its old pile, AppendPlayPileLerpTween
  * to the play pile (the lerp time, to 0.8 in 0.25 s); exhausted, it waits
  * there (0.5 s, Fast 0.2) and NCardExhaustVfx burns it. */
+/* NCard.Create(stolen) added to the %StolenCardPos marker (under the
+ * hopper's CardBoneNode, behind its body), UpdateVisuals(Deck, Normal); it
+ * stays there, going with the visuals when the hopper dies or escapes. */
+void CombatScreen::hold_card(Creature& c, const Json& view) {
+    Node* pos = c.visuals && view.is_object() ? c.visuals->find_unique("StolenCardPos") : NULL;
+    if (!pos || !pos->children.empty()) return;
+    Node* card = make_card(lib_, view);
+    if (card) pos->add_child(card);
+}
+
 void CombatScreen::create_at_pile(const Json& ch) {
     int id = ch["card"].i(-1);
     if (!hand_box_ || in_play(id) || !ch["view"].is_object()) return;

@@ -48,7 +48,11 @@ public:
 private:
     ScreenShake();
     Control* target_;
-    Vec2 origin_, offset_;
+    /* the target's own offsets: the shake is added to them (its anchors keep
+     * laying it out, whatever its size when the shake begins) */
+    float base_[4];
+    Vec2 offset_;
+    void place_target(const Vec2& v);
     float multiplier_;
     /* punch */
     bool punch_;

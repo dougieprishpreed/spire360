@@ -131,7 +131,8 @@ static unsigned pad_bits(const XINPUT_GAMEPAD& g) {
                 { XINPUT_GAMEPAD_LEFT_SHOULDER, PadState::LB }, { XINPUT_GAMEPAD_RIGHT_SHOULDER, PadState::RB },
                 { XINPUT_GAMEPAD_DPAD_UP, PadState::UP },   { XINPUT_GAMEPAD_DPAD_DOWN, PadState::DOWN },
                 { XINPUT_GAMEPAD_DPAD_LEFT, PadState::LEFT }, { XINPUT_GAMEPAD_DPAD_RIGHT, PadState::RIGHT },
-                { XINPUT_GAMEPAD_START, PadState::START },  { XINPUT_GAMEPAD_BACK, PadState::BACK } };
+                { XINPUT_GAMEPAD_START, PadState::START },  { XINPUT_GAMEPAD_BACK, PadState::BACK },
+                { XINPUT_GAMEPAD_LEFT_THUMB, PadState::LS } };
     unsigned b = 0;
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); ++i)
         if (g.wButtons & map[i].x) b |= map[i].bit;

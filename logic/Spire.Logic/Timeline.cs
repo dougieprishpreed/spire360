@@ -179,9 +179,19 @@ public partial class RunDriver
             ["story_id"] = m.StoryId,
             ["story_title"] = Text(() => m.StoryTitle),
             ["chapter"] = Num(() => m.ChapterIndex),
+            // NEpochInspectScreen.RefreshChapterPaginators: the story's
+            // revealed chapters either side
+            ["prev_chapter"] = Chapter(() => StoryModel.PrevChapter(m)),
+            ["next_chapter"] = Chapter(() => StoryModel.NextChapter(m)),
             ["portrait"] = "images/atlases/epoch_atlas.sprites/" + id.ToLowerInvariant() + ".tres",
             ["real_portrait"] = "images/timeline/epoch_portraits/" + id.ToLowerInvariant() + ".png",
         };
+    }
+
+    private static string? Chapter(Func<EpochModel?> f)
+    {
+        try { return f()?.Id; }
+        catch { return null; }
     }
 
     private static int Num(Func<int> f)

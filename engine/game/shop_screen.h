@@ -43,6 +43,15 @@ public:
     /* NMerchantRoom.OpenInventory (the merchant tip's "Got it!"), as A on
      * the merchant does */
     void open_rug();
+    /* Before build: the room buys by itself (LordsParasol.PurchaseEverything
+     * with its input blocked): steps' NMerchantInventory.Open and auto
+     * merchant_purchase cues play at their delays; busy until they have
+     * played and the last item has flown. */
+    void set_auto(const Json& steps);
+    virtual bool busy() const;
+    /* An item the auto purchases took from its slot since the last call
+     * (kind: card, relic or potion; its id), for the top bar to follow. */
+    bool take_bought(std::string* kind, std::string* id);
     std::string focused_kind() const;
     int focused_index() const;
     virtual Node* build(const Json& decision, std::string* error);
@@ -120,6 +129,14 @@ private:
     Vec2 hand_start_, hand_target_;
     int hand_slot_;           /* the slot pointed at, -1: none */
     double hand_linger_, hand_t_;
+    struct AutoCue {
+        double at;
+        std::string kind; /* "open", or the slot's kind */
+        int index;
+    };
+    std::vector<AutoCue> auto_;
+    double auto_t_, auto_tail_;
+    std::vector<std::pair<std::string, std::string> > bought_;
 };
 
 } /* namespace spire */

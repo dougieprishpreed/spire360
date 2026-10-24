@@ -1,5 +1,6 @@
 #include "settings_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../core/pack.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
@@ -330,6 +331,8 @@ std::string SettingsScreen::change(Line& l, int step) {
     if (l.kind == TICKBOX && step == 0) {
         bool on = !settings_[l.key].b();
         settings_.set(l.key, Json::make_bool(on));
+        /* NTickbox.ForceToggleTick */
+        if (lib_->audio()) lib_->audio()->ui(on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
         static const struct {
             const char* key;
             const char* toast;

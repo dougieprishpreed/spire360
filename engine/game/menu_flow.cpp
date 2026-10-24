@@ -404,6 +404,9 @@ bool MenuFlow::update(const PadState& in) {
                 break;
             }
             CharacterSelectScreen::Action a = chars_->input(pad);
+            /* the unlock animation's end: PendingCharacterUnlock cleared */
+            std::string unlock_cmd = chars_->take_command();
+            if (!unlock_cmd.empty()) game_->request(unlock_cmd);
             if (a == CharacterSelectScreen::BACK) {
                 last_character_ = chars_->selected();
                 close_screen();

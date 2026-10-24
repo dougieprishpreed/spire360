@@ -1,5 +1,6 @@
 #include "ui_util.h"
 
+#include "card_view.h"
 #include "loc.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -57,7 +58,37 @@ Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
     box->name = "HoverTipSet";
     box->add_theme_constant_override("separation", 5);
     box->mouse_filter = 2;
+    /* NHoverTipCardContainer: the cards the tips name (card_hover_tip.tscn,
+     * the card at 0.75), 4 px apart, beside the text tips */
+    Control* cards = NULL;
     for (size_t i = 0; i < tips.size(); ++i) {
+        if (!tips[i]["card"].is_object()) continue;
+        Node* ct = instance(lib, "scenes/ui/card_hover_tip.tscn");
+        Node* slot = ct ? ct->find_unique("Card") : NULL;
+        Node* card = slot ? make_card(lib, tips[i]["card"]) : NULL;
+        if (!ct || !ct->is_control() || !slot || !card || !card->is_control() || !slot->is_control()) {
+            delete card;
+            delete ct;
+            continue;
+        }
+        Control* c = (Control*)card;
+        Control* s = (Control*)slot;
+        for (int k = 0; k < 4; ++k) c->offset[k] = s->offset[k];
+        for (int k = 0; k < 4; ++k) c->anchor[k] = s->anchor[k];
+        c->scale = s->scale;
+        slot->parent->add_child_before(card, slot);
+        slot->parent->remove_child(slot);
+        delete slot;
+        if (!cards) {
+            cards = (Control*)SceneLibrary::create_node("VBoxContainer");
+            cards->name = "CardHoverTipContainer";
+            cards->add_theme_constant_override("separation", 4);
+            cards->mouse_filter = 2;
+        }
+        cards->add_child(ct);
+    }
+    for (size_t i = 0; i < tips.size(); ++i) {
+        if (tips[i]["card"].is_object()) continue;
         Control* t = make_hover_tip(lib, tips[i]["title"].str(), tips[i]["description"].str());
         if (!t) continue;
         Node* bg = tips[i]["debuff"].b() ? t->find_unique("Bg") : NULL;
@@ -69,6 +100,19 @@ Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
                 ((CanvasItem*)bg)->material = (MaterialRes*)m;
         }
         box->add_child(t);
+    }
+    if (cards) {
+        if (box->children.empty()) {
+            delete box;
+            return cards;
+        }
+        Control* row = (Control*)SceneLibrary::create_node("HBoxContainer");
+        row->name = "HoverTipSetWithCards";
+        row->add_theme_constant_override("separation", 4);
+        row->mouse_filter = 2;
+        row->add_child(box);
+        row->add_child(cards);
+        return row;
     }
     if (box->children.empty()) {
         delete box;

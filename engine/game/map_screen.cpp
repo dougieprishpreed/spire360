@@ -4,6 +4,7 @@
 #include "../audio/game_audio.h"
 
 #include "../scene/controls.h"
+#include "../scene/line_2d.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
 #include "../scene/spine_sprite.h"
@@ -192,11 +193,241 @@ static std::string outline_name(const std::string& type, const std::string& room
     return icon_name(type, room);
 }
 
-MapScreen::MapScreen(SceneLibrary* lib) : lib_(lib), focus_(-1), next_tick_(0), current_col_(-1), current_row_(-1),
+static Control* as_ctl(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
+
+/* NMapDrawings' lines for the act (the logic does not keep them): each in
+ * the drawing viewport's coordinates (half the map's), drawn or erasing. */
+namespace {
+struct MapStroke {
+    bool erase;
+    std::vector<Vec2> points;
+};
+std::vector<MapStroke> g_strokes;
+int g_strokes_act = -1;
+}
+
+void MapScreen::clear_drawings() {
+    g_strokes.clear();
+    g_strokes_act = -1;
+}
+
+MapScreen::MapScreen(SceneLibrary* lib) : tools_(NULL), tool_tip_(NULL), tool_focus_(-1), draw_mode_(0), drawings_(NULL),
+    draw_vp_(NULL), session_(NULL), cursor_(NULL), cursor_icon_(NULL), pen_(false), pen_wait_(false), line_(NULL), lib_(lib),
+    focus_(-1),
+    next_tick_(0), current_col_(-1), current_row_(-1),
     opening_(0), travel_t_(-1), marker_(NULL), map_ctl_(NULL), scroll_(0), scroll_to_(0), scroll_lo_(0), scroll_hi_(0),
     scroll_step_(1), act_anim_(-1), act_delay_(1), act_duration_(3), map_ftue_seen_(false), travel_time_(0.8), banner_(NULL),
     banner_end_(0) {
     start_point_ = NULL;
+    tool_icons_[0] = tool_icons_[1] = tool_icons_[2] = NULL;
+}
+
+/* map_line_draw.tscn / map_line_erase.tscn in the drawing viewport, in the
+ * character's MapDrawingColor (CreateLineForPlayer). */
+Line2D* MapScreen::add_line(bool erase, const std::vector<Vec2>& points) {
+    if (!draw_vp_) return NULL;
+    Node* n = instance(lib_, erase ? "scenes/screens/map/map_line_erase.tscn" : "scenes/screens/map/map_line_draw.tscn");
+    if (!n || n->type != "Line2D") {
+        delete n;
+        return NULL;
+    }
+    Line2D* l = (Line2D*)n;
+    l->color = draw_color_;
+    l->points = points;
+    l->position = Vec2(0, 0);
+    draw_vp_->add_child(l);
+    return l;
+}
+
+/* NMapScreen's drawing tools and NMapDrawings (TheMap/Drawings: a
+ * map_drawing.tscn per player, its viewport at half the map's size), the
+ * act's lines again. */
+void MapScreen::build_drawings(Node* root, const Json& d) {
+    int act = d["context"]["act"].i(d["act"].i());
+    if (act != g_strokes_act) {
+        g_strokes.clear();
+        g_strokes_act = act;
+    }
+    draw_color_ = json_rgba(d["map"]["drawing_color"], hex(0xCB282B));
+    tools_ = ctl(root, "DrawingTools");
+    static const char* const names[3] = { "DrawButton", "EraseButton", "ClearButton" };
+    for (int i = 0; i < 3; ++i) {
+        Control* b = tools_ ? ctl(tools_, names[i]) : NULL;
+        tool_icons_[i] = b ? as_ctl(b->get_node("Icon")) : NULL;
+    }
+    show_glyph(lib_, tools_ ? tools_->find_unique("DrawingToolsHotkey") : NULL, "rb");
+    drawings_ = ctl(root, "Drawings");
+    Node* layer = drawings_ ? instance(lib_, "scenes/screens/map/map_drawing.tscn") : NULL;
+    if (layer) {
+        drawings_->add_child(layer);
+        draw_vp_ = layer->get_node("DrawViewport");
+    }
+    for (size_t i = 0; i < g_strokes.size(); ++i) add_line(g_strokes[i].erase, g_strokes[i].points);
+}
+
+/* NMapDrawButton / NMapEraseButton focused: the icon to 1.2 in its active
+ * colour (0.05 s) with its hover tip 132 px above the tools; unfocused
+ * back to 1.1, active or half white. */
+void MapScreen::focus_tool(int i) {
+    static const unsigned active[3] = { 0x57C4FF, 0xFF5757, 0xFFFFFF };
+    static const char* const tips[3] = { "DRAWING_BUTTON", "ERASING_BUTTON", "CLEAR_DRAWING" };
+    if (tool_tip_) {
+        if (tool_tip_->parent) tool_tip_->parent->remove_child(tool_tip_);
+        delete tool_tip_;
+        tool_tip_ = NULL;
+    }
+    tool_focus_ = i;
+    for (int k = 0; k < 3; ++k) {
+        Control* ic = tool_icons_[k];
+        if (!ic) continue;
+        bool on = k == i || k + 1 == draw_mode_;
+        Color c = on ? hex(active[k]) : Color(1, 1, 1, 0.5f);
+        float s = k == i ? 1.2f : 1.1f;
+        tweens_.tween(&ic->scale, Vec2(s, s), 0.05f);
+        tweens_.tween(&ic->self_modulate.r, c.r, 0.05f);
+        tweens_.tween(&ic->self_modulate.g, c.g, 0.05f);
+        tweens_.tween(&ic->self_modulate.b, c.b, 0.05f);
+        tweens_.tween(&ic->self_modulate.a, c.a, 0.05f);
+    }
+    if (i < 0 || !tools_) return;
+    Json list = Json::make_array();
+    Json tip;
+    std::string key = tips[i];
+    tip.set("title", Json::make_string(Loc::get("map", (key + (i < 2 ? ".title_controller" : ".title")).c_str())));
+    tip.set("description", Json::make_string(Loc::get("map", (key + ".description").c_str())));
+    list.append(tip);
+    Node* t = make_tip_set(lib_, list);
+    tool_tip_ = t && t->is_control() ? (Control*)t : NULL;
+    if (t && !tool_tip_) delete t;
+    if (tool_tip_ && tools_->parent) {
+        tools_->parent->add_child(tool_tip_);
+        tool_tip_->set_position(tools_->global_transform().origin + Vec2(10, -132));
+    }
+}
+
+/* NMapDrawingInput.Create (a ControllerMapDrawingSession): the cursor at the
+ * screen's centre, the quill or eraser (SetDrawingModeLocal) */
+void MapScreen::start_drawing(int mode) {
+    stop_drawing();
+    draw_mode_ = mode;
+    session_ = instance(lib_, "scenes/screens/map/controller_map_drawing_input.tscn");
+    Node* root = tools_ ? tools_->parent : NULL;
+    if (!session_ || !root) {
+        delete session_;
+        session_ = NULL;
+        draw_mode_ = 0;
+        return;
+    }
+    root->add_child(session_);
+    cursor_ = ctl(session_, "Cursor");
+    cursor_icon_ = cursor_ ? as_ctl(cursor_->get_node("TextureRect")) : NULL;
+    pen_ = false;
+    /* the button acts on its release (NClickableControl.Released): the A
+     * that pressed it draws nothing until it is let go */
+    pen_wait_ = true;
+    pen(false);
+    if (cursor_icon_) {
+        /* _drawingIconPos / _eraserIconPos */
+        Vec2 at = mode == 1 ? Vec2(-10, -76) : Vec2(-34, -76);
+        Vec2 size = offset_size(cursor_icon_);
+        place(cursor_icon_, at.x, at.y, size.x, size.y);
+    }
+    focus_tool(-1);
+}
+
+/* the cursor's texture: tilted while the line is drawn */
+void MapScreen::pen(bool down) {
+    if (!cursor_icon_) return;
+    const char* tex = draw_mode_ == 1 ? (down ? "images/packed/common_ui/cursor_quill_tilted.png" : "images/packed/common_ui/cursor_quill.png")
+                                      : (down ? "images/packed/common_ui/cursor_eraser_tilted.png" : "images/packed/common_ui/cursor_eraser.png");
+    /* the cursors are Image imports, in the pack only once the converter
+     * packs them: the tools' own quill and eraser till then */
+    Resource* r = lib_->ext(tex);
+    if (!r || !r->is_texture()) tex = draw_mode_ == 1 ? "images/packed/map/drawing_quill.png" : "images/packed/map/drawing_eraser.png";
+    set_texture(lib_, cursor_icon_, tex);
+}
+
+/* NMapDrawingInput.StopDrawing: the line ends, the mode with it */
+void MapScreen::stop_drawing() {
+    if (pen_ && line_) {
+        MapStroke s = { draw_mode_ == 2, line_->points };
+        g_strokes.push_back(s);
+    }
+    pen_ = false;
+    line_ = NULL;
+    draw_mode_ = 0;
+    if (session_) {
+        if (session_->parent) session_->parent->remove_child(session_);
+        delete session_;
+    }
+    session_ = NULL;
+    cursor_ = cursor_icon_ = NULL;
+    cursor_dir_ = Vec2(0, 0);
+    focus_tool(tool_focus_);
+}
+
+void MapScreen::tools_input(const PadState& pad) {
+    if ((pad.pressed & PadState::LEFT) && tool_focus_ > 0) focus_tool(tool_focus_ - 1);
+    else if ((pad.pressed & PadState::RIGHT) && tool_focus_ < 2) focus_tool(tool_focus_ + 1);
+    else if (pad.pressed & (PadState::B | PadState::RB | PadState::UP)) focus_tool(-1);
+    else if (pad.pressed & PadState::A) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        if (tool_focus_ == 2) {
+            /* OnClearMapDrawingButtonPressed: every line of the player's */
+            stop_drawing();
+            g_strokes.clear();
+            while (draw_vp_ && !draw_vp_->children.empty()) {
+                Node* c = draw_vp_->children.back();
+                draw_vp_->remove_child(c);
+                delete c;
+            }
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_erase");
+        } else if (draw_mode_ == tool_focus_ + 1) {
+            stop_drawing();
+        } else {
+            start_drawing(tool_focus_ + 1);
+        }
+    }
+}
+
+/* NControllerMapDrawingInput._Process / _Input: A held draws (BeginLineLocal
+ * at the cursor, StopLineLocal on release); B stops; RB back to the tools
+ * (OnDrawingToolsHotkeyPressed: the focus moves, which stops it). */
+void MapScreen::drawing_input(const PadState& pad) {
+    if (pad.pressed & PadState::B) {
+        stop_drawing();
+        focus_tool(-1);
+        return;
+    }
+    if (pad.pressed & PadState::RB) {
+        int mode = draw_mode_;
+        stop_drawing();
+        focus_tool(mode - 1);
+        return;
+    }
+    cursor_dir_ = Vec2((pad.held & PadState::RIGHT ? 1.0f : 0.0f) - (pad.held & PadState::LEFT ? 1.0f : 0.0f),
+                       (pad.held & PadState::DOWN ? 1.0f : 0.0f) - (pad.held & PadState::UP ? 1.0f : 0.0f));
+    if (cursor_dir_.x != 0 && cursor_dir_.y != 0) cursor_dir_ = cursor_dir_ * 0.70710678f; /* Input.GetVector */
+    bool held = (pad.held & PadState::A) != 0;
+    if (pen_wait_) {
+        pen_wait_ = held;
+        return;
+    }
+    if (held && !pen_ && cursor_ && drawings_) {
+        Vec2 at = inverse(drawings_->global_transform()).xform(cursor_->global_transform().origin) * 0.5f;
+        std::vector<Vec2> pts;
+        pts.push_back(at);
+        pts.push_back(at + Vec2(0, 0.5f));
+        line_ = add_line(draw_mode_ == 2, pts);
+        pen_ = line_ != NULL;
+        pen(true);
+    } else if (!held && pen_) {
+        MapStroke s = { draw_mode_ == 2, line_->points };
+        g_strokes.push_back(s);
+        pen_ = false;
+        line_ = NULL;
+        pen(false);
+    }
 }
 
 Node* MapScreen::build(const Json& d, std::string* error) {
@@ -226,7 +457,7 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     Node* backstop = root->find_unique("Backstop");
     if (backstop && backstop->is_canvas_item()) ((CanvasItem*)backstop)->modulate.a = 0.85f;
     hide(root->get_node("Back"));
-    hide(root->find_unique("DrawingTools"));
+    build_drawings(root, d);
     hide(root->find_unique("ShareButton"));
     hide(root->find_unique("ShareToast"));
 
@@ -638,6 +869,20 @@ std::string MapScreen::input(const PadState& pad) {
     if (busy()) return std::string();
     /* past a quarter of it, input ends the rise (and still counts) */
     if (act_anim_ >= 0 && pad.pressed) act_anim_ = act_delay_ + act_duration_;
+    if (draw_mode_ != 0) {
+        drawing_input(pad);
+        return std::string();
+    }
+    if (tool_focus_ >= 0) {
+        tools_input(pad);
+        return std::string();
+    }
+    if ((pad.pressed & PadState::RB) && tools_) {
+        /* OnDrawingToolsHotkeyPressed: the draw button (the eraser's while
+         * erasing) */
+        focus_tool(0);
+        return std::string();
+    }
     if (pad.pressed & PadState::UP) scroll_to_ = minf(scroll_to_ + scroll_step_, scroll_hi_);
     if (pad.pressed & PadState::DOWN) scroll_to_ = maxf(scroll_to_ - scroll_step_, scroll_lo_);
     int n = (int)choices_.size();
@@ -681,6 +926,21 @@ void MapScreen::begin_travel(int col, int row) {
 void MapScreen::frame(double dt) {
     tweens_.update(dt);
     opening_ += dt;
+    if (cursor_ && (cursor_dir_.x != 0 || cursor_dir_.y != 0)) {
+        /* 700 px a second, kept on the screen; the line follows (points
+         * 2 px apart at least: UpdateCurrentLinePosition) */
+        Vec2 at = cursor_->global_transform().origin + cursor_dir_ * (700.0f * (float)dt);
+        at = Vec2(clampf(at.x, 0, 1920), clampf(at.y, 0, 1080));
+        Node* p = cursor_->parent;
+        Vec2 local = p && p->is_canvas_item() ? inverse(((CanvasItem*)p)->global_transform()).xform(at) : at;
+        cursor_->set_position(local);
+        if (pen_ && line_ && drawings_) {
+            Vec2 v = inverse(drawings_->global_transform()).xform(at) * 0.5f;
+            Vec2 last = line_->points.empty() ? v : line_->points.back();
+            Vec2 dd = v - last;
+            if (dd.x * dd.x + dd.y * dd.y >= 4.0f) line_->points.push_back(v);
+        }
+    }
     if (act_anim_ >= 0) {
         act_anim_ += dt;
         float u = clampf((float)((act_anim_ - act_delay_) / act_duration_), 0, 1);

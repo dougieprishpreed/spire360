@@ -26,7 +26,10 @@ static const float LINE_PER_ERA = 226.0f;
 TimelineScreen::TimelineScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), slots_box_(NULL), line_(NULL), moved_(NULL), inspect_(NULL), holder_(NULL),
       backstop_(NULL), reminder_(NULL), tutorial_(NULL), tip_(NULL), unlock_(NULL), queue_at_(0), mode_(LOADING),
-      focus_(-1), pan_(0), pan_target_(0), t_(0), unlock_t_(0), inspect_ready_(0.4), closing_unlock_(false), tutorial_done_(false) {}
+      focus_(-1), pan_(0), pan_target_(0), t_(0), unlock_t_(0), inspect_ready_(0.4), info_text_at_(-1), closing_unlock_(false),
+      tutorial_done_(false) {
+    paginator_left_[0] = paginator_left_[1] = 0;
+}
 
 Node* TimelineScreen::build(std::string* error) {
     tweens_.clear();
@@ -41,6 +44,10 @@ Node* TimelineScreen::build(std::string* error) {
     line_ = ctl(root_, "Line");
     moved_ = ctl(root_, "WhatsMoved");
     inspect_ = ctl(root_, "EpochInspectScreen");
+    for (int i = 0; i < 2; ++i) {
+        Control* b = inspect_ ? ctl(inspect_, i ? "NextChapterButton" : "PrevChapterButton") : NULL;
+        paginator_left_[i] = b ? b->offset[SIDE_LEFT] : 0;
+    }
     holder_ = ctl(root_, "UnlockScreenHolder");
     backstop_ = ctl(root_, "SharedBackstop");
     reminder_ = ctl(root_, "EpochReminderText");
@@ -173,10 +180,61 @@ void TimelineScreen::set_slot_state(Slot& s, const std::string& state) {
     set_visible(s.chains, state == "Obtained");
     s.pulsing = state == "Obtained";
     if (s.outline) s.outline->modulate = state == "Obtained" ? HIGHLIGHT : state == "Complete" ? Color(0, 0, 0, 0) : OUTLINE_DEFAULT;
+    set_highlight(s, state == "Obtained");
 }
 
-/* NEpochSlot.SpawnSlot: up from 64 px below, fading in. */
+static void free_node(Control*& c) {
+    if (!c) return;
+    if (c->parent) c->parent->remove_child(c);
+    delete c;
+    c = NULL;
+}
+
+/* NEpochSlot.EnableHighlight / DisableHighlight: an obtained slot's
+ * NEpochHighlightVfx behind it (epoch_highlight_vfx.tscn, child 0) and its
+ * NEpochOffscreenVfx (epoch_offscreen_vfx.tscn) in the screen's
+ * %ReminderVfxHolder, shown at the screen's edge while the slot is off it
+ * (TimelineScreen::frame). */
+void TimelineScreen::set_highlight(Slot& s, bool on) {
+    if (!on) {
+        free_node(s.highlight);
+        free_node(s.offscreen);
+        s.off_shown = false;
+        return;
+    }
+    if (!s.highlight) {
+        Node* h = instance(lib_, "scenes/vfx/epoch_highlight_vfx.tscn");
+        if (h && h->is_control()) {
+            s.highlight = (Control*)h;
+            s.node->add_child(h);
+            std::vector<Node*>& ch = s.node->children;
+            ch.pop_back();
+            ch.insert(ch.begin(), h);
+        } else {
+            delete h;
+        }
+    }
+    Control* holder = root_ ? ctl(root_, "ReminderVfxHolder") : NULL;
+    if (!s.offscreen && holder) {
+        Node* o = instance(lib_, "scenes/timeline_screen/epoch_offscreen_vfx.tscn");
+        if (o && o->is_control()) {
+            s.offscreen = (Control*)o;
+            s.offscreen->modulate.a = 0;
+            holder->add_child(o);
+            s.off_shown = false;
+        } else {
+            delete o;
+        }
+    }
+}
+
+/* NEpochSlot.SpawnSlot: up from 64 px below, fading in; an obtained one's
+ * highlight once it has spawned (EnableHighlight after the tween). */
 void TimelineScreen::spawn_slot(Slot& s, float delay) {
+    if (s.highlight) {
+        s.highlight->modulate.a = 0;
+        tweens_.tween(&s.highlight->modulate.a, 1, 0.01f, TRANS_LINEAR, EASE_IN_OUT, delay + 0.5f);
+    }
     Control* parts[2] = { s.image, s.outline };
     for (int k = 0; k < 2; ++k) {
         Control* c = parts[k];
@@ -214,6 +272,8 @@ void TimelineScreen::add_slot(const Json& e, bool animated, float delay) {
     s.outline = ctl(n, "Outline");
     s.reticle = ctl(n, "SelectionReticle");
     s.pulsing = false;
+    s.highlight = s.offscreen = NULL;
+    s.off_shown = false;
     hide(ctl(n, "DebugLabel"));
     if (s.reticle) s.reticle->modulate.a = 0;
     n->name = format("Slot%d", s.position);
@@ -375,7 +435,10 @@ void TimelineScreen::focus(int i) {
             tweens_.tween(&s.portrait->shader_params["v"], 1.2f, 0.05f);
         }
     }
-    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
+    /* NEpochSlot.HoveredSfx: a locked slot's own */
+    if (lib_->audio())
+        lib_->audio()->ui(s.state != "NotObtained" ? "event:/sfx/ui/timeline/ui_timeline_hover"
+                                                   : "event:/sfx/ui/timeline/ui_timeline_hover_locked");
     /* The hover tip beside the slot (left of it past 70% of the screen). */
     tip_ = make_hover_tip(lib_, s.data["title"].str(),
                           s.data[s.state == "Complete" ? "unlock_info_revealed" : "unlock_info"].str());
@@ -453,10 +516,22 @@ void TimelineScreen::open_inspect(const Json& e, bool revealed) {
     set_texture(lib_, portrait, e["real_portrait"].str());
     if (portrait && !portrait->visible) set_visible(portrait, true);
     hide(ctl(inspect_, "PlaceholderLabel"));
-    set_label(ctl(inspect_, "ChapterLabel"), e["chapter_text"].str());
-    set_label(ctl(inspect_, "StoryLabel"), e["story_title"].str());
-    hide(ctl(inspect_, "NextChapterButton"));
-    hide(ctl(inspect_, "PrevChapterButton"));
+    /* the chapter fades in after 0.2 s and the story after 0.4 s (0.5 s) */
+    Control* chapter = ctl(inspect_, "ChapterLabel");
+    Control* story = ctl(inspect_, "StoryLabel");
+    set_label(chapter, e["chapter_text"].str());
+    set_label(story, e["story_title"].str());
+    if (chapter) {
+        chapter->modulate.a = 0;
+        tweens_.tween(&chapter->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.2f);
+    }
+    if (story) {
+        story->modulate.a = 0;
+        tweens_.tween(&story->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.4f);
+    }
+    /* the chapter paginators, but at a reveal (UnlockAnimation's HidePaginators) */
+    info_text_at_ = -1;
+    show_paginators(revealed ? Json() : e, true);
     hide(ctl(inspect_, "EraLabel"));
     Control* fancy = ctl(inspect_, "FancyText");
     set_label(fancy, e["description"].str());
@@ -471,9 +546,12 @@ void TimelineScreen::open_inspect(const Json& e, bool revealed) {
     inspect_ready_ = button_at + 0.3;
     Control* info = ctl(inspect_, "UnlockInfo");
     if (info) {
+        /* NUnlockInfo.AnimIn: to 0.8 in 1 s; a reveal keeps it hidden
+         * (UnlockAnimation's HideImmediately) */
         set_label(ctl(info, "Text"), e["unlock_text"].str());
+        tweens_.kill(&info->modulate.a);
         info->modulate.a = 0;
-        tweens_.tween(&info->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, button_at);
+        if (!revealed) tweens_.tween(&info->modulate.a, 0.8f, 1.0f);
     }
     Control* close = ctl(inspect_, "CloseButton");
     set_label(ctl(close, "CloseLabel"), Loc::get("timeline", revealed ? "EPOCH_INSPECT.continueButton" : "EPOCH_INSPECT.closeButton"));
@@ -513,8 +591,70 @@ void TimelineScreen::open_inspect(const Json& e, bool revealed) {
     unlock_t_ = 0;
 }
 
+/* NEpochInspectScreen.RefreshChapterPaginators: an NEpochPaginateButton
+ * shows (OnEnable) for a revealed chapter either side of a story's epoch.
+ * Open slides them in from 100 px inside (offset_left, Back Out 0.25 s
+ * after 0.25 s) as they fade in; the gold arrow's hsv value is 0.9
+ * (NGoldArrowButton._Ready). */
+void TimelineScreen::show_paginators(const Json& e, bool slide) {
+    for (int i = 0; i < 2; ++i) {
+        chapters_[i] = e[i ? "next_chapter" : "prev_chapter"].str();
+        Control* b = inspect_ ? ctl(inspect_, i ? "NextChapterButton" : "PrevChapterButton") : NULL;
+        if (!b) continue;
+        bool on = !chapters_[i].empty();
+        set_visible(b, on);
+        if (!on || !slide) continue;
+        Control* arrow = ctl(b, "TextureRect");
+        if (arrow) arrow->shader_params["v"] = 0.9f;
+        b->modulate.a = 0;
+        tweens_.tween(&b->modulate.a, 1, 0.25f, TRANS_LINEAR, EASE_IN_OUT, 0.25f);
+        b->offset[SIDE_LEFT] = paginator_left_[i];
+        tweens_.tween_from(&b->offset[SIDE_LEFT], paginator_left_[i] + (i ? -100.0f : 100.0f), paginator_left_[i], 0.25f,
+                           TRANS_BACK, EASE_OUT, 0.25f);
+    }
+}
+
+/* A paginator's hotkey (the pad's left / right): OpenViaPaginator, the
+ * chapter's portrait, text and paginators in place; the unlock info fades
+ * out (0.1 s) and back in with the chapter's (NUnlockInfo.AnimInViaPaginator). */
+void TimelineScreen::paginate(int side) {
+    const Json* found = NULL;
+    for (size_t i = 0; i < slots_.size() && !found; ++i)
+        if (slots_[i].id == chapters_[side]) found = &slots_[i].data;
+    if (!found) return;
+    const Json e = *found;
+    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_click");
+    /* NGoldArrowButton.OnPress: the arrow's value drops to 0.7 */
+    Control* b = ctl(inspect_, side ? "NextChapterButton" : "PrevChapterButton");
+    Control* arrow = b ? ctl(b, "TextureRect") : NULL;
+    if (arrow) arrow->shader_params["v"] = 0.7f;
+    set_texture(lib_, ctl(inspect_, "Portrait"), e["real_portrait"].str());
+    Control* chapter = ctl(inspect_, "ChapterLabel");
+    Control* story = ctl(inspect_, "StoryLabel");
+    set_label(chapter, e["chapter_text"].str());
+    set_label(story, e["story_title"].str());
+    if (chapter) { tweens_.kill(&chapter->modulate.a); chapter->modulate.a = 1; }
+    if (story) { tweens_.kill(&story->modulate.a); story->modulate.a = 1; }
+    Control* fancy = ctl(inspect_, "FancyText");
+    set_label(fancy, e["description"].str());
+    if (fancy) {
+        fancy->modulate.a = 0;
+        tweens_.tween(&fancy->modulate.a, 1, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.1f);
+    }
+    show_paginators(e, false);
+    Control* info = ctl(inspect_, "UnlockInfo");
+    if (info) {
+        tweens_.tween(&info->modulate.a, 0, 0.1f);
+        info_text_ = e["unlock_text"].str();
+        info_text_at_ = unlock_t_ + 0.1;
+    }
+}
+
 void TimelineScreen::close_inspect() {
     hide(inspect_);
+    info_text_at_ = -1;
+    chapters_[0].clear();
+    chapters_[1].clear();
     if (queue_at_ < queue_.size()) {
         next_unlock();
         return;
@@ -673,14 +813,22 @@ TimelineScreen::Action TimelineScreen::input(const PadState& pad, std::string* c
         }
         return NONE;
     case INSPECT:
+        /* the paginators' hotkeys (MegaInput.left / right) once they show */
+        if (unlock_t_ > 0.25 && (pad.pressed & (PadState::LEFT | PadState::RIGHT))) {
+            int side = (pad.pressed & PadState::LEFT) ? 0 : 1;
+            if (!chapters_[side].empty()) paginate(side);
+            return NONE;
+        }
         if ((pad.pressed & (PadState::A | PadState::B)) && unlock_t_ > inspect_ready_) {
-            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+            /* NCloseButton.ClickedSfx */
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_close_epoch");
             close_inspect();
         }
         return NONE;
     case UNLOCKS:
         if (unlock_ && !closing_unlock_ && unlock_t_ > 0.5 && (pad.pressed & PadState::A)) {
-            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+            /* NAcknowledgeButton.ClickedSfx */
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_close_epoch");
             close_unlock();
         }
         return NONE;
@@ -699,6 +847,9 @@ TimelineScreen::Action TimelineScreen::input(const PadState& pad, std::string* c
     if (pad.pressed & PadState::DOWN) focus(neighbour(0, 1));
     if ((pad.pressed & PadState::A) && focus_ >= 0) {
         Slot& s = slots_[(size_t)focus_];
+        /* NEpochSlot.ClickedSfx (a slot that opens something) */
+        if ((s.state == "Obtained" || s.state == "Complete") && lib_->audio())
+            lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_click");
         if (s.state == "Obtained") {
             /* NEpochSlot.RevealEpoch. */
             *cmd = "{\"cmd\":\"reveal_epoch\",\"epoch\":\"" + s.id + "\"}";
@@ -715,6 +866,24 @@ void TimelineScreen::frame(double dt) {
     tweens_.update(dt);
     t_ += dt;
     unlock_t_ += dt;
+    /* NEpochOffscreenVfx._Process: an obtained slot off the screen shows
+     * at the edge it went past (0.75 in 0.5 s, 60 px under its top); back
+     * on the screen it goes (0.2 s). */
+    for (size_t i = 0; i < slots_.size(); ++i) {
+        Slot& s = slots_[i];
+        if (!s.offscreen || !s.node) continue;
+        Vec2 at = s.node->global_transform().origin;
+        if (!s.off_shown && (at.x < 0 || at.x > 1920)) {
+            s.off_shown = true;
+            tweens_.tween(&s.offscreen->modulate.a, 0.75f, 0.5f);
+            Vec2 edge(at.x < 0 ? 0.0f : 1920.0f, at.y + 60);
+            Node* p = s.offscreen->parent;
+            s.offscreen->set_position(p && p->is_canvas_item() ? inverse(((CanvasItem*)p)->global_transform()).xform(edge) : edge);
+        } else if (s.off_shown && at.x > 0 && at.x < 1920) {
+            s.off_shown = false;
+            tweens_.tween(&s.offscreen->modulate.a, 0.0f, 0.2f);
+        }
+    }
     /* NEpochSlot._Process: the obtained slots' outline pulses. */
     float a = (float)(sin(t_ * 1000.0 * 0.005) + 2.0) * 0.25f;
     for (size_t i = 0; i < slots_.size(); ++i)
@@ -726,6 +895,14 @@ void TimelineScreen::frame(double dt) {
         float w = moved_->offset[SIDE_RIGHT] - moved_->offset[SIDE_LEFT];
         moved_->offset[SIDE_LEFT] += step;
         moved_->offset[SIDE_RIGHT] = moved_->offset[SIDE_LEFT] + w;
+    }
+    if (info_text_at_ >= 0 && unlock_t_ >= info_text_at_) {
+        info_text_at_ = -1;
+        Control* info = inspect_ ? ctl(inspect_, "UnlockInfo") : NULL;
+        if (info) {
+            set_label(ctl(info, "Text"), info_text_);
+            tweens_.tween(&info->modulate.a, 0.8f, 1.0f);
+        }
     }
     if (mode_ == UNLOCKS && closing_unlock_ && unlock_t_ >= 1.0) {
         if (unlock_->parent) unlock_->parent->remove_child(unlock_);

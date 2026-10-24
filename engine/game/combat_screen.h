@@ -14,6 +14,7 @@
 #include "../core/json.h"
 #include "../scene/tween.h"
 #include "combat_vfx.h"
+#include "peek_button.h"
 #include "run_screen.h"
 
 #include <algorithm>
@@ -225,6 +226,9 @@ private:
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
+    /* ThievingHopper.ThieveryMove: the stolen card's NCard under the
+     * creature's %StolenCardPos (once) */
+    void hold_card(Creature& c, const Json& view);
     /* keep: StartDeathAnim(shouldRemove: false), the body stays (AnimDie
      * neither fades nor frees it) */
     void monster_death(Creature& cr, const std::string& who, class SpineSprite* s, bool keep = false);
@@ -534,6 +538,7 @@ private:
     void creature_order(std::vector<Creature*>& out);
     Creature* creature_of(Control* node);
     void show_creature_focus(bool on);
+    void show_creature_tips(Creature& c);
     Control* creature_focus_;  /* the focused creature's node, NULL: none */
     Control* creature_tips_;
     /* hand selection mode */
@@ -541,6 +546,8 @@ private:
     void sel_pick(int holder);
     void sel_unpick(int k);
     void sel_layout();
+    void sel_filter();
+    PeekButton peek_; /* the hand's, in its selection mode */
     int sel_mode_; /* 0 none, 1 simple, 2 upgrade */
     Json sel_;
     std::vector<Holder> selected_; /* in %SelectedHandCardContainer, picked order */

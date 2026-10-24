@@ -627,7 +627,11 @@ BestiaryScreen::Action BestiaryScreen::input(const PadState& pad, std::string* c
     if (pad.pressed & PadState::UP) focus(focus_ - 1);
     if (pad.pressed & PadState::DOWN) focus(focus_ + 1);
     if (pad.pressed & PadState::A) select(focus_);
-    if (pad.pressed & PadState::Y) set_mode(!stats_mode_, true);
+    if (pad.pressed & PadState::Y) {
+        /* NBestiaryModeButton.ClickedSfx */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_close_epoch");
+        set_mode(!stats_mode_, true);
+    }
     if (stats_mode_) {
         if (pad.pressed & PadState::LB) step_filter(-1);
         if (pad.pressed & PadState::RB) step_filter(1);

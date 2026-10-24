@@ -166,6 +166,11 @@ internal static class Steps
 
     /// <summary>A key on the ui cue just recorded (what the client needs
     /// from the game's state at the moment of the call).</summary>
+    /// <summary>A fight set up or under way (CombatManager.StartCombatInternal
+    /// runs the creatures' AfterAddedToRoom before IsInProgress): when the
+    /// game's UI shows what the fight does.</summary>
+    public static bool InCombat => CombatManager.Instance.IsInProgress || CombatManager.Instance.IsStarting;
+
     public static void SetOnLastUi(string key, object? value)
     {
         if (_pendingUi.Count == 0 || _pendingUi[^1]["t"] as string != "ui") return;
@@ -356,6 +361,11 @@ internal static class Steps
     /// <summary>The presentation's clock: every wait recorded so far, in ms
     /// (what Time.GetTicksMsec would have moved on in the game).</summary>
     public static long ClockMs;
+
+    /// <summary>The merchant entries the player is buying (buy_card, ...):
+    /// their purchase_completed cue is the client's own purchase, not the
+    /// shop buying by itself (Lord's Parasol).</summary>
+    public static readonly HashSet<object> PlayerPurchases = new();
 
     public static void Wait(int ms, string source, double? scale = null)
     {

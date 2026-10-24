@@ -59,6 +59,9 @@ private:
         Control* outline;
         Control* reticle;
         bool pulsing;
+        Control* highlight; /* NEpochHighlightVfx (obtained) */
+        Control* offscreen; /* NEpochOffscreenVfx in %ReminderVfxHolder */
+        bool off_shown;
     };
     struct Column {
         int era;
@@ -67,6 +70,7 @@ private:
     Column* column_for(const Json& epoch, bool animated);
     void add_slot(const Json& epoch, bool animated, float delay);
     void set_slot_state(Slot& s, const std::string& state);
+    void set_highlight(Slot& s, bool on);
     void spawn_slot(Slot& s, float delay);
     void show_name_and_year(Column& c);
     void sync_slots(const Json& slots, bool animated);
@@ -74,6 +78,8 @@ private:
     int neighbour(int dx, int dy) const;
     void clear_tip();
     void open_inspect(const Json& epoch, bool revealed);
+    void show_paginators(const Json& epoch, bool slide);
+    void paginate(int side);
     void close_inspect();
     void next_unlock();
     void close_unlock();
@@ -106,6 +112,10 @@ private:
     float pan_, pan_target_;
     double t_, unlock_t_;
     double inspect_ready_; /* unlock_t_ the inspect screen's close button is enabled at */
+    std::string chapters_[2]; /* the inspected epoch's previous / next chapter (empty: none) */
+    float paginator_left_[2]; /* the paginators' offset_left in the scene */
+    double info_text_at_;     /* unlock_t_ the unlock info takes info_text_ (AnimInViaPaginator) */
+    std::string info_text_;
     bool closing_unlock_;
     bool tutorial_done_; /* the tutorial was acknowledged: its answer spawns Neow */
     TweenSet tweens_;

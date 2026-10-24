@@ -204,7 +204,10 @@ class Runner:
 
     def suite_cards(self, content):
         """Each card into the hand of a fight against several enemies, played
-        (its target the first enemy), its prompts answered; then upgraded."""
+        (its target the first enemy), its prompts answered; then upgraded.
+        A power is followed by two turns (its turn start and end triggers:
+        Noxious Fumes, The Bomb); an unplayable card stays in hand through
+        an end of turn (Burn, Infection)."""
         cards = self.limited(content["cards"])
         batch = 25
         # A character's cards are tried with that character (the Regent's
@@ -221,11 +224,22 @@ class Runner:
                 name = f"cards_{tag}{'_plus' if upgraded else ''}"
                 case = Case("cards", name)
                 lg = self.logic("cards", name)
+                in_fight = lambda s: s.get("decision") in ("combat_play", "rewards", "map_select")
+
+                def end_turn(state):
+                    if state.get("decision") != "combat_play":
+                        return state
+                    state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                    return self.play_until(case, lg, state, in_fight, 60)
+
                 try:
                     self.new_run(case, lg, character=ch, seed=f"cards-{tag}")
                     state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
                     for card in chunk:
                         if card.get("upgradable") is False and upgraded:
+                            continue
+                        if card.get("multiplayer_only"):
+                            case.notes.append(f"{card['id']}: multiplayer only")
                             continue
                         if state.get("decision") != "combat_play":
                             # The fight is over: through its rewards to the map, then a new one.
@@ -244,9 +258,11 @@ class Runner:
                                                      "stars": 9, "upgraded": upgraded})
                         hand = state.get("hand") or []
                         mine = [h for h in hand if (h.get("id") or "").split(".")[-1] == card["id"]]
-                        if mine and not mine[-1].get("can_play") and "BlockedByCardLogic" in (mine[-1].get("unplayable_reason") or ""):
+                        if not mine or (not mine[-1].get("can_play") and
+                                        "BlockedByCardLogic" in (mine[-1].get("unplayable_reason") or "")):
                             # its own condition (an empty draw pile, a hand of
-                            # attacks): the card alone in hand, nothing to draw
+                            # attacks), or a full hand (cards the last one
+                            # made): the card alone in hand, nothing to draw
                             state = self.step(case, lg, {"cmd": "add_to_hand", "cards": [card["id"]], "energy": 9,
                                                          "stars": 9, "upgraded": upgraded, "clear": True})
                             hand = state.get("hand") or []
@@ -257,14 +273,16 @@ class Runner:
                         h = mine[-1]
                         if not h.get("can_play"):
                             case.notes.append(f"{card['id']}: unplayable ({h.get('unplayable_reason') or ''})")
+                            state = end_turn(state)
                             continue
                         args = {"card_index": h["index"]}
                         if h.get("target_type") == "AnyEnemy" and state.get("enemies"):
                             args["target_index"] = 0
                         state = self.step(case, lg, {"cmd": "action", "action": "play_card", "args": args})
                         # Its prompts (card selections, choices) until the hand is back.
-                        state = self.play_until(case, lg, state, lambda s: s.get("decision") in ("combat_play", "rewards",
-                                                                                             "map_select"), 40)
+                        state = self.play_until(case, lg, state, in_fight, 40)
+                        if card.get("type") == "Power":
+                            state = end_turn(end_turn(state))
                 finally:
                     self.finish(case, lg)
 
@@ -390,10 +408,10 @@ class Runner:
             if enc in seen:
                 continue
             seen.add(enc)
-            todo.append((enc, room, 0))
+            todo.append((enc, room, 0, 150))
         met = collections.defaultdict(set)
         while todo:
-            enc, room, attempt = todo.pop(0)
+            enc, room, attempt, cap_after = todo.pop(0)
             name = enc if attempt == 0 else f"{enc}_{attempt}"
             case = Case("encounters", name)
             lg = self.logic("encounters", name)
@@ -406,7 +424,7 @@ class Runner:
                 # the game's own damage: every fight reaches its deaths, last
                 # phases and rewards (bosses outlasted 9999 HP of random play).
                 done = lambda s: s.get("decision") in ("rewards", "map_select", "card_reward", "game_over")
-                state = self.play_until(case, lg, state, done, 150)
+                state = self.play_until(case, lg, state, done, cap_after)
                 for _ in range(12):
                     if done(state):
                         break
@@ -418,8 +436,14 @@ class Runner:
                 # while some of the encounter's possible ones never came
                 met[enc] |= case.monsters
                 missing = set(possible.get(enc) or []) - met[enc]
-                if missing and attempt < 7:
-                    todo.append((enc, room, attempt + 1))
+                if state.get("decision") == "game_over" and cap_after > 10:
+                    # the player died despite 9999 HP (The Insatiable's
+                    # Sandpit kills outright): again with the enemies' HP
+                    # capped after a few steps, so their own deaths run
+                    case.notes.append("the player died: again with the cap early")
+                    todo.append((enc, room, attempt + 1, 10))
+                elif missing and attempt < 7:
+                    todo.append((enc, room, attempt + 1, cap_after))
                 elif missing:
                     case.notes.append("never met: " + ", ".join(sorted(missing)))
                 if state.get("decision") not in ("rewards", "map_select", "card_reward", "game_over"):
@@ -444,6 +468,11 @@ class Runner:
             try:
                 self.step(case, lg, {"cmd": "select_profile", "profile": 1})
                 self.step(case, lg, {"cmd": "set_unlock_all", "on": True})
+                # a new profile's first act is the undiscovered alternate
+                # (Underdocks); every other run is a seasoned profile's, its
+                # first act drawn from both (Overgrowth's flow end to end)
+                if i % 2:
+                    self.step(case, lg, {"cmd": "discover_acts"})
                 state = self.step(case, lg, {"cmd": "start_game_run", "character": ch, "ascension": i % 11,
                                              "seed": f"acts-{i}"})
                 tank = self.step(case, lg, {"cmd": "set_player", "max_hp": 9999, "hp": 9999})

@@ -5,6 +5,7 @@
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
+#include "../scene/particles.h"
 #include "../scene/scene.h"
 
 #include <math.h>
@@ -20,7 +21,8 @@ static Control* as_control(Node* n) { return n && n->is_control() ? (Control*)n 
 
 CharacterSelectScreen::CharacterSelectScreen(SceneLibrary* lib)
     : lib_(lib), info_(NULL), panel_(NULL), tip_(NULL), ascension_(0), max_ascension_(0), bg_box_(NULL), focus_(-1),
-      starting_(false), t_(0), info_left_(0), info_right_(0) {}
+      starting_(false), t_(0), info_left_(0), info_right_(0), backstop_(NULL), unlock_i_(-1), unlock_t_(-1000),
+      unlock_played_(false), unlock_charged_(false), unlock_done_(false) {}
 
 const Json* CharacterSelectScreen::progress_for(const std::string& id) const {
     const Json& cs = progress_["characters"];
@@ -66,7 +68,10 @@ Node* CharacterSelectScreen::build(const Json& characters, const std::string& se
     }
     hide(screen->get_node("ReadyAndWaitingPanel"));
     hide(screen->get_node("UnreadyButton"));
-    hide(screen->find_unique("CharacterUnlockAnimationBackstop"));
+    backstop_ = ctl(screen, "CharacterUnlockAnimationBackstop");
+    hide(backstop_);
+    unlock_t_ = -1000;
+    unlock_played_ = false;
     info_ = as_control(screen->get_node("InfoPanel"));
     if (info_) {
         info_left_ = info_->offset[SIDE_LEFT];
@@ -132,6 +137,86 @@ void CharacterSelectScreen::set_progress(const Json& menu) {
     int i = focus_;
     focus_ = -1;
     if (i >= 0) select(i, false);
+    /* a character the timeline just unlocked: its animation, once */
+    if (!unlock_played_ && menu["pending_unlock"].is_string())
+        for (size_t k = 0; k < buttons_.size(); ++k)
+            if (buttons_[k].id == menu["pending_unlock"].str()) start_unlock((int)k);
+}
+
+/* LockForAnimation: the locked icon and the lock (white) over the button
+ * raised; the info panel hidden behind the backstop; 0.3 s, then
+ * AnimateUnlock. */
+void CharacterSelectScreen::start_unlock(int i) {
+    Button& b = buttons_[(size_t)i];
+    unlock_played_ = true;
+    unlock_i_ = i;
+    unlock_t_ = -0.3;
+    unlock_charged_ = unlock_done_ = false;
+    set_texture(lib_, b.icon, "images/packed/character_select/char_select_" + lower(b.id) + "_locked.png");
+    if (b.lock) {
+        b.lock->visible = true;
+        b.lock->modulate = Color(1, 1, 1, 1);
+        lock_origin_ = offset_pos(b.lock);
+    }
+    b.node->z_index = 1;
+    set_visible(backstop_, true);
+    set_visible(info_, false);
+}
+
+/* AnimateUnlock: the charge (UnlockChargeParticles, character_unlock_charge
+ * .mp3; for 1 s the lock jitters a random way by 1..5 px, Quad Out); then
+ * character_unlock.mp3, the lock unlocked, the icon the character's with
+ * %IconAdd growing to 1.5 (1 s) as it fades (Expo In), the lock fading
+ * after 0.5 s (0.5 s), UnlockParticles; the button selected, the panel back,
+ * PendingCharacterUnlock cleared. */
+void CharacterSelectScreen::unlock_frame(double dt) {
+    if (unlock_t_ < -100 || unlock_i_ < 0 || unlock_i_ >= (int)buttons_.size()) return;
+    Button& b = buttons_[(size_t)unlock_i_];
+    unlock_t_ += dt;
+    if (unlock_t_ < 0) return;
+    if (!unlock_charged_) {
+        unlock_charged_ = true;
+        Node* charge = b.node->find_unique("UnlockChargeParticles");
+        if (charge && (charge->type == "GPUParticles2D" || charge->type == "CPUParticles2D")) ((Particles2D*)charge)->emitting = true;
+        if (lib_->audio()) lib_->audio()->ui("character_unlock_charge.mp3");
+    }
+    if (unlock_t_ < 1.0) {
+        float k = (float)unlock_t_;
+        float amp = 1.0f + 4.0f * (1.0f - (1.0f - k) * (1.0f - k));
+        float a = (float)(chaotic_rand() % 6283) / 1000.0f;
+        if (b.lock) b.lock->set_position(lock_origin_ + Vec2(cosf(a), sinf(a)) * amp);
+        return;
+    }
+    if (unlock_done_) return;
+    unlock_done_ = true;
+    if (lib_->audio()) lib_->audio()->ui("character_unlock.mp3");
+    if (b.lock) {
+        b.lock->set_position(lock_origin_);
+        set_texture(lib_, b.lock, "images/packed/character_select/char_select_lock3_unlocked.png");
+        tweens_.tween(&b.lock->modulate.a, 0.0f, 0.5f, TRANS_LINEAR, EASE_IN_OUT, 0.5f);
+    }
+    std::string icon = "images/packed/character_select/char_select_" + lower(b.id) + ".png";
+    set_texture(lib_, b.icon, icon);
+    Control* add = ctl(b.node, "IconAdd");
+    if (add) {
+        set_texture(lib_, add, icon);
+        add->visible = true;
+        add->modulate.a = 1;
+        add->pivot_offset = offset_size(add) * 0.5f;
+        tweens_.tween(&add->scale, Vec2(1.5f, 1.5f), 1.0f);
+        tweens_.tween(&add->modulate.a, 0.0f, 1.0f, TRANS_EXPO, EASE_IN);
+    }
+    Node* burst = b.node->find_unique("UnlockParticles");
+    if (burst && (burst->type == "GPUParticles2D" || burst->type == "CPUParticles2D")) ((Particles2D*)burst)->restart();
+    Node* charge = b.node->find_unique("UnlockChargeParticles");
+    if (charge && (charge->type == "GPUParticles2D" || charge->type == "CPUParticles2D")) ((Particles2D*)charge)->emitting = false;
+    b.node->z_index = 0;
+    b.locked = false;
+    select(unlock_i_, true);
+    set_visible(backstop_, false);
+    set_visible(info_, true);
+    unlock_t_ = -1000;
+    command_ = "{\"cmd\":\"clear_pending_unlock\"}";
 }
 
 /* NCharacterSelectButton.Init: locked buttons (Random: while any is). */
@@ -308,7 +393,7 @@ void CharacterSelectScreen::select(int i, bool animate) {
 }
 
 CharacterSelectScreen::Action CharacterSelectScreen::input(const PadState& pad) {
-    if (starting_ || buttons_.empty()) return NONE;
+    if (starting_ || buttons_.empty() || unlock_t_ > -100) return NONE;
     int n = (int)buttons_.size();
     /* Focus neighbours wrap left / right. */
     if (pad.pressed & PadState::LEFT) select((focus_ + n - 1) % n, true);
@@ -347,6 +432,7 @@ void CharacterSelectScreen::set_starting() {
 void CharacterSelectScreen::frame(double dt) {
     tweens_.update(dt);
     t_ += dt;
+    unlock_frame(dt);
     /* _Process: the selected button's outline pulses (0.35..1, 1.6 pi/s). */
     if (focus_ >= 0 && buttons_[(size_t)focus_].outline) {
         float k = (cosf((float)t_ * 1.6f * 3.14159265f) + 1.0f) * 0.5f;

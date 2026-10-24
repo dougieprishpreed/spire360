@@ -9,6 +9,7 @@
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/logic_link.h"
 #include "../../engine/game/loc.h"
+#include "../../engine/game/top_bar.h"
 #include "../../engine/game/ui_util.h"
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
@@ -506,7 +507,7 @@ int main(int argc, char** argv) {
     texture_cache_cases(pack);
     doom_cases(lib, pack);
     atlas_fallback_cases(lib);
-    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0, death_checks = 0;
+    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0, death_checks = 0, icon_checks = 0;
     bool selections_checked = false;
     bool transition_checked = false;
     for (int file = 2; file < argc; ++file) {
@@ -597,6 +598,9 @@ int main(int argc, char** argv) {
                     for (size_t k = 0; k < d["steps"][s].size(); ++k) {
                         const Json& ch = d["steps"][s][k];
                         if (ch["t"].str() != "death" && ch["t"].str() != "despawn") continue;
+                        /* StartDeathAnim(shouldRemove: false): the body stays
+                         * (the Eye With Teeth stunned until it heals) */
+                        if (ch["keep"].b()) continue;
                         const std::string& who = ch["who"].str();
                         if (who.size() < 2 || who[0] != 'e') continue;
                         int id = atoi(who.c_str() + 1);
@@ -654,6 +658,16 @@ int main(int argc, char** argv) {
                 if (present && !matched) fprintf(stderr, "%s response %d: %s\n", argv[file], responses, hp_who.c_str());
                 check(matched || !present, "health bar did not settle to the decision's HP");
             }
+            /* every relic the top bar shows has its picture (a holder's
+             * %Relic/%Icon: an owner-scoped lookup lost them once) */
+            Node* relic_row = find_named(tree.root(), "RelicInventory");
+            for (size_t r = 0; relic_row && r < relic_row->children.size(); ++r) {
+                Node* icon = holder_relic_icon(relic_row->children[r]);
+                bool shown = icon && icon->type == "TextureRect" && ((TextureRect*)icon)->texture;
+                if (!shown) fprintf(stderr, "%s response %d: relic holder %d without an icon\n", argv[file], responses, (int)r);
+                check(shown, "a top bar relic holder shows no icon");
+                ++icon_checks;
+            }
             previous = d;
             previous_line = line;
             ++responses;
@@ -663,8 +677,10 @@ int main(int argc, char** argv) {
     check(persistent > 0, "no consecutive combat decisions were checked");
     check(hp_checks > 0, "no delayed health changes were checked");
     check(selections_checked, "no card data was available for controller selection checks");
-    printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d death checks, %d failures\n",
-           responses, persistent, hp_checks, orb_checks, death_checks, failures);
+    check(icon_checks > 0, "no top bar relic icons were checked");
+    printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d death checks, "
+           "%d relic icon checks, %d failures\n",
+           responses, persistent, hp_checks, orb_checks, death_checks, icon_checks, failures);
     if (audio.events().available()) {
         check(audio.events().failures() == 0, "audio replay had decoder failures");
         printf("audio replay: %.0f voices started, %u absent event calls, %u decoder failures\n",

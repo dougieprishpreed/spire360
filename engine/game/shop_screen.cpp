@@ -8,6 +8,7 @@
 #include "top_bar.h"
 
 #include "../audio/game_audio.h"
+#include "../core/cue_ledger.h"
 #include "../scene/animation.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -42,10 +43,45 @@ static void play_idle_all(Node* n) {
 }
 
 ShopScreen::ShopScreen(SceneLibrary* lib)
-    : lib_(lib), root_(NULL), inspect_card_(NULL), inspect_relic_(NULL), inspect_node_(NULL), inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL),
-      back_button_(NULL), focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), slots_closed_top_(0),
-      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0), fake_(false),
-      again_(false), dialogue_(NULL), dialogue_box_(NULL), dialogue_bubble_(NULL), dialogue_text_(NULL), welcome_at_(-1) {}
+    : fake_(false), again_(false), dialogue_(NULL), dialogue_box_(NULL), dialogue_bubble_(NULL), dialogue_text_(NULL),
+      welcome_at_(-1), lib_(lib), root_(NULL), inspect_card_(NULL), inspect_relic_(NULL), inspect_node_(NULL),
+      inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL), back_button_(NULL),
+      focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), slots_closed_top_(0),
+      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0), auto_t_(0),
+      auto_tail_(0) {}
+
+void ShopScreen::set_auto(const Json& steps) {
+    auto_.clear();
+    auto_t_ = 0;
+    auto_tail_ = 0;
+    /* a cue's time: the waits before it, then its own delay (a task the
+     * game runs alongside; resumed after a selection, it waits inline) */
+    double waited = 0;
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& c = steps[i][k];
+            if (c["t"].str() == "wait") waited += c["ms"].num() / 1000.0;
+            AutoCue a = { waited + c["delay"].num(0) / 1000.0, std::string(), c["index"].i() };
+            if (c["t"].str() == "ui" && c["call"].str() == "NMerchantInventory.Open") a.kind = "open";
+            else if (c["t"].str() == "merchant_purchase" && c["auto"].b() && c["kind"].str() != "removal") a.kind = c["kind"].str();
+            else continue;
+            CueLedger::used(c);
+            /* in time order (the cues' delays), stable */
+            size_t at = auto_.size();
+            while (at > 0 && auto_[at - 1].at > a.at) --at;
+            auto_.insert(auto_.begin() + (long)at, a);
+        }
+}
+
+bool ShopScreen::busy() const { return !auto_.empty() || auto_tail_ > 0; }
+
+bool ShopScreen::take_bought(std::string* kind, std::string* id) {
+    if (bought_.empty()) return false;
+    *kind = bought_.front().first;
+    *id = bought_.front().second;
+    bought_.erase(bought_.begin());
+    return true;
+}
 
 std::string ShopScreen::line(const char* kind) const {
     /* MerchantDialogueSet.CreateFromLocStrings: <prefix><kind>.lineN */
@@ -499,6 +535,7 @@ void ShopScreen::open_rug() {
 }
 
 std::string ShopScreen::input(const PadState& pad) {
+    if (busy()) return std::string(); /* NMerchantInventory.BlockInput */
     if (inspect_card_ || inspect_relic_) {
         if (!(inspect_card_ ? inspect_card_->input(pad) : inspect_relic_->input(pad))) close_inspect();
         return std::string();
@@ -582,6 +619,37 @@ void ShopScreen::stop_hand(double linger) {
 void ShopScreen::frame(double dt) {
     tweens_.update(dt);
     proceed_.frame(dt);
+    if (auto_tail_ > 0) auto_tail_ -= dt;
+    if (!auto_.empty()) {
+        /* LordsParasol.PurchaseEverything: Open after 0.75 s; each item
+         * 0.25 s apart, NMerchantInventory.OnPurchaseCompleted (the thank-
+         * yous, a purchaseSuccess line) with the slot's own flight */
+        auto_t_ += dt;
+        while (!auto_.empty() && auto_.front().at <= auto_t_) {
+            AutoCue c = auto_.front();
+            auto_.erase(auto_.begin());
+            if (auto_.empty()) auto_tail_ = 0.6; /* the last item's flight */
+            if (c.kind == "open") {
+                if (!open_) open_inventory(true);
+                continue;
+            }
+            for (size_t i = 0; i < slots_list_.size(); ++i) {
+                Slot& s = slots_list_[i];
+                if (s.kind != c.kind || s.index != c.index || !s.stocked) continue;
+                const char* key = s.kind == "card" ? "cards" : s.kind == "relic" ? "relics" : "potions";
+                std::string id;
+                for (size_t k = 0; k < decision_[key].size(); ++k)
+                    if (decision_[key][k]["index"].i((int)k) == s.index) id = decision_[key][k]["id"].str();
+                purchased(s);
+                g_say_next.clear();
+                say("purchaseSuccess");
+                s.stocked = false;
+                s.node->visible = false;
+                bought_.push_back(std::make_pair(s.kind, id));
+                break;
+            }
+        }
+    }
     /* WiggleAnimation: x + sin(p * 2 pi) * 10, p 0..2 over 0.4 s (Quad Out) */
     for (size_t i = 0; i < wiggles_.size();) {
         Wiggle& w = wiggles_[i];

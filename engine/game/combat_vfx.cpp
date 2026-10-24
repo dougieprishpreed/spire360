@@ -603,6 +603,16 @@ private:
 bool resolve(const Place& p, VfxAnchors& anchors, Vec2* out) {
     VfxCreature c;
     if (!anchors.creature(p.who, &c)) return false;
+    if (p.anchor.compare(0, 5, "node:") == 0) {
+        /* a node of the creature's visuals by its path (%Unique or a
+         * path): its global position (LagavulinMatriarch's %SleepVfxPos) */
+        Node* v = anchors.visuals_of(p.who);
+        std::string path = p.anchor.substr(5);
+        Node* n = !v ? NULL : path.size() > 1 && path[0] == '%' ? v->find_unique(path.substr(1)) : v->get_node(path);
+        if (!n || !n->is_canvas_item()) return false;
+        *out = ((CanvasItem*)n)->global_transform().origin + p.offset;
+        return true;
+    }
     if (p.anchor == "side_floor") {
         if (!anchors.side_floor(c.enemy, out)) return false;
         *out = *out + p.offset;

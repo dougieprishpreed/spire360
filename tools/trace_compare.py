@@ -34,10 +34,14 @@ DROP = {
     "usage", "usable", "discardable", "use_label",
     "enchantment_screen",  # NDeckEnchantSelectScreen's description of the enchantment
     "pets",  # the pets beside the player (their own state stays in the steps)
-    "ancient_border", "ancient_text_bg", "enchantment_view", "overlay",  # a card's look (NCard)
+    "ancient_border", "ancient_text_bg", "enchantment_view", "overlay", "card_overlay",  # a card's look (NCard)
     "death_fade", "death_padding", "death_anim_length",  # a monster's death (NCreature.AnimDie)
     "run_time", "icon_base", "relic_icon_base", "inspect_upgrade", "inspect", "item_views",  # NRunTimer (wall clock)
     "crystal_sphere",  # the finished NCrystalSphereScreen under its rewards
+    "peek",  # NPeekButton enabled: a fight in progress
+    "drawing_color",  # the map's line colour (Character.MapDrawingColor)
+    "room_view",  # a finished fight's room behind its rewards (a continued run)
+    "held_card",  # the card the Thieving Hopper holds (its %StolenCardPos)
     "spine_ops", "phobia_skin",  # MonsterModel.SetupSkins / OnPhobiaModeToggled on the spine sprite
     "anim_init", "play",  # what the CreatureAnimator plays
     "unplayable_line",  # NControllerCardPlay.Start's thought bubble for a card that cannot be played

@@ -73,10 +73,12 @@ delegate	AncientEventModel.GenerateInitialOptionsWrapper -> NEventRoom.Proceed	p
 #
 # ---- open: to port ----
 sound	NCreature.OnPowerIncreased event:/sfx/buff	ported	power_vfx cue's sound flag (ShouldPlayVfx, not ending): combat_screen plays buff / debuff and the debuff shake
+sound	NCreature.OnPowerIncreased event:/sfx/debuff	ported	the power_vfx cue's sound flag: combat_screen plays debuff (and AnimShake)
 sound	NCreature.OnPowerIncreased *	open	buff / debuff sound on every power gain (and AnimShake on a debuff): engine power_vfx cue
 sound	NRewardsScreen._Ready victory.mp3	ported	rewards_screen: victory.mp3 on a fresh rewards screen (its delay kept)
 sound	NMapScreen.TravelToMapCoord event:/sfx/ui/wipe_map	ported	map_screen begin_travel: wipe_map, the circle and NMapNodeSelectVfx
 sound	NMerchantInventory.Open event:/sfx/npcs/merchant/merchant_welcome	ported	shop_screen: merchant_welcome and an openInventory line on opening; merchant_thank_yous and a purchaseSuccess line on a purchase
+sound	NMerchantInventory.OnPurchaseCompleted event:/sfx/npcs/merchant/merchant_thank_yous	ported	shop_screen purchased (the client's purchases and the auto ones: Lord's Parasol)
 sound	NMerchantInventory.* *	open	merchant welcome on open, thank-yous on a purchase
 sound	NMerchantRoom.FoulPotionThrown event:/sfx/npcs/merchant/merchant_thank_yous	ported	shop_screen: the foul_potion cue (thank-yous, a foulPotion line, a rumble, vfx_slime_impact)
 sound	NMerchantRoom.FoulPotionThrown *	open	Foul Potion thrown at the merchant
@@ -84,12 +86,12 @@ sound	NMerchantSlot.OnPurchaseFailed event:/sfx/npcs/merchant/merchant_dissapoin
 sound	NMerchantSlot.OnPurchaseFailed *	open	merchant disappointment (not enough gold)
 sound	NMouseCardPlay.StartCardDrag card_select.mp3	n/a	the mouse's drag; the pad's NControllerCardPlay.Start is ported
 sound	NControllerCardPlay.Start card_select.mp3	ported	game_client: card_select.mp3 when A picks a hand card (a card that cannot be played: its thought bubble)
-sound	NEpochSlot.*	open	timeline: the epoch slot's own hover / click sounds
-sound	NChapterPaginateButton.*	open	timeline paginate click sound
-sound	NEpochPaginateButton.*	open	timeline paginate click sound
-sound	NAcknowledgeButton.*	open	timeline acknowledge: ui_timeline_close_epoch
-sound	NCloseButton.*	open	timeline close: ui_timeline_close_epoch
-sound	NBestiaryModeButton.*	open	bestiary mode button: ui_timeline_close_epoch
+sound	NEpochSlot.*	ported	timeline_screen: the slot's hover (locked or not) and click, close / acknowledge ui_timeline_close_epoch
+sound	NChapterPaginateButton.*	n/a	no scene or code uses NChapterPaginateButton (the inspect screen's paginators are NEpochPaginateButton)
+sound	NEpochPaginateButton.*	ported	timeline_screen paginate: left / right in a story's inspect screen, ui_timeline_click
+sound	NAcknowledgeButton.*	ported	timeline_screen: the slot's hover (locked or not) and click, close / acknowledge ui_timeline_close_epoch
+sound	NCloseButton.*	ported	timeline_screen: the slot's hover (locked or not) and click, close / acknowledge ui_timeline_close_epoch
+sound	NBestiaryModeButton.*	ported	bestiary_screen: Y toggles the mode with ui_timeline_close_epoch
 scene	NStarCounter vfx/star_gain_vfx	ported	combat_screen: star_gain_vfx behind the counter on a gain, StarCounterAnim
 scene	NPowerRemovedVfx res://scenes/vfx/power_removed_vfx.tscn	ported	combat_vfx spawn_power_removed on the power_removed cue
 scene	NPowerRemovedVfx *	open	"wears off" text when a power is removed (NCreature.OnPowerRemoved)
@@ -111,6 +113,8 @@ scene	NDesaturateTransitionVfx vfx/desaturate_transition_vfx	ported	rest_site_sc
 scene	NDesaturateTransitionVfx *	open	the rest site's heal: desaturate transition (HealRestSiteOption.DoLocalPostSelectVfx)
 scene	NLiquidOverlayVfx vfx/vfx_liquid_overlay	ported	combat_vfx liquid_overlay: EFFECT_LIQUID_OVERLAY on the spine body 1 s (captured: work/cap71/flaskt)
 scene	NLiquidOverlayVfx *	open	the splash's liquid overlay on the creature (Bouncing Flask, PlaySplashVfx)
+scene	NSpikeSplashVfx *ground_spike_vfx*	ported	combat_vfx NSpikeSplashVfx: six fg and six bg ground spikes each way at the bottom (GroundSpike), 2 s
+scene	NSpikeSplashVfx vfx/spike_splash_vfx	ported	combat_vfx NSpikeSplashVfx: its spikes (fg / bg_ground_spike_vfx, GroundSpike) at the bottom
 scene	NSpikeSplashVfx *	open	Ceremonial Beast's crush / stomp, Crush Under, Mecha Knight's charge, Stomp
 scene	NPotionFlashVfx vfx/vfx_potion_flash	ported	top_bar make_potion_flash after a potion arrives (its image as the flash particle)
 scene	NPotionFlashVfx *	open	NPotion.DoFlash (a potion's flash in its slot)
@@ -127,14 +131,16 @@ answer	NPlayerHand.get_Instance@CardSelectCmd.*	ported	cardselect.kind.hand* hoo
 answer	NModalContainer.get_Instance@*	ported	the FTUEs in the client (ftue.cpp: combat rules, shuffle) from the profile's ftues
 answer	NRunMusicController.get_Instance@CombatManager.StartCombatInternal	ported	the combat rules FTUE and NCombatStartBanner in the client (ftue.cpp, the combat screen's banners)
 answer	NRunMusicController.get_Instance@WaterfallGiant.IncrementBuildUpAnimationTrack	ported	its _tracks/buildupN arrives as a spine anim cue (the ledger's ui list does not name it)
-answer	NRunMusicController.get_Instance@Queen.AfterDeath	open	the Queen's own death (queen_progress 5; tracks/empty on track 1) never ran: the coverage fights lost to her; the encounters suite now caps the enemies' HP (set_player enemy_hp) so bosses die
+answer	NRunMusicController.get_Instance@Queen.AfterDeath	ported	scenario queen: queen_progress 5 and tracks/empty on track 1 at her death; was: the Queen's own death (queen_progress 5; tracks/empty on track 1) never ran: the coverage fights lost to her; the encounters suite now caps the enemies' HP (set_player enemy_hp) so bosses die
 answer	NGame.get_Instance@TheArchitect.*	ported	architect.line / architect.head / architect.parts hooks; event_screen plays the attacks
 answer	NCombatRoom.get_Instance@TheArchitect.*	ported	architect.line / architect.head / architect.parts hooks; event_screen plays the attacks
 answer	NRun.get_Instance@CardCmd.Upgrade	ported	deck.upgrade.begin + deck_card upgrade cues -> deck_previews UpgradePreview (NCardUpgradeVfx)
 answer	NRun.get_Instance@MerchantCardRemovalEntry.OnTryPurchase	ported	shop_screen: card_removal_used -> NMerchantCardRemoval's Used animation, no price, no focus
 answer	NRun.get_Instance@AncientEventModel.BeforeEventStarted	ported	neow.hp_lerp hook -> NTopBarHp.LerpAtNeow (room_cues)
-answer	NRun.get_Instance@LordsParasol.PurchaseEverything	open	shop pass: Lord's Parasol opens the inventory after 0.75 s and buys every item 0.25 s apart (its TestMode.IsOff block); check the shop shows the purchases one by one
-answer	NMapScreen.get_Instance@LordsParasol.PurchaseEverything	open	shop pass: see NRun.get_Instance@LordsParasol.PurchaseEverything
+answer	MegaAnimationState.AddAnimationTracked@CreatureAnimator.AddNextState	ported	logic/Spire.Logic/Animators.cs records the animator's next states (add_animation ops on the creature)
+answer	NMapScreen.get_Instance@RunManager.ProceedFromTerminalRewardsScreen	n/a	SetTravelEnabled: the map screen's input lock; the client's map takes input when it is shown
+answer	NRun.get_Instance@LordsParasol.PurchaseEverything	ported	shop_entry / merchant_purchase cues, ShopScreen::set_auto (scenario parasol); was: shop pass: Lord's Parasol opens the inventory after 0.75 s and buys every item 0.25 s apart (its TestMode.IsOff block); check the shop shows the purchases one by one
+answer	NMapScreen.get_Instance@LordsParasol.PurchaseEverything	ported	as NRun.get_Instance@LordsParasol.PurchaseEverything; was: shop pass: see NRun.get_Instance@LordsParasol.PurchaseEverything
 answer	NRun.get_Instance@*Room.*	n/a	the client builds each room's screen from its decision
 answer	NCombatRoom.get_Instance@CombatRoom.StartCombat	n/a	the client builds each room's screen from its decision
 answer	NRun.get_Instance@RunManager.EnterAct	ported	map_screen: the marker on the last visited point (InitMarker); RefreshAllMapPointVotes is multiplayer voting
@@ -181,6 +187,7 @@ cue	ui:NSplashVfx.Create	ported	combat_vfx spawn_splash
 cue	ui:NMapScreen.SetTravelEnabled	n/a	input
 cue	ui:NPlayerHand.CancelAllCardPlay	n/a	input
 cue	ui:NRelicFlashVfx.Create	n/a	duplicate: the relic_flash cue draws it at each target (flash_relic)
+cue	ui:NPotionContainer.AnimatePotion	ported	top_bar make_potions: a potion new since the last decision drops into its slot (or flies from where it came: top_bar_acquire_from)
 cue	ui:NRelicInventory.AnimateRelic	n/a	duplicate: the relic_flash cue flashes the holder (make_relic_holder_flash)
 cue	ui:NRunMusicController.*	n/a	the decision's context audio (track, bank, ambience, progress) drives the music
 cue	ui:NTopBarRoomIcon.DebugClearMapPointTypeOverride	n/a	debug
@@ -216,8 +223,8 @@ event	* -> NCardPlayQueue.BeforeRemoteCardPlayResumedAfterPlayerChoice	n/a	multi
 event	OnModDetected -> NGame.OnNewModDetected	n/a	mods
 event	Saved -> NSaveIndicator.SavedGame	ported	save.indicator hook -> saved cue: GAME_SAVED fades in and out in the top bar
 event	* -> NCreature.UpdateBounds	ported	engine/game/combat_screen.cpp (bounds at build and after scale changes)
-event	* -> NCreature.ShowCreatureHoverTips	open	hover tips of the focused creature refresh as its powers change (check the client's tips)
-event	* -> NPower.ShowPowerHoverTips	open	as NCreature.ShowCreatureHoverTips, for a focused power
+event	* -> NCreature.ShowCreatureHoverTips	ported	combat_screen show_creature_tips at each sync while focused; was: hover tips of the focused creature refresh as its powers change (check the client's tips)
+event	* -> NPower.ShowPowerHoverTips	n/a	the pad focuses creatures, not their power icons (the creature's tips list its powers); was: as NCreature.ShowCreatureHoverTips, for a focused power
 event	* -> NCreatureStateDisplay.OnCombatStateChanged	ported	the state display from each sync (refresh_state)
 event	* -> NCreatureStateDisplay.AnimateInBlock	ported	engine/game/combat_screen.cpp apply_state block (NHealthBar.AnimateInBlock)
 event	* -> NCreatureStateDisplay.OnBlockTrackingCreatureBlockChanged	ported	engine/game/combat_screen.cpp TrackBlockStatus
@@ -263,7 +270,12 @@ event	PulsingStarted -> NPower.OnPulsingStarted	ported	power_pulse cue (pulsing_
 event	* -> NPower.OnPulsingStarted	open	the power icon's pulse shader parameter (PowerModel.StartPulsing: needs a cue)
 event	PulsingStopped -> NPower.OnPulsingStopped	ported	power_pulse cue (pulsing_)
 event	* -> NPower.OnPulsingStopped	open	as OnPulsingStarted
+event	PowerApplied -> NOrbVfx.OnPowerApplied	ported	combat_screen power cue: FOCUS_POWER on the player refreshes the orbs' focused particles
+event	PowerDecreased -> NOrbVfx.OnPowerDecreased	ported	as PowerApplied
+event	PowerIncreased -> NOrbVfx.OnPowerIncreased	ported	as PowerApplied
 event	* -> NOrbVfx.OnPower*	open	orbs show the Focus state (UpdateFocusPowerState) from the player's powers
+event	EvokeActivated -> NOrbVfx.OnEvoke	ported	combat_screen activate_orb: the evoke scene (SpawnEvokeVfx) and each kind's effect at the targets (OnEvokeInternal)
+event	PassiveActivated -> NOrbVfx.OnPassiveActivated	ported	combat_screen activate_orb: _passiveActivatedParticles, the focused ones with Focus, the shaker
 event	* -> NOrbVfx.OnEvoke	open	check against engine activate_orb (evoke effect at the targets)
 event	* -> NOrbVfx.OnPassiveActivated	open	passive particles (and the focused ones with Focus)
 event	CombatSetUp -> NOrbManager.OnCombatSetup	ported	ui_event CombatSetUp: the orb slots from 0
@@ -352,6 +364,13 @@ testmode	GameAction.Execute	n/a	error handling
 testmode	MoveToMapCoordAction.ExecuteAction	ported	map_screen begin_travel: wipe_map, NMapNodeSelectVfx, the drawn circle
 testmode	EventModel.GetAssetPaths	n/a	preloading
 testmode	MonsterModel.PerformMove	n/a	logging
+testmode	NetCombatCardDb.StartCombat	n/a	multiplayer (a peer's combat state)
+testmode	ModManager.*	n/a	mods (none headless or on the console)
+testmode	Slither.TestEnergyCostOverride	n/a	a test helper
+testmode	ChecksumTracker.*	n/a	multiplayer checksums
+testmode	NetCursorHelper.*	n/a	multiplayer cursors
+testmode	PeerInputSynchronizer.*	n/a	multiplayer focus sync
+testmode	NullLeaderboardStrategy.*	n/a	leaderboards (no platform service)
 testmode	DecimillipedeSegment.AfterDeath	ported	combat_screen segment_phobia: the shriveled phobia texture while down
 testmode	ToughEgg.AfterAddedToRoom	n/a	HatchPos: nothing in the game sets it
 testmode	FoulPotion.ShowPotionVfx	ported	foul_potion cue: vfx_slime_impact at the merchant button (shop_screen)
@@ -387,8 +406,8 @@ godot	Creature.SetNodeVisible	ported	node_visible cue
 godot	KindleRestSiteOption.PlayKindleVfx	ported	engine/game/rest_site_screen.cpp
 godot	HoverTip.GetHoverTipAlignment	ported	engine/game/combat_screen.cpp hover tips
 godot	ActModel.CreateRestSiteBackground	ported	engine/game/rest_site_screen.cpp (the act's background)
-godot	AfflictionModel.CreateOverlay	open	check: an affliction's overlay on its card (card_view)
-godot	CardModel.CreateOverlay	open	check: a card's overlay (card_view)
+godot	AfflictionModel.CreateOverlay	ported	card_view: the affliction's overlay when the pack has it (HasOverlay), else card_overlay; was: check: an affliction's overlay on its card (card_view)
+godot	CardModel.CreateOverlay	ported	card_view: the card's own overlay (HasBuiltInOverlay); was: check: a card's overlay (card_view)
 godot	CardModel.PlayPowerCardFlyVfx	ported	power_fly cue (NCardFlyPowerVfx)
 godot	FiendFire.OnPlay	ported	fiend_fire.on_play + the ui hook's scale per fire
 godot	SovereignBlade.GetVfxNode	ported	blade.attack_node
@@ -421,8 +440,8 @@ godot	Rocket.*	open	as Crusher
 godot	DecimillipedeSegment.AnimSegmentsAttack	ported	vfx.scene_at_screen
 godot	DecimillipedeSegment.ChangePhobiaModeTexture	ported	combat_screen segment_phobia (death / revive)
 godot	Flyconid.*	ported	testmode.presentation.is_off
-godot	LagavulinMatriarch.Sleep	open	check: NSleepingVfx at %SleepVfxPos (the special node) against the client's sleeping effect
-godot	SlumberingBeetle.AfterAddedToRoom	open	as LagavulinMatriarch.Sleep (and its sleep loop)
+godot	LagavulinMatriarch.Sleep	ported	NSleepingVfx at eN@node:%SleepVfxPos (the Marker2D's position; captured: work/cap73/sleepers); was: check: NSleepingVfx at %SleepVfxPos (the special node) against the client's sleeping effect
+godot	SlumberingBeetle.AfterAddedToRoom	ported	as LagavulinMatriarch.Sleep (captured: work/cap73/sleepers); was: as LagavulinMatriarch.Sleep (and its sleep loop)
 godot	TestSubject.SetColor	ported	test_subject.set_color -> CanvasItem.SetSelfModulate on %CanvasGroup
 godot	TorchHeadAmalgam.OnDieToDoom	ported	torch_head.die_to_doom
 godot	TorchHeadAmalgam.SoulBeamMove	ported	aim.torch_head_amalgam.soul_beam
@@ -437,18 +456,18 @@ godot	RollingBoulderPower.AfterPlayerTurnStart	ported	rolling_boulder.turn_start
 godot	SandpitPower.*	ported	sandpit.* hooks (see the testmode item for AfterPowerAmountChanged)
 godot	SurroundedPower.FlipScale	ported	surrounded.face
 godot	RelicModel.UpdateTexture	ported	top_bar relic status (pulse, is_used, wax, melted)
-godot	RelicReward.CreateIcon	open	check: the relic reward icon's material (outline shader?)
+godot	RelicReward.CreateIcon	n/a	relic_mat's parameters are 0 for a reward's relic (a fresh relic: Normal, not wax or melted), as the client draws it; was: check: the relic reward icon's material (outline shader?)
 godot	Reward.CreateIcon	n/a	the client draws the rewards
 #
 # ---- sounds and scenes of the UI's own screens (settled screen by screen) ----
-sound	NCharacterSelectButton.AnimateUnlock *	open	screen pass (character select): a character's unlock animation and its sounds
+sound	NCharacterSelectButton.AnimateUnlock *	ported	character_select start_unlock / unlock_frame (the profile's pending_unlock), clear_pending_unlock after
 sound	NFakeMerchant.ShowWelcomeDialogue event:/sfx/npcs/reverse_merchant/reverse_merchant_laugh	ported	shop_screen (fake_merchant): the laugh and a welcome line 0.75 s in
 sound	NFakeMerchant.ShowWelcomeDialogue *	open	screen pass (Fake Merchant event): the reverse merchant's laugh with its welcome line
-sound	NMapPointHistoryEntry.*	open	screen pass (run history): the map history entries animate in with their sounds
-sound	NMapScreen.OnClearMapDrawingButtonPressed *	open	screen pass (map): map drawing with the pad (NControllerMapDrawingInput) and its erase sound
-sound	NPeekButton.Wiggle deny.mp3	open	screen pass (card selection): the peek button's wiggle and deny sound
-sound	NSfxVolumeSlider.OnDragEnded dagger_throw.mp3	open	screen pass (settings): the SFX slider plays dagger_throw.mp3 when released
-sound	NTickbox.ForceToggleTick *	open	screen pass (settings and others): tickboxes' on / off sounds
+sound	NMapPointHistoryEntry.*	n/a	dead code: nothing in the game calls NMapPointHistoryEntry.AnimateIn (or HurryUp / SetupForAnimation)
+sound	NMapScreen.OnClearMapDrawingButtonPressed *	ported	map_screen tools_input: the clear button, map_erase
+sound	NPeekButton.Wiggle deny.mp3	ported	peek_button wiggle (a hand card pressed while peeking in the hand's selection mode), Medium pitch variance
+sound	NSfxVolumeSlider.OnDragEnded dagger_throw.mp3	n/a	NSlider.MouseReleased only: the pad's steps play nothing
+sound	NTickbox.ForceToggleTick *	ported	settings_screen, card_library_screen, pile_screen: ui_checkbox_on / off on a toggle
 scene	NBounceSparkVfx *	n/a	no game code creates it
 scene	NGaseousScreenVfx *	n/a	no game code creates it
 scene	NHeavyBluntVfx *	n/a	no game code creates it
@@ -458,17 +477,36 @@ scene	NStarryImpactVfx *	n/a	no game code creates it
 scene	NEpochSlotParticle *	n/a	no game code creates it
 scene	NPatchNotesScreen *	n/a	the PC build's patch notes
 scene	NEarlyAccessDisclaimer *	n/a	the PC early access disclaimer
+scene	NCard res://scenes/cards/card_canvas_group_blur_material.tres	ported	card_view: an unseen / locked card's portrait blurred (card_portrait_blur_material); the group's own blur not applied over it
+scene	NCard res://scenes/cards/card_canvas_group_mask_blur_material.tres	ported	as card_canvas_group_blur_material (an Ancient card's)
+scene	NCard res://scenes/cards/card_canvas_group_mask_material.tres	ported	card_view: the Ancient card's canvas group mask
 scene	NCard res://scenes/cards/card_canvas_group_*	open	check: the card's canvas group blur materials (when NCard uses them; card_view)
-scene	NCardFlyVfx vfx/vfx_card_fly	open	check: the client's card flights against vfx_card_fly (its trail and particles)
-scene	NControllerMapDrawingInput *	open	screen pass (map): drawing on the map with the pad
+scene	NCardFlyVfx vfx/vfx_card_fly	ported	the scene holds only the script; the client flies the card itself (MovingCard, PickedPreview, NCardTrailVfx)
+scene	NControllerMapDrawingInput *	ported	map_screen: RB tools, draw / erase cursor (700 px/s), A held draws into map_drawing.tscn's viewport, B stops; lines kept for the act
 scene	N*CustomRun* *	open	screen pass (main menu): the custom run mode and its modifiers (check whether the client offers it)
 scene	NRunModifierTickbox *	open	as the custom run screens
 scene	NTopBarModifier *	open	as the custom run screens (a run's modifiers in the top bar; daily runs too)
-scene	NEpochHighlightVfx *	open	screen pass (timeline): an epoch slot's highlight
-scene	NTimelineScreen *	open	screen pass (timeline): place_epoch_sparks
-scene	NGameOverScreen *	open	screen pass (game over): the run history from the game over screen
+scene	NEpochHighlightVfx *	ported	timeline_screen set_highlight: behind an obtained slot once spawned; NEpochOffscreenVfx at the edge while it is off the screen
+scene	NTimelineScreen *	n/a	place_epoch_sparks.tscn is only preloaded (NTimelineScreen.AssetPaths); nothing instantiates it
+scene	NGameOverScreen *	n/a	NGameOverScreen disables its View Run button in _Ready and never enables it (run_history_screen_via_game_over_screen is unreachable); the client hides it
+scene	NHoverTipCardContainer *	ported	ui_util make_tip_set: card_hover_tip.tscn with the card, beside the text tips (HoverTipSetWithCards)
+scene	NHoverTipSet *	ported	ui_util make_tip_set / make_hover_tip (hover_tip_set.tscn, hover_tip.tscn)
 scene	NHoverTip*	open	screen pass (hover tips): the tip sets and the card tips (a card a tip names)
-scene	NSettingsScreenPopup *	open	screen pass (settings): the reset tutorials popup
+scene	NSettingsScreenPopup *	n/a	its only opener, NResetTutorialsButton, shows only in a non-release build (NGame.IsReleaseGame)
 scene	NTopBarBossIcon res://scenes/ui/top_bar/second_boss_icon.tscn	ported	top_bar: the second boss icon at (30, 22), tinted (boss_tint); only the second's at the first boss
 scene	NTopBarBossIcon *	open	check: the second boss icon (two bosses in an act)
 scene	NVerticalPopup *	ported	engine/game/confirm_popup.cpp (abandon run; the tutorials FTUE: check)
+hook	ShouldAllowMerchantCardRemoval	n/a	only the Hoarder modifier implements it (custom and daily runs, not offered yet)
+hook	ShouldAllowTargeting	n/a	no model implements it
+hook	ShouldProceedToNextMapPoint	n/a	no model implements it
+answer	NCombatRoom.Create@CombatRoom.StartPreFinishedCombat	ported	the rewards decision's room_view: game_client builds the room in FinishedCombat mode (background, the player, no enemies) behind them
+answer	NMapScreen.get_Instance@CombatRoom.StartPreFinishedCombat	ported	SetTravelEnabled: Proceed leads to the map_select decision
+headless	NBigSlashImpactVfx.Create	ported	attack.hit_vfx_node records the hit's effect; combat_vfx spawn_big_slash
+headless	NBigSlashVfx.Create	ported	attack.hit_vfx_node records the hit's effect; combat_vfx spawn_big_slash
+headless	NGoopyImpactVfx.Create	ported	attack.hit_vfx_node records the hit's effect; combat_vfx's table
+headless	NGrandFinaleImpactVfx.Create	ported	attack.hit_vfx_node records the hit's effect; combat_vfx's table
+headless	NWormyImpactVfx.Create	ported	attack.hit_vfx_node records the hit's effect; combat_vfx's table
+cue	saved	ported	top_bar: NSaveIndicator.SavedGame's fade on the indicator itself (engine 80)
+cue	ui:NCard.UpdateVisuals	ported	ThievingHopper.ThieveryMove's stolen card: the held_card cue and the hopper's held_card state (CombatScreen::hold_card under %StolenCardPos)
+cue	ui:NMerchantInventory.BlockInput	n/a	input: the shop ignores input while Lord's Parasol buys (ShopScreen::busy)
+cue	ui:NMerchantInventory.UnblockInput	n/a	as BlockInput

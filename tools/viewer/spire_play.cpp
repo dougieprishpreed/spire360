@@ -8,7 +8,8 @@
  *
  * --pad presses those buttons one at a time while a decision is shown (the
  * screen half a second after each is saved, NNNN_pad_KK.png), then
- * auto-play takes over.
+ * auto-play takes over. A+RIGHT presses both; A+RIGHT*40 then holds them
+ * for 40 more frames (map drawing: a stroke).
  *
  * --menu starts at the main menu of the logic's last profile instead
  * (MenuFlow, as the console): the --pad buttons drive the menus (title,
@@ -178,7 +179,16 @@ static void on_crash(int sig, siginfo_t* info, void* ctx) {
     _exit(139);
 }
 
-/* A --pad list ("A,RIGHT,WAIT,..."). */
+/* An entry of a --pad list held from the frame before (no press). */
+static const unsigned PAD_HELD = 1u << 31;
+
+static void apply_pad(unsigned entry, PadState& pad) {
+    pad.held = entry & ~PAD_HELD;
+    pad.pressed = (entry & PAD_HELD) ? 0 : pad.held;
+}
+
+/* A --pad list ("A,RIGHT,WAIT,...", "A+RIGHT*40": pressed together, then
+ * held 40 frames). */
 static void parse_pad(const std::string& list, std::vector<unsigned>& out) {
     static const struct {
         const char* name;
@@ -188,14 +198,36 @@ static void parse_pad(const std::string& list, std::vector<unsigned>& out) {
                   { "UP", PadState::UP },     { "DOWN", PadState::DOWN },   { "START", PadState::START },
                   { "LB", PadState::LB },     { "RB", PadState::RB },       { "LT", PadState::LT },
                   { "RT", PadState::RT },     { "RS_UP", PadState::RS_UP }, { "RS_DOWN", PadState::RS_DOWN },
-                  { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT },
+                  { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT }, { "LS", PadState::LS },
                   { "WAIT", 0 } /* a second with no press */ };
     size_t at = 0;
     while (at <= list.size()) {
         size_t comma = list.find(',', at);
         std::string tok = list.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
-        for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k)
-            if (tok == names[k].name) out.push_back(names[k].bit);
+        int hold = 0;
+        size_t star = tok.find('*');
+        if (star != std::string::npos) {
+            hold = atoi(tok.c_str() + star + 1);
+            tok = tok.substr(0, star);
+        }
+        unsigned bits = 0;
+        bool known = false;
+        size_t from = 0;
+        while (from <= tok.size()) {
+            size_t plus = tok.find('+', from);
+            std::string part = tok.substr(from, plus == std::string::npos ? std::string::npos : plus - from);
+            for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); ++k)
+                if (part == names[k].name) {
+                    bits |= names[k].bit;
+                    known = true;
+                }
+            if (plus == std::string::npos) break;
+            from = plus + 1;
+        }
+        if (known) {
+            out.push_back(bits);
+            for (int h = 0; h < hold; ++h) out.push_back(bits | PAD_HELD);
+        }
         if (comma == std::string::npos) break;
         at = comma + 1;
     }
@@ -385,11 +417,11 @@ int main(int argc, char** argv) {
                 hp_set = true;
             }
             if (settled && at < pad_script.size()) {
-                pad.pressed = pad.held = pad_script[at++];
+                apply_pad(pad_script[at++], pad);
                 idle = 0;
                 quiet = 0; /* the last screen is shot once its press has settled */
             } else if (settled && autoplay && run_at < run_script.size() && game.decision_count() >= pad_after) {
-                pad.pressed = pad.held = run_script[run_at++];
+                apply_pad(run_script[run_at++], pad);
                 idle = 0;
                 quiet = 0;
                 if (run_at == run_script.size()) game.set_auto_play_until(0);
@@ -517,12 +549,16 @@ int main(int argc, char** argv) {
         fflush(stdout);
         return 0;
     }
-    int shown = 0, idle = 0, frame_n = 0;
+    int shown = 0, idle = 0, frame_n = 0, waited = 0;
     while (shown < steps) {
         PadState pad;
         if (pad_at < pad_script.size() && !game.busy() &&
             (pad_after == 0 ? game.decision_count() > 0 : shown > pad_after)) {
-            pad.pressed = pad.held = pad_script[pad_at++];
+            /* WAIT: a second with no press */
+            if (pad_script[pad_at] != 0 || ++waited >= 60) {
+                waited = 0;
+                apply_pad(pad_script[pad_at++], pad);
+            }
         } else if (pad_at >= pad_script.size() && !pad_script.empty()) {
             game.set_auto_play(auto_seed);
             game.set_auto_play_until(0);

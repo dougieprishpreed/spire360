@@ -1,5 +1,6 @@
 #include "card_library_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "card_view.h"
@@ -434,6 +435,8 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
             }
         } else if (it.kind == TICK) {
             it.on = !it.on;
+            /* NTickbox.ForceToggleTick */
+            if (lib_->audio()) lib_->audio()->ui(it.on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
             refresh_item(it);
             rebuild();
         } else if (it.kind == SORTER) {
@@ -450,6 +453,7 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
             rebuild();
         } else if (it.kind == VIEW) {
             it.on = !it.on;
+            if (lib_->audio()) lib_->audio()->ui(it.on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
             upgrades_ = it.on;
             refresh_item(it);
             rebuild();

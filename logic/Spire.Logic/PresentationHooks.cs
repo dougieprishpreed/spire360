@@ -71,7 +71,7 @@ internal static partial class Hooks
 
     private static void RandomizeCostCue(CardModel card)
     {
-        if (card.Pile?.Type == PileType.Hand && CombatManager.Instance.IsInProgress)
+        if (card.Pile?.Type == PileType.Hand && Steps.InCombat)
             Steps.Cue(new Dictionary<string, object?> { ["t"] = "card_randomize_cost", ["card"] = Steps.IdOf(card) });
     }
 
@@ -144,7 +144,7 @@ internal static partial class Hooks
         foreach (var m in FlashMethods)
             Spire.HookBridge.Hooks.RegisterAfter("card.flash." + m, (a, r) =>
             {
-                if (a.Length > 0 && a[0] is CardModel card && card.Pile?.Type == PileType.Hand && CombatManager.Instance.IsInProgress)
+                if (a.Length > 0 && a[0] is CardModel card && card.Pile?.Type == PileType.Hand && Steps.InCombat)
                     Steps.Cue(new Dictionary<string, object?> { ["t"] = "card_flash", ["card"] = Steps.IdOf(card) });
             });
         // NCard.PlayRandomizeCostAnim: Confused (the owner's drawn cards with
@@ -221,7 +221,7 @@ internal static partial class Hooks
             Spire.HookBridge.Hooks.RegisterBefore("aim." + id, a =>
             {
                 if (a.Length < 2 || a[0] is not MonsterModel m || a[1] is not IReadOnlyList<Creature> targets) return;
-                if (!CombatManager.Instance.IsInProgress || m.Creature.IsDead) return;
+                if (!Steps.InCombat || m.Creature.IsDead) return;
                 if (targets.Count == 0)
                 {
                     // Tunneler.BelowMove with no target: Position = Left * 400;
@@ -242,7 +242,7 @@ internal static partial class Hooks
         // TestSubject.SetColor: %CanvasGroup.SetSelfModulate(color)
         Spire.HookBridge.Hooks.RegisterBefore("test_subject.set_color", a =>
         {
-            if (a.Length < 2 || a[0] is not MonsterModel m || a[1] is not Godot.Color c || !CombatManager.Instance.IsInProgress) return;
+            if (a.Length < 2 || a[0] is not MonsterModel m || a[1] is not Godot.Color c || !Steps.InCombat) return;
             static int B(float v) => (int)Math.Round(Math.Clamp(v, 0f, 1f) * 255f);
             SpecialCall("CanvasItem.SetSelfModulate", m.Creature, "%CanvasGroup", $"#{B(c.R):x2}{B(c.G):x2}{B(c.B):x2}{B(c.A):x2}");
         });
@@ -250,13 +250,13 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterBefore("aim.fuzzy_wurm_crawler.acid_goop", a =>
         {
             if (a.Length < 2 || a[0] is not MonsterModel m || a[1] is not IReadOnlyList<Creature> targets || targets.Count == 0) return;
-            if (CombatManager.Instance.IsInProgress)
+            if (Steps.InCombat)
                 SpecialCall("SpecialNode.ReachTo", m.Creature, "Visuals/SpineBoneNode", Steps.Who(targets[0]));
         });
         // TorchHeadAmalgam.OnDieToDoom: its torches' lights go out.
         Spire.HookBridge.Hooks.RegisterBefore("torch_head.die_to_doom", a =>
         {
-            if (a.Length < 1 || a[0] is not MonsterModel m || !CombatManager.Instance.IsInProgress) return;
+            if (a.Length < 1 || a[0] is not MonsterModel m || !Steps.InCombat) return;
             for (int i = 1; i <= 3; i++)
                 SpecialCall("CanvasItem.SetVisible", m.Creature, $"Visuals/torch{i}Slot/fire{i}_small_green/light_small", false);
         });
@@ -265,14 +265,14 @@ internal static partial class Hooks
         foreach (var bot in new[] { "guardbot", "noisebot", "stabbot", "zapbot" })
             Spire.HookBridge.Hooks.RegisterBefore("bot_fall." + bot, a =>
             {
-                if (a.Length > 0 && a[0] is MonsterModel m && CombatManager.Instance.IsInProgress)
+                if (a.Length > 0 && a[0] is MonsterModel m && Steps.InCombat)
                     SpecialCall("SpecialNode.BotFall", m.Creature, "Visuals/FallControl");
             });
         // Vantom.ScaleTo(scale, duration) (ShrinkPower): Visuals/ScalingBone's
         // scale tweens there (Sine InOut).
         Spire.HookBridge.Hooks.RegisterBefore("vantom.scale_to", a =>
         {
-            if (a.Length > 2 && a[0] is MonsterModel m && a[1] is float scale && a[2] is float duration && CombatManager.Instance.IsInProgress)
+            if (a.Length > 2 && a[0] is MonsterModel m && a[1] is float scale && a[2] is float duration && Steps.InCombat)
                 SpecialCall("SpecialNode.ScaleTo", m.Creature, "Visuals/ScalingBone", scale, duration);
         });
         // SurroundedPower.FaceDirection(direction): the owner's and its pets'
@@ -280,7 +280,7 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterBefore("surrounded.face", a =>
         {
             if (a.Length < 2 || a[0] is not PowerModel power || a[1] is not Enum direction || power.Owner == null) return;
-            if (!CombatManager.Instance.IsInProgress) return;
+            if (!Steps.InCombat) return;
             bool left = direction.ToString() == "Left";
             var who = new List<object?> { Steps.Who(power.Owner) };
             who.AddRange(power.Owner.Pets.Select(p => (object?)Steps.Who(p)));
@@ -292,7 +292,7 @@ internal static partial class Hooks
         // after 0.1 s (the tween made on the node).
         Bridge.Register("osty.fade_in", a =>
         {
-            if (a.Length > 0 && StandIns.TryCreature(a[0], out var osty) && CombatManager.Instance.IsInProgress)
+            if (a.Length > 0 && StandIns.TryCreature(a[0], out var osty) && Steps.InCombat)
                 CreatureCall("NCreature.FadeIn", Steps.Who(osty), 0.35f, 0.1f);
             return new Godot.Tween();
         });
@@ -301,7 +301,7 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterBefore("creature.escape", a =>
         {
             if (a.Length < 2 || a[0] is not Creature c || a[1] is not true || c.IsDead) return;
-            if (c.CombatState == null || !CombatManager.Instance.IsInProgress) return;
+            if (c.CombatState == null || !Steps.InCombat) return;
             Steps.Cue(new Dictionary<string, object?> { ["t"] = "escape", ["who"] = Steps.Who(c) });
         });
         // VfxCmd.PlayVfx(position, path, container) at a creature's point
@@ -322,7 +322,7 @@ internal static partial class Hooks
         // own code stays skipped (it reaches into NGame's run node).
         Bridge.Register("testmode.nightmare.is_off", _ =>
         {
-            if (CombatManager.Instance.IsInProgress)
+            if (Steps.InCombat)
             {
                 CreatureCall("NSmokyVignetteVfx.Create", "#cc4dcca8", "#0000ff54");
                 CreatureCall("NNightmareHandsVfx.Create");
@@ -342,12 +342,12 @@ internal static partial class Hooks
         // in when it runs out.
         Spire.HookBridge.Hooks.RegisterBefore("sandpit.applied", a =>
         {
-            if (a.Length > 0 && a[0] is SandpitPower p && p.Target != null && CombatManager.Instance.IsInProgress)
+            if (a.Length > 0 && a[0] is SandpitPower p && p.Target != null && Steps.InCombat)
                 CreatureCall("Sandpit.Begin", Steps.Who(p.Owner), Steps.Who(p.Target), p.Amount);
         });
         Spire.HookBridge.Hooks.RegisterBefore("sandpit.update_positions", a =>
         {
-            if (a.Length < 1 || a[0] is not SandpitPower p || p.Target == null || !CombatManager.Instance.IsInProgress) return;
+            if (a.Length < 1 || a[0] is not SandpitPower p || p.Target == null || !Steps.InCombat) return;
             var player = p.Target.Player;
             var affected = SandpitAffected(p).Where(c => c.IsAlive).Select(c => (object?)Steps.Who(c)).ToList();
             var osty = player != null && player.IsOstyAlive ? Steps.Who(player.Osty!) : null;
@@ -358,7 +358,7 @@ internal static partial class Hooks
         {
             _sandpitSteps.Clear();
             if (a.Length < 2 || a[0] is not SandpitPower p || a[1] is not Creature oldOwner || p.Target == null) return;
-            if (oldOwner.IsDead || p.Target.IsDead || !CombatManager.Instance.IsInProgress) return;
+            if (oldOwner.IsDead || p.Target.IsDead || !Steps.InCombat) return;
             var affected = SandpitAffected(p);
             var owner = Steps.Who(oldOwner);
             _sandpitSteps.Enqueue(() => CreatureCall("Sandpit.Pull", owner, affected.Select(c => (object?)Steps.Who(c)).ToList()));

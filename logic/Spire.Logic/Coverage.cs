@@ -13,12 +13,27 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Rooms;
+using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Timeline;
 
 namespace Spire.Logic;
 
 public partial class RunDriver
 {
+    /// <summary>Every act discovered (SerializableProgress.DiscoveredActs), as
+    /// on a profile that has played them: a new run's acts are then drawn
+    /// from the unlocked ones (ActModel.GetRandomList), where a new profile
+    /// always gets the undiscovered alternate first (Underdocks).</summary>
+    public Dictionary<string, object?> DiscoverActs()
+    {
+        if (_profileId <= 0) return Error("No profile selected");
+        EnsureModelDbInitialized();
+        var progress = SaveManager.Instance.Progress;
+        foreach (var act in ModelDb.ActsByIndex.SelectMany(a => a)) progress.MarkActAsSeen(act.Id);
+        SaveManager.Instance.SaveProgressFile();
+        return new Dictionary<string, object?> { ["type"] = "ok", ["acts"] = progress.DiscoveredActs.Select(a => a.Entry).ToList() };
+    }
+
     /// <summary>Everything ModelDb knows a run can contain.</summary>
     public Dictionary<string, object?> Content()
     {
@@ -35,6 +50,8 @@ public partial class RunDriver
                     ["rarity"] = x.card.Rarity.ToString(),
                     ["target"] = x.card.TargetType.ToString(),
                     ["upgradable"] = Safe(() => x.card.IsUpgradable),
+                    // CardMultiplayerConstraint.MultiplayerOnly: never in a solo run
+                    ["multiplayer_only"] = x.card.MultiplayerConstraint == CardMultiplayerConstraint.MultiplayerOnly,
                 }).ToList();
             // Starting decks' cards outside any pool.
             foreach (var c in ModelDb.AllCards)

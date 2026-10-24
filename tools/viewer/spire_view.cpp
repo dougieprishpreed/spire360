@@ -114,7 +114,8 @@ int main(int argc, char** argv) {
                           { "UP", PadState::UP },   { "DOWN", PadState::DOWN }, { "START", PadState::START },
                           { "LB", PadState::LB },   { "RB", PadState::RB },     { "LT", PadState::LT },
                           { "RT", PadState::RT },   { "RS_UP", PadState::RS_UP }, { "RS_DOWN", PadState::RS_DOWN },
-                          { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT } };
+                          { "RS_LEFT", PadState::RS_LEFT }, { "RS_RIGHT", PadState::RS_RIGHT },
+                          { "LS", PadState::LS } };
             std::string list = argv[++i];
             size_t at = 0;
             while (at <= list.size()) {

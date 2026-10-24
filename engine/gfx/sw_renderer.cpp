@@ -1545,7 +1545,9 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
                 r = dr + sr; g = dg + sg; b = db + sb; a = da + sa * (1 - da);
                 break;
             case BLEND_SUB:
-                r = dr - sr; g = dg - sg; b = db - sb; a = da;
+                /* alpha too, as D3D9's REVSUBTRACT and Godot's blend_sub
+                 * (an eraser in a SubViewport: NMapDrawings) */
+                r = dr - sr; g = dg - sg; b = db - sb; a = da - sa;
                 break;
             case BLEND_MUL:
                 r = dr * (s[0] * col[0]); g = dg * (s[1] * col[1]); b = db * (s[2] * col[2]); a = da;

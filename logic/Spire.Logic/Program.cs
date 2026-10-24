@@ -206,6 +206,9 @@ internal static class Program
             case "content":
                 return sim.Content();
 
+            case "discover_acts":
+                return sim.DiscoverActs();
+
             case "obtain":
                 return sim.Obtain(cmd);
 

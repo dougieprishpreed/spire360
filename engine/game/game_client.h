@@ -221,6 +221,10 @@ private:
     RoomTransition* transition_;
     DeckPreviews* deck_previews_; /* NRun.GlobalUi's card previews (over the screens) */
     bool event_finishing_;        /* finishing_ waits for the event's room */
+    bool shop_auto_;              /* finishing_ waits for the shop buying by itself (Lord's Parasol) */
+    Json auto_steps_;             /* its cues */
+    Json auto_player_;            /* the player as its top bar shows them meanwhile */
+    void auto_bar(const std::string& kind, const std::string& id);
     std::vector<std::string> room_vfx_; /* the event room's own effects (ui calls) */
     std::string room_vfx_event_;
     Json event_portrait_;                /* the event's portrait as a page set it */
