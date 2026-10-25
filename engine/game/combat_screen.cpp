@@ -1142,8 +1142,11 @@ void CombatScreen::layout_hand(bool snap) {
         int i = act[(size_t)k];
         Holder& h = holders_[i];
         if (i == play_card_) continue; /* centred by begin_play */
-        float x = HAND_POS[n - 1][k][0], y = HAND_POS[n - 1][k][1];
-        float angle = HAND_ANGLE[n - 1][k], sc = scale;
+        /* the game's hand holds 10 at most; more holders here is a stale
+         * one, never a read past the layout tables */
+        int row = n <= 10 ? n - 1 : 9, col = k < 10 ? k : 9;
+        float x = HAND_POS[row][col][0], y = HAND_POS[row][col][1];
+        float angle = HAND_ANGLE[row][col], sc = scale;
         h.node->z_index = 0;
         if (k == focus) {
             y = -hitbox_height(h.node) * 0.5f + 2.0f;

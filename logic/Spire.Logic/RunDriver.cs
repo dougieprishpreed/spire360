@@ -308,6 +308,12 @@ public partial class RunDriver
                 foreach (var e in player.Creature.CombatState.Enemies)
                     if (e.IsAlive && e.CurrentHp > cap) SetField(e, "_currentHp", cap);
             }
+            // the living enemies back to their max HP (a card tried on an enemy
+            // earlier cards wore down would kill it: its effect after the
+            // attack never runs)
+            if (args.TryGetValue("enemy_heal", out var heal) && heal.ValueKind == System.Text.Json.JsonValueKind.True && player.Creature?.CombatState != null)
+                foreach (var e in player.Creature.CombatState.Enemies)
+                    if (e.IsAlive && e.CurrentHp < e.MaxHp) SetField(e, "_currentHp", e.MaxHp);
 
             Log($"SetPlayer: hp={player.Creature?.CurrentHp} gold={player.Gold} relics={player.Relics.Count} deck={player.Deck?.Cards?.Count}");
             return new Dictionary<string, object?>
@@ -324,8 +330,18 @@ public partial class RunDriver
         try
         {
             if (_runState == null) return Error("No run in progress");
+            // A dead player's run is over (the game over screen): a fight
+            // would wait forever for the player to be ready
+            if (_runState.Players.All(p => p.Creature?.IsDead == true)) return Error("The run is over");
             var runState = _runState;
             Log($"EnterRoom: type={roomType} encounter={encounter} event={eventId}");
+            // a new room, as DoMapSelect resets for one (else a second fight
+            // entered this way skips its rewards)
+            _rewardsProcessed = false;
+            _restSiteDone = false;
+            ResetTreasure();
+            _pendingCardReward = null;
+            _eventOptionChosen = false;
 
             AbstractRoom room;
             switch (roomType.ToLowerInvariant())
@@ -1289,6 +1305,9 @@ public partial class RunDriver
 
     private Dictionary<string, object?> DoSkipSelect(Player player)
     {
+        // a selection that must be made has no skip (nor cancel) on its screen
+        if (_cardSelector.HasPending && _cardSelector.PendingMinSelect > 0 && !_cardSelector.PendingCancelable)
+            return Error($"This selection cannot be skipped: choose at least {_cardSelector.PendingMinSelect}");
         if (_cardSelector.HasPending)
         {
             Log("Skipping card selection");
@@ -1723,6 +1742,10 @@ public partial class RunDriver
                 ["manual_confirm"] = _cardSelector.PendingManualConfirm,
                 ["enchantment_screen"] = _cardSelector.PendingKind == "enchant" ? EnchantmentDescription() : null,
                 ["player"] = PlayerSummary(player),
+                // the fight behind a selection made in it (its hand, enemies,
+                // piles): the client's room when this is the fight's first
+                // decision (Gambling Chip at its start)
+                ["fight"] = SelectionFight(player),
             };
         }
 
@@ -2393,6 +2416,13 @@ public partial class RunDriver
             Log($"CombatView: {ex.Message}");
             return null;
         }
+    }
+
+    private Dictionary<string, object?>? SelectionFight(Player player)
+    {
+        if (!Steps.InCombat || player.PlayerCombatState == null) return null;
+        try { return CombatPlayState(player); }
+        catch (Exception ex) { Log($"Selection fight: {ex.Message}"); return null; }
     }
 
     private Dictionary<string, object?> CombatPlayState(Player player)
@@ -3643,7 +3673,10 @@ public partial class RunDriver
             var point = _runState.CurrentMapPoint;
             ctx["point_type"] = point?.PointType.ToString();
             ctx["total_floor"] = _runState.TotalFloor;
-            ctx["ancient"] = act?.Ancient?.Id.Entry;
+            // NMapScreen reads Act.Ancient only for an Ancient starting point:
+            // an act may have none (a new profile's first act, no ancient
+            // unlocked), and RoomSet.Ancient throws then
+            if (_runState.Map?.StartingMapPoint.PointType == MapPointType.Ancient) ctx["ancient"] = act?.Ancient?.Id.Entry;
             ctx["second_boss"] = act?.SecondBossEncounter?.Id.Entry;
             ctx["at_second_boss"] = point != null && point == _runState.Map?.SecondBossMapPoint;
             ctx["at_boss"] = point != null && point == _runState.Map?.BossMapPoint;
@@ -3781,10 +3814,6 @@ public partial class RunDriver
         try { SaveManager.Instance.InitPrefsDataForTest(); }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager.InitPrefsDataForTest: {ex.Message}"); }
 
-        // Initialize progress data for epoch/timeline tracking
-        try { SaveManager.Instance.InitProgressData(); }
-        catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitProgressData: {ex.Message}"); }
-
         // Cmd.Wait, TalkCmd.Play and the other sts2-cli Harmony patches are now
         // static IL patches (logic/patches.json); their handlers live in Hooks.cs
         // and are registered by Program before any game code runs.
@@ -3818,8 +3847,8 @@ public partial class RunDriver
         try { MegaCrit.Sts2.Core.Modding.AssemblyInfo.Init(); }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] AssemblyInfo.Init: {ex.Message}"); }
 
-        // v0.111.0: progress data resolves character models, so load it again
-        // now that ModelDb is populated (the earlier call fails on a fresh profile).
+        // Progress data (epochs, the timeline) resolves character models: loaded
+        // once ModelDb is populated, as NGame does after the models.
         try { SaveManager.Instance.InitProgressData(); }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitProgressData (after ModelDb): {(Spire.Logic.Log.Verbose ? ex.ToString() : ex.Message)}"); }
 

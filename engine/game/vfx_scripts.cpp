@@ -384,7 +384,9 @@ public:
             float distance = has_last_ ? sqrtf((point.x - last_.x) * (point.x - last_.x) + (point.y - last_.y) * (point.y - last_.y)) : 0;
             if (!has_last_ || distance >= 12) {
                 size_t count = line->points.size();
-                if (count > 2 && distance > 48) {
+                /* a jump of more than a screen is a teleport, not a motion: no
+                 * points between (and no runaway loop on a wild position) */
+                if (count > 2 && distance > 48 && distance < 4096) {
                     Vec2 a = line->points[count - 2], b = line->points[count - 1];
                     for (float span = 48; span < distance - 12; span += 48) {
                         float t = 0.5f + span / distance * 0.5f;

@@ -1,8 +1,9 @@
 // Test aids for the content coverage harness (tools/content_coverage.py):
 // the game's content as ModelDb lists it, and ways to give a run any card,
-// relic or potion through the game's own commands (RelicCmd.Obtain,
-// PotionCmd.TryToProcure, CardPileCmd), so their effects and hooks run as
-// they would when the game hands them out. Not used by the game's flow.
+// relic, potion, enchantment or affliction through the game's own commands
+// (RelicCmd.Obtain, PotionCmd.TryToProcure, CardPileCmd, CardCmd.Enchant /
+// Afflict), so their effects and hooks run as they would when the game
+// hands them out. Not used by the game's flow.
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -106,11 +107,23 @@ public partial class RunDriver
                 ["encounter_monsters"] = ModelDb.AllEncounters.ToDictionary(e => e.Id.Entry,
                     e => (object?)e.AllPossibleMonsters.Select(m => m.Id.Entry).Distinct().ToList()),
                 ["powers"] = ModelDb.AllPowers.Count(),
+                ["power_ids"] = ModelDb.AllPowers.Where(p => p.GetType().Namespace?.EndsWith(".Mocks") != true).Select(p => p.Id.Entry).ToList(),
+                ["enchantments"] = Enchantments().Select(e => e.Id.Entry).ToList(),
+                ["afflictions"] = Afflictions().Select(a => a.Id.Entry).ToList(),
+                ["orbs"] = ModelDb.Orbs.Select(o => o.Id.Entry).ToList(),
                 ["epochs"] = EpochModel.AllEpochIds.ToList(),
             };
         }
         catch (Exception ex) { return ErrorWithTrace("content failed", ex); }
     }
+
+    // ModelDb.DebugEnchantments / DebugAfflictions without the test mocks and
+    // DeprecatedEnchantment (what old saves' removed enchantments load as)
+    private static IEnumerable<EnchantmentModel> Enchantments() => ModelDb.DebugEnchantments.Where(e =>
+        e.GetType().Namespace == "MegaCrit.Sts2.Core.Models.Enchantments" && e.GetType().Name != "DeprecatedEnchantment");
+
+    private static IEnumerable<AfflictionModel> Afflictions() => ModelDb.DebugAfflictions.Where(a =>
+        a.GetType().Namespace == "MegaCrit.Sts2.Core.Models.Afflictions");
 
     /// <summary>The skin a pet's relic chose (Byrdpip.Skin, PaelsLegion.Skin).</summary>
     private static string? PetSkin(MegaCrit.Sts2.Core.Entities.Players.Player player, MegaCrit.Sts2.Core.Entities.Creatures.Creature pet)
@@ -198,6 +211,28 @@ public partial class RunDriver
                     EventSetup(card, player);
                     Sched.Run(() => CardPileCmd.Add(card, PileType.Deck));
                 }
+            // [{"id": "SLITHER", "amount": 1, "target": "AnyEnemy"}]: on every
+            // deck card it can enchant (CardCmd.Enchant), of that target type
+            // if given (the cards the game's own sources pick); none:
+            // "not_allowed"
+            if (cmd.TryGetProperty("enchant", out var es))
+                foreach (var e in es.EnumerateArray())
+                {
+                    var id = e.TryGetProperty("id", out var ei) ? ei.GetString() ?? "" : "";
+                    var model = Enchantments().FirstOrDefault(m => m.Id.Entry == id);
+                    if (model == null) { missing.Add("ENCHANTMENT." + id); continue; }
+                    decimal amount = e.TryGetProperty("amount", out var am) && am.TryGetDecimal(out var a) ? a : 1m;
+                    var target = e.TryGetProperty("target", out var tt) ? tt.GetString() : null;
+                    int n = 0;
+                    foreach (var card in PileType.Deck.GetPile(player).Cards.ToList())
+                    {
+                        if (card.Enchantment != null || !model.CanEnchant(card)) continue;
+                        if (target != null && card.TargetType.ToString() != target) continue;
+                        CardCmd.Enchant(model.ToMutable(), card, amount);
+                        n++;
+                    }
+                    if (n == 0) notAllowed.Add("ENCHANTMENT." + id);
+                }
             WaitForActionExecutor();
             var d = DetectDecisionPoint();
             if (missing.Count > 0) d["missing"] = missing;
@@ -240,6 +275,17 @@ public partial class RunDriver
                     if (upgraded && card.IsUpgradable) CardCmd.Upgrade(card);
                     Sched.Run(() => CardPileCmd.AddGeneratedCardToCombat(card, PileType.Hand, player));
                 }
+            // {"id": "BOUND", "amount": 1}: the hand's cards afflicted
+            // (CardCmd.Afflict; Hook.ShouldAfflict and CanAfflict decide)
+            if (cmd.TryGetProperty("afflict", out var af))
+            {
+                var id = af.TryGetProperty("id", out var ai) ? ai.GetString() ?? "" : "";
+                var model = Afflictions().FirstOrDefault(m => m.Id.Entry == id);
+                if (model == null) return Error($"Unknown affliction {id}");
+                decimal amount = af.TryGetProperty("amount", out var am) && am.TryGetDecimal(out var a) ? a : 1m;
+                foreach (var card in PileType.Hand.GetPile(player).Cards.ToList())
+                    if (card.Affliction == null) Sched.Run(() => CardCmd.Afflict(model.ToMutable(), card, amount));
+            }
             if (cmd.TryGetProperty("energy", out var en) && en.TryGetInt32(out var e) && e > 0)
                 Sched.Run(() => PlayerCmd.GainEnergy(e, player));
             if (cmd.TryGetProperty("stars", out var st) && st.TryGetInt32(out var s) && s > 0)

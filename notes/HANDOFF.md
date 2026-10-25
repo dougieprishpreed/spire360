@@ -10,6 +10,124 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Completeness audit, part 3 (2026-10-24): model coverage, and what it found
+
+The game folder is back: the pack was rebuilt (`work/pack-80/pack.s3p`,
+`SPIRE_DATA=work/pack-80/data`; 0 errors). It has the Image imports now
+(the map drawing cursors, cursor_quill.png ...: captured, work/cap81/draw).
+spire_check against it: the same 2,433 responses, 0 failures.
+
+**Model coverage** (`tools/model_coverage.py --runs work/covNN [--runs ...]`):
+every ModelDb model that no suite drives by construction must show up in
+some trace: powers (a power cue or a creature's powers), orbs, monsters,
+enchantments, afflictions, and every relic whose code calls Flash() must
+flash (its trigger ran; read from decomp/). "model" verdict rows answer
+what a solo run cannot show (multiplayer-only cards' powers, four powers
+nothing applies). Exits 1 while something unanswered was never seen.
+
+Its first run named (cov80): no enchantment or affliction suite existed
+(Slither's cost roll never ran); 31 powers never applied; 38 relics whose
+trigger never fired. The causes, each fixed in the harness:
+
+- Suites `enchantments` (each on the deck's cards it can enchant, `obtain`
+  `enchant`, Neow first; Inky only on targeted cards as the game gives it
+  to Shivs) and `afflictions` (`add_to_hand` `afflict`). 22 and 7, all ok.
+- The coverage agent's random picks: the Knowledge Demon offered three
+  curses and Disintegration was taken each time. `act_for` now takes a
+  card or rest option this run has not taken yet; scenario
+  `knowledge_demon_0/1` takes both sides explicitly.
+- Kill branches (The Hunt, Feed, Hand of Greed, Sunder, Knockout Blow,
+  Echoing Slash): the cards suite's upgraded pass kills with every attack
+  (enemy_hp 1); the plain pass heals the enemies first (`set_player
+  enemy_heal`) so an attack's after-effects (Rebound's power) run.
+- A card that leaves a new power on the player gets two turns (Shadow
+  Step's Double Damage), not only Power cards.
+- Mad Science's nine variants (scenario `mad_science`: Curious, Improvement).
+- The relic suite: the relic's own character; a kit of trigger cards in
+  each fight (Shivs, an X cost, an exhaust, a discard, an orb, poison,
+  Strength, stars spent: RELIC_KIT), two more turns, the first fight then
+  run to its end, a fight at 40% HP (Red Skull), a third fight, a shop with
+  999 gold, and a last fight at 1 HP (Lizard Tail).
+
+Bugs it found:
+
+- **The Knowledge Demon's curse could be skipped** (and any choose-a-card
+  screen the game makes mandatory): CardSelectCmd.FromChooseACardScreen asks
+  the selector for 0 to 1 cards either way and only the screen enforces
+  canSkip, so the decision said min_select 0 and the client showed Skip.
+  The selector now requires one pick without canSkip; skip_select refuses a
+  mandatory selection.
+- `enter_room` (the test command) did not reset the per-room state map
+  travel resets: a second fight entered that way skipped its rewards (hid
+  The Hunt's extra reward and every reward relic in the suites).
+- `enter_room` on a dead player's run hung (the fight waited for the player
+  to be ready); it now answers "The run is over". The harness has a
+  watchdog: a command over 300 s kills its logic, the case is "hung".
+- The top bar's context threw on a new profile's first act (no ancient
+  unlocked: RoomSet.Ancient throws) and lost the boss icon state; Act.Ancient
+  is read only for an Ancient starting point, as NMapScreen does.
+- InitProgressData ran once before ModelDb (a known failure on every fresh
+  profile); now only after it, as NGame does.
+- **A freeze (and, in the sweep, an out-of-memory crash) after a fight
+  that starts with a selection** (Gambling Chip's discard-and-redraw, which
+  the relic suite reached by buying relics): the client built the room
+  behind that first selection from the previous fight's last state, so the
+  new fight's draws piled onto the old hand (11, 12 holders); the hand
+  layout read past its 10-row tables (undefined behaviour: a holder at 43
+  million pixels), a played card flew from there and its NCardTrail
+  interpolated hundreds of thousands of points (a quadratic erase: the
+  hang). Fixed at each level: the client drops the last fight's state on
+  any decision outside a fight; a selection made during a fight carries the
+  fight (`fight`, CombatPlayState) and the client builds the room from it;
+  the layout clamps past 10 holders; a trail does not interpolate a jump
+  over 4096 px. spire_check now checks every combat response's hand: at
+  most 10 holders, each on the screen ("hand checks").
+- Found by isolating the stall: cut the trace response by response, then
+  a temporary per-phase and per-node trace (SPIRE_PHASES, removed) named
+  the node. No debugger is in the toolchain; that method works.
+
+Tools: content_coverage `--only ID,...` runs single items; `set_player`
+`enemy_heal`; the harness watchdog (300 s per command).
+
+Checks at the pause: seeded traces against traces/base6, differences 0
+(traces/new84); content coverage cov83: 828 cases, all ok (22 min); the
+sweep over it (pack-80): 42,021 decisions, 185 gaps, 58 cue kinds never
+played, every one with a verdict (40 min, no crash); scenarios scen84 all
+ok; spire_check on new84 + scen84 + mecha62: 2,284 responses, 1,767 hand
+checks, 0 failures; strict C++98 builds. Model coverage (cov83 + scen84):
+powers 241/265 seen plus 23 verdicts, Self-Forming Clay's power left (it
+needs unblocked damage, which a run may or may not take); orbs 4/4,
+monsters 107/107, enchantments 22/22, afflictions 7/7; relic flashes
+129/157. testmode_audit 0 open, hook_caller_audit 0 open.
+
+The audit's open and unclassified rows are now only these:
+- custom and daily runs (5 scene rows), deferred past the alpha RC;
+- the long review lists: call (171: UI methods game code calls, mostly
+  MegaAnimationState / MegaSkeleton / audio managers), script (163: scene
+  scripts the replays met without a port), asset (124 directories of
+  scenes never loaded), and ui_reach_audit's 193 sites (NTimelineScreen
+  58: the epochs' unlock queues, NOverlayStack 19, NGame 19, NCombatRoom
+  17, NRun 17, NMapScreen 15, ...; no "reach" verdict rows exist yet);
+- 28 relics whose trigger never fired: Bone Flute, Bookmark, Burning
+  Sticks, Darkstone Periapt, Demon Tongue, Dream Catcher, Emotion Chip,
+  Fake Orichalcum, Fiddle, Galactic Dust, Game Piece, Hand Drill, History
+  Course, Jeweled Mask, Lava Rock, Lost Wisp, Maw Bank, Metronome,
+  Nunchaku, Pael's Flesh, Pael's Wing, Screaming Flagon, Snecko Skull,
+  Stone Calendar, The Abacus, Tough Bandages, Tuning Fork, Wongo's Mystery
+  Ticket (the set shifts a little between runs: random play). Each needs
+  its own recipe in the relic suite (a rest at a campfire, a purchase, a
+  boss reward, an orb channelled, the seventh turn, ...).
+
+Next console build: logic (all stages: patches.json changed in part 2),
+engine, and the pack (work/pack-80: the cursor images, the fonts' pages).
+
+RNG note (the user's pointer, Andy Tockman's "Correlated randomness"):
+v0.111.0's Rng wraps MegaRandom (Xoshiro256**, seeds through SplitMix64),
+not System.Random, so the older build's correlations do not apply; the
+port runs that code, so whatever the build does is reproduced. Coverage
+must never count on a lucky roll: force content, take every side of a
+choice explicitly.
+
 ## Completeness audit, part 2 (2026-10-24): static audits, and the bugs they named
 
 Coverage only shows what it drives. Three static audits now list

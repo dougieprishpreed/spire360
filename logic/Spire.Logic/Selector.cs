@@ -57,6 +57,7 @@ public partial class RunDriver
         // EnchantmentDescriptionContainer)
         public (EnchantmentModel model, int amount)? PendingEnchantment { get; private set; }
         private (EnchantmentModel model, int amount)? _nextEnchantment;
+        private bool _nextMustPick;
 
         /// <summary>
         /// After a CardSelectCmd entry point returns: label the selection it
@@ -82,6 +83,17 @@ public partial class RunDriver
             {
                 try { prompt = new MegaCrit.Sts2.Core.Localization.LocString("gameplay_ui", "CHOOSE_CARD_UPGRADE_HEADER").GetFormattedText(); } catch { }
             }
+            // FromChooseACardScreen(context, cards, player, canSkip): the
+            // selector is asked for 0 to 1 cards either way; the screen
+            // (NChooseACardSelectionScreen) offers its skip only with canSkip,
+            // so without it one card must be taken (the Knowledge Demon's curses)
+            bool mustPick = false;
+            if (kind == "choose_a_card")
+            {
+                mustPick = true;
+                foreach (var a in args)
+                    if (a is bool canSkip) mustPick = !canSkip;
+            }
             (EnchantmentModel, int)? enchantment = null;
             if (kind == "enchant")
                 for (int i = 0; i + 1 < args.Length; ++i)
@@ -94,11 +106,13 @@ public partial class RunDriver
                 PendingCancelable = cancelable;
                 PendingManualConfirm = manual;
                 PendingEnchantment = enchantment;
+                if (mustPick && PendingOptions?.Count > 0) PendingMinSelect = Math.Max(PendingMinSelect, 1);
             }
             else if (result is Task t && !t.IsCompleted)
             {
                 _next = (kind, prompt, cancelable, manual);
                 _nextEnchantment = enchantment;
+                _nextMustPick = mustPick;
             }
         }
 
@@ -123,6 +137,8 @@ public partial class RunDriver
             PendingEnchantment = _nextEnchantment;
             _next = null;
             _nextEnchantment = null;
+            if (_nextMustPick) PendingMinSelect = Math.Max(minSelect, 1);
+            _nextMustPick = false;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
             Spire.Logic.Log.Info($"Card selection pending: {optList.Count} options, select {minSelect}-{maxSelect}");
             return _pendingTcs.Task;

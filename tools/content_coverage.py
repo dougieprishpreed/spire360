@@ -1,5 +1,6 @@
-"""Content coverage: every card, relic, potion, event, encounter and act of
-the game played through the real logic, with everything unlocked.
+"""Content coverage: every card, relic, potion, enchantment, affliction,
+event, encounter and act of the game played through the real logic, with
+everything unlocked.
 
     python tools/content_coverage.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" \
         --data work/pack/data --work work/coverage [--suite cards,relics,...] [--limit N]
@@ -7,8 +8,13 @@ the game played through the real logic, with everything unlocked.
 Suites (default: all):
   cards       each card generated into the hand and played (and upgraded)
   potions     each potion obtained and used in a fight
-  relics      each relic obtained (RelicCmd.Obtain), then a fight, a rest
-              site, a shop and a treasure room with it
+  relics      each relic obtained (RelicCmd.Obtain) by its character, then
+              fights with trigger cards played, low HP, its rest site
+              option, a shop with gold, a treasure room
+  enchantments each enchantment on the deck's cards it can enchant
+              (CardCmd.Enchant), then a fight, a rest site and a shop
+  afflictions each affliction on the hand's cards (CardCmd.Afflict), the
+              fight played to its end
   events      each event entered and played through from each of its first
               options
   encounters  each encounter fought to its end (999 HP)
@@ -35,25 +41,57 @@ import re
 import shlex
 import shutil
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import random_runs  # noqa: E402
 
 
-def act_for(rng, state):
-    """random_runs' agent, with everything a coverage run needs to keep going."""
-    return random_runs.act(rng, state)
+def act_for(rng, state, taken=None):
+    """random_runs' agent, with everything a coverage run needs to keep going.
+    taken: what this coverage run has picked so far; a pick of one card (the
+    Knowledge Demon's curses, a choose-a-card screen) or a rest site option
+    goes to one never taken when there is one, so a rare choice is not left
+    to chance."""
+    cmd = random_runs.act(rng, state)
+    if taken is None:
+        return cmd
+    d = state.get("decision")
+    args = cmd.get("args") or {}
+    if d == "card_select" and cmd.get("action") == "select_cards":
+        cards = state.get("cards") or []
+        picks = [int(i) for i in str(args.get("indices", "")).split(",") if i != ""]
+        fresh = [i for i, c in enumerate(cards) if ("card", c.get("id")) not in taken]
+        if len(picks) == 1 and fresh:
+            picks = [rng.choice(fresh)]
+            cmd = dict(cmd, args=dict(args, indices=str(picks[0])))
+        taken.update(("card", cards[i].get("id")) for i in picks if i < len(cards))
+    elif d == "rest_site" and cmd.get("action") == "choose_option":
+        opts = [o for o in state.get("options", []) if o.get("is_enabled", True)]
+        fresh = [o for o in opts if ("rest", o.get("option_id")) not in taken]
+        if fresh:
+            pick = rng.choice(fresh)
+            cmd = dict(cmd, args=dict(args, option_index=pick["index"]))
+        chosen = [o for o in opts if o.get("index") == cmd["args"].get("option_index")]
+        taken.update(("rest", o.get("option_id")) for o in chosen)
+    return cmd
 
 
 LEDGER = True
 
 
 class Logic:
-    """One logic process; restarted when it dies."""
+    """One logic process. A command that takes longer than TIMEOUT kills it
+    (hung); once it is gone every command answers an error, so the case runs
+    out and the next one starts a new process."""
+
+    TIMEOUT = 300
 
     def __init__(self, cmd, data, trace):
         self.cmd, self.data, self.trace = cmd, data, trace
+        self.dead = None  # why the process is gone
+        self.hung = False
         if LEDGER and os.path.exists(trace[:-6] + ".ledger.jsonl"):
             os.remove(trace[:-6] + ".ledger.jsonl")
         self.start()
@@ -69,7 +107,27 @@ class Logic:
             raise RuntimeError(f"logic did not start: {ready}")
 
     def send(self, cmd):
-        return self.s.send(cmd)
+        if self.dead:
+            return {"type": "error", "message": self.dead}
+        timer = threading.Timer(self.TIMEOUT, self._kill)
+        timer.daemon = True
+        timer.start()
+        try:
+            return self.s.send(cmd)
+        except (RuntimeError, OSError, ValueError) as ex:
+            text = json.dumps(cmd)[:200]
+            self.dead = (f"logic hung on {text} (killed after {self.TIMEOUT} s)" if self.hung
+                         else f"logic ended on {text}: {str(ex)[:300]}")
+            return {"type": "error", "message": self.dead}
+        finally:
+            timer.cancel()
+
+    def _kill(self):
+        self.hung = True
+        try:
+            self.s.proc.kill()
+        except Exception:
+            pass
 
     def close(self):
         try:
@@ -124,6 +182,7 @@ class Runner:
         self.cases = []
         self.cues = {}
         self.rng = random.Random(a.seed)
+        self.taken = set()  # act_for's picks so far
 
     # ---- plumbing ----
 
@@ -157,6 +216,8 @@ class Runner:
     def step(self, case, logic, cmd):
         state = logic.send(cmd)
         case.record(state)
+        if logic.dead and case.status in ("ok", "error"):
+            case.status = "hung" if logic.hung else "crashed"
         return state
 
     def play_until(self, case, logic, state, stop, limit=400):
@@ -180,7 +241,7 @@ class Runner:
                 case.status = "stuck"
                 case.notes.append(f"stuck at {state.get('decision')}")
                 return state
-            state = self.step(case, logic, act_for(self.rng, state))
+            state = self.step(case, logic, act_for(self.rng, state, self.taken))
         case.notes.append("step limit")
         return state
 
@@ -198,6 +259,9 @@ class Runner:
         return c
 
     def limited(self, items):
+        only = set(filter(None, (getattr(self.a, "only", "") or "").split(",")))
+        if only:
+            items = [x for x in items if (x.get("id") if isinstance(x, dict) else x) in only]
         return items[: self.a.limit] if self.a.limit else items
 
     # ---- suites ----
@@ -222,6 +286,11 @@ class Runner:
         for tag, ch, chunk in chunks:
             for upgraded in (False, True):
                 name = f"cards_{tag}{'_plus' if upgraded else ''}"
+                # the upgraded pass kills: among several enemies, so a kill is
+                # not always the fight's last (The Hunt's power: PowerCmd.Apply
+                # does nothing once the combat is ending)
+                fight = ({"type": "monster", "encounter": KILL_FIGHT} if upgraded
+                         else {"type": "elite", "encounter": self.a.fight})
                 case = Case("cards", name)
                 lg = self.logic("cards", name)
                 in_fight = lambda s: s.get("decision") in ("combat_play", "rewards", "map_select")
@@ -234,17 +303,22 @@ class Runner:
 
                 try:
                     self.new_run(case, lg, character=ch, seed=f"cards-{tag}")
-                    state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
+                    state = self.step(case, lg, {"cmd": "enter_room", **fight})
                     for card in chunk:
                         if card.get("upgradable") is False and upgraded:
                             continue
                         if card.get("multiplayer_only"):
                             case.notes.append(f"{card['id']}: multiplayer only")
                             continue
+                        if state.get("decision") == "game_over":
+                            # the card killed the player (The Gambit): a new run
+                            case.notes.append(f"{card['id']}: the player died; a new run")
+                            self.new_run(case, lg, character=ch, seed=f"cards-{tag}-{card['id']}")
+                            state = self.step(case, lg, {"cmd": "enter_room", **fight})
                         if state.get("decision") != "combat_play":
                             # The fight is over: through its rewards to the map, then a new one.
                             state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 60)
-                            state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
+                            state = self.step(case, lg, {"cmd": "enter_room", **fight})
                             self.step(case, lg, {"cmd": "set_player", "hp": 9999})
                         if len(state.get("hand") or []) >= 9:
                             # A full hand takes no more cards: a new turn discards it.
@@ -252,8 +326,7 @@ class Runner:
                             state = self.play_until(case, lg, state, lambda s: s.get("decision") == "combat_play", 60)
                             if state.get("decision") != "combat_play":
                                 state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 60)
-                                state = self.step(case, lg, {"cmd": "enter_room", "type": "elite",
-                                                             "encounter": self.a.fight})
+                                state = self.step(case, lg, {"cmd": "enter_room", **fight})
                         state = self.step(case, lg, {"cmd": "add_to_hand", "cards": [card["id"]], "energy": 9,
                                                      "stars": 9, "upgraded": upgraded})
                         hand = state.get("hand") or []
@@ -278,10 +351,22 @@ class Runner:
                         args = {"card_index": h["index"]}
                         if h.get("target_type") == "AnyEnemy" and state.get("enemies"):
                             args["target_index"] = 0
+                        if upgraded and card.get("type") == "Attack":
+                            # the upgraded pass kills with it: what a card does
+                            # on a kill (Feed, The Hunt, Hand of Greed, Sunder,
+                            # Fatal) and the death hooks it sets off
+                            self.step(case, lg, {"cmd": "set_player", "enemy_hp": 1})
+                        elif not upgraded:
+                            # the plain pass never kills: what comes after the
+                            # attack (Rebound's power) runs
+                            self.step(case, lg, {"cmd": "set_player", "enemy_heal": True})
+                        powers = {p.get("id") for p in state.get("player_powers") or []}
                         state = self.step(case, lg, {"cmd": "action", "action": "play_card", "args": args})
                         # Its prompts (card selections, choices) until the hand is back.
                         state = self.play_until(case, lg, state, in_fight, 40)
-                        if card.get("type") == "Power":
+                        # A power, or a card that left a new power on the player
+                        # (Shadow Step's next turn): its turn triggers.
+                        if card.get("type") == "Power" or {p.get("id") for p in state.get("player_powers") or []} - powers:
                             state = end_turn(end_turn(state))
                 finally:
                     self.finish(case, lg)
@@ -323,18 +408,49 @@ class Runner:
                 self.finish(case, lg)
 
     def suite_relics(self, content):
+        """Each relic obtained (RelicCmd.Obtain) by its pool's character, then
+        what its triggers need: fights with a kit of trigger cards generated
+        into the hand and played (RELIC_KIT), two more turns, a fight at 40%
+        HP (Red Skull), a third fight (every-third-combat counters), its own
+        rest site option, a shop with gold to spend, a treasure room, and a
+        last fight at 1 HP (Lizard Tail; the run may end there)."""
+        weak = "SHRINKER_BEETLE_WEAK"
         for r in self.limited(content["relics"]):
             case = Case("relics", r["id"])
             lg = self.logic("relics", r["id"])
+            in_fight = lambda s: s.get("decision") in ("combat_play", "rewards", "map_select", "game_over")
+            to_map = lambda s: s.get("decision") == "map_select"
             try:
-                self.new_run(case, lg, seed=f"relic-{r['id']}")
+                owner = (r.get("pool") or "").split("_")[0]
+                ch = owner.capitalize() if owner in content["characters"] else "Ironclad"
+                self.new_run(case, lg, character=ch, seed=f"relic-{r['id']}")
                 state = self.step(case, lg, {"cmd": "obtain", "relics": [r["id"]]})
                 if state.get("not_allowed"):
                     case.notes.append("multiplayer only: not in solo runs")
                     continue
-                state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
-                for room in ({"type": "monster", "encounter": self.a.fight}, {"type": "rest_site"}, {"type": "shop"},
-                             {"type": "treasure"}):
+                state = self.play_until(case, lg, state, to_map, 30)
+                for n, (room, encounter, hp) in enumerate((("elite", self.a.fight, None), ("monster", weak, 4000),
+                                                           ("monster", weak, None))):
+                    if hp:
+                        self.step(case, lg, {"cmd": "set_player", "hp": hp})
+                    state = self.step(case, lg, {"cmd": "enter_room", "type": room, "encounter": encounter})
+                    if n < 2 and state.get("decision") == "combat_play":
+                        state = self.play_kit(case, lg, state, RELIC_KIT, in_fight)
+                        if n == 0:
+                            # the first fight then runs its course (Pen Nib's
+                            # tenth attack, Stone Calendar's seventh turn)
+                            self.step(case, lg, {"cmd": "set_player", "enemy_heal": True})
+                        for _ in range(2):
+                            if state.get("decision") != "combat_play":
+                                break
+                            state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                            state = self.play_until(case, lg, state, in_fight, 60)
+                    if state.get("decision") == "combat_play" and n > 0:
+                        self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+                    state = self.play_until(case, lg, state, to_map, 300)
+                for room in ({"type": "rest_site"}, {"type": "shop"}, {"type": "treasure"}):
+                    if room["type"] == "shop":
+                        self.step(case, lg, {"cmd": "set_player", "gold": 999})
                     state = self.step(case, lg, dict({"cmd": "enter_room"}, **room))
                     if state.get("decision") == "rest_site":
                         # the relic's own rest option (Dig, Lift, Kindle, Clone,
@@ -344,7 +460,80 @@ class Runner:
                         if own:
                             state = self.step(case, lg, {"cmd": "action", "action": "choose_option",
                                                          "args": {"option_index": own[0]["index"]}})
+                    state = self.play_until(case, lg, state, to_map, 300)
+                self.step(case, lg, {"cmd": "set_player", "hp": 1})
+                state = self.step(case, lg, {"cmd": "enter_room", "type": "monster", "encounter": weak})
+                if state.get("decision") == "combat_play":
+                    state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                    state = self.play_until(case, lg, state, in_fight, 60)
+                    if state.get("decision") == "combat_play":
+                        self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+                    self.play_until(case, lg, state, lambda s: to_map(s) or s.get("decision") == "game_over", 300)
+            finally:
+                self.finish(case, lg)
+
+    def play_kit(self, case, lg, state, kit, in_fight):
+        """The kit's cards generated into a cleared hand with energy and stars,
+        each played (the first enemy its target), its prompts answered."""
+        state = self.step(case, lg, {"cmd": "add_to_hand", "cards": kit, "energy": 20, "stars": 20, "clear": True})
+        for card_id in kit:
+            if state.get("decision") != "combat_play":
+                break
+            mine = [h for h in state.get("hand") or [] if (h.get("id") or "").split(".")[-1] == card_id and h.get("can_play")]
+            if not mine:
+                continue
+            args = {"card_index": mine[0]["index"]}
+            if mine[0].get("target_type") == "AnyEnemy" and state.get("enemies"):
+                args["target_index"] = 0
+            state = self.step(case, lg, {"cmd": "action", "action": "play_card", "args": args})
+            state = self.play_until(case, lg, state, in_fight, 40)
+        return state
+
+    def suite_enchantments(self, content):
+        """Each enchantment on every deck card it can enchant (CardCmd.Enchant;
+        a power and an exhausting skill join the starter deck first), then a
+        fight played to its end, a rest site and a shop: its draw, play, turn
+        and deck triggers run."""
+        for e in self.limited(content.get("enchantments") or []):
+            case = Case("enchantments", e)
+            lg = self.logic("enchantments", e)
+            try:
+                state = self.new_run(case, lg, seed=f"enchant-{e}")
+                # Neow first, as in a run (Leafy Poultice transforms cards an
+                # enchantment may have made unremovable: Tezcatara's Ember)
+                self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
+                self.step(case, lg, {"cmd": "obtain", "cards": ["INFLAME", "DOMINATE"]})
+                enchant = {"id": e, "amount": ENCHANT_AMOUNTS.get(e, 1)}
+                if e in ENCHANT_TARGETS:
+                    enchant["target"] = ENCHANT_TARGETS[e]
+                state = self.step(case, lg, {"cmd": "obtain", "enchant": [enchant]})
+                if state.get("not_allowed"):
+                    case.status = "error"
+                    case.notes.append("no deck card it can enchant")
+                    continue
+                state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
+                for room in ({"type": "elite", "encounter": self.a.fight}, {"type": "rest_site"}, {"type": "shop"}):
+                    state = self.step(case, lg, dict({"cmd": "enter_room"}, **room))
                     state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 300)
+            finally:
+                self.finish(case, lg)
+
+    def suite_afflictions(self, content):
+        """Each affliction on the hand's cards at a fight's start
+        (CardCmd.Afflict), the fight played to its end: the afflicted cards
+        played or held through ends of turn."""
+        for af in self.limited(content.get("afflictions") or []):
+            case = Case("afflictions", af)
+            lg = self.logic("afflictions", af)
+            try:
+                self.new_run(case, lg, seed=f"afflict-{af}")
+                self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
+                state = self.step(case, lg, {"cmd": "add_to_hand", "afflict": {"id": af, "amount": 1}})
+                if not any(h.get("affliction") for h in state.get("hand") or []):
+                    case.status = "error"
+                    case.notes.append("no hand card afflicted")
+                    continue
+                self.play_until(case, lg, state, lambda s: s.get("decision") in ("rewards", "map_select"), 300)
             finally:
                 self.finish(case, lg)
 
@@ -503,6 +692,64 @@ class Runner:
         print(f"  acts seen: {sorted(acts_seen)}; victories {endings}")
 
     def suite_scenarios(self, content):
+        # The Knowledge Demon's three curse choices (a pick is required): one
+        # fight taking Disintegration each time, one taking the other curse
+        # (Mind Rot, Sloth, Waste Away)
+        for side in (0, 1):
+            case = Case("scenarios", f"knowledge_demon_{side}")
+            lg = self.logic("scenarios", f"knowledge_demon_{side}")
+            try:
+                state = self.new_run(case, lg, seed=f"knowledge-{side}")
+                state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
+                state = self.step(case, lg, {"cmd": "enter_room", "type": "monster", "encounter": "KNOWLEDGE_DEMON_BOSS"})
+                chosen = 0
+                for _ in range(200):
+                    d = state.get("decision")
+                    if d in ("rewards", "map_select", "game_over") or state.get("type") == "error":
+                        break
+                    if d == "card_select" and state.get("kind") == "choose_a_card":
+                        cards = state.get("cards") or []
+                        pick = next((c for c in cards if ((c.get("id") or "").endswith("DISINTEGRATION")) == (side == 0)),
+                                    cards[0] if cards else None)
+                        if pick is not None:
+                            state = self.step(case, lg, {"cmd": "action", "action": "select_cards",
+                                                         "args": {"indices": str(pick["index"])}})
+                            chosen += 1
+                            if chosen == 3:
+                                self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+                                break
+                            continue
+                    if d == "combat_play":
+                        # end turns until the demon has asked three times
+                        state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                        continue
+                    state = self.step(case, lg, act_for(self.rng, state))
+                if chosen < 3:
+                    case.status = "error"
+                    case.notes.append(f"{chosen} curse choices, not 3")
+                self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 100)
+            finally:
+                self.finish(case, lg)
+        # Tinker Time's Mad Science: each of its nine type and rider variants
+        # (EventSetup gives each new one the next) played, its powers' turns
+        # (Curious, Improvement)
+        case = Case("scenarios", "mad_science")
+        lg = self.logic("scenarios", "mad_science")
+        try:
+            self.new_run(case, lg, seed="mad-science")
+            state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
+            in_fight = lambda s: s.get("decision") in ("combat_play", "rewards", "map_select")
+            for _ in range(9):
+                if state.get("decision") != "combat_play":
+                    state = self.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 60)
+                    state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
+                state = self.play_kit(case, lg, state, ["MAD_SCIENCE"], in_fight)
+                for _ in range(2):
+                    if state.get("decision") == "combat_play":
+                        state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                        state = self.play_until(case, lg, state, in_fight, 60)
+        finally:
+            self.finish(case, lg)
         # The Byrdonis egg: the event's egg card, hatched at a rest site
         # into Byrdpip, which then fights beside the player.
         case = Case("scenarios", "byrdpip")
@@ -537,7 +784,21 @@ class Runner:
             self.finish(case, lg)
 
 
-SUITES = ["cards", "potions", "relics", "events", "encounters", "scenarios", "acts"]
+SUITES = ["cards", "potions", "relics", "enchantments", "afflictions", "events", "encounters", "scenarios", "acts"]
+# CardCmd.Enchant's amount where the game's own sources give more than 1
+ENCHANT_AMOUNTS = {"CLONE": 4, "SHARP": 2, "NIMBLE": 2, "SWIFT": 2}
+# Cards that set relics' triggers off, generated into the hand (Regalite)
+# and played: Shivs (Helical Dart), an X cost (Chemical X), an exhaust
+# (Charon's Ashes, Burning Sticks), a discard (Tingsha, Tough Bandages), an
+# orb (Metronome), poison (Snecko Skull), Strength (Ruined Helmet), stars
+# spent (Galactic Dust, Mini Regent); three skills (Letter Opener) and the
+# three card types (Rainbow Ring) among them
+# The cards suite's kill pass: three enemies
+KILL_FIGHT = "TWO_TAILED_RATS_NORMAL"
+RELIC_KIT = ["SHIV", "SHIV", "WHIRLWIND", "TRUE_GRIT", "SURVIVOR", "ZAP", "DEADLY_POISON", "INFLAME", "FALLING_STAR"]
+# The cards the game's own sources give it: Inky only on Blade of Ink's
+# Shivs (its OnPlay weakens cardPlay.Target, null on an untargeted card)
+ENCHANT_TARGETS = {"INKY": "AnyEnemy"}
 
 
 def main():
@@ -547,6 +808,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--suite", default=",".join(SUITES))
     ap.add_argument("--limit", type=int, default=0, help="first N items of each suite (0: all)")
+    ap.add_argument("--only", default="", help="comma-separated item ids (a relic, a potion, ...) to run alone")
     ap.add_argument("--fight", default="BYGONE_EFFIGY_ELITE", help="the encounter cards and potions are tried in")
     ap.add_argument("--act-runs", type=int, default=10)
     ap.add_argument("--seed", type=int, default=1)

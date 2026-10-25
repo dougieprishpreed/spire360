@@ -483,9 +483,9 @@ scene	NCard res://scenes/cards/card_canvas_group_mask_material.tres	ported	card_
 scene	NCard res://scenes/cards/card_canvas_group_*	open	check: the card's canvas group blur materials (when NCard uses them; card_view)
 scene	NCardFlyVfx vfx/vfx_card_fly	ported	the scene holds only the script; the client flies the card itself (MovingCard, PickedPreview, NCardTrailVfx)
 scene	NControllerMapDrawingInput *	ported	map_screen: RB tools, draw / erase cursor (700 px/s), A held draws into map_drawing.tscn's viewport, B stops; lines kept for the act
-scene	N*CustomRun* *	open	screen pass (main menu): the custom run mode and its modifiers (check whether the client offers it)
+scene	N*CustomRun* *	open	deferred past the alpha RC (custom and daily runs are left out of it): the custom run mode and its modifiers
 scene	NRunModifierTickbox *	open	as the custom run screens
-scene	NTopBarModifier *	open	as the custom run screens (a run's modifiers in the top bar; daily runs too)
+scene	NTopBarModifier *	open	as the custom run screens, deferred past the alpha RC (a run's modifiers in the top bar; daily runs too)
 scene	NEpochHighlightVfx *	ported	timeline_screen set_highlight: behind an obtained slot once spawned; NEpochOffscreenVfx at the edge while it is off the screen
 scene	NTimelineScreen *	n/a	place_epoch_sparks.tscn is only preloaded (NTimelineScreen.AssetPaths); nothing instantiates it
 scene	NGameOverScreen *	n/a	NGameOverScreen disables its View Run button in _Ready and never enables it (run_history_screen_via_game_over_screen is unreachable); the client hides it
@@ -510,3 +510,35 @@ cue	saved	ported	top_bar: NSaveIndicator.SavedGame's fade on the indicator itsel
 cue	ui:NCard.UpdateVisuals	ported	ThievingHopper.ThieveryMove's stolen card: the held_card cue and the hopper's held_card state (CombatScreen::hold_card under %StolenCardPos)
 cue	ui:NMerchantInventory.BlockInput	n/a	input: the shop ignores input while Lord's Parasol buys (ShopScreen::busy)
 cue	ui:NMerchantInventory.UnblockInput	n/a	as BlockInput
+content	Byrdpip	ported	its SetupSkins runs only when the UI makes the pet's node: the pets' skin key (the relic's Skin, Coverage.PetSkin), CombatScreen::make_pet sets it
+content	PaelsLegion	ported	as Byrdpip (PaelsLegion.Skin)
+model	powers:BEACON_OF_HOPE_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:CACOPHONY_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:CONCOCT_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:COORDINATE_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:COVERED_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:INTERCEPT_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:FADE_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:FLANKING_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:HAMMER_TIME_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:HIBERNATE_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:IMITATION_LEARNING_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:KNOCKDOWN_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:ONE_FOR_ALL_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:SNEAKY_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:SOULBOUND_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:TAG_TEAM_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:TANK_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:GUARDED_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:UNDERWORLD_POWER	n/a	only a multiplayer-only card applies it (CardMultiplayerConstraint.MultiplayerOnly: never in a solo run)
+model	powers:GRAVITY_POWER	n/a	nothing in the game applies it
+model	powers:LEADERSHIP_POWER	n/a	nothing in the game applies it
+model	powers:MAGIC_BOMB_POWER	n/a	nothing in the game applies it
+model	powers:NO_ENERGY_GAIN_POWER	n/a	nothing in the game applies it
+answer	NCard.FindOnTable@Slither.AfterCardDrawn	ported	card.randomize_cost.slither: the card_randomize_cost cue (CombatScreen's cost roll)
+cue	ui:NCapstoneContainer.CleanUp	n/a	RunManager.CleanUp at a run's end: the client tears its own screens down
+cue	ui:NHotkeyManager.ClearHotkeys	n/a	as NCapstoneContainer.CleanUp
+cue	ui:NMapScreen.CleanUp	n/a	as NCapstoneContainer.CleanUp
+cue	ui:NModalContainer.Clear	n/a	as NCapstoneContainer.CleanUp
+cue	ui:NOverlayStack.Clear	n/a	as NCapstoneContainer.CleanUp
+content	Finisher	ported	NStabVfx (combat_vfx); one hit per attack played this turn, so none when it is played first (cov82 ran it)

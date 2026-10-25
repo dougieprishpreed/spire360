@@ -157,8 +157,9 @@ def load_verdicts(path):
             if not line.strip() or line.startswith("#"):
                 continue
             parts = line.split("\t")
-            # the static audits' rows (tools/hook_caller_audit.py, ui_reach_audit.py)
-            if parts[0] in ("hook", "reach"):
+            # the other audits' rows (tools/hook_caller_audit.py, ui_reach_audit.py,
+            # model_coverage.py)
+            if parts[0] in ("hook", "reach", "model"):
                 continue
             if len(parts) < 3 or parts[0] not in CATEGORIES or parts[2] not in ("ported", "n/a", "open"):
                 sys.exit(f"{path}:{n}: expected category<TAB>pattern<TAB>ported|n/a|open<TAB>note: {line!r}")

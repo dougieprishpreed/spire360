@@ -605,7 +605,11 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
         if (aftermath) room_->show_aftermath(d["player"]);
         return room_->root_node();
     }
-    if (in_fight && !last_combat_.is_null()) {
+    /* a selection during a fight carries the fight as it is (the hand it
+     * selects from, the enemies): newer than the last combat decision */
+    const Json& fight = in_fight && d["fight"].is_object() ? d["fight"] : last_combat_;
+    if (in_fight && !fight.is_null()) {
+        if (&fight != &last_combat_) last_combat_ = fight;
         room_ = new CombatScreen(lib_);
         if (aftermath) room_->set_aftermath(d["player"]);
         return room_->build(last_combat_, &err);
@@ -873,6 +877,9 @@ void GameClient::show(const Json& d) {
     if (event_room) kept_room = ((EventScreen*)ported_)->take_combat();
     const std::string& room_type = d["context"]["room_type"].str();
     bool in_fight = room_type == "Monster" || room_type == "Elite" || room_type == "Boss";
+    /* the last fight's state is for its own aftermath only: the next fight's
+     * first selection (Gambling Chip) must not show the old hand */
+    if (!in_fight) last_combat_ = Json();
     bool combat_screen = kind == "combat_play" || kind == "card_select" || kind == "rewards" || kind == "card_reward";
     if (((in_fight && combat_screen) || kind == "game_over") && (combat_ || room_)) {
         kept_room = combat_ ? combat_ : room_;

@@ -340,8 +340,8 @@ void MapScreen::pen(bool down) {
     if (!cursor_icon_) return;
     const char* tex = draw_mode_ == 1 ? (down ? "images/packed/common_ui/cursor_quill_tilted.png" : "images/packed/common_ui/cursor_quill.png")
                                       : (down ? "images/packed/common_ui/cursor_eraser_tilted.png" : "images/packed/common_ui/cursor_eraser.png");
-    /* the cursors are Image imports, in the pack only once the converter
-     * packs them: the tools' own quill and eraser till then */
+    /* the cursors are Image imports, which packs built before the
+     * converter packed those lack: the tools' own quill and eraser there */
     Resource* r = lib_->ext(tex);
     if (!r || !r->is_texture()) tex = draw_mode_ == 1 ? "images/packed/map/drawing_quill.png" : "images/packed/map/drawing_eraser.png";
     set_texture(lib_, cursor_icon_, tex);

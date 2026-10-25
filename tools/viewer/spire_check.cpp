@@ -507,7 +507,7 @@ int main(int argc, char** argv) {
     texture_cache_cases(pack);
     doom_cases(lib, pack);
     atlas_fallback_cases(lib);
-    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0, death_checks = 0, icon_checks = 0;
+    int responses = 0, persistent = 0, hp_checks = 0, orb_checks = 0, death_checks = 0, icon_checks = 0, hand_checks = 0;
     bool selections_checked = false;
     bool transition_checked = false;
     for (int file = 2; file < argc; ++file) {
@@ -668,6 +668,26 @@ int main(int argc, char** argv) {
                 check(shown, "a top bar relic holder shows no icon");
                 ++icon_checks;
             }
+            /* the hand: at most NPlayerHand's 10 holders, each on the screen
+             * (a previous fight's hand left behind once grew past the layout
+             * tables and sent a card's trail to millions of pixels) */
+            if (d["decision"].str() == "combat_play") {
+                Node* holders = find_named(tree.root(), "CardHolderContainer");
+                int count = 0;
+                bool placed = true;
+                for (size_t h = 0; holders && h < holders->children.size(); ++h) {
+                    Node* holder = holders->children[h];
+                    if (holder->queued_for_deletion() || !holder->is_control()) continue;
+                    ++count;
+                    Vec2 at = ((Control*)holder)->global_transform().origin;
+                    if (fabsf(at.x) > 10000 || fabsf(at.y) > 10000) placed = false;
+                }
+                if (count > 10 || !placed)
+                    fprintf(stderr, "%s response %d: %d hand holders%s\n", argv[file], responses, count, placed ? "" : ", one off the screen");
+                check(count <= 10, "the hand has more than 10 card holders");
+                check(placed, "a hand card holder is far off the screen");
+                ++hand_checks;
+            }
             previous = d;
             previous_line = line;
             ++responses;
@@ -678,9 +698,10 @@ int main(int argc, char** argv) {
     check(hp_checks > 0, "no delayed health changes were checked");
     check(selections_checked, "no card data was available for controller selection checks");
     check(icon_checks > 0, "no top bar relic icons were checked");
+    check(hand_checks > 0, "no hands were checked");
     printf("presentation: %d responses, %d persistent rooms, %d impact checks, %d orb checks, %d death checks, "
-           "%d relic icon checks, %d failures\n",
-           responses, persistent, hp_checks, orb_checks, death_checks, icon_checks, failures);
+           "%d relic icon checks, %d hand checks, %d failures\n",
+           responses, persistent, hp_checks, orb_checks, death_checks, icon_checks, hand_checks, failures);
     if (audio.events().available()) {
         check(audio.events().failures() == 0, "audio replay had decoder failures");
         printf("audio replay: %.0f voices started, %u absent event calls, %u decoder failures\n",
