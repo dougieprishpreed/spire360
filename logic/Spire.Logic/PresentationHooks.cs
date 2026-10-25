@@ -330,12 +330,11 @@ internal static partial class Hooks
             }
             return false;
         });
-        // DollRoom.BeforeEventStarted (TestMode off): its ambience.
-        Bridge.Register("testmode.doll_room.is_off", _ =>
-        {
-            CreatureCall("NDebugAudioManager.Play", "doll_room_amb.mp3");
-            return false;
-        });
+        // DollRoom.BeforeEventStarted (TestMode off): its ambience, played by
+        // the game itself: NDebugAudioManager.Play's ui cue gets a handle
+        // (Hooks), which the event keeps, so StopAudio stops it when a doll
+        // is taken or the event ends.
+        Bridge.Register("testmode.doll_room.is_off", _ => true);
         // SandpitPower (The Insatiable): the player is drawn towards it as the
         // power counts down (AfterApplied keeps where they stood;
         // UpdateCreaturePositions tweens them, 0.25 s Cubic Out), and pulled

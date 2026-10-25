@@ -142,6 +142,7 @@ void MenuFlow::close_ascension() {
 
 void MenuFlow::embark() {
     last_character_ = chars_->selected();
+    game_->embark_wipe(chars_->character());
     note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
     if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));
     else game_->start_game_run(chars_->character(), chars_->ascension(), game_->run_seed());
@@ -481,8 +482,10 @@ bool MenuFlow::update(const PadState& in) {
     }
 
     game_->update(PadState());
-    if (starting_ && game_->decision_count() != decisions_seen_) {
-        /* The run's first screen: the menus go. */
+    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
+        /* The run's first screen (once the embark wipe is black): the
+         * menus go, the room fades in. */
+        game_->end_embark_wipe();
         close_screen();
         if (title_node_) {
             if (title_node_->parent) title_node_->parent->remove_child(title_node_);

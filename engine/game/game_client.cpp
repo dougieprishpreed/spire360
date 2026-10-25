@@ -113,6 +113,51 @@ public:
     }
 };
 
+/* NTransition.FadeOut(0.8 s, a character's transition material): the
+ * transition node (black) with the material, its threshold from 0 to 1
+ * (linear), and its SimpleTransition from clear to black (Quad In), both
+ * over 0.8 s; it stays black until the run's first room fades in. */
+class EmbarkWipe : public Control {
+public:
+    EmbarkWipe(SceneLibrary* lib, const std::string& character) : elapsed(0), wipe_(NULL), simple_(NULL) {
+        flags |= NF_PROCESS;
+        name = "EmbarkWipe";
+        z_index = 4096;
+        wipe_ = new ColorRect();
+        wipe_->color = Color(0, 0, 0, 1);
+        Resource* m = lib->ext("materials/transitions/" + lower(character) + "_transition_mat.tres");
+        if (m && m->kind == Resource::RES_SHADER_MATERIAL) wipe_->material = (MaterialRes*)m;
+        wipe_->shader_params["threshold"] = 0;
+        simple_ = new ColorRect();
+        simple_->color = Color(0, 0, 0, 1);
+        simple_->modulate.a = 0;
+        add_child(wipe_);
+        add_child(simple_);
+        place(wipe_);
+        place(simple_);
+        place(this);
+        /* Instant would skip it; without a material only the fade shows */
+        if (!wipe_->material) wipe_->visible = false;
+    }
+    double elapsed;
+    bool done() const { return elapsed >= 0.8; }
+    virtual void process(double dt) {
+        elapsed += dt;
+        float k = clampf((float)(elapsed / 0.8), 0, 1);
+        wipe_->shader_params["threshold"] = k;
+        simple_->modulate.a = tween_interpolate(TRANS_QUAD, EASE_IN, k, 0, 1, 1);
+    }
+
+private:
+    static void place(Control* c) {
+        c->offset[SIDE_LEFT] = c->offset[SIDE_TOP] = 0;
+        c->offset[SIDE_RIGHT] = 1920;
+        c->offset[SIDE_BOTTOM] = 1080;
+    }
+    ColorRect* wipe_;
+    ColorRect* simple_;
+};
+
 static std::string quoted(const std::string& s) {
     std::string out = "\"";
     for (size_t i = 0; i < s.size(); ++i) {
@@ -259,7 +304,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), deck_previews_(NULL), event_finishing_(false), shop_auto_(false),
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), shop_auto_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
@@ -289,6 +334,10 @@ GameClient::~GameClient() {
     if (transition_) {
         if (transition_->parent) transition_->parent->remove_child(transition_);
         delete transition_;
+    }
+    if (wipe_) {
+        if (wipe_->parent) wipe_->parent->remove_child(wipe_);
+        delete wipe_;
     }
     if (deck_previews_) {
         Node* layer = deck_previews_->layer();
@@ -368,6 +417,29 @@ unsigned GameClient::next_rand() {
 bool GameClient::busy() const {
     return waiting_ || !finishing_.is_null() || (combat_ && combat_->busy()) || (room_ && room_->busy()) ||
            (ported_ && ported_->busy()) || (transition_ && transition_->phase != 0);
+}
+
+void GameClient::embark_wipe(const std::string& character) {
+    end_embark_wipe();
+    /* CharacterModel.CharacterTransitionSfx: wipe_<id> (the Defect and the
+     * Necrobinder use the Ironclad's) */
+    std::string id = lower(character);
+    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/wipe_" + (id == "defect" || id == "necrobinder" ? std::string("ironclad") : id));
+    wipe_ = new EmbarkWipe(lib_, character);
+    tree_->root()->add_child(wipe_);
+}
+
+bool GameClient::embark_wiping() const { return wipe_ && !wipe_->done(); }
+
+void GameClient::end_embark_wipe() {
+    if (!wipe_) return;
+    if (wipe_->parent) wipe_->parent->remove_child(wipe_);
+    delete wipe_;
+    wipe_ = NULL;
+    /* NTransition.RoomFadeIn: the first room from black */
+    if (!transition_) transition_ = new RoomTransition(lib_);
+    if (!transition_->parent) tree_->root()->add_child(transition_);
+    transition_->start_in();
 }
 
 void GameClient::start_room_transition() {
@@ -775,10 +847,16 @@ void GameClient::show(const Json& d) {
     deck_previews_->play(d["steps"], d["player"]["character"].str());
     play_global_cues(lib_, previews, d["steps"]);
     /* NSimpleCardsViewScreen.ShowScreen (Pandora's Box): a capstone over
-     * whatever comes next */
+     * whatever comes next; Trial's Double Down: NAbandonRunConfirmPopup
+     * (NModalContainer) over the event */
     for (size_t i = 0; i < d["steps"].size(); ++i)
         for (size_t k = 0; k < d["steps"][i].size(); ++k) {
             const Json& c = d["steps"][i][k];
+            if (c["call"].str() == "NAbandonRunConfirmPopup.Create") {
+                CueLedger::used(c);
+                open_confirm();
+                continue;
+            }
             if (c["t"].str() != "cards_view") continue;
             CueLedger::used(c);
             Json msg;
@@ -1382,7 +1460,20 @@ void GameClient::open_pause() {
     add_capstone(pause_node_);
 }
 
-void GameClient::close_pause() {
+void GameClient::open_confirm() {
+    if (confirm_) return;
+    std::string err;
+    confirm_ = new ConfirmPopup(lib_);
+    confirm_node_ = confirm_->build(&err);
+    if (confirm_node_) add_capstone(confirm_node_);
+    else {
+        log_warn("abandon popup: %s", err.c_str());
+        delete confirm_;
+        confirm_ = NULL;
+    }
+}
+
+void GameClient::close_confirm() {
     if (confirm_node_) {
         if (confirm_node_->parent) confirm_node_->parent->remove_child(confirm_node_);
         delete confirm_node_;
@@ -1390,6 +1481,10 @@ void GameClient::close_pause() {
     }
     delete confirm_;
     confirm_ = NULL;
+}
+
+void GameClient::close_pause() {
+    close_confirm();
     if (pause_node_) {
         if (pause_node_->parent) pause_node_->parent->remove_child(pause_node_);
         delete pause_node_;
@@ -1402,36 +1497,25 @@ void GameClient::close_pause() {
 /* The pause menu's input while it is open; true when it took the pad. */
 bool GameClient::pause_input(const PadState& pad) {
     if (settings_input(pad)) return true;
-    if (!pause_) return false;
     if (confirm_) {
-        /* NAbandonRunConfirmPopup: Confirm gives up (RunManager.Abandon). */
+        /* NAbandonRunConfirmPopup (the pause menu's Give Up, Trial's Double
+         * Down): Confirm gives up (RunManager.Abandon), Cancel closes it. */
         ConfirmPopup::Action a = confirm_->input(pad);
         if (a == ConfirmPopup::YES) {
             close_pause();
             send("{\"cmd\":\"give_up\"}");
         } else if (a == ConfirmPopup::NO) {
-            if (confirm_node_->parent) confirm_node_->parent->remove_child(confirm_node_);
-            delete confirm_node_;
-            confirm_node_ = NULL;
-            delete confirm_;
-            confirm_ = NULL;
+            close_confirm();
         }
         return true;
     }
+    if (!pause_) return false;
     PauseMenu::Action a = pause_->input(pad);
     if (a == PauseMenu::RESUME) {
         if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/pause_close");
         close_pause();
     } else if (a == PauseMenu::GIVE_UP) {
-        std::string err;
-        confirm_ = new ConfirmPopup(lib_);
-        confirm_node_ = confirm_->build(&err);
-        if (confirm_node_) add_capstone(confirm_node_);
-        else {
-            log_warn("abandon popup: %s", err.c_str());
-            delete confirm_;
-            confirm_ = NULL;
-        }
+        open_confirm();
     } else if (a == PauseMenu::SETTINGS) {
         std::string err;
         settings_screen_ = new SettingsScreen(lib_);

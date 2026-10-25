@@ -414,6 +414,7 @@ public partial class RunDriver
             AttachRun();
             Sched.Run(() => RunManager.Instance.FinalizeStartingRelics());
             RunManager.Instance.Launch();
+            _markerAtStart = _runState.ExtraFields.StartedWithNeow;
             Sched.Run(() => RunManager.Instance.EnterAct(0, doTransition: false));
             Log("Run launched");
             return DetectDecisionPoint();

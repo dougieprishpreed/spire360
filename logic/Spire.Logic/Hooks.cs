@@ -639,6 +639,18 @@ internal static partial class Hooks
                 Steps.Cue(new Dictionary<string, object?> { ["t"] = "held_card", ["who"] = _stolenCardHolder, ["card"] = Driver.DeckCardView(stolen) });
             _stolenCardHolder = id.Contains("NCreature::GetSpecialNode", StringComparison.Ordinal) && a.Length > 1 &&
                 a[1] as string == "%StolenCardPos" && StandIns.TryCreature(a[0], out var holder) ? Steps.Who(holder) : null;
+            // DoomPower.StartDoomAnim (a creature dying to Doom): SetAnimationTrigger("Hit"),
+            // its hurt animation frozen at HurtAnimationTrackOffsetForDoom
+            // (SetTrackTime, SetTimeScale(0)), then NDoomVfx.Create(visuals, ...,
+            // shouldDie) takes the body: the pose on that cue
+            if (id.EndsWith("NCreature::SetAnimationTrigger", StringComparison.Ordinal))
+                _doomHit = a.Length > 1 && a[1] as string == "Hit" && StandIns.TryCreature(a[0], out var hit) ? hit : null;
+            if (id.EndsWith("NDoomVfx::Create", StringComparison.Ordinal) && a.Length > 3 && a[3] is true && _doomHit != null)
+            {
+                Steps.SetOnLastUi("pose", Animators.Trigger(_doomHit, "Hit"));
+                Steps.SetOnLastUi("hurt_offset", _doomHit.Monster?.HurtAnimationTrackOffsetForDoom ?? 0.1f);
+                _doomHit = null;
+            }
             Driver?.OnUiCall(id, a);
             var answer = StandIns.Answer(id, a);
             // NDebugAudioManager.Play's handle (Dense Vegetation stops its
@@ -682,6 +694,8 @@ internal static partial class Hooks
     private static int _debugAudioHandle;
     /// <summary>The creature whose %StolenCardPos the last UI call asked for.</summary>
     private static string? _stolenCardHolder;
+    /// <summary>The creature the last direct SetAnimationTrigger("Hit") was for (DoomPower's).</summary>
+    private static Creature? _doomHit;
     private static float _fiendFireScale;
 
     /// <summary>NCardFlyPowerVfx.GetDuration with the play pile and the

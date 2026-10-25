@@ -5,6 +5,7 @@
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
+#include "../scene/path_2d.h"
 #include "../scene/rich_text.h"
 #include "../scene/scene.h"
 #include "../scene/script.h"
@@ -270,6 +271,14 @@ const Spec SPECS[] = {
     { "NGrandFinaleImpactVfx", "scenes/vfx/vfx_grand_finale_impact.tscn", "NGrandFinaleImpactVfx.cs", AT_CENTER,
       TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false,
       { { 0, OP_RESTART, "_centerParticles" }, { 0, OP_RESTART, "_groundParticles" } }, 2.0f },
+    /* WithHitFx's scenes (VfxCmd plays them by path): Bludgeon, Break, All
+     * For One, ...; Astral Pulse */
+    { "NHeavyBluntVfx", "scenes/vfx/vfx_heavy_blunt.tscn", "NHeavyBluntVfx.cs", AT_CENTER, TINT_NONE, NULL, 0,
+      FLIP_NONE, NULL, false, false,
+      { { 0, OP_RESTART, "_anticipationParticles" }, { 0.2f, OP_SHAKE, "Strong/Short" },
+        { 0.2f, OP_RESTART, "_impactParticles" } }, 2.2f },
+    { "NStarryImpactVfx", "scenes/vfx/vfx_starry_impact.tscn", "NStarryImpactVfx.cs", AT_CENTER, TINT_NONE, NULL, 0,
+      FLIP_NONE, NULL, false, false, { { 0, OP_SHAKE, "Weak/Short" }, { 0, OP_RESTART, "_particles" } }, 2.0f },
 };
 
 const Spec* spec_named(const std::string& name) {
@@ -859,12 +868,17 @@ public:
         if (stop_at_ < 0) stop_at_ = t_;
     }
     virtual void begin(Node* n) {
+        Node* z = exported_one(n, "_zParticles");
+        /* Create: _localizedZTexture (LocalizedTexture: eng and jpn, the
+         * scene's own is eng) on the Z particles */
+        SceneLibrary* lib = SceneLibrary::current();
+        if (z && is_particles(z) && lib && Loc::language() == "jpn") {
+            Resource* r = lib->ext("images/vfx/sleeping/sleeping_z_jpn.png");
+            if (r && r->is_texture()) ((Particles2D*)z)->texture = (Texture2DRes*)r;
+        }
         restart_list(n, "_burstParticles");
         restart_list(n, "_continuousParticles");
-        if (!right_) {
-            Node* z = exported_one(n, "_zParticles");
-            if (z && z->is_node2d()) ((Node2D*)z)->scale.x = -((Node2D*)z)->scale.x;
-        }
+        if (!right_ && z && z->is_node2d()) ((Node2D*)z)->scale.x = -((Node2D*)z)->scale.x;
     }
     virtual void tick(Node* n, double) {
         if (stop_at_ >= 0 && stop_at_ + 1e-6 >= t_ - 0.0001 && stop_at_ <= t_) emitting_list(n, "_continuousParticles", false);
@@ -1302,6 +1316,172 @@ private:
     int phase_;
     Vec2 player_;
     CanvasItem* spotlight_;
+};
+
+/* NScreamVfx / NSpookyScreamVfx (WithHitFx scenes): the one-shot particles
+ * live _duration (1 s), the continuous ones emit for _duration, then 2 s
+ * more before it goes; the scream shakes the screen (Medium, Normal). */
+class Scream : public Effect {
+public:
+    explicit Scream(bool shake) : shake_(shake), duration_(1), stopped_(false) {}
+    virtual void begin(Node* n) {
+        duration_ = exported_float(n, "_duration", 1);
+        if (shake_) ScreenShake::get().shake("Medium", "Normal");
+        std::vector<Node*> list;
+        exported(n, "_oneShotParticles", list);
+        for (size_t i = 0; i < list.size(); ++i)
+            if (is_particles(list[i])) {
+                ((Particles2D*)list[i])->lifetime = duration_;
+                ((Particles2D*)list[i])->restart();
+            }
+        list.clear();
+        exported(n, "_continuousParticles", list);
+        for (size_t i = 0; i < list.size(); ++i)
+            if (is_particles(list[i])) {
+                ((Particles2D*)list[i])->restart();
+                ((Particles2D*)list[i])->emitting = true;
+            }
+    }
+    virtual void tick(Node* n, double) {
+        if (!stopped_ && t_ >= duration_) {
+            stopped_ = true;
+            emitting_list(n, "_continuousParticles", false);
+        }
+        if (t_ >= duration_ + 2 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    bool shake_;
+    float duration_;
+    bool stopped_;
+};
+
+/* NHellraiserAttackVfx (HellraiserPower's hit effect): the %Sword (flipped
+ * at random) rises from below the clip to 90 (0.5 s, Expo Out) as the
+ * effect goes from red to white (0.3 s); after a 0.1 s pause it sinks back
+ * to 300 (0.5 s, Expo In) as it fades (0.3 s), then goes. */
+class HellraiserAttack : public Effect {
+public:
+    HellraiserAttack() : sword_(NULL), height_(0), sinking_(false) {}
+    virtual void begin(Node* n) {
+        Node* s = n->find_unique("Sword");
+        sword_ = s && s->is_control() ? (Control*)s : NULL;
+        if (sword_ && sword_->type == "TextureRect") ((TextureRect*)sword_)->flip_h = chaotic_rand() % 2 == 0;
+        if (sword_) height_ = sword_->offset[SIDE_BOTTOM] - sword_->offset[SIDE_TOP];
+        move_to(90, TRANS_EXPO, EASE_OUT);
+        if (n->is_canvas_item()) {
+            CanvasItem* c = (CanvasItem*)n;
+            c->modulate = Color(1, 0, 0, 1);
+            tweens_.tween(&c->modulate.g, 1, 0.3f);
+            tweens_.tween(&c->modulate.b, 1, 0.3f);
+        }
+    }
+    virtual void tick(Node* n, double) {
+        if (!sinking_ && t_ >= 0.6) {
+            sinking_ = true;
+            move_to(300, TRANS_EXPO, EASE_IN);
+            if (n->is_canvas_item()) tweens_.tween(&((CanvasItem*)n)->modulate.a, 0, 0.3f);
+        }
+        if (t_ >= 1.1 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    /* TweenProperty(sword, "position:y", y, 0.5) */
+    void move_to(float y, TweenTrans trans, TweenEase ease) {
+        if (!sword_) return;
+        tweens_.tween(&sword_->offset[SIDE_TOP], y, 0.5f, trans, ease);
+        tweens_.tween(&sword_->offset[SIDE_BOTTOM], y + height_, 0.5f, trans, ease);
+    }
+    Control* sword_;
+    float height_;
+    bool sinking_;
+};
+
+/* NDecimillipedeRocksVfx: each of _rocks in turn, 100-200 ms apart, plays
+ * fall1-4 (once); the effect goes 5 s after the last. */
+class DecimillipedeRocks : public Effect {
+public:
+    DecimillipedeRocks() : next_(0), at_(0) {}
+    virtual void begin(Node* n) {
+        exported(n, "_rocks", rocks_);
+        at_ = 0.1 + (double)(chaotic_rand() % 101) / 1000.0;
+    }
+    virtual void tick(Node* n, double) {
+        while (next_ < rocks_.size() && t_ >= at_) {
+            Node* r = rocks_[next_++];
+            if (r->type == "SpineSprite") ((SpineSprite*)r)->set_animation(format("fall%u", 1 + chaotic_rand() % 4), false, 0);
+            at_ += 0.1 + (double)(chaotic_rand() % 101) / 1000.0;
+        }
+        if (next_ >= rocks_.size() && t_ >= at_ + 5 && !n->queued_for_deletion()) n->queue_free();
+    }
+
+private:
+    std::vector<Node*> rocks_;
+    size_t next_;
+    double at_;
+};
+
+/* NSymbioteEyeMovementVfx: the PathFollow2D goes round its path, a tenth of
+ * it a second. */
+class SymbioteEye : public ScriptBehavior {
+public:
+    virtual void process(Node* n, double dt) {
+        if (n->type != "PathFollow2D") return;
+        PathFollow2D* f = (PathFollow2D*)n;
+        f->progress_ratio += (float)dt * 0.1f;
+        f->use_ratio = true;
+    }
+};
+
+/* NRestSiteFireVfx (the rest site's flame, when _enabled): Flicker, its
+ * height between _minFlickerScale and 1, then 1 and _maxFlickerScale of
+ * its own (_minFlickerTime-_maxFlickerTime each, Quad InOut), again and
+ * again; Sway, its skew between _minSkew and 0, then 0 and _maxSkew of its
+ * own (_minSkewTime-_maxSkewTime each, Sine InOut). Extinguish has no
+ * caller in the game. */
+class RestSiteFire : public ScriptBehavior {
+public:
+    RestSiteFire() : started_(false), enabled_(true), base_scale_y_(1), base_skew_(0), flicker_end_(0), sway_end_(0),
+                     flicker_step_(0), sway_step_(0), t_(0) {}
+    virtual void process(Node* n, double dt) {
+        if (!started_) {
+            started_ = true;
+            const Json* on = n->get_extra("_enabled");
+            enabled_ = !on || on->b(true);
+            if (n->is_node2d()) {
+                base_scale_y_ = ((Node2D*)n)->scale.y;
+                base_skew_ = ((Node2D*)n)->skew;
+            }
+        }
+        if (!enabled_ || !n->is_node2d()) return;
+        Node2D* f = (Node2D*)n;
+        t_ += dt;
+        tweens_.update(dt);
+        if (t_ >= flicker_end_) {
+            float lo = flicker_step_ == 0 ? base_scale_y_ * exported_float(n, "_minFlickerScale", 0.85f) : base_scale_y_;
+            float hi = flicker_step_ == 0 ? base_scale_y_ : base_scale_y_ * exported_float(n, "_maxFlickerScale", 1.05f);
+            float d = rand_range(exported_float(n, "_minFlickerTime", 0.3f), exported_float(n, "_maxFlickerTime", 0.5f));
+            tweens_.tween(&f->scale.y, rand_range(lo, hi), d, TRANS_QUAD, EASE_IN_OUT);
+            flicker_end_ = t_ + d;
+            flicker_step_ ^= 1;
+        }
+        if (t_ >= sway_end_) {
+            float lo = sway_step_ == 0 ? base_skew_ + exported_float(n, "_minSkew", -0.1f) : base_skew_;
+            float hi = sway_step_ == 0 ? base_skew_ : base_skew_ + exported_float(n, "_maxSkew", 0.1f);
+            float d = rand_range(exported_float(n, "_minSkewTime", 0.8f), exported_float(n, "_maxSkewTime", 1.5f));
+            tweens_.tween(&f->skew, rand_range(lo, hi), d, TRANS_SINE, EASE_IN_OUT);
+            sway_end_ = t_ + d;
+            sway_step_ ^= 1;
+        }
+    }
+
+private:
+    bool started_, enabled_;
+    float base_scale_y_, base_skew_;
+    double flicker_end_, sway_end_;
+    int flicker_step_, sway_step_;
+    double t_;
+    TweenSet tweens_;
 };
 
 /* NHellraiserSwordVfx: a sword rising out of the ground (Spring) as it turns
@@ -2023,6 +2203,12 @@ ScriptBehavior* make_hyperbeam(Node*) { return new Hyperbeam(); }
 ScriptBehavior* make_sweeping_beam(Node* n) { return new SweepingBeam(n); }
 ScriptBehavior* make_grand_finale(Node*) { return new GrandFinale(); }
 ScriptBehavior* make_hellraiser_sword(Node*) { return new HellraiserSword(); }
+ScriptBehavior* make_scream(Node*) { return new Scream(true); }
+ScriptBehavior* make_spooky_scream(Node*) { return new Scream(false); }
+ScriptBehavior* make_hellraiser_attack(Node*) { return new HellraiserAttack(); }
+ScriptBehavior* make_decimillipede_rocks(Node*) { return new DecimillipedeRocks(); }
+ScriptBehavior* make_symbiote_eye(Node*) { return new SymbioteEye(); }
+ScriptBehavior* make_rest_site_fire(Node*) { return new RestSiteFire(); }
 ScriptBehavior* make_additive_overlay(Node*) { return new AdditiveOverlay(); }
 
 ScriptBehavior* make_sequence(Node* n) {
@@ -3211,6 +3397,12 @@ void install_combat_vfx_scripts() {
     for (size_t i = 0; i < sizeof(SPECS) / sizeof(SPECS[0]); ++i)
         register_script((std::string("res://src/Core/Nodes/Vfx/") + SPECS[i].script).c_str(), make_sequence);
     register_script("res://src/Core/Nodes/Vfx/NThinSliceVfx.cs", make_thin_slice);
+    register_script("res://src/Core/Nodes/Vfx/NScreamVfx.cs", make_scream);
+    register_script("res://src/Core/Nodes/Vfx/NSpookyScreamVfx.cs", make_spooky_scream);
+    register_script("res://src/Core/Nodes/Vfx/Cards/NHellraiserAttackVfx.cs", make_hellraiser_attack);
+    register_script("res://src/Core/Nodes/Vfx/NDecimillipedeRocksVfx.cs", make_decimillipede_rocks);
+    register_script("res://src/Core/Nodes/Vfx/Events/NSymbioteEyeMovementVfx.cs", make_symbiote_eye);
+    register_script("res://src/Core/Nodes/Vfx/NRestSiteFireVfx.cs", make_rest_site_fire);
     register_script("res://src/Core/Nodes/Vfx/NStabVfx.cs", make_stab);
     register_script("res://src/Core/Nodes/Vfx/NGroundFireVfx.cs", make_ground_fire);
     register_script("res://src/Core/Nodes/Vfx/NStunnedVfx.cs", make_stunned);

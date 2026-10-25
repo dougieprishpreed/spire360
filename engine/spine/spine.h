@@ -384,6 +384,14 @@ public:
     float track_time(int track) const;
     /* MegaTrackEntry.SetTrackTime: the current entry moved to t seconds. */
     void set_track_time(int track, float t);
+    /* MegaTrackEntry.SetTimeScale: the current entry's speed (0: it stops). */
+    void set_track_speed(int track, float speed);
+    /* The entry last set or queued on a track (MegaTrackEntry.SetTimeScale,
+     * SetTrackTime on it): its speed (<= 0: as it is) and where it starts,
+     * t seconds into it (a queued one adds the time it starts late). */
+    void time_last(int track, float speed, float t);
+    /* The duration of the animation last set or queued on a track (0: none). */
+    float last_duration(int track) const;
     bool track_complete(int track) const;
     float default_mix;
     float time_scale;

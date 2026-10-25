@@ -210,7 +210,8 @@ private:
 
 class Layer : public ScriptBehavior {
 public:
-    Layer(SceneLibrary* lib) : lib(lib), layer_node(NULL), trails(NULL), now(0), messy_reset(0), messy(NULL) {
+    Layer(SceneLibrary* lib)
+        : lib(lib), layer_node(NULL), trails(NULL), now(0), messy_reset(0), messy(NULL), grid_columns(0), grid_filled(false) {
         for (int i = 0; i < BOX_COUNT; ++i) boxes[i] = NULL;
     }
     ~Layer() {
@@ -224,6 +225,10 @@ public:
                 delete previews[i];
                 previews.erase(previews.begin() + (long)i);
             }
+        /* NGridCardPreviewContainer.CheckAnyChildrenPresent: the forced
+         * columns end once the cards that came after them are gone */
+        if (boxes[BOX_GRID] && !boxes[BOX_GRID]->children.empty()) grid_filled = true;
+        else if (grid_filled) grid_columns = 0, grid_filled = false;
     }
     /* A preview's node into a container, laid out as the game's script
      * does when a child enters it. */
@@ -256,9 +261,11 @@ public:
                 set_pos(c->children[(size_t)i], mid + Vec2(-(float)(count - 1) * 325 * 0.5f + 325.0f * (float)i, 0));
             return;
         }
-        /* NGridCardPreviewContainer.ReformatElements */
+        /* NGridCardPreviewContainer.ReformatElements (its rows counted before
+         * ForceMaxColumnsUntilEmpty's limit) */
         int cols = (int)floorf(1920.0f / (CARD_W + 25));
         int rows = (count + cols - 1) / cols;
+        if (grid_columns > 0 && grid_columns < cols) cols = grid_columns;
         for (int i = 0; i < count; ++i) {
             int row = i / cols, col = i % cols;
             int in_row = cols < count - row * cols ? cols : count - row * cols;
@@ -305,6 +312,8 @@ public:
     std::vector<Preview*> previews;
     double now, messy_reset;
     Poisson* messy;
+    int grid_columns; /* ForceMaxColumnsUntilEmpty (0: none) */
+    bool grid_filled;
 };
 
 Control* Preview::new_card(const Json& card) {
@@ -916,8 +925,17 @@ Node* DeckPreviews::layer() {
 
 void DeckPreviews::play(const Json& steps, const std::string& character) {
     for (size_t i = 0; i < steps.size(); ++i)
-        for (size_t k = 0; k < steps[i].size(); ++k)
-            if (steps[i][k]["t"].str() == "deck_card" && !steps[i][k]["pile"].is_string()) play_cue(steps[i][k], character);
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& c = steps[i][k];
+            if (c["t"].str() == "deck_card" && !c["pile"].is_string()) play_cue(c, character);
+            /* Sand Castle: NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty(3)
+             * before its upgrades */
+            Layer* l = layer_ ? (Layer*)layer_->behavior : NULL;
+            if (l && c["call"].str() == "NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty") {
+                l->grid_columns = c["args"][(size_t)0].i();
+                CueLedger::used(c);
+            }
+        }
 }
 
 void DeckPreviews::play_cue(const Json& c, const std::string& character) {

@@ -87,6 +87,9 @@ public partial class RunDriver
 
     // The card reward screen open (a fight's, from the rewards decision)
     private bool _rewardsProcessed;
+    /// <summary>RunManager.EnterAct ran NMapScreen.InitMarker (the first act,
+    /// begun with Neow): the map's marker on the starting point.</summary>
+    private bool _markerAtStart;
     private bool _restSiteDone; // the rest site's choice is made: only Proceed is left
     private object? _restSync;  // the RestSiteSynchronizer whose choices are watched
     private int _goldBeforeCombat;
@@ -149,6 +152,7 @@ public partial class RunDriver
             Log("Starting relics finalized");
 
             // Enter first act (generates map)
+            _markerAtStart = _runState.ExtraFields.StartedWithNeow;
             Sched.Run(() => RunManager.Instance.EnterAct(0, doTransition: false));
             Log("Entered Act 0");
 
@@ -441,6 +445,7 @@ public partial class RunDriver
         {
             ApplyLanguage(lang);
             EnsureModelDbInitialized();
+            _markerAtStart = false;
 
             Log("Loading save file...");
 
@@ -487,6 +492,7 @@ public partial class RunDriver
                 // should not send the player back through the Ancient start node.
                 if (_runState.CurrentActIndex == 0 && savedVisitedCoords.Count > 0)
                     _runState.ExtraFields.StartedWithNeow = false;
+                _markerAtStart = _runState.CurrentActIndex == 0 && _runState.ExtraFields.StartedWithNeow;
                 Sched.Run(() => RunManager.Instance.EnterAct(_runState.CurrentActIndex, doTransition: false));
                 Sched.Pump();
                 Log($"Entered Act {_runState.CurrentActIndex}");
@@ -1354,6 +1360,11 @@ public partial class RunDriver
                     return Error($"Potion {potion.Id.Entry} targets a single enemy (AnyEnemy); " +
                                  $"'target_index' is required when multiple enemies are alive ({alive.Count}).");
             }
+            // NTargetManager needs a living enemy to aim at (none between a
+            // boss's respawns, none outside a fight): the potion stays unused
+            // (UsePotionAction would cancel, and the potion was discarded below)
+            if (target == null)
+                return Error($"Potion {potion.Id.Entry} targets an enemy (AnyEnemy) and no enemy can be targeted.");
         }
         // All other target types (None, All, etc.) → leave target as null
 
@@ -1525,6 +1536,24 @@ public partial class RunDriver
     /// future engine path that does fire the callback.
     /// Adapted from PR #83 commit cf75bec by @tianyumyum.
     /// </summary>
+    /// <summary>NRewardsScreen.OnProceedButtonPressed at a boss's rewards: the
+    /// first of the act's two bosses (Ascension's DoubleBoss) proceeds to the
+    /// map, where the second waits (ProceedFromTerminalRewardsScreen).</summary>
+    private bool AtFirstOfTwoBosses => _runState?.Map?.SecondBossMapPoint != null &&
+                                       _runState.CurrentMapCoord == _runState.Map.BossMapPoint.coord;
+
+    /// <summary>NRewardsScreen.OnProceedButtonPressed after the act's (last)
+    /// boss: ActChangeSynchronizer.SetLocalPlayerReady, whose vote action
+    /// moves on once every player is ready (MoveToNextAct: ActFloor + 1, then
+    /// EnterNextAct, The Architect after the last act).</summary>
+    private void VoteToMoveToNextAct()
+    {
+        Sched.Call(() => RunManager.Instance.ActChangeSynchronizer.SetLocalPlayerReady());
+        WaitForActionExecutor();
+        Sched.Pump();
+        WaitForActionExecutor();
+    }
+
     private void HealBetweenActs()
     {
         if (_runState == null) return;
@@ -1558,7 +1587,7 @@ public partial class RunDriver
 
         // Check if we need to move to next act (boss defeated)
         var room = _runState?.CurrentRoom;
-        if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss)
+        if (room is CombatRoom combatRoom && combatRoom.RoomType == RoomType.Boss && !AtFirstOfTwoBosses)
         {
             if (combatRoom.IsPreFinished || !CombatManager.Instance.IsInProgress)
             {
@@ -1569,8 +1598,7 @@ public partial class RunDriver
                     Log($"Final boss defeated via Proceed (Act {_runState.CurrentActIndex + 1}), reporting victory");
                     return GameOverState(true);
                 }
-                Sched.Run(() => RunManager.Instance.EnterNextAct());
-                WaitForActionExecutor();
+                VoteToMoveToNextAct();
                 if (!GameFlow) HealBetweenActs(); // the game heals at the act's Ancient
                 return DetectDecisionPoint();
             }
@@ -1938,6 +1966,9 @@ public partial class RunDriver
                 ["visited"] = (_runState?.VisitedMapCoords ?? new List<MapCoord>())
                     .Select(c => new List<int> { (int)c.col, (int)c.row }).ToList(),
                 ["current"] = cur.HasValue ? new List<int> { (int)cur.Value.col, (int)cur.Value.row } : null,
+                // RunManager.EnterAct: NMapScreen.InitMarker on the starting
+                // point (the first act, begun with Neow)
+                ["marker_at_start"] = _markerAtStart && _runState?.CurrentActIndex == 0,
             };
         }
         catch (Exception ex)
@@ -2754,7 +2785,7 @@ public partial class RunDriver
         // 0-based and STS2 has 3 acts (0/1/2); killing the Act-3 (index 2) boss has no next
         // act — EnterNextAct NREs and DetectDecisionPoint falls through to an empty
         // map_select. Report victory directly in that case.
-        if (combatRoom.RoomType == RoomType.Boss)
+        if (combatRoom.RoomType == RoomType.Boss && !AtFirstOfTwoBosses)
         {
             if (!GameFlow && _runState != null && _runState.CurrentActIndex >= 2)
             {
@@ -2764,9 +2795,7 @@ public partial class RunDriver
             Log("Boss defeated, entering next act");
             try
             {
-                Sched.Run(() => RunManager.Instance.EnterNextAct());
-                Sched.Pump();
-                WaitForActionExecutor();
+                VoteToMoveToNextAct();
                 if (!GameFlow) HealBetweenActs();
             }
             catch (Exception ex) { Log($"EnterNextAct: {ex.Message}"); }
@@ -4054,7 +4083,12 @@ internal static class CreatureViewExtensions
             d["hp_display"] = c.HpDisplay.ToString();
             d["poison_next_turn"] = c.GetPower<PoisonPower>()?.CalculateTotalDamageNextTurn() ?? 0;
             // the CreatureAnimator's first state (idle, low health, ...)
-            if (c.CombatState != null) d["anim_init"] = Animators.Init(c);
+            if (c.CombatState != null)
+            {
+                d["anim_init"] = Animators.Init(c);
+                // its state's BoundsContainer (NCreature.UpdateBounds: the intents' place)
+                if (Animators.Bounds(c) is { } bounds) d["anim_bounds"] = bounds;
+            }
             if (c.Monster != null)
             {
                 d["hp_bar_reduction"] = c.Monster.HpBarSizeReduction;

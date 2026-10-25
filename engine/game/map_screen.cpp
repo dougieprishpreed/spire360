@@ -731,14 +731,17 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     }
 
     /* NMapMarker on the last room visited (not on the start or boss rows):
-     * the character's marker over the point's top centre. */
+     * the character's marker over the point's top centre. On the start
+     * point too once RunManager.EnterAct's InitMarker put it there (the
+     * first act, begun with Neow). */
     Node* marker = root->get_node("TheMap/MapMarker");
     marker_ = marker && marker->is_control() ? (Control*)marker : NULL;
     if (!visited.empty() && marker && marker->type == "TextureRect") {
         int vc = visited.back().first, vr = visited.back().second;
+        bool at_start = vr == m["start"]["row"].i();
         for (size_t i = 0; i < placed.size(); ++i) {
             const Json& pd = *placed[i].data;
-            if (pd["col"].i() != vc || pd["row"].i() != vr || pd["type"].str() == "Boss" || vr == m["start"]["row"].i())
+            if (pd["col"].i() != vc || pd["row"].i() != vr || pd["type"].str() == "Boss" || (at_start && !m["marker_at_start"].b()))
                 continue;
             TextureRect* r = (TextureRect*)marker;
             std::string character =

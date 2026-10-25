@@ -1076,7 +1076,7 @@
       "in_types": [
         "MegaCrit.Sts2.Core.Models.Events.DollRoom::BeforeEventStarted"
       ],
-      "note": "DollRoom.BeforeEventStarted's ambience (NDebugAudioManager.Play): recorded as a cue; TestMode reads on (the handle it keeps stays null)."
+      "note": "DollRoom.BeforeEventStarted's ambience: TestMode reads off, so the game plays it (NDebugAudioManager.Play: a recorded ui cue with a handle) and keeps the handle; StopAudio stops it when a doll is taken or the event ends."
     },
     {
       "id": "sandpit.applied",

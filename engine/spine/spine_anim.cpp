@@ -502,7 +502,8 @@ void SpAnimationState::update(float dt) {
         if (!t.queue.empty() && t.cur.time >= t.queue[0].delay) {
             Entry next = t.queue[0];
             t.queue.erase(t.queue.begin());
-            next.time = t.cur.time - next.delay;
+            float preset = next.time; /* time_last's start */
+            next.time = preset + t.cur.time - next.delay;
             next.delay = 0;
             if (!next.anim) {
                 /* the empty animation: the track lets go */
@@ -511,8 +512,8 @@ void SpAnimationState::update(float dt) {
                 continue;
             }
             start(t, next);
-            /* its keys from the start to where it begins */
-            fire_events(fired, (int)i, t.cur.anim, -1.0f, t.cur.time, t.cur.loop);
+            /* its keys from the start (or its preset start) to where it begins */
+            fire_events(fired, (int)i, t.cur.anim, preset > 0 ? preset : -1.0f, t.cur.time, t.cur.loop);
             t.cur.events_from_start = false;
         }
     }
@@ -552,6 +553,31 @@ void SpAnimationState::set_track_time(int ti, float t) {
     if (ti < 0 || (size_t)ti >= tracks_.size() || !tracks_[ti].has_cur) return;
     tracks_[ti].cur.time = t;
     tracks_[ti].cur.last_time = -1;
+}
+
+void SpAnimationState::time_last(int ti, float speed, float t) {
+    if (ti < 0 || (size_t)ti >= tracks_.size()) return;
+    Track& tr = tracks_[ti];
+    Entry* e = !tr.queue.empty() ? &tr.queue.back() : tr.has_cur ? &tr.cur : NULL;
+    if (!e) return;
+    if (speed > 0) e->time_scale = speed;
+    e->time = t;
+    if (e == &tr.cur) {
+        e->last_time = -1;
+        e->events_from_start = t <= 0;
+    }
+}
+
+float SpAnimationState::last_duration(int ti) const {
+    if (ti < 0 || (size_t)ti >= tracks_.size()) return 0;
+    const Track& tr = tracks_[ti];
+    const Entry* e = !tr.queue.empty() ? &tr.queue.back() : tr.has_cur ? &tr.cur : NULL;
+    return e && e->anim ? e->anim->duration : 0;
+}
+
+void SpAnimationState::set_track_speed(int ti, float speed) {
+    if (ti < 0 || (size_t)ti >= tracks_.size() || !tracks_[ti].has_cur) return;
+    tracks_[ti].cur.time_scale = speed;
 }
 
 bool SpAnimationState::track_complete(int ti) const {

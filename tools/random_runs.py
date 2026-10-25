@@ -99,7 +99,9 @@ def act(rng, state):
         energy = state.get("energy", 0)
         hand = [c for c in state.get("hand", []) if c.get("can_play") and c.get("cost", 0) <= energy]
         # Mostly play cards, sometimes end the turn early, sometimes drink a potion.
-        potions = [p for p in state.get("player", {}).get("potions", []) if p]
+        # (an enemy-aimed potion needs a living enemy to aim at)
+        potions = [p for p in state.get("player", {}).get("potions", [])
+                   if p and (p.get("target_type") != "AnyEnemy" or state.get("enemies"))]
         if potions and rng.random() < 0.05:
             p = rng.choice(potions)
             args = {"potion_index": p["index"]}

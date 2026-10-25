@@ -319,6 +319,21 @@ Node* EventScreen::build_ancient(const Json& d) {
     Node* scene = instance(lib_, "scenes/events/background_scenes/" + id + ".tscn");
     if (bg && scene) bg->add_child(scene);
     else delete scene;
+    /* NAncientBgContainer._Ready (OnWindowChange at 16:9): at _pos169, at
+     * _scale169 about its centre (the full screen's) */
+    if (bg && bg->is_control()) {
+        Control* c = (Control*)bg;
+        const Json* pos = bg->get_extra("_pos169");
+        const Json* scale = bg->get_extra("_scale169");
+        Vec2 at = pos ? Vec2((float)(*pos)["v"][(size_t)0].num(0), (float)(*pos)["v"][(size_t)1].num(40)) : Vec2(0, 40);
+        float k = scale ? (float)(*scale)["v"][(size_t)0].num(0.89) : 0.89f;
+        c->pivot_offset = Vec2(960, 540);
+        c->scale = Vec2(k, k);
+        c->offset[SIDE_LEFT] += at.x;
+        c->offset[SIDE_RIGHT] += at.x;
+        c->offset[SIDE_TOP] += at.y;
+        c->offset[SIDE_BOTTOM] += at.y;
+    }
 
     content_container_ = ctl(lay, "ContentContainer");
     content_ = ctl(lay, "Content");

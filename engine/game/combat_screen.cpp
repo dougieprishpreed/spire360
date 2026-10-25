@@ -129,6 +129,7 @@ Node* CombatScreen::make_background(const Json& bg) {
 
 static void play_idle(Node* n);
 static SpineSprite* first_spine(Node* n);
+static Node* orb_export(Node* n, const char* key);
 static void segment_phobia(SceneLibrary* lib, Node* visuals, const Json& data, bool dead);
 
 /* NCreature.Create + _Ready: the creature scene with the visuals as its first
@@ -230,13 +231,7 @@ void CombatScreen::update_bounds(Creature& c) {
         ret->pivot_offset = size * 0.5f;
         ret->modulate.a = 0; /* NSelectionReticle._Ready */
     }
-    Control* intents = ctl(c.node, "Intents");
-    Node* ipos = vis->get_node("IntentPos");
-    if (intents && ipos && ipos->is_node2d()) {
-        Vec2 isz = offset_size(intents);
-        Vec2 p = ((Node2D*)ipos)->position - isz * 0.5f;
-        place(intents, p.x, p.y * vs.x, isz.x, isz.y);
-    }
+    apply_bounds(c, Json());
 
     Control* sd = ctl(c.node, "HealthBar"); /* NCreatureStateDisplay */
     Control* hb = ctl(sd, "HealthBar");     /* NHealthBar */
@@ -258,6 +253,31 @@ void CombatScreen::update_bounds(Creature& c) {
         Vec2 bs = offset_size(block);
         place(block, pos.x - bs.x * 0.5f - hb_origin.x, block->offset[SIDE_TOP], bs.x, bs.y);
     }
+}
+
+void CombatScreen::apply_bounds(Creature& c, const Json& ops) {
+    /* no ops: the creature's state (anim_bounds) as it is built */
+    bool moved = !ops.is_array();
+    if (moved && c.data["anim_bounds"].is_string()) c.bounds = c.data["anim_bounds"].str();
+    for (size_t i = 0; i < ops.size(); ++i)
+        if (ops[i]["op"].str() == "bounds") {
+            c.bounds = ops[i]["name"].str();
+            moved = true;
+        }
+    if (!moved) return;
+    Node* vis = c.visuals;
+    Control* intents = c.node ? ctl(c.node, "Intents") : NULL;
+    if (!vis || !intents) return;
+    /* the container's IntentPos, the visuals' own without one (%Bounds,
+     * the hitbox's, is always the root's: GetNode resolves the unique name
+     * in the scene's owner) */
+    Node* box = c.bounds.empty() ? NULL : vis->get_node(c.bounds);
+    Node* ipos = (box ? box : vis)->get_node("IntentPos");
+    if (!ipos || !ipos->is_node2d()) return;
+    Vec2 vs = vis->is_node2d() ? ((Node2D*)vis)->scale : Vec2(1, 1);
+    Vec2 isz = offset_size(intents);
+    Vec2 p = ((Node2D*)ipos)->position - isz * 0.5f;
+    place(intents, p.x, p.y * vs.x, isz.x, isz.y);
 }
 
 /* A power by id in the creature's list (NULL if it has none). */
@@ -1620,6 +1640,12 @@ void CombatScreen::process(double dt) {
         o.t += dt;
         float k = tween_interpolate(TRANS_SINE, EASE_IN_OUT, (float)(o.t < 0.45 ? o.t : 0.45), 0, 1, 0.45f);
         o.node->set_position(o.from + (o.to - o.from) * k);
+        if (o.bg_t < 0.25f) {
+            o.bg_t = minf(o.bg_t + (float)dt, 0.25f);
+            Node* dark = orb_export(o.sprite, "_darkBg");
+            float s = o.bg_from + (o.bg_to - o.bg_from) * o.bg_t / 0.25f;
+            if (dark && dark->is_node2d()) ((Node2D*)dark)->scale = Vec2(s, s);
+        }
     }
     for (size_t i = fading_orbs_.size(); i-- > 0;) {
         FadingOrb& o = fading_orbs_[i];
@@ -1697,15 +1723,36 @@ static void phobia_mode(Node* visuals, const Json& data) {
     if (s && data["phobia_skin"].b()) s->set_skins(std::vector<std::string>(1, phobia ? "phobia" : "normal"));
 }
 
+/* CreatureAnimator.OffsetLoopingAnimation on the entry just set or queued
+ * ("offset": a speed of 0.9-1.1, its start within 0.1 s of its loop point)
+ * and its constructor's idle_loop started anywhere ("random_start"), rolled
+ * here as the game rolls Rng.Chaotic. */
+static void time_animator_op(SpineSprite* s, const Json& op) {
+    bool offset = op["offset"].b(), anywhere = op["random_start"].b();
+    SpAnimationState* st = offset || anywhere ? s->animation_state() : NULL;
+    int track = op["track"].i();
+    float end = st ? st->last_duration(track) : 0;
+    if (end <= 0) return;
+    float speed = offset ? 0.9f + 0.2f * (float)(chaotic_rand() % 10001) / 10000.0f : -1.0f;
+    float at = anywhere ? end * (float)(chaotic_rand() % 10000) / 10000.0f
+                        : fmodf(end + 0.2f * (float)(chaotic_rand() % 10001) / 10000.0f - 0.1f, end);
+    st->time_last(track, speed, at);
+}
+
 bool play_animator_ops(SpineSprite* s, const Json& ops) {
     if (!s) return false;
+    size_t played = 0;
     for (size_t i = 0; i < ops.size(); ++i) {
         const Json& op = ops[i];
-        bool ok = op["op"].str() == "set_animation" ? s->set_animation(op["name"].str(), op["loop"].b(true), op["track"].i())
-                                                     : s->add_animation(op["name"].str(), op["loop"].b(true), op["delay"].f(), op["track"].i());
-        if (!ok) return i > 0;
+        const std::string& kind = op["op"].str();
+        if (kind != "set_animation" && kind != "add_animation") continue; /* "bounds": the screen's */
+        bool ok = kind == "set_animation" ? s->set_animation(op["name"].str(), op["loop"].b(true), op["track"].i())
+                                          : s->add_animation(op["name"].str(), op["loop"].b(true), op["delay"].f(), op["track"].i());
+        if (!ok) return played > 0;
+        time_animator_op(s, op);
+        ++played;
     }
-    return ops.size() > 0;
+    return played > 0;
 }
 
 void setup_creature_spine(Node* visuals, const Json& data) {
@@ -1861,6 +1908,8 @@ void CombatScreen::sync_orbs(const Json& models, int slots, bool animate) {
         OrbSlot o;
         o.node = NULL;
         o.sprite = NULL;
+        o.bg_from = o.bg_to = 1;
+        o.bg_t = 1;
         for (size_t j = 0; j < orbs_.size(); ++j)
             if (!kept[j] && orbs_[j].id == id && orbs_[j].data["id"] == model["id"]) {
                 o = orbs_[j]; kept[j] = true; break;
@@ -1900,6 +1949,15 @@ void CombatScreen::sync_orbs(const Json& models, int slots, bool animate) {
         bool focus = focus_power && (*focus_power)["amount"].i() > 0;
         orb_particles(orb_export(o.sprite, "_focusedParticles"), false, focus && (kind != "glass_orb" || model["passive"].i() > 0));
         orb_particles(orb_export(o.sprite, "_superchargedParticles"), false, model["evoke"].i() >= 24);
+        /* NDarkOrbVfx.UpdateDarkBgSize: its _darkBg at 1.2 supercharged, 1
+         * otherwise (0.25 s) */
+        float bg = kind == "dark_orb" && model["evoke"].i() >= 24 ? 1.2f : 1.0f;
+        if (bg != o.bg_to) {
+            Node* dark = kind == "dark_orb" ? orb_export(o.sprite, "_darkBg") : NULL;
+            o.bg_from = dark && dark->is_node2d() ? ((Node2D*)dark)->scale.x : o.bg_to;
+            o.bg_to = bg;
+            o.bg_t = 0;
+        }
         next.push_back(o);
     }
     for (size_t i = 0; i < orbs_.size(); ++i) if (!kept[i]) {
@@ -3794,6 +3852,7 @@ void CombatScreen::fire(const Cue& c) {
         /* the creature's CreatureAnimator (the logic ran it) */
         if (c.data["play"].is_array()) {
             bool played = play_animator_ops(s, c.data["play"]);
+            if (cr && cr->node && !dying) apply_bounds(*cr, c.data["play"]);
             if (dying) monster_death(*cr, c.who, played ? s : NULL, c.data["keep"].b());
             return;
         }
@@ -3906,6 +3965,22 @@ void CombatScreen::fire(const Cue& c) {
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.RadialBlur") {
         radial_blur(c.data["args"][(size_t)0].str());
         return;
+    }
+    if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NDoomVfx.Create" && c.data["pose"].is_array()) {
+        /* DoomPower.StartDoomAnim before the effect takes the body: the Hit
+         * trigger, and a hurt animation stopped HurtAnimationTrackOffsetForDoom
+         * into it (SetTrackTime, SetTimeScale(0)) */
+        const std::string& at = c.data["args"][(size_t)0].str();
+        Creature* cr = creature_for(at.substr(0, at.find('@')));
+        SpineSprite* s = cr ? first_spine(cr->visuals) : NULL;
+        if (play_animator_ops(s, c.data["pose"])) {
+            SpAnimationState* st = s->animation_state();
+            const SpAnimation* now = st ? st->current(0) : NULL;
+            if (now && now->name == "hurt") {
+                st->set_track_time(0, c.data["hurt_offset"].f(0.1f));
+                st->set_track_speed(0, 0);
+            }
+        }
     }
     if (c.kind == CUE_SCRIPTED) {
         if (!spawn_combat_vfx(lib_, vfx_box_, c.data["call"].str(), c.data["args"], *this)) CueLedger::retract(c.data);

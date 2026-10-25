@@ -227,6 +227,12 @@ internal static class Program
             case "reveal_epoch":
                 return sim.RevealEpoch(Protocol.Str(cmd, "epoch") ?? "");
 
+            case "obtain_epoch":
+                return sim.ObtainEpoch(Protocol.Str(cmd, "epoch") ?? "");
+
+            case "enter_act":
+                return sim.EnterActForTest(Protocol.Int(cmd, "act", 0));
+
             case "characters":
                 return sim.Characters(Protocol.Str(cmd, "lang"));
 

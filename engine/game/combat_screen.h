@@ -204,6 +204,9 @@ private:
          * Visuals.DefaultScale (* Osty's size by its HP). */
         Vec2 scale_base;
         float scale_temp, scale_default, scale_osty;
+        /* the animator's state's BoundsContainer (IdleBounds, FlyingBounds,
+         * ...; empty: the visuals' own IntentPos) */
+        std::string bounds;
     };
     /* A hand card's holder and where NHandCardHolder is taking it
      * (SetTargetPosition / Angle / Scale: lerps, not tweens). */
@@ -226,6 +229,9 @@ private:
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
     void update_bounds(Creature& c);
+    /* CreatureAnimator.BoundsUpdated (a "bounds" op among the animator's):
+     * NCreature.UpdateBounds moves the intents to that container's IntentPos */
+    void apply_bounds(Creature& c, const Json& ops);
     /* ThievingHopper.ThieveryMove: the stolen card's NCard under the
      * creature's %StolenCardPos (once) */
     void hold_card(Creature& c, const Json& view);
@@ -276,6 +282,8 @@ private:
         int id;
         Vec2 from, to;
         double t;
+        /* NDarkOrbVfx.UpdateDarkBgSize: its _darkBg's scale tween (0.25 s) */
+        float bg_from, bg_to, bg_t;
     };
     struct FadingOrb { Control* node; double until; };
     Node* orb_box_;

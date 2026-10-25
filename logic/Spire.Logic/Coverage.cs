@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Rooms;
+using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Timeline;
 
@@ -33,6 +34,35 @@ public partial class RunDriver
         foreach (var act in ModelDb.ActsByIndex.SelectMany(a => a)) progress.MarkActAsSeen(act.Id);
         SaveManager.Instance.SaveProgressFile();
         return new Dictionary<string, object?> { ["type"] = "ok", ["acts"] = progress.DiscoveredActs.Select(a => a.Entry).ToList() };
+    }
+
+    /// <summary>The run moved to an act's start (RunManager.EnterAct, as the
+    /// act change does): its map, its Ancient; the acts' rooms (the last
+    /// act's second boss at Ascension 10) were drawn when the run began.</summary>
+    public Dictionary<string, object?> EnterActForTest(int act)
+    {
+        if (_runState == null) return Error("No run in progress");
+        if (act < 0 || act >= _runState.Acts.Count) return Error($"No act {act}");
+        try
+        {
+            Sched.Run(() => RunManager.Instance.EnterAct(act, doTransition: false));
+            WaitForActionExecutor();
+            return DetectDecisionPoint();
+        }
+        catch (Exception ex) { return ErrorWithTrace("enter_act failed", ex); }
+    }
+
+    /// <summary>An epoch made Obtained on the current profile (its slot
+    /// opened), so reveal_epoch can run its QueueUnlocks as the Timeline's
+    /// inspect screen does.</summary>
+    public Dictionary<string, object?> ObtainEpoch(string id)
+    {
+        if (_profileId <= 0) return Error("No profile selected");
+        EnsureModelDbInitialized();
+        if (!MegaCrit.Sts2.Core.Timeline.EpochModel.EpochIdsHashSet.Contains(id)) return Error($"No epoch {id}");
+        SaveManager.Instance.ObtainEpochOverride(id, MegaCrit.Sts2.Core.Saves.EpochState.Obtained);
+        SaveManager.Instance.SaveProgressFile();
+        return new Dictionary<string, object?> { ["type"] = "ok", ["epoch"] = id };
     }
 
     /// <summary>Everything ModelDb knows a run can contain.</summary>
@@ -111,6 +141,7 @@ public partial class RunDriver
                 ["enchantments"] = Enchantments().Select(e => e.Id.Entry).ToList(),
                 ["afflictions"] = Afflictions().Select(a => a.Id.Entry).ToList(),
                 ["orbs"] = ModelDb.Orbs.Select(o => o.Id.Entry).ToList(),
+                ["epochs"] = MegaCrit.Sts2.Core.Timeline.EpochModel.AllEpochIds.ToList(),
                 ["epochs"] = EpochModel.AllEpochIds.ToList(),
             };
         }

@@ -67,6 +67,8 @@ def reached(runs):
                 c, m = caller.split("::", 1)
                 # an async method's state machine: <OnPlay>d__3::MoveNext
                 m = re.sub(r"^<([^>]*).*$", r"\1", m)
+                # a property's accessor: the sites name the property
+                m = re.sub(r"^[gs]et_", "", m)
                 out.add(f"{c.split('.')[-1].split('+')[0]}.{m}")
     return out
 

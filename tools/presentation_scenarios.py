@@ -45,10 +45,19 @@ spire_play --replay-run (frame captures) and spire_check replay.
             then killed (the card back as a reward)
   flask     Bouncing Flask and a Fire Potion (splashes, liquid overlays),
             Neutralize's Weak (the intents' numbers at once)
+  doom      an enemy killed by Doom (End of Days): NDoomVfx with the body's
+            frozen hurt pose
+  double_down Trial's Reject, Double Down: the abandon run popup
+  doll_room the Doll Room's ambience, stopped by its handle once a doll is
+            taken
+  sand_castle Sand Castle's upgrades (the preview grid at three columns)
+  double_boss Ascension 10's last act (enter_act): the first boss's rewards
+            lead to the second boss on the map, then The Architect
 
 Each writes OUT/scenario/<name>.jsonl and .log (content_coverage's Runner).
 """
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -399,6 +408,128 @@ def main():
             run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
         finally:
             run.finish(case, lg)
+    def event(name, ev):
+        case = cc.Case("scenario", name)
+        lg = run.logic("scenario", name)
+        run.new_run(case, lg, character="Ironclad", seed=name)
+        run.step(case, lg, {"cmd": "set_player", "gold": 500})
+        state = run.step(case, lg, {"cmd": "enter_room", "type": "event", "event": ev})
+        return case, lg, state
+
+    def choose(case, lg, state, key):
+        opt = next((o for o in state.get("options") or [] if (o.get("text_key") or "").endswith(key)), None)
+        if opt is None:
+            case.status = "error"
+            case.notes.append(f"no {key} option")
+            return state
+        return run.step(case, lg, {"cmd": "action", "action": "choose_option", "args": {"option_index": opt["index"]}})
+
+    def cues(case, call):
+        """The ui cues of a call in the case's trace so far."""
+        out = []
+        with open(case_trace(case), encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("{") and call in line:
+                    d = json.loads(line)
+                    for s in d.get("steps") or []:
+                        for c in s if isinstance(s, list) else [s]:
+                            if c.get("call") == call:
+                                out.append(c)
+        return out
+
+    def case_trace(case):
+        return os.path.join(a.work, "scenario", case.name + ".jsonl")
+
+    if not only or "doom" in only:
+        # an enemy dying to Doom (DoomPower.StartDoomAnim: the Hit trigger,
+        # its hurt animation frozen, NDoomVfx taking the body)
+        case, lg, state = fight("doom", "SHRINKER_BEETLE_WEAK")
+        run.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+        state = play(case, lg, state, "END_OF_DAYS")
+        state = end_turns(case, lg, state, 2)
+        run.finish(case, lg)
+        if not any(c.get("pose") for c in cues(case, "NDoomVfx.Create")):
+            case.status = "error"
+            case.notes.append("no NDoomVfx with its pose")
+    if not only or "double_down" in only:
+        # Trial's Reject, Double Down: NAbandonRunConfirmPopup over the event
+        case, lg, state = event("double_down", "TRIAL")
+        state = choose(case, lg, state, "REJECT")
+        state = choose(case, lg, state, "DOUBLE_DOWN")
+        run.finish(case, lg)
+        if not cues(case, "NAbandonRunConfirmPopup.Create"):
+            case.status = "error"
+            case.notes.append("no abandon popup cue")
+    if not only or "doll_room" in only:
+        # the Doll Room's ambience (NDebugAudioManager.Play) stopped by its
+        # handle when a doll is taken
+        case, lg, state = event("doll_room", "DOLL_ROOM")
+        state = choose(case, lg, state, "RANDOM")
+        run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
+        run.finish(case, lg)
+        plays = [c.get("handle") for c in cues(case, "NDebugAudioManager.Play") if "doll_room_amb" in str(c.get("args"))]
+        stops = [c.get("args", [None])[0] for c in cues(case, "NDebugAudioManager.Stop")]
+        if not plays or plays[0] not in stops:
+            case.status = "error"
+            case.notes.append(f"ambience handles {plays}, stops {stops}")
+    if not only or "sand_castle" in only:
+        # Sand Castle: its upgrades in a grid of three columns
+        # (NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty)
+        case = cc.Case("scenario", "sand_castle")
+        lg = run.logic("scenario", "sand_castle")
+        try:
+            run.new_run(case, lg, character="Ironclad", seed="sand_castle")
+            run.step(case, lg, {"cmd": "obtain", "relics": ["SAND_CASTLE"]})
+        finally:
+            run.finish(case, lg)
+        if not cues(case, "NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty"):
+            case.status = "error"
+            case.notes.append("no forced columns cue")
+    if not only or "double_boss" in only:
+        # Ascension 10 (DoubleBoss): the last act's first boss, its rewards
+        # proceed to the map, its second boss, then the act change's vote
+        # (The Architect)
+        data = os.path.join(a.work, "scenario", "double_boss_data")
+        shutil.rmtree(data, ignore_errors=True)
+        shutil.copytree(a.data, data, ignore=shutil.ignore_patterns("user"))
+        case = cc.Case("scenario", "double_boss")
+        lg = cc.Logic(a.cmd, data, os.path.join(a.work, "scenario", "double_boss.jsonl"))
+        bosses = []
+        try:
+            run.step(case, lg, {"cmd": "select_profile", "profile": 1})
+            run.step(case, lg, {"cmd": "set_unlock_all", "on": True})
+            run.step(case, lg, {"cmd": "start_game_run", "character": "Ironclad", "ascension": 10, "seed": "double_boss"})
+            state = run.step(case, lg, {"cmd": "enter_act", "act": 2})
+            run.step(case, lg, {"cmd": "set_player", "max_hp": 9999, "hp": 9999})
+            state = run.step(case, lg, {"cmd": "get_state"})
+            for _ in range(400):
+                ctx = state.get("context") or {}
+                d = state.get("decision")
+                if state.get("event_id") == "the_architect" or d == "game_over" or case.status != "ok":
+                    break
+                if d == "combat_play":
+                    if ctx.get("room_type") == "Boss" and (not bosses or bosses[-1] != bool(ctx.get("at_second_boss"))):
+                        bosses.append(bool(ctx.get("at_second_boss")))
+                    # the enemies at 1 HP and the player tanked again every few
+                    # actions (the Test Subject comes back at full HP)
+                    for _ in range(80):
+                        if state.get("decision") != "combat_play":
+                            break
+                        run.step(case, lg, {"cmd": "set_player", "enemy_hp": 1, "hp": 9999})
+                        state = run.step(case, lg, {"cmd": "get_state"})
+                        state = run.play_until(case, lg, state, lambda s: s.get("decision") != "combat_play", 6)
+                    case.notes = [n for n in case.notes if n != "step limit"]
+                elif d == "map_select":
+                    state = run.step(case, lg, cc.act_for(run.rng, state))
+                else:
+                    state = run.play_until(case, lg, state, lambda s: s.get("decision") in ("combat_play", "map_select", "game_over")
+                                           or s.get("event_id") == "the_architect", 200)
+            case.notes.append(f"bosses (second?): {bosses}; ended at {state.get('decision')} {state.get('event_id') or ''}")
+        finally:
+            run.finish(case, lg)
+        if bosses != [False, True]:
+            case.status = "error"
+            case.notes.append("the last act's two bosses were not both fought")
     bad = [c for c in run.cases if c.status != "ok"]
     return 1 if bad else 0
 

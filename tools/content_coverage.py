@@ -23,6 +23,8 @@ Suites (default: all):
               ending were reached
   scenarios   chains the suites above do not reach on their own (the
               Byrdonis egg hatched into Byrdpip at a rest site, ...)
+  epochs      every epoch revealed on a new profile (each one's unlock
+              screens on the Timeline)
 
 Each case's protocol trace goes to <work>/<suite>/<case>.jsonl (replayable
 by spire_check); <work>/report.json has every case's outcome, the errors
@@ -634,6 +636,46 @@ class Runner:
             finally:
                 self.finish(case, lg)
 
+    def suite_epochs(self, content):
+        """Every epoch revealed on a new profile, in the Timeline's order
+        (obtain_epoch opens its slot, reveal_epoch runs its QueueUnlocks as
+        NEpochInspectScreen.UnlockAnimation does): the unlock screens each
+        queues on NTimelineScreen. Neow first, then each revealed epoch's new
+        slots (its timeline expansion) before the rest, so no expansion
+        reopens a slot already revealed."""
+        case = Case("epochs", "timeline")
+        data = os.path.join(self.a.work, "epochs", "timeline_data")
+        shutil.rmtree(data, ignore_errors=True)
+        shutil.copytree(self.a.data, data, ignore=shutil.ignore_patterns("user"))
+        lg = Logic(self.a.cmd, data, os.path.join(self.a.work, "epochs", "timeline.jsonl"))
+        try:
+            self.step(case, lg, {"cmd": "select_profile", "profile": 1})
+            self.step(case, lg, {"cmd": "timeline"})
+            screens = 0
+            epochs = self.limited(content.get("epochs") or [])
+            order = sorted(epochs, key=lambda e: e != "NEOW_EPOCH")
+            done = set()
+            while order:
+                e = order.pop(0)
+                if e in done:
+                    continue
+                done.add(e)
+                self.step(case, lg, {"cmd": "obtain_epoch", "epoch": e})
+                d = self.step(case, lg, {"cmd": "reveal_epoch", "epoch": e})
+                if d.get("type") == "error":
+                    case.status = "error"
+                    case.notes.append(f"{e}: {d.get('message', '')[:120]}")
+                    continue
+                unlocks = d.get("unlocks") or []
+                screens += len(unlocks)
+                if not unlocks:
+                    case.notes.append(f"{e}: no unlock screens")
+                new = [s.get("id") for u in unlocks if u.get("kind") == "timeline" for s in u.get("slots") or []]
+                order = [x for x in new if x in epochs and x not in done] + order
+            case.notes.insert(0, f"{screens} unlock screens")
+        finally:
+            self.finish(case, lg)
+
     def suite_events(self, content):
         events = []
         for a in content["acts"]:
@@ -763,10 +805,13 @@ class Runner:
                                              "seed": f"acts-{i}"})
                 tank = self.step(case, lg, {"cmd": "set_player", "max_hp": 9999, "hp": 9999})
                 state = self.step(case, lg, {"cmd": "get_state"})
+                second_boss = False  # Ascension 10's second boss of the last act fought
                 for _ in range(12000):
                     ctx = state.get("context") or {}
                     if ctx.get("act_name"):
                         acts_seen.add(ctx.get("act_name"))
+                    if ctx.get("at_second_boss") and state.get("decision") == "combat_play":
+                        second_boss = True
                     if state.get("decision") == "game_over":
                         break
                     if state.get("decision") == "map_select" and (state.get("player") or {}).get("hp", 9999) < 5000:
@@ -781,6 +826,9 @@ class Runner:
                                       f"{state.get('act')} floor {state.get('floor')}")
                     if state.get("victory"):
                         endings += 1
+                        if i % 11 == 10 and not second_boss:
+                            case.status = "error"
+                            case.notes.append("Ascension 10 won without the last act's second boss")
                 else:
                     case.notes.append(f"stopped at {state.get('decision')}")
                 del tank
@@ -881,7 +929,7 @@ class Runner:
             self.finish(case, lg)
 
 
-SUITES = ["cards", "potions", "relics", "enchantments", "afflictions", "events", "encounters", "scenarios", "acts"]
+SUITES = ["cards", "potions", "relics", "enchantments", "afflictions", "events", "encounters", "scenarios", "epochs", "acts"]
 # CardCmd.Enchant's amount where the game's own sources give more than 1
 ENCHANT_AMOUNTS = {"CLONE": 4, "SHARP": 2, "NIMBLE": 2, "SWIFT": 2}
 # The cards suite's kill pass: three enemies
@@ -933,7 +981,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="first N items of each suite (0: all)")
     ap.add_argument("--only", default="", help="comma-separated item ids (a relic, a potion, ...) to run alone")
     ap.add_argument("--fight", default="BYGONE_EFFIGY_ELITE", help="the encounter cards and potions are tried in")
-    ap.add_argument("--act-runs", type=int, default=10)
+    ap.add_argument("--act-runs", type=int, default=11)  # ascensions 0-10 (10: the last act's two bosses)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--no-ledger", action="store_true", help="no presentation ledgers")
     a = ap.parse_args()

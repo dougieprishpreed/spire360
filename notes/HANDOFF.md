@@ -10,6 +10,143 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## The four review lists (2026-10-25): every item has a verdict, and what they found
+
+The presentation audit's long lists (call 171, script 163, asset 124) and
+ui_reach_audit's 193 sites are all answered now (notes/
+presentation_verdicts.tsv; "reach" rows for the reach audit). Order: the
+logic-to-UI boundary first (call, then reach), then the client side
+(script, then asset), since the last two shrink as the first two are
+ported. Only custom and daily runs stay open (deferred past the alpha RC).
+
+How each list was read:
+- call: a UI method game code calls. Most are handled where the logic
+  records them another way: a redirected or hooked caller (SfxCmd, the
+  pile tween, CardCmd's previews, ...), the decision (rooms, screens,
+  music from context.audio), or state diffs (orbs, hand). "runs: 0" there
+  is a naming artifact (SpineAnimationAccess's calls are recorded as
+  MegaAnimationState's) or a caller patched away. Method: map each callee
+  to its callers (work/ui_surface.json) and each caller to its patch
+  action in patches.json, then read what is left.
+- reach: a UI singleton read no run reached. Fixed the audit first: it
+  named property sites by the property ("Crusher.Background") while the
+  ledgers record the getter (get_Background), so no property site could
+  count as reached. The 58 Timeline sites: no suite revealed epochs; the
+  new coverage suite `epochs` does.
+- script: a scene script with no registered port. 119 are driven by the
+  screens that cite them; the other 44 were read one by one.
+- asset: pack files the sweep never loaded, by directory. 959 files; 814
+  are roots (nothing in the pack references them), checked for a game code
+  user (the game's text scenes: pck_tool extract "*.tscn" "*.tres"); the
+  sweep replays runs only (no menus, no client input such as map travel),
+  so menu assets are answered by their ports. Shader resources are
+  compiled into the pack's effects and never "loaded".
+
+Ported (each a gap the lists named):
+- Creature animation: CreatureAnimator.OffsetLoopingAnimation (each
+  looping state at a random 0.9-1.1 speed, its start within 0.1 s of the
+  loop point: identical monsters no longer animate in lockstep) and the
+  constructor's random idle start. The animator ops carry "offset" (every
+  looping state set or queued) / "random_start" (an initial idle_loop),
+  read from the calls: the stand-ins answer GetCurrent with null, so the
+  track entry's own calls never arrive. The client rolls its own
+  (Rng.Chaotic). SpAnimationState gained time_last / set_track_speed.
+- The animator never moved past a state that does not loop: the game's
+  CreatureAnimator.OnAnimationCompleted (a sprite signal, never fired
+  headless) moves it to the state after, so the logic's animator stayed on
+  e.g. the Owl Magistrate's take_off and its Attack (the dive, from
+  fly_loop) found no branch: nothing played. Animators.Settle moves it on
+  after each trigger, as completion would (a trigger mid-animation branches
+  from the next state: the same branches in practice).
+- A state's BoundsContainer (CreatureAnimator.BoundsUpdated ->
+  NCreature.UpdateBounds): the intents move to that container's IntentPos
+  (Thieving Hopper and Owl Magistrate flying, Cubex Construct burrowed,
+  Test Subject respawning). %Bounds itself always resolves to the root's
+  (unique names are the scene owner's), so the hitbox stays. Ops "bounds",
+  view "anim_bounds".
+- A Doom kill's pose: DoomPower.StartDoomAnim's Hit trigger with the hurt
+  animation frozen at HurtAnimationTrackOffsetForDoom (Inklet 0.04), on the
+  NDoomVfx cue ("pose", "hurt_offset"); the body was taken into the effect
+  still playing its idle.
+- Sand Castle: NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty(3)
+  (its upgrades 3+3, not 5+1), until the grid empties.
+- The act 1 map marker on Neow's point (RunManager.EnterAct's InitMarker;
+  the driver records when its EnterAct ran it: map "marker_at_start").
+- Trial's Double Down opens the abandon-run confirmation over the event
+  (Confirm gives up, Cancel returns); nothing happened before.
+- The Doll Room's ambience never stopped (the testmode hook played it
+  itself, so the event kept no handle): TestMode reads off there now and
+  the game plays it through the ui hook, which gives it a handle; StopAudio
+  stops it when a doll is taken.
+- **The act's second boss (Ascension 10, DoubleBoss) was skipped**: the
+  driver went to the next act straight after the first boss's rewards.
+  Both proceed paths now follow NRewardsScreen.OnProceedButtonPressed: the
+  first of two bosses proceeds to the map (the second waits there),
+  otherwise the act change goes through the game's vote
+  (ActChangeSynchronizer.SetLocalPlayerReady: MoveToNextAct, ActFloor + 1,
+  EnterNextAct), not EnterNextAct directly. The acts suite ran Ascension
+  0-9 only; it runs 11 runs now (0-10) and an Ascension 10 win without the
+  second boss fails the case. That run died in act 1, so scenario
+  `double_boss` (an Ascension 10 game-flow run moved to the last act with
+  the test command `enter_act`, tanked) checks it: Test Subject at floor
+  15, the Queen at 16, The Architect at 17 (MoveToNextAct's ActFloor + 1:
+  the act runs' victories now end on floor 16, not 15).
+- An enemy-aimed potion with no enemy to aim at (between a boss's
+  respawns): the driver started UsePotionAction anyway, which cancelled,
+  and then discarded the potion as "not consumed". It refuses now (the
+  game's targeting has nothing to aim at; the potion stays).
+- Hit effects with unported scripts (VfxCmd plays them by path): Heavy
+  Blunt (Bludgeon, Break, All For One: its strong shake at 0.2 s), Starry
+  Impact (Astral Pulse), Scream / Spooky Scream (continuous particles for
+  _duration, then off; they ran forever), Hellraiser's attack sword (it
+  stayed on screen). Each was also never freed.
+- Decimillipede's falling rocks, the Symbiote event's moving eye, the rest
+  site's flame (NRestSiteFireVfx: Flicker and Sway), the Dark orb's
+  background at 1.2 when supercharged.
+- NAncientBgContainer: the Ancient's background (Neow at every run start)
+  at 0.89 about its centre, 40 px down (its 16:9 values); it was full size.
+- The sleeping Zs in Japanese (LocalizedTexture).
+- The Embark wipe: the character's transition sound (wipe_<id>; the Defect
+  and the Necrobinder use the Ironclad's) and NTransition.FadeOut with the
+  character's transition material (0.8 s), then the first room fades in;
+  the run started with neither.
+
+Answered without a port (examples): the play queue's cancellations (the
+console sends one play at a time), Mend and every DoRemotePostSelectVfx
+(multiplayer), RelicSelectCmd (no caller), LinkedRewardSet (nothing makes
+one), the Glass orb's passive impact (only the debug tester),
+NAncientMapPoint.TargetMaterial (no user), the rest site light upscaler
+(the texture is its original size in the pack), PlayerCombatState.
+RecalculateCardValues (only Adroit uses it, already set at enchant; no
+enchantment stacks).
+
+Tools: content_coverage suite `epochs` (every epoch obtained and revealed
+in the Timeline's order; `obtain_epoch` test command; content lists
+`epochs`), `--act-runs` 11; scenarios `doom`, `double_down`, `doll_room`,
+`sand_castle` (each checks its cue), `double_boss`; test command
+`enter_act`; ui_reach_audit reads property accessors.
+
+Checks: seeded traces against traces/base6, differences 0 (traces/new89d,
+after every logic change here); content coverage cov89: 829 cases ok (the
+11 act runs, epochs: 57 revealed, 69 unlock screens), the encounters again
+after the animator settle (cov89e: 104 ok; empty Hit results 74 -> 8, the
+rest burrowed states with no Hit branch, as in the game; the empty Attack
+results are Knowledge Demon's and the Decimillipede segments', which have
+no Attack branch); the sweep over cov89 (pack-80): 52,581 decisions, 184
+gaps, 56 cue kinds never played, every one with a verdict, no crash (48
+min); scenarios scen89: 28 ok; spire_check on new89d + scen89 + mecha62:
+3,532 responses, 2,649 hand checks, 0 failures (the audio's 3 absent
+events are the game's own, as before); strict C++98 builds. Audits:
+presentation only custom and daily runs open; ui_reach 486 sites, 357
+reached, 0 open; model coverage complete (relic flashes 157/157);
+testmode 0, hook callers 0. Captures (work/cap89): the Doom kill's hurt
+pose, the Owl Magistrate flying (its intents at FlyingBounds' IntentPos),
+Trial's abandon popup, Sand Castle's 3+3 grid, Neow's background at 0.89.
+
+Next console build: logic (all stages: patches.json changed), engine; the
+pack is unchanged (work/pack-80). The Embark wipe is menu-only (no replay
+reaches it): look for it at the first Embark in Xenia.
+
 ## Relic triggers (2026-10-25): every relic's trigger fires, and what that found
 
 The 28 relics whose trigger never fired (part 3's list), and the five more

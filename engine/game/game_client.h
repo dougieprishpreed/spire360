@@ -36,6 +36,7 @@ class Node;
 class SceneLibrary;
 class SceneTree;
 class RoomTransition;
+class EmbarkWipe;
 
 /* Something the player can do now: a label for the plain screen and the
  * protocol command. */
@@ -75,6 +76,14 @@ public:
     /* Takes the run's screen out of the tree (back to the main menu); a
      * new start_run follows. */
     void clear_screen();
+    /* NCharacterSelectScreen.StartNewSingleplayerRun: the character's wipe
+     * (CharacterTransitionSfx, NTransition.FadeOut(0.8 s) with its
+     * CharacterSelectTransitionPath) over the menus; embark_wiping() while
+     * it runs; end_embark_wipe() as the run's first screen comes, which then
+     * fades in from black (NTransition.RoomFadeIn). */
+    void embark_wipe(const std::string& character);
+    bool embark_wiping() const;
+    void end_embark_wipe();
     /* Plays by itself (tests): choices picked by a seeded generator. */
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
     /* Auto play answers only the decisions before the until-th (0: all). */
@@ -124,6 +133,10 @@ private:
     void queue_or_send(const std::string& command);
     void open_pause();
     void close_pause();
+    /* NAbandonRunConfirmPopup over the pause menu or the room (Trial's
+     * Double Down); close_confirm takes it away. */
+    void open_confirm();
+    void close_confirm();
     bool pause_input(const PadState& pad);
     /* NDeckViewScreen / NCardPileScreen: asked of the logic (view_pile),
      * shown over the run until closed. */
@@ -219,6 +232,7 @@ private:
     Json characters_;
     int characters_version_;
     RoomTransition* transition_;
+    EmbarkWipe* wipe_;
     DeckPreviews* deck_previews_; /* NRun.GlobalUi's card previews (over the screens) */
     bool event_finishing_;        /* finishing_ waits for the event's room */
     bool shop_auto_;              /* finishing_ waits for the shop buying by itself (Lord's Parasol) */
