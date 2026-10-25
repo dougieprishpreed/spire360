@@ -40,6 +40,7 @@ private:
     std::vector<float> scales_;
     int focus_;
     bool can_skip_;
+    int alternative_; /* the alternative RB chooses (Reroll, Sacrifice), -1: none */
     TweenSet tweens_;
     class InspectCardScreen* inspect_; /* InspectCard (Y) */
     Node* inspect_node_;

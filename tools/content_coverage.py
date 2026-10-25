@@ -34,6 +34,7 @@ exceptions) goes to <case>.ledger.jsonl for tools/presentation_audit.py
 """
 import argparse
 import collections
+import fnmatch
 import json
 import os
 import random
@@ -46,6 +47,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import random_runs  # noqa: E402
+import model_coverage  # noqa: E402
 
 
 def act_for(rng, state, taken=None):
@@ -67,6 +69,14 @@ def act_for(rng, state, taken=None):
             picks = [rng.choice(fresh)]
             cmd = dict(cmd, args=dict(args, indices=str(picks[0])))
         taken.update(("card", cards[i].get("id")) for i in picks if i < len(cards))
+    elif d == "card_reward" and state.get("alternatives"):
+        # an alternative (Pael's Wing's Sacrifice, Driftwood's Reroll) not
+        # taken before goes first
+        fresh = [a for a in state["alternatives"] if ("alt", a.get("id")) not in taken]
+        if fresh:
+            taken.add(("alt", fresh[0].get("id")))
+            cmd = {"cmd": "action", "action": "choose_card_reward_alternative",
+                   "args": {"alternative_index": fresh[0]["index"]}}
     elif d == "rest_site" and cmd.get("action") == "choose_option":
         opts = [o for o in state.get("options", []) if o.get("is_enabled", True)]
         fresh = [o for o in opts if ("rest", o.get("option_id")) not in taken]
@@ -147,6 +157,7 @@ class Case:
         self.cues = set()
         self.notes = []
         self.monsters = set()  # the enemies' ids the fight's states showed
+        self.flashed = set()  # the relics that flashed (relic_flash cues)
 
     def record(self, state):
         t = state.get("type")
@@ -166,6 +177,8 @@ class Case:
                 if not isinstance(ch, dict):
                     continue
                 kind = ch.get("t")
+                if kind == "relic_flash" and ch.get("relic"):
+                    self.flashed.add(ch["relic"])
                 if kind in ("vfx", "sfx", "music", "anim", "ui"):
                     key = ch.get("path") or ch.get("event") or ch.get("name") or ch.get("call")
                     if key:
@@ -408,18 +421,40 @@ class Runner:
                 self.finish(case, lg)
 
     def suite_relics(self, content):
-        """Each relic obtained (RelicCmd.Obtain) by its pool's character, then
-        what its triggers need: fights with a kit of trigger cards generated
-        into the hand and played (RELIC_KIT), two more turns, a fight at 40%
-        HP (Red Skull), a third fight (every-third-combat counters), its own
-        rest site option, a shop with gold to spend, a treasure room, and a
-        last fight at 1 HP (Lizard Tail; the run may end there)."""
+        """Each relic obtained (RelicCmd.Obtain) by its pool's character, a
+        power (Jeweled Mask) and a curse (Darkstone Periapt) into the deck,
+        then what its triggers need:
+        - an elite fight: trigger cards generated into the hand and played
+          (RELIC_KIT_A), the enemies healed before each so the kit runs out,
+          two more turns, then the fight runs its course (Pen Nib, Nunchaku);
+        - a fight at 40% HP (Red Skull), the enemies with block (Hand Drill),
+          the relic's own recipe cards (RELIC_RECIPES: 7 orbs, 10 attacks,
+          ...), RELIC_KIT_B with a Retain card held (Bookmark), its turns;
+        - more fights (every-third-combat and five-combat counters), a boss
+          (Lava Rock) where the recipe asks;
+        - its rest site option (else Heal: Dream Catcher), a shop with gold
+          and a purchase (Maw Bank), a treasure room;
+        - a last fight at 1 HP (Lizard Tail; the run may end there).
+        A relic whose code flashes and never flashed is "untriggered" (a
+        "model" verdict "relic flashes:<ID>" answers one no solo run fires)."""
         weak = "SHRINKER_BEETLE_WEAK"
+        flashing = model_coverage.flashing_relics()
+        answered = [k for k, status, _ in model_coverage.verdicts() if k.startswith("relic flashes:")]
         for r in self.limited(content["relics"]):
             case = Case("relics", r["id"])
             lg = self.logic("relics", r["id"])
             in_fight = lambda s: s.get("decision") in ("combat_play", "rewards", "map_select", "game_over")
             to_map = lambda s: s.get("decision") == "map_select"
+            recipe = RELIC_RECIPES.get(r["id"], {})
+
+            def turns(state, n):
+                for _ in range(n):
+                    if state.get("decision") != "combat_play":
+                        break
+                    state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
+                    state = self.play_until(case, lg, state, in_fight, 60)
+                return state
+
             try:
                 owner = (r.get("pool") or "").split("_")[0]
                 ch = owner.capitalize() if owner in content["characters"] else "Ironclad"
@@ -429,23 +464,60 @@ class Runner:
                     case.notes.append("multiplayer only: not in solo runs")
                     continue
                 state = self.play_until(case, lg, state, to_map, 30)
-                for n, (room, encounter, hp) in enumerate((("elite", self.a.fight, None), ("monster", weak, 4000),
-                                                           ("monster", weak, None))):
-                    if hp:
-                        self.step(case, lg, {"cmd": "set_player", "hp": hp})
+                state = self.step(case, lg, {"cmd": "obtain", "cards": ["INFLAME", "INJURY"]})
+                state = self.play_until(case, lg, state, to_map, 30)
+                # through the map towards the rooms the relic acts in
+                for _ in range(8 if recipe.get("travel") else 0):
+                    if state.get("decision") != "map_select" or r["id"] in case.flashed:
+                        break
+                    points = {(p.get("col"), p.get("row")): p for p in (state.get("map") or {}).get("points") or []}
+                    choices = state.get("choices") or []
+                    want = recipe["travel"]
+                    good = [c for c in choices if (points.get((c.get("col"), c.get("row"))) or {}).get("quest")
+                            or c.get("type") == want] if want == "quest" else [c for c in choices if c.get("type") == want]
+                    pick = (good or choices or [None])[0]
+                    if pick is None:
+                        break
+                    state = self.step(case, lg, {"cmd": "action", "action": "select_map_node",
+                                                 "args": {"col": pick["col"], "row": pick["row"]}})
+                    if state.get("decision") == "combat_play" and want != "quest":
+                        self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+                    state = self.play_until(case, lg, state, to_map, 300)
+                # the elite: kit A, two turns, then its course
+                state = self.step(case, lg, {"cmd": "enter_room", "type": "elite", "encounter": self.a.fight})
+                if state.get("decision") == "combat_play":
+                    state = self.play_kit(case, lg, state, RELIC_KIT_A, in_fight, hold=["DEFEND_IRONCLAD"], energy=6)
+                    self.step(case, lg, {"cmd": "set_player", "enemy_heal": True})
+                    state = turns(state, 2)
+                state = self.play_until(case, lg, state, to_map, 300)
+                # at 40% HP, the enemies blocking: the recipe, kit B, its turns
+                self.step(case, lg, {"cmd": "set_player", "hp": 4000})
+                state = self.step(case, lg, {"cmd": "enter_room", "type": "monster", "encounter": weak})
+                if state.get("decision") == "combat_play":
+                    self.step(case, lg, {"cmd": "set_player", "enemy_block": 8})
+                    if recipe.get("kit"):
+                        state = self.play_kit(case, lg, state, recipe["kit"], in_fight)
+                    state = self.play_kit(case, lg, state, RELIC_KIT_B, in_fight, hold=["REAP"])
+                    # a potion drunk (Reptile Trinket, the potion relics)
+                    state = self.step(case, lg, {"cmd": "obtain", "potions": ["BLOCK_POTION"]})
+                    pots = [x for x in (state.get("player") or {}).get("potions") or [] if x and x.get("id", "").endswith("BLOCK_POTION")]
+                    if pots and state.get("decision") == "combat_play":
+                        state = self.step(case, lg, {"cmd": "action", "action": "use_potion",
+                                                     "args": {"potion_index": pots[0]["index"]}})
+                        state = self.play_until(case, lg, state, in_fight, 20)
+                    if recipe.get("enemy_hp") and state.get("decision") == "combat_play":
+                        self.step(case, lg, {"cmd": "set_player", "enemy_hp": recipe["enemy_hp"]})
+                    state = turns(state, recipe.get("turns", 2))
+                    if state.get("decision") == "combat_play":
+                        self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
+                state = self.play_until(case, lg, state, to_map, 300)
+                # more fights, quickly; a boss where the recipe asks
+                fights = [("monster", weak)] * recipe.get("fights", 1)
+                if recipe.get("boss"):
+                    fights.append(("monster", "VANTOM_BOSS"))
+                for room, encounter in fights:
                     state = self.step(case, lg, {"cmd": "enter_room", "type": room, "encounter": encounter})
-                    if n < 2 and state.get("decision") == "combat_play":
-                        state = self.play_kit(case, lg, state, RELIC_KIT, in_fight)
-                        if n == 0:
-                            # the first fight then runs its course (Pen Nib's
-                            # tenth attack, Stone Calendar's seventh turn)
-                            self.step(case, lg, {"cmd": "set_player", "enemy_heal": True})
-                        for _ in range(2):
-                            if state.get("decision") != "combat_play":
-                                break
-                            state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
-                            state = self.play_until(case, lg, state, in_fight, 60)
-                    if state.get("decision") == "combat_play" and n > 0:
+                    if state.get("decision") == "combat_play":
                         self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
                     state = self.play_until(case, lg, state, to_map, 300)
                 for room in ({"type": "rest_site"}, {"type": "shop"}, {"type": "treasure"}):
@@ -454,38 +526,63 @@ class Runner:
                     state = self.step(case, lg, dict({"cmd": "enter_room"}, **room))
                     if state.get("decision") == "rest_site":
                         # the relic's own rest option (Dig, Lift, Kindle, Clone,
-                        # Hatch, ...) rather than whatever the agent picks
-                        own = [o for o in state.get("options") or []
-                               if o.get("option_id") not in ("HEAL", "SMITH") and not o.get("is_locked")]
-                        if own:
+                        # Hatch, ...), else Heal (Dream Catcher's card reward)
+                        opts = [o for o in state.get("options") or [] if not o.get("is_locked")]
+                        own = [o for o in opts if o.get("option_id") not in ("HEAL", "SMITH")]
+                        pick = own or [o for o in opts if o.get("option_id") == "HEAL"]
+                        if pick:
                             state = self.step(case, lg, {"cmd": "action", "action": "choose_option",
-                                                         "args": {"option_index": own[0]["index"]}})
+                                                         "args": {"option_index": pick[0]["index"]}})
+                    if state.get("decision") == "shop":
+                        # a purchase (Maw Bank, the shop's own relics)
+                        cards = [c for c in state.get("cards") or [] if c.get("is_stocked", True)
+                                 and c.get("cost", 1 << 30) <= (state.get("player") or {}).get("gold", 0)]
+                        if cards:
+                            state = self.step(case, lg, {"cmd": "action", "action": "buy_card",
+                                                         "args": {"card_index": cards[0]["index"]}})
                     state = self.play_until(case, lg, state, to_map, 300)
                 self.step(case, lg, {"cmd": "set_player", "hp": 1})
                 state = self.step(case, lg, {"cmd": "enter_room", "type": "monster", "encounter": weak})
                 if state.get("decision") == "combat_play":
-                    state = self.step(case, lg, {"cmd": "action", "action": "end_turn", "args": {}})
-                    state = self.play_until(case, lg, state, in_fight, 60)
+                    state = turns(state, 1)
                     if state.get("decision") == "combat_play":
                         self.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
                     self.play_until(case, lg, state, lambda s: to_map(s) or s.get("decision") == "game_over", 300)
             finally:
+                if (r["id"] in flashing and r["id"] not in case.flashed and case.status == "ok"
+                        and not any(fnmatch.fnmatch(f"relic flashes:{r['id']}", k) for k in answered)):
+                    case.status = "untriggered"
+                    case.notes.append("its trigger never fired (no relic_flash): a recipe in RELIC_RECIPES")
                 self.finish(case, lg)
 
-    def play_kit(self, case, lg, state, kit, in_fight):
-        """The kit's cards generated into a cleared hand with energy and stars,
-        each played (the first enemy its target), its prompts answered."""
-        state = self.step(case, lg, {"cmd": "add_to_hand", "cards": kit, "energy": 20, "stars": 20, "clear": True})
-        for card_id in kit:
+    def play_kit(self, case, lg, state, kit, in_fight, hold=(), energy=20):
+        """The kit's cards generated into a cleared hand with energy and stars
+        (hold: cards added and kept in hand, or for a prompt to take), each
+        played (the first enemy its target), the enemies healed first so the
+        kit runs out; a prompt takes cards the kit does not still need."""
+        state = self.step(case, lg, {"cmd": "add_to_hand", "cards": list(kit) + list(hold), "energy": energy, "stars": 20,
+                                     "clear": True})
+        for n, card_id in enumerate(kit):
             if state.get("decision") != "combat_play":
                 break
             mine = [h for h in state.get("hand") or [] if (h.get("id") or "").split(".")[-1] == card_id and h.get("can_play")]
             if not mine:
                 continue
+            self.step(case, lg, {"cmd": "set_player", "enemy_heal": True})
             args = {"card_index": mine[0]["index"]}
             if mine[0].get("target_type") == "AnyEnemy" and state.get("enemies"):
                 args["target_index"] = 0
             state = self.step(case, lg, {"cmd": "action", "action": "play_card", "args": args})
+            if state.get("decision") == "card_select":
+                # Survivor's discard, an exhaust: what the kit no longer needs
+                later = set(kit[n + 1:])
+                cards = state.get("cards") or []
+                want = max(1, state.get("min_select") or 0)
+                order = sorted(cards, key=lambda c: (c.get("id") or "").split(".")[-1] in later)
+                picks = [c["index"] for c in order[:min(want, state.get("max_select") or want)]]
+                if picks:
+                    state = self.step(case, lg, {"cmd": "action", "action": "select_cards",
+                                                 "args": {"indices": ",".join(str(i) for i in sorted(picks))}})
             state = self.play_until(case, lg, state, in_fight, 40)
         return state
 
@@ -787,15 +884,41 @@ class Runner:
 SUITES = ["cards", "potions", "relics", "enchantments", "afflictions", "events", "encounters", "scenarios", "acts"]
 # CardCmd.Enchant's amount where the game's own sources give more than 1
 ENCHANT_AMOUNTS = {"CLONE": 4, "SHARP": 2, "NIMBLE": 2, "SWIFT": 2}
-# Cards that set relics' triggers off, generated into the hand (Regalite)
-# and played: Shivs (Helical Dart), an X cost (Chemical X), an exhaust
-# (Charon's Ashes, Burning Sticks), a discard (Tingsha, Tough Bandages), an
-# orb (Metronome), poison (Snecko Skull), Strength (Ruined Helmet), stars
-# spent (Galactic Dust, Mini Regent); three skills (Letter Opener) and the
-# three card types (Rainbow Ring) among them
 # The cards suite's kill pass: three enemies
 KILL_FIGHT = "TWO_TAILED_RATS_NORMAL"
-RELIC_KIT = ["SHIV", "SHIV", "WHIRLWIND", "TRUE_GRIT", "SURVIVOR", "ZAP", "DEADLY_POISON", "INFLAME", "FALLING_STAR"]
+# Cards that set relics' triggers off, generated into the hand (Regalite)
+# and played: Shivs (Helical Dart), an orb (Metronome), poison (Snecko
+# Skull), a power (Game Piece, Lost Wisp, Ruined Helmet's Strength), stars
+# spent (Galactic Dust, Mini Regent), an exhausting skill (Charon's Ashes,
+# Burning Sticks), a discard (Tingsha, Tough Bandages: a Defend held for it),
+# an X cost last (Chemical X), the hand then empty (Unceasing Top, and at the
+# turn's end Screaming Flagon); three skills (Letter Opener) and the three
+# card types (Rainbow Ring) among them. Energy 6: Whirlwind hits a few times
+RELIC_KIT_A = ["SHIV", "SHIV", "ZAP", "DEADLY_POISON", "INFLAME", "FALLING_STAR", "DOMINATE", "SURVIVOR", "WHIRLWIND"]
+# The second fight's: a draw on the player's own turn (Fiddle prevents it),
+# damage taken on it (Demon Tongue), the enemies' block broken (Hand Drill)
+RELIC_KIT_B = ["POMMEL_STRIKE", "BLOODLETTING", "SHIV"]
+# What a relic's trigger needs beyond the kits: cards played in the second
+# fight ("kit"), the enemies' HP then ("enemy_hp"), its turns ("turns",
+# default 2), more fights ("fights", default 1), an act 1 boss ("boss"),
+# travelling the map first towards points of a kind ("travel": "quest" for
+# a relic's marked rooms, or a point type)
+RELIC_RECIPES = {
+    "METRONOME": {"kit": ["ZAP"] * 7},  # seven orbs channelled
+    "NUNCHAKU": {"kit": ["SHIV"] * 10},  # ten attacks
+    "TUNING_FORK": {"kit": ["DEFEND_IRONCLAD"] * 10},  # ten skills
+    "GALACTIC_DUST": {"kit": ["FALLING_STAR"] * 6},  # ten stars spent
+    "BONE_FLUTE": {"kit": ["POKE"]},  # Osty attacks
+    "STONE_CALENDAR": {"turns": 7},  # the seventh turn
+    "WONGOS_MYSTERY_TICKET": {"fights": 6},  # five combats finished
+    "LAVA_ROCK": {"boss": True},  # an act 1 boss's rewards
+    "PANTOGRAPH": {"boss": True},  # a boss fight's start
+    "BEATING_REMNANT": {"kit": ["BLOODLETTING"] * 8},  # over 20 HP lost in a turn
+    "BOOK_REPAIR_KNIFE": {"kit": ["END_OF_DAYS"], "enemy_hp": 20},  # an enemy dead to Doom
+    "JOSS_PAPER": {"kit": ["DOMINATE"] * 5},  # five cards exhausted
+    "FUR_COAT": {"travel": "quest"},  # a fight in one of its marked rooms
+    "PLANISPHERE": {"travel": "Unknown"},  # an unknown room entered
+}
 # The cards the game's own sources give it: Inky only on Blade of Ink's
 # Shivs (its OnPlay weakens cardPlay.Target, null on an untargeted card)
 ENCHANT_TARGETS = {"INKY": "AnyEnemy"}

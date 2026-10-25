@@ -143,7 +143,7 @@ internal static class Program
                 _ => new Dictionary<string, object?>
                 {
                     ["type"] = "error",
-                    ["message"] = "A card reward choice is pending: send select_card_reward or skip_card_reward",
+                    ["message"] = "A card reward choice is pending: send select_card_reward, choose_card_reward_alternative or skip_card_reward",
                 },
             };
             proto.Write(reply);
@@ -389,6 +389,17 @@ public partial class RunDriver
             if (args == null || !args.TryGetValue("card_index", out var idx) || idx == null) return false;
             Log($"Resolving event card reward: index {idx}");
             _cardSelector.ResolveReward(Convert.ToInt32(idx));
+            return true;
+        }
+        if (action == "choose_card_reward_alternative")
+        {
+            var args = Protocol.Args(cmd);
+            if (args == null || !args.TryGetValue("alternative_index", out var alt) || alt == null) return false;
+            var alternatives = _cardSelector.PendingRewardAlternatives;
+            int i = Convert.ToInt32(alt);
+            if (alternatives == null || i < 0 || i >= alternatives.Count) return false;
+            Log($"Card reward alternative: {alternatives[i].OptionId}");
+            _cardSelector.ResolveRewardAlternative(i);
             return true;
         }
         return false;

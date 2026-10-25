@@ -128,14 +128,17 @@ internal static partial class Hooks
             if (a.Length > 0 && a[0] is string path)
                 Steps.Cue(new Dictionary<string, object?> { ["t"] = "vfx", ["path"] = path, ["at"] = "screen" });
         });
-        // RelicModel.Flash (Player.OnRelicFlashed: this, relic, targets) and
-        // PowerModel.Flash (this): the flashes the UI would show.
-        Spire.HookBridge.Hooks.RegisterAfter("relic.flashed", (a, r) =>
+        // RelicModel.Flash(targets) (this, targets) and PowerModel.Flash (this):
+        // the flashes the UI would show. The top bar's holder flashes for every
+        // relic; the targets' NRelicFlashVfx only through Player.OnRelicFlashed,
+        // which a relic with ShouldFlashOnPlayer false (Maw Bank) or a melted one
+        // is not subscribed to.
+        Spire.HookBridge.Hooks.RegisterAfter("relic.flash", (a, r) =>
         {
-            if (a.Length > 2 && a[0] is Player p && a[1] is RelicModel relic)
+            if (a.Length > 1 && a[0] is RelicModel relic && relic.Owner is Player p)
             {
                 var who = new List<string>();
-                if (a[2] is IEnumerable<Creature> targets)
+                if (relic.ShouldFlashOnPlayer && !relic.IsMelted && a[1] is IEnumerable<Creature> targets)
                     foreach (var t in targets) who.Add(Steps.Who(t));
                 Steps.Cue(new Dictionary<string, object?>
                 {

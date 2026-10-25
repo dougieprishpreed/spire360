@@ -554,12 +554,12 @@
       "note": "The blade goes (RemoveSovereignBlade: exhausted, transformed). Recorded as a blade remove cue."
     },
     {
-      "id": "relic.flashed",
+      "id": "relic.flash",
       "action": "call_after",
-      "type": "MegaCrit.Sts2.Core.Entities.Players.Player",
-      "method": "OnRelicFlashed",
-      "optional": true,
-      "note": "RelicModel.Flash: the Player handler plays the relic's sound (recorded) and gives each target an NRelicFlashVfx, which TestMode's null VFX container skips; the top bar's holder flashes too (NRelicInventoryHolder). Recorded as a relic_flash cue."
+      "type": "MegaCrit.Sts2.Core.Models.RelicModel",
+      "method": "Flash",
+      "params": ["IEnumerable`1"],
+      "note": "RelicModel.Flash(targets): the top bar's holder flashes for every relic (NRelicInventoryHolder subscribes to Flashed); the Player handler (OnRelicFlashed: the relic's sound, recorded, and an NRelicFlashVfx on each target, which TestMode's null VFX container skips) only for relics it subscribed (ShouldFlashOnPlayer, not melted: Maw Bank flashes in the top bar alone). Recorded as a relic_flash cue, its targets empty when the Player handler is not subscribed."
     },
     {
       "id": "power.flashed",

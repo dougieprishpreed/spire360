@@ -3,6 +3,7 @@
 #include "card_view.h"
 #include "deck_previews.h"
 #include "loc.h"
+#include "top_bar.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -30,7 +31,7 @@ static void disown(Node* n, Node* root) {
 }
 
 CardRewardScreen::CardRewardScreen(SceneLibrary* lib)
-    : lib_(lib), background_(NULL), focus_(0), can_skip_(true), inspect_(NULL), inspect_node_(NULL) {
+    : lib_(lib), background_(NULL), focus_(0), can_skip_(true), alternative_(-1), inspect_(NULL), inspect_node_(NULL) {
     root_ = NULL;
 }
 
@@ -79,25 +80,42 @@ Node* CardRewardScreen::build(const Json& d, std::string* error) {
         Node* card = make_card(lib_, cards[(size_t)i]);
         if (card) h->add_child(card);
         card_reward_glow(lib_, card, cards[(size_t)i]["rarity"].str());
+        /* RefreshOptions: NCard.FlashRelicOnCard for each relic that changed
+         * it (the relic's own flash is the logic's relic_flash cue) */
+        const Json& mods = cards[(size_t)i]["modifying_relics"];
+        for (size_t m = 0; card && m < mods.size(); ++m) {
+            Resource* r = lib_->ext("images/atlases/relic_atlas.sprites/" + lower(relic_icon_base(mods[m])) + ".tres");
+            flash_relic_on_card(lib_, card, r && r->is_texture() ? (Texture2DRes*)r : NULL);
+        }
         place(h, ((float)i - (float)(n - 1) / 2.0f) * CARD_X_OFFSET, 0, 0, 0);
         h->scale = Vec2(SMALL_SCALE, SMALL_SCALE);
         row->add_child(h);
         holders_.push_back(h);
         scales_.push_back(SMALL_SCALE);
     }
-    /* CardRewardAlternative.Generate: Skip when the reward allows it
-     * (hotkeys B and Start; the glyph shows B). */
+    Node* scene = instance(lib_, "scenes/screens/card_selection/card_reward_selection_screen.tscn");
+    /* CardRewardAlternative.Generate: Skip when the reward allows it (B and
+     * Start; the glyph shows B), then Reroll (Driftwood) or Sacrifice (Pael's
+     * Wing) on RB: buttons in the screen's UI/RewardAlternatives row */
+    Node* row_alt = scene ? scene->get_node("UI/RewardAlternatives") : NULL;
+    if (row_alt) {
+        row_alt->parent->remove_child(row_alt);
+        disown(row_alt, scene);
+        ui->add_child(row_alt);
+    }
     can_skip_ = d["can_skip"].b(true);
-    if (can_skip_) {
-        Node* skip = instance(lib_, "scenes/ui/card_reward_alternative_button.tscn");
-        if (skip) {
-            set_label(skip->get_node("Label"), Loc::get("card_reward_ui", "OPTION_SKIP.name"));
-            show_glyph(lib_, skip->find_unique("HotkeyIcon"), "b");
-            ui->add_child(skip);
-        }
+    alternative_ = -1;
+    const Json& alts = d["alternatives"];
+    for (int k = -1; k < (int)alts.size(); ++k) {
+        if (k < 0 && !can_skip_) continue;
+        Node* button = instance(lib_, "scenes/ui/card_reward_alternative_button.tscn");
+        if (!button) continue;
+        set_label(button->get_node("Label"), k < 0 ? Loc::get("card_reward_ui", "OPTION_SKIP.name") : alts[(size_t)k]["label"].str());
+        show_glyph(lib_, button->find_unique("HotkeyIcon"), k < 0 ? "b" : "rb");
+        if (k >= 0 && alternative_ < 0) alternative_ = alts[(size_t)k]["index"].i(-1);
+        (row_alt ? row_alt : ui)->add_child(button);
     }
     /* %InspectPrompt (card_reward_selection_screen.tscn) */
-    Node* scene = instance(lib_, "scenes/screens/card_selection/card_reward_selection_screen.tscn");
     Node* prompt = scene ? scene->find_unique("InspectPrompt") : NULL;
     if (prompt) {
         /* its %HotkeyIcon is found through the scene: before it leaves */
@@ -181,6 +199,9 @@ std::string CardRewardScreen::input(const PadState& pad) {
                                format("\"card_index\":%d", decision_["cards"][(size_t)focus_]["index"].i(focus_)));
     }
     if ((pad.pressed & (PadState::B | PadState::START)) && can_skip_) return protocol_action("skip_card_reward");
+    /* the other alternative's hotkey (MegaInput.viewExhaustPileAndTabRight) */
+    if ((pad.pressed & PadState::RB) && alternative_ >= 0)
+        return protocol_action("choose_card_reward_alternative", format("\"alternative_index\":%d", alternative_));
     return std::string();
 }
 

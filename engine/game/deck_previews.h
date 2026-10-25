@@ -37,6 +37,7 @@ namespace spire {
 
 class Node;
 class SceneLibrary;
+class Texture2DRes;
 
 class DeckPreviews {
 public:
@@ -68,6 +69,10 @@ private:
 /* The card VFX scripts the previews use (NCardRemoveVfx,
  * NCardTransformShineVfx). */
 void install_deck_preview_scripts();
+/* NCard.FlashRelicOnCard: NRelicFlashVfx at twice its size in the card's
+ * middle (its CardContainer), rising as its three icons grow and fade;
+ * icon: the relic's (NULL: none). */
+void flash_relic_on_card(SceneLibrary* lib, Node* card, Texture2DRes* icon);
 
 } /* namespace spire */
 

@@ -43,6 +43,7 @@ DROP = {
     "room_view",  # a finished fight's room behind its rewards (a continued run)
     "held_card",  # the card the Thieving Hopper holds (its %StolenCardPos)
     "fight",  # the fight behind a selection made in it (the client's room)
+    "modifying_relics",  # a card reward card's relics (NCard.FlashRelicOnCard)
     "spine_ops", "phobia_skin",  # MonsterModel.SetupSkins / OnPhobiaModeToggled on the spine sprite
     "anim_init", "play",  # what the CreatureAnimator plays
     "unplayable_line",  # NControllerCardPlay.Start's thought bubble for a card that cannot be played

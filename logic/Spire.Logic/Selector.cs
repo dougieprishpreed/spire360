@@ -168,7 +168,14 @@ public partial class RunDriver
 
         // Pending card reward from events. The game calls this synchronously.
         public List<CardCreationResult>? PendingRewardCards { get; private set; }
+        // CardRewardAlternative.Generate's list for them: Skip (CanSkip),
+        // Reroll (Driftwood), Sacrifice (Pael's Wing): the screen's buttons
+        public List<CardRewardAlternative>? PendingRewardAlternatives { get; private set; }
         private int _rewardChoice = -1;
+        private int _rewardAlternative = -1;
+        // The OnSelect whose Reroll was taken (its alternatives list): the
+        // screen's buttons are generated again without it (CanReroll false)
+        private object? _rerolledIn;
         private bool _rewardResolved;
 
         // NOTE: ICardSelector.GetSelectedCardReward return type has churned across STS2 builds:
@@ -183,8 +190,15 @@ public partial class RunDriver
             if (options.Count == 0) return default;  // Skip
 
             PendingRewardCards = options.ToList();
+            PendingRewardAlternatives = alternatives
+                .Where(a => !(a.OptionId == "REROLL" && ReferenceEquals(alternatives, _rerolledIn))).ToList();
             _rewardChoice = -1;
+            _rewardAlternative = -1;
             _rewardResolved = false;
+            // NCardRewardSelectionScreen.RefreshOptions: the relics that changed
+            // a card flash as the cards are shown (again after a reroll)
+            foreach (var option in options)
+                foreach (var relic in option.ModifyingRelics) relic.Flash();
             Spire.Logic.Log.Info($"Card reward pending: {options.Count} cards (nested decision)");
 
             if (NestedDecisionLoop != null)
@@ -193,8 +207,16 @@ public partial class RunDriver
                 Spire.Logic.Log.Warn("no nested decision loop; skipping the card reward");
 
             var choice = _rewardChoice;
+            var alternative = _rewardAlternative;
+            var shown = PendingRewardAlternatives;
             PendingRewardCards = null;
+            PendingRewardAlternatives = null;
 
+            if (alternative >= 0 && alternative < shown.Count)
+            {
+                if (shown[alternative].OptionId == "REROLL") _rerolledIn = alternatives;
+                return new CardRewardSelection { alternative = shown[alternative] };
+            }
             if (choice >= 0 && choice < options.Count)
                 return new CardRewardSelection { card = options[choice].Card };
             return default;  // Skip (no card kept)
@@ -205,6 +227,14 @@ public partial class RunDriver
         public void ResolveReward(int index)
         {
             _rewardChoice = index;
+            _rewardResolved = true;
+        }
+
+        /// <summary>One of the screen's alternatives (Reroll, Sacrifice, Skip).</summary>
+        public void ResolveRewardAlternative(int index)
+        {
+            _rewardChoice = -1;
+            _rewardAlternative = index;
             _rewardResolved = true;
         }
 

@@ -505,6 +505,32 @@ private:
     Vec2 at_;
 };
 
+} /* namespace */
+
+void flash_relic_on_card(SceneLibrary* lib, Node* card, Texture2DRes* icon) {
+    Node* body = card ? find_named(card, "CardContainer") : NULL;
+    if (!body || !body->is_control()) return;
+    Node* fx = instance(lib, "scenes/vfx/relic_flash_vfx.tscn");
+    if (!fx || !fx->is_control()) {
+        delete fx;
+        return;
+    }
+    for (int k = 1; k <= 3; ++k) {
+        Node* img = fx->get_node(format("Image%d", k));
+        if (img && icon && img->type == "TextureRect") ((TextureRect*)img)->texture = icon;
+        if (img && img->is_canvas_item()) ((CanvasItem*)img)->modulate.a = 0;
+    }
+    Control* c = (Control*)fx;
+    for (int s = 0; s < 4; ++s) c->anchor[s] = 0;
+    c->scale = Vec2(2, 2);
+    Vec2 at = ((Control*)body)->size * 0.5f;
+    c->set_position(at);
+    fx->behavior = new CardRelicFlash(at);
+    body->add_child(fx);
+}
+
+namespace {
+
 /* CardCmd.PreviewInternal: grows in, flies after the cue's time; the
  * relics that changed the card flash on it and in the top bar as it has
  * grown in (FlashRelics). */
@@ -529,7 +555,6 @@ private:
     void flash_relics() {
         const Json& relics = cue_["relics"];
         Node* root = layer_->layer_node ? layer_->layer_node->parent : NULL;
-        Node* body = card_ ? find_named(card_, "CardContainer") : NULL;
         for (size_t i = 0; root && i < relics.size(); ++i) {
             int index = relics[i].i(-1);
             Node* holder = NULL;
@@ -543,25 +568,7 @@ private:
             Node* hf = make_relic_holder_flash(layer_->lib, (Control*)holder);
             if (hf) layer_->layer_node->add_child(hf);
             Node* hi = holder_relic_icon(holder);
-            Texture2DRes* icon = hi && hi->type == "TextureRect" ? ((TextureRect*)hi)->texture : NULL;
-            if (!body || !body->is_control()) continue;
-            Node* fx = instance(layer_->lib, "scenes/vfx/relic_flash_vfx.tscn");
-            if (!fx || !fx->is_control()) {
-                delete fx;
-                continue;
-            }
-            for (int k = 1; k <= 3; ++k) {
-                Node* img = fx->get_node(format("Image%d", k));
-                if (img && icon && img->type == "TextureRect") ((TextureRect*)img)->texture = icon;
-                if (img && img->is_canvas_item()) ((CanvasItem*)img)->modulate.a = 0;
-            }
-            Control* c = (Control*)fx;
-            for (int s = 0; s < 4; ++s) c->anchor[s] = 0;
-            c->scale = Vec2(2, 2);
-            Vec2 at = ((Control*)body)->size * 0.5f;
-            c->set_position(at);
-            fx->behavior = new CardRelicFlash(at);
-            body->add_child(fx);
+            flash_relic_on_card(layer_->lib, card_, hi && hi->type == "TextureRect" ? ((TextureRect*)hi)->texture : NULL);
         }
     }
     float wait_;

@@ -37,6 +37,10 @@ spire_play --replay-run (frame captures) and spire_check replay.
             in a shop after a purchase, at a rest site, in an event
   sleepers  the Slumbering Beetle (its sleeping Zs from AfterAddedToRoom)
   fake      the Fake Merchant: a relic bought, a Foul Potion thrown, its fight
+  card_sacrifice  Pael's Wing: a fight's card reward sacrificed (its
+            card reward screen alternative)
+  card_reroll Driftwood with Lava Lamp: the reward's cards upgraded (the
+            lamp flashing on them), rerolled once, one taken
   hopper    the Thieving Hopper's theft (the stolen card in its hand),
             then killed (the card back as a reward)
   flask     Bouncing Flask and a Fire Potion (splashes, liquid overlays),
@@ -367,6 +371,34 @@ def main():
                 break
             state = play(case, lg, state, "BLUDGEON")
         run.finish(case, lg)
+    for name, relics, pick in (("card_sacrifice", ["PAELS_WING"], "SACRIFICE"),
+                               ("card_reroll", ["DRIFTWOOD", "LAVA_LAMP"], "REROLL")):
+        if only and name not in only:
+            continue
+        case = cc.Case("scenario", name)
+        lg = run.logic("scenario", name)
+        try:
+            run.new_run(case, lg, character="Ironclad", seed=name)
+            run.step(case, lg, {"cmd": "obtain", "relics": relics})
+            state = run.step(case, lg, {"cmd": "enter_room", "type": "monster", "encounter": "SHRINKER_BEETLE_WEAK"})
+            run.step(case, lg, {"cmd": "set_player", "enemy_hp": 1})
+            state = play(case, lg, state, "STRIKE_IRONCLAD")
+            state = run.play_until(case, lg, state, lambda s: s.get("decision") == "rewards", 30)
+            card = next((r for r in state.get("rewards") or [] if r.get("type") == "card"), None)
+            if card:
+                state = run.step(case, lg, {"cmd": "action", "action": "take_reward", "args": {"reward_index": card["index"]}})
+            alt = next((a for a in state.get("alternatives") or [] if a.get("id") == pick), None)
+            if alt is None:
+                case.status = "error"
+                case.notes.append(f"no {pick} alternative on the card reward")
+            else:
+                state = run.step(case, lg, {"cmd": "action", "action": "choose_card_reward_alternative",
+                                            "args": {"alternative_index": alt["index"]}})
+                if state.get("decision") == "card_reward":
+                    state = run.step(case, lg, {"cmd": "action", "action": "select_card_reward", "args": {"card_index": 0}})
+            run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
+        finally:
+            run.finish(case, lg)
     bad = [c for c in run.cases if c.status != "ok"]
     return 1 if bad else 0
 

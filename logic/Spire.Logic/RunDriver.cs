@@ -86,7 +86,6 @@ public partial class RunDriver
     private int _lastEventOptionCount;
 
     // The card reward screen open (a fight's, from the rewards decision)
-    private CardReward? _pendingCardReward;
     private bool _rewardsProcessed;
     private bool _restSiteDone; // the rest site's choice is made: only Proceed is left
     private object? _restSync;  // the RestSiteSynchronizer whose choices are watched
@@ -188,7 +187,6 @@ public partial class RunDriver
         _turnStarted = _combatEnded = _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         ClearRewards();
-        _pendingCardReward = null;
         _rewardsProcessed = false;
         _restSiteDone = false;
         ResetTreasure();
@@ -314,6 +312,15 @@ public partial class RunDriver
             if (args.TryGetValue("enemy_heal", out var heal) && heal.ValueKind == System.Text.Json.JsonValueKind.True && player.Creature?.CombatState != null)
                 foreach (var e in player.Creature.CombatState.Enemies)
                     if (e.IsAlive && e.CurrentHp < e.MaxHp) SetField(e, "_currentHp", e.MaxHp);
+            // block on each living enemy (CreatureCmd.GainBlock): an attack then
+            // breaks it (Hand Drill's AfterBlockBroken)
+            if (args.TryGetValue("enemy_block", out var blockEl) && blockEl.TryGetInt32(out var block) && block > 0 &&
+                player.Creature?.CombatState != null)
+            {
+                foreach (var e in player.Creature.CombatState.Enemies.Where(e => e.IsAlive).ToList())
+                    Sched.Run(() => CreatureCmd.GainBlock(e, block, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered, null));
+                WaitForActionExecutor();
+            }
 
             Log($"SetPlayer: hp={player.Creature?.CurrentHp} gold={player.Gold} relics={player.Relics.Count} deck={player.Deck?.Cards?.Count}");
             return new Dictionary<string, object?>
@@ -340,8 +347,7 @@ public partial class RunDriver
             _rewardsProcessed = false;
             _restSiteDone = false;
             ResetTreasure();
-            _pendingCardReward = null;
-            _eventOptionChosen = false;
+                _eventOptionChosen = false;
 
             AbstractRoom room;
             switch (roomType.ToLowerInvariant())
@@ -818,6 +824,8 @@ public partial class RunDriver
                     return DoChooseOption(player, args);
                 case "select_card_reward":
                     return DoSelectCardReward(player, args);
+                case "choose_card_reward_alternative":
+                    return DoChooseRewardAlternative(args);
                 case "skip_card_reward":
                     return DoSkipCardReward(player);
                 case "take_reward":
@@ -873,7 +881,6 @@ public partial class RunDriver
         _rewardsProcessed = false;
         _restSiteDone = false;
         ResetTreasure();
-        _pendingCardReward = null;
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
         ClearRewards();
@@ -1034,13 +1041,14 @@ public partial class RunDriver
 
     private Dictionary<string, object?> DoSelectCardReward(Player player, Dictionary<string, object?>? args)
     {
-        // Handle event-triggered card reward (blocking GetSelectedCardReward)
+        // The card reward screen: CardReward.OnSelect waits on the selector
+        // (GetSelectedCardReward), a fight's reward as an event's
         if (_cardSelector.HasPendingReward)
         {
             if (args == null || !args.ContainsKey("card_index"))
                 return Error("select_card_reward requires 'card_index'");
             var idx = Convert.ToInt32(args["card_index"]);
-            Log($"Resolving event card reward: index {idx}");
+            Log($"Resolving card reward: index {idx}");
             _cardSelector.ResolveReward(idx);
             Sched.Pump();
             Sched.Pump();
@@ -1048,33 +1056,22 @@ public partial class RunDriver
             return DetectDecisionPoint();
         }
 
-        if (_pendingCardReward == null)
-            return Error("No pending card reward");
-        if (args == null || !args.ContainsKey("card_index"))
-            return Error("select_card_reward requires 'card_index'");
+        return Error("No pending card reward");
+    }
 
-        var cardIndex = Convert.ToInt32(args["card_index"]);
-        var cards = _pendingCardReward.Cards.ToList();
-        if (cardIndex < 0 || cardIndex >= cards.Count)
-            return Error($"Invalid card index {cardIndex}, {cards.Count} cards available");
-
-        var card = cards[cardIndex];
-        Log($"Selected card reward: {card.GetType().Name}");
-
-        // Add card to deck
-        try
-        {
-            Sched.Run(() => MegaCrit.Sts2.Core.Commands.CardPileCmd
-                .Add(card, MegaCrit.Sts2.Core.Entities.Cards.PileType.Deck));
-            Sched.Pump();
-            RunManager.Instance.RewardSynchronizer.SyncLocalObtainedCard(card);
-        }
-        catch (Exception ex) { Log($"Add card to deck: {ex.Message}"); }
-
-        if (_cardFromList) _rewardList?.Remove(_pendingCardReward);
-        _cardFromList = false;
-        _pendingCardReward = null;
-        // Back to the rewards screen
+    /// <summary>A card reward screen's alternative (Reroll, Sacrifice, Skip).</summary>
+    private Dictionary<string, object?> DoChooseRewardAlternative(Dictionary<string, object?>? args)
+    {
+        var alternatives = _cardSelector.PendingRewardAlternatives;
+        if (!_cardSelector.HasPendingReward || alternatives == null) return Error("No card reward is pending");
+        if (args == null || !args.ContainsKey("alternative_index")) return Error("choose_card_reward_alternative requires 'alternative_index'");
+        var idx = Convert.ToInt32(args["alternative_index"]);
+        if (idx < 0 || idx >= alternatives.Count) return Error($"Invalid alternative index {idx}, {alternatives.Count} alternatives");
+        Log($"Card reward alternative: {alternatives[idx].OptionId}");
+        _cardSelector.ResolveRewardAlternative(idx);
+        Sched.Pump();
+        Sched.Pump();
+        WaitForActionExecutor();
         return DetectDecisionPoint();
     }
 
@@ -1088,15 +1085,6 @@ public partial class RunDriver
             Sched.Pump();
             WaitForActionExecutor();
             return DetectDecisionPoint();
-        }
-        if (_pendingCardReward != null)
-        {
-            Log("Skipping card reward");
-            // From the rewards screen: it stays there, marked; Proceed skips it.
-            if (_cardFromList) _rewardSkipped.Add(_pendingCardReward);
-            else _pendingCardReward.OnSkipped();
-            _cardFromList = false;
-            _pendingCardReward = null;
         }
         return DetectDecisionPoint();
     }
@@ -1663,7 +1651,7 @@ public partial class RunDriver
             };
         }
 
-        // Check if there's a pending card reward from event (GetSelectedCardReward blocking)
+        // The card reward screen (CardReward.OnSelect waiting on GetSelectedCardReward)
         if (_cardSelector.HasPendingReward)
         {
             var rewardCards = _cardSelector.PendingRewardCards!;
@@ -1685,19 +1673,38 @@ public partial class RunDriver
                     ["keywords"] = rrkws?.Count > 0 ? rrkws : null,
                     ["after_upgrade"] = GetUpgradedInfo(cr.Card),
                     ["inspect_upgrade"] = UpgradePreviewView(cr.Card),
+                    // NCard.FlashRelicOnCard: the relics that changed it (their
+                    // places in the top bar)
+                    ["modifying_relics"] = ModifyingRelics(player, cr),
                 });
             }).ToList();
 
-            return new Dictionary<string, object?>
+            // CardRewardAlternative.Generate: Skip when the reward allows it,
+            // the others (Driftwood's Reroll, Pael's Wing's Sacrifice) as buttons
+            var alternatives = _cardSelector.PendingRewardAlternatives ?? new List<CardRewardAlternative>();
+            var buttons = alternatives.Select((a, i) => (a, i)).Where(x => x.a.OptionId != "Skip").Select(x =>
+                (object?)new Dictionary<string, object?>
+                {
+                    ["index"] = x.i,
+                    ["id"] = x.a.OptionId,
+                    ["label"] = SafeText(() => x.a.Title.GetFormattedText()),
+                }).ToList();
+            var rewardRoom = _runState!.CurrentRoom as CombatRoom;
+            var state = new Dictionary<string, object?>
             {
                 ["type"] = "decision",
                 ["decision"] = "card_reward",
                 ["context"] = RunContext(),
                 ["cards"] = cards,
-                ["can_skip"] = true,
-                ["from_event"] = true,
-                ["player"] = PlayerSummary(_runState!.Players[0]),
+                ["can_skip"] = alternatives.Any(a => a.OptionId == "Skip"),
+                ["alternatives"] = buttons.Count > 0 ? buttons : null,
+                ["from_event"] = rewardRoom == null ? true : null,
+                ["gold_earned"] = rewardRoom != null ? _runState.Players[0].Gold - _goldBeforeCombat : null,
+                ["player"] = PlayerSummary(_runState.Players[0]),
             };
+            var sphere = CrystalSphereBehind();
+            if (sphere != null) state["crystal_sphere"] = sphere;
+            return state;
         }
 
         // Check if there's a pending card selection (upgrade, remove, transform, start-of-turn powers)
@@ -1747,12 +1754,6 @@ public partial class RunDriver
                 // decision (Gambling Chip at its start)
                 ["fight"] = SelectionFight(player),
             };
-        }
-
-        // Check if there's a pending card reward
-        if (_pendingCardReward != null)
-        {
-            return CardRewardState(player, _runState.CurrentRoom as CombatRoom);
         }
 
         // The rewards screen (a fight's or an event's)
@@ -2418,6 +2419,20 @@ public partial class RunDriver
         }
     }
 
+    /// <summary>The relics that changed a card reward's card
+    /// (CardCreationResult.ModifyingRelics): their top bar places and icons.</summary>
+    private static List<object?>? ModifyingRelics(Player player, CardCreationResult result)
+    {
+        var relics = player.Relics.ToList();
+        var list = result.ModifyingRelics.Select(r => (object?)new Dictionary<string, object?>
+        {
+            ["index"] = relics.IndexOf(r),
+            ["id"] = r.Id.Entry,
+            ["icon_base"] = RelicIconBase(r),
+        }).ToList();
+        return list.Count > 0 ? list : null;
+    }
+
     private Dictionary<string, object?>? SelectionFight(Player player)
     {
         if (!Steps.InCombat || player.PlayerCombatState == null) return null;
@@ -2733,7 +2748,6 @@ public partial class RunDriver
             return RewardsState();
 
         // Rewards done — proceed
-        _pendingCardReward = null;
         _rewardsProcessed = true;
 
         // Boss → next act, OR final victory after the last act's boss (#81). Act index is
@@ -2762,47 +2776,6 @@ public partial class RunDriver
         // Normal → go to map
         ForceToMap();
         return MapSelectState();
-    }
-
-    private Dictionary<string, object?> CardRewardState(Player player, CombatRoom? combatRoom)
-    {
-        if (_pendingCardReward == null)
-            return DetectPostCombatState(player, combatRoom ?? (_runState?.CurrentRoom as CombatRoom)!);
-
-        var cards = _pendingCardReward.Cards.Select((c, i) =>
-        {
-            var stats = new Dictionary<string, object?>();
-            try { foreach (var dv in c.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
-            var crkws = c.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
-            return WithCardView(c, PileType.None, new Dictionary<string, object?>
-            {
-                ["index"] = i,
-                ["id"] = c.Id.ToString(),
-                ["name"] = _loc.Card(c.Id.Entry),
-                ["cost"] = c.EnergyCost?.GetResolved() ?? 0,
-                ["type"] = c.Type.ToString(),
-                ["rarity"] = c.Rarity.ToString(),
-                ["description"] = _loc.Bilingual("cards", c.Id.Entry + ".description"),
-                ["stats"] = stats.Count > 0 ? stats : null,
-                ["keywords"] = crkws?.Count > 0 ? crkws : null,
-                ["after_upgrade"] = GetUpgradedInfo(c),
-                ["inspect_upgrade"] = UpgradePreviewView(c),
-            });
-        }).ToList();
-
-        var state = new Dictionary<string, object?>
-        {
-            ["type"] = "decision",
-            ["decision"] = "card_reward",
-            ["context"] = RunContext(),
-            ["cards"] = cards,
-            ["can_skip"] = _pendingCardReward.CanSkip,
-            ["gold_earned"] = _runState!.Players[0].Gold - _goldBeforeCombat,
-            ["player"] = PlayerSummary(_runState!.Players[0]),
-        };
-        var sphere = CrystalSphereBehind();
-        if (sphere != null) state["crystal_sphere"] = sphere;
-        return state;
     }
 
     private void ForceToMap()

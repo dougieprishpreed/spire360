@@ -21,8 +21,6 @@ public partial class RunDriver
     // A reward being taken that waits on a later command (a card choice).
     private Task<bool>? _rewardTask;
     private Reward? _rewardTaking;
-    // The combat card reward opened from the list (taken by the old path).
-    private bool _cardFromList;
     // An event's set (RewardsSet.Offer): the game waits on _rewardSetDone.
     private RewardsSet? _rewardSet;
     private TaskCompletionSource? _rewardSetDone;
@@ -78,7 +76,6 @@ public partial class RunDriver
         _rewardSkipped.Clear();
         _rewardTask = null;
         _rewardTaking = null;
-        _cardFromList = false;
         _rewardSet = null;
         _rewardSetDone = null;
     }
@@ -251,14 +248,6 @@ public partial class RunDriver
             return Error($"Invalid reward index {idx}, {_rewardList.Count} rewards");
         var reward = _rewardList[idx];
         Log($"Taking reward {RewardTypeName(reward)}");
-
-        // A fight's card reward: its own decision (the card reward screen).
-        if (reward is CardReward cr && reward is not SpecialCardReward && _rewardSet == null)
-        {
-            _pendingCardReward = cr;
-            _cardFromList = true;
-            return CardRewardState(player, _runState?.CurrentRoom as CombatRoom);
-        }
 
         _rewardTaking = reward;
         Task<bool>? task = null;

@@ -10,6 +10,74 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Relic triggers (2026-10-25): every relic's trigger fires, and what that found
+
+The 28 relics whose trigger never fired (part 3's list), and the five more
+the reworked suite then missed, all fire now: the relic suite checks it
+itself. A relic whose code calls Flash() and that never flashed in its own
+case is "untriggered" (a "model" verdict `relic flashes:<ID>` answers one no
+solo run can fire; none needed so far).
+
+Why they never fired, and the suite's answers (content_coverage.py):
+- The trigger kit never ran out: Whirlwind with 20 energy killed the enemy
+  halfway, so the power, poison, discard and exhaust cards after it were
+  never played (Game Piece, Lost Wisp, Snecko Skull, Tough Bandages, ...),
+  and True Grit's random exhaust and Survivor's discard ate kit cards. The
+  enemies are healed before each kit card, Whirlwind comes last with 6
+  energy, a prompt takes what the kit no longer needs (a Defend held for
+  it), Dominate is the exhausting skill.
+- Counters and situations no generic play reaches: RELIC_RECIPES (seven
+  orbs, ten attacks or skills, ten stars spent, an Osty attack, the seventh
+  turn, six fights, an act 1 boss, over 20 HP lost in a turn, five
+  exhausts, an enemy dead to Doom, travelling the map to marked or unknown
+  rooms). Every case also gets a power and a curse in the deck (Jeweled
+  Mask, Darkstone Periapt), enemies with block in the second fight (Hand
+  Drill, `set_player enemy_block`), a Retain card held (Bookmark), a draw
+  on its own turn (Fiddle), self-damage (Demon Tongue), a potion drunk
+  (Reptile Trinket), Heal at the rest site when the relic has no option of
+  its own (Dream Catcher), a purchase (Maw Bank).
+
+Bugs found on the way (all fixed):
+- **The card reward screen had no alternatives**: Pael's Wing's Sacrifice
+  and Driftwood's Reroll could not be chosen on the console. A fight's card
+  reward was taken by a driver shortcut (the card added to the deck by
+  hand), not CardReward.OnSelect: no alternatives, no run history card
+  choices. Both fights' and events' card rewards now go through OnSelect
+  (the selector's nested decision); the decision lists `alternatives`
+  (index, id, label; Skip stays `can_skip`), `choose_card_reward_alternative`
+  takes one, and after a Reroll the screen's list is generated again without
+  it (CanReroll false), as Populate does. The client builds the buttons in
+  the screen's own UI/RewardAlternatives row (Skip on B, the other on RB).
+  Captured: work/cap86 (card_sacrifice, card_reroll).
+- **Relics that changed a reward card did not flash** (Lava Lamp, Glitter,
+  Silken Tress, Lasting Candy, Fresnel Lens): NCardRewardSelectionScreen.
+  RefreshOptions flashes them and puts their icon on the card
+  (NCard.FlashRelicOnCard). The selector flashes them as the cards are
+  shown; each card carries `modifying_relics` and the client runs the card
+  flash (flash_relic_on_card, shared with the deck previews). Captured.
+- **Maw Bank never flashed in the top bar**: the relic_flash cue came from
+  Player.OnRelicFlashed, which a relic with ShouldFlashOnPlayer false (or a
+  melted one) is not subscribed to, while the top bar holder flashes for
+  every relic. The cue now comes from RelicModel.Flash(targets) (patch
+  `relic.flash`), its targets empty when the Player handler would not run.
+
+Scenarios: `card_sacrifice`, `card_reroll`.
+
+Checks: seeded traces against traces/base6, differences 0 (traces/new88;
+the card reward path changed none of the game's choices); content
+coverage cov84: 827 cases, all ok, all 299 relics triggered (25 min); the
+sweep: 51,875 decisions, 189 gaps, 58 cue kinds never played, each with a
+verdict (47 min); scenarios scen88: 23, all ok; spire_check on new88 +
+scen88 + mecha62: 2,303 responses, 1,771 hand checks, 0 failures; model
+coverage (cov84 + scen84): powers 242/265 plus 23 verdicts, orbs 4/4,
+monsters 107/107, enchantments 22/22, afflictions 7/7, relic flashes
+157/157; testmode_audit and hook_caller_audit 0 open; strict C++98 builds
+(reward_screen.cpp too: it was missing from the check list).
+
+Left as before: custom and daily runs (deferred), and the long review
+lists (call 171, script 163, asset 124, ui_reach 193).
+
+
 ## Completeness audit, part 3 (2026-10-24): model coverage, and what it found
 
 The game folder is back: the pack was rebuilt (`work/pack-80/pack.s3p`,
