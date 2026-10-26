@@ -252,4 +252,14 @@ void log_warn(const char* fmt, ...) {
     va_end(ap);
 }
 
+static LoadClock g_load_clock = NULL;
+
+void set_load_trace(LoadClock clock) { g_load_clock = clock; }
+
+double load_trace_start() { return g_load_clock ? g_load_clock() : -1.0; }
+
+void load_traced(const char* kind, const std::string& name, double started) {
+    if (g_load_clock && started >= 0) log_info("load %s %.2f ms %s", kind, g_load_clock() - started, name.c_str());
+}
+
 } /* namespace spire */

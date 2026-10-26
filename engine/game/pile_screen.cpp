@@ -282,8 +282,16 @@ bool PileScreen::input(const PadState& pad, unsigned close_buttons) {
         }
         return true;
     }
+    /* the back button: ui_back; the cards (NGridCardHolder) ui_click on A
+     * where they open the inspect screen, no focus sound; the sort buttons
+     * (NCardViewSortButton) NButton's sounds */
+    if (!simple_ && (pad.pressed & PadState::B) && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
     if (simple_ ? (pad.pressed & PadState::Y) != 0 : (pad.pressed & (PadState::B | close_buttons)) != 0) return false;
     int n = (int)order_.size();
+    if ((pad.pressed & PadState::A) && lib_->audio() &&
+        (sorter_focus_ >= 0 || ((deck_ || simple_) && focus_ >= 0 && focus_ < n)))
+        lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+    int sorter_was = sorter_focus_;
     if ((deck_ || simple_) && sorter_focus_ < 0 && focus_ >= 0 && focus_ < n && (pad.pressed & PadState::A)) {
         /* NDeckViewScreen: a card pressed opens NInspectCardScreen over the
          * cards shown */
@@ -339,6 +347,7 @@ bool PileScreen::input(const PadState& pad, unsigned close_buttons) {
     } else if (deck_ && (pad.pressed & PadState::UP) && sorters_[0].node) {
         focus_sorter(0);
     }
+    if (sorter_focus_ >= 0 && sorter_focus_ != sorter_was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if (deck_ && (pad.pressed & PadState::Y)) {
         /* NUpgradePreviewTickbox (NTickbox.ForceToggleTick) */
         upgrades_ = !upgrades_;

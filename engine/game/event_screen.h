@@ -30,6 +30,7 @@ public:
     virtual ~EventScreen();
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
     void set_combat(CombatScreen* combat) { combat_ = combat; }
     /* Before build: the portrait an earlier page of the event put in place

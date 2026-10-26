@@ -13,7 +13,8 @@
  * --data DIR mounts the data folder itself as "/" (SPIRE_DATA=/); without
  * either, the SPIRE_DATA of our environment is that folder when set (the
  * tools give each case its own copy that way). SPIRE_INVINCIBLE,
- * SPIRE_GODMODE, SPIRE_STEPS and SPIRE_UI_EVENTS pass through.
+ * SPIRE_GODMODE, SPIRE_STEPS, SPIRE_UI_EVENTS and SPIRE_LOG_COMMANDS pass
+ * through.
  * Build: tools/build_logic.py --stage native.
  */
 #include "w2c2_base.h"
@@ -70,9 +71,10 @@ static void pump_output(void* unused) {
 int main(int argc, char** argv) {
     srt_config cfg;
     static const char* const guest_argv[1] = { "spire-logic" };
-    static const char* const passed[4] = { "SPIRE_INVINCIBLE", "SPIRE_GODMODE", "SPIRE_STEPS", "SPIRE_UI_EVENTS" };
-    static char passed_env[4][128];
-    static const char* guest_env[6] = { "SPIRE_DATA=/data", "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1" };
+    static const char* const passed[5] = { "SPIRE_INVINCIBLE", "SPIRE_GODMODE", "SPIRE_STEPS", "SPIRE_UI_EVENTS",
+                                           "SPIRE_LOG_COMMANDS" };
+    static char passed_env[5][128];
+    static const char* guest_env[7] = { "SPIRE_DATA=/data", "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1" };
     static char line[1 << 16];
     const char* root = NULL;
     const char* data = NULL;
@@ -106,7 +108,7 @@ int main(int argc, char** argv) {
     if (root == NULL) {
         root = ".";
     }
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 5; i++) {
         const char* v = getenv(passed[i]);
         if (v != NULL && strlen(passed[i]) + strlen(v) + 2 <= sizeof(passed_env[i])) {
             sprintf(passed_env[i], "%s=%s", passed[i], v);

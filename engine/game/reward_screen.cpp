@@ -5,6 +5,7 @@
 #include "loc.h"
 #include "top_bar.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
@@ -45,7 +46,7 @@ Node* CardRewardScreen::build(const Json& d, std::string* error) {
     Control* root = full_rect_control("CardRewardScreen");
     root_ = root;
     if (background_) {
-        root->add_child(background_);
+        root->add_child(overlay_behind(background_));
         background_ = NULL;
     }
     /* The overlays' shared backstop (run.tscn: colour not in the bundles). */
@@ -166,6 +167,10 @@ std::string CardRewardScreen::input(const PadState& pad) {
         return std::string();
     }
     int n = (int)holders_.size();
+    /* NGridCardHolder: no focus sound, ui_click on A or Y (select /
+     * confirm); the skip and alternative buttons play none. */
+    if ((pad.pressed & (PadState::A | PadState::Y)) && focus_ >= 0 && focus_ < n && lib_->audio())
+        lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
     if ((pad.pressed & PadState::Y) && focus_ >= 0 && focus_ < n) {
         /* InspectCard: that card alone */
         Json list = Json::make_array();

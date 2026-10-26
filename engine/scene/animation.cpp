@@ -68,6 +68,16 @@ bool AnimationPlayer::play(const std::string& name) {
     return true;
 }
 
+bool AnimationPlayer::resume(const std::string& name, double t) {
+    if (!active_ || name.empty()) return false;
+    if (current_ != name && !(current_.empty() && autoplay_ == name && play(""))) return false;
+    if (!loop_ || length_ <= 0) return false;
+    started_ = true;
+    time_ = fmod(t, length_);
+    apply(time_, time_, true);
+    return true;
+}
+
 void AnimationPlayer::process(double dt) {
     if (!active_) return;
     if (!playing_ && !started_ && !autoplay_.empty() && current_.empty()) play("");

@@ -42,7 +42,7 @@ Node* GameOverScreen::build(const Json& d, std::string* error) {
     decision_ = d;
     Control* root = full_rect_control("GameOverOverlay");
     if (background_) {
-        root->add_child(background_);
+        root->add_child(overlay_behind(background_));
         background_ = NULL;
     }
     Node* screen = instance(lib_, "scenes/screens/game_over_screen.tscn");

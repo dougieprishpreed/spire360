@@ -1,5 +1,6 @@
 #include "crystal_sphere_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "loc.h"
@@ -238,7 +239,10 @@ void CrystalSphereScreen::refresh_highlight() {
 
 std::string CrystalSphereScreen::input(const PadState& pad) {
     if (decision_["divinations"].i() <= 0) return std::string();
-    /* SetSmallDivination / SetBigDivination (LT / RT) */
+    /* SetSmallDivination / SetBigDivination (LT / RT): the NDivinationButtons'
+     * hotkeys (NButton's ui_click); the cells (NCrystalSphereCell) and the
+     * proceed button play none. */
+    if ((pad.pressed & (PadState::LT | PadState::RT)) && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
     if ((pad.pressed & PadState::LT) && decision_["tool"].str() != "Small")
         return protocol_action("crystal_sphere_tool", "\"tool\":\"Small\"");
     if ((pad.pressed & PadState::RT) && decision_["tool"].str() != "Big")

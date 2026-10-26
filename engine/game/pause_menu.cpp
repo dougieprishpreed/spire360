@@ -105,17 +105,26 @@ void PauseMenu::focus(int i) {
 PauseMenu::Action PauseMenu::input(const PadState& pad) {
     if (buttons_.empty()) return (pad.pressed & (PadState::B | PadState::START)) ? RESUME : NONE;
     int n = (int)buttons_.size();
+    int was = focus_;
     if (pad.pressed & PadState::UP) focus((focus_ + n - 1) % n);
     if (pad.pressed & PadState::DOWN) focus((focus_ + 1) % n);
-    if (lib_->audio() && (pad.pressed & (PadState::UP | PadState::DOWN))) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
+    if (lib_->audio() && focus_ != was) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if (pad.pressed & (PadState::B | PadState::START)) {
-        /* OnBackOrResumeButtonPressed. */
-        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_close");
+        /* the back button's hotkeys (NBackButton.ClickedSfx), then
+         * OnBackOrResumeButtonPressed. */
+        if (lib_->audio()) {
+            lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+            lib_->audio()->ui("event:/sfx/ui/map/map_close");
+        }
         return RESUME;
     }
     if ((pad.pressed & PadState::A) && focus_ >= 0) {
         Action a = buttons_[(size_t)focus_].action;
-        if (lib_->audio()) lib_->audio()->ui(a == RESUME ? "event:/sfx/ui/map/map_close" : "event:/sfx/ui/clicks/ui_click");
+        /* NPauseMenuButton: NButton's ui_click; Resume's map_close too */
+        if (lib_->audio()) {
+            lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+            if (a == RESUME) lib_->audio()->ui("event:/sfx/ui/map/map_close");
+        }
         return a;
     }
     return NONE;

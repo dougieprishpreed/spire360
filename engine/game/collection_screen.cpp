@@ -1,5 +1,6 @@
 #include "collection_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "../scene/value.h"
@@ -228,9 +229,15 @@ CollectionScreen::Action CollectionScreen::input(const PadState& pad, std::strin
         }
         return NONE;
     }
-    if (pad.pressed & PadState::B) return BACK;
+    /* the back button: ui_back; NRelicCollectionEntry plays ui_click on the
+     * press (no hover sound), NLabPotionHolder (no NButton) none */
+    if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
     if ((pad.pressed & PadState::A) && kind_ == RELICS && row_ >= 0) {
         /* OnRelicEntryPressed: NInspectRelicScreen over the collection's relics */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         Json list = Json::make_array();
         for (size_t i = 0; i < items_.size(); ++i) list.append(*items_[i]);
         inspect_ = new InspectRelicScreen(lib_);

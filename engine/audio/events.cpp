@@ -184,10 +184,17 @@ struct AudioEvents::Impl {
                 for (size_t j = 0; j < i && !seen; ++j) seen = conditions[j][(size_t)0].str() == name;
                 if (seen) continue;
                 float value = parameter(name);
+                /* A discrete parameter's value k is the range k..k+1, its
+                 * end excluded: Progress 2 (Merchant) is not 1..2 (Enemy),
+                 * and "Unknown or Treasure" is 4..5 with 5..6. The banks'
+                 * discrete parameters (flag 8) are their labeled ones. A
+                 * continuous one's range includes both ends (1..1). */
+                bool discrete = bank->doc["parameters"].get(name)["labels"].size() > 0;
                 bool hit = false;
                 for (size_t j = i; j < n && !hit; ++j)
                     if (conditions[j][(size_t)0].str() == name)
-                        hit = value + EPS >= conditions[j][1].num() && value <= conditions[j][2].num() + EPS;
+                        hit = value + EPS >= conditions[j][1].num() &&
+                              (discrete ? value + EPS < conditions[j][2].num() : value <= conditions[j][2].num() + EPS);
                 if (!hit) return false;
             }
             return true;
@@ -620,9 +627,12 @@ struct AudioEvents::Impl {
     float range(float a, float b) { return a + (b - a) * random(); }
     Bank* load(const std::string& name) {
         if (banks.count(name)) return banks[name];
+        double started = load_trace_start();
         Bank* bank = new Bank; bank->name = name;
         if (!read_json(pack, "audio/runtime/" + name + ".json", bank->doc)) { delete bank; return NULL; }
-        banks[name] = bank; return bank;
+        banks[name] = bank;
+        load_traced("bank", name, started);
+        return bank;
     }
     Bank* bank_for(const std::string& path) {
         std::string name = index["paths"].get(path).str();
@@ -700,7 +710,11 @@ void AudioEvents::prefer_bank(const std::string& bank) {
     ScopedLock lock(impl_->lock);
     impl_->preferred = bank;
 }
+static bool g_trace_plays = false;
+void AudioEvents::set_trace(bool on) { g_trace_plays = on; }
+
 u32 AudioEvents::play(const std::string& path, float volume, const Json& params) {
+    if (g_trace_plays && !path.empty()) log_info("audio play %s", path.c_str());
     ScopedLock lock(impl_->lock);
     if (path.empty() || impl_->roots.size() >= 128) return 0;
     Impl::Bank* bank = impl_->bank_for(path);

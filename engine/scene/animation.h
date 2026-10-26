@@ -24,6 +24,12 @@ public:
     /* AnimationMixer.Active: false, nothing plays (not even autoplay). */
     void set_active(bool on) { active_ = on; }
     bool is_playing() const { return playing_; }
+    /* The looping animation playing ("" none) and how far into it. */
+    std::string looping() const { return playing_ && loop_ ? current_ : std::string(); }
+    double position() const { return time_; }
+    /* That looping animation (the autoplay one before its first frame)
+     * carried on from t seconds: a screen rebuilt for the same room. */
+    bool resume(const std::string& name, double t);
     /* The animation that last ran to its end (animation_finished), until
      * the next play; "" if none. */
     const std::string& finished() const { return finished_; }

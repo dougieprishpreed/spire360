@@ -8,7 +8,156 @@ Last rewrite: 2026-10-18, when the work moved from a cloud session (game
 data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
-parts 2 and 3 above it).
+parts 2 and 3 above it); since then each session adds its section at the
+top (the newest: Xenia session 1, 2026-10-26).
+
+## Xenia session 1 (2026-10-26): the user's release-build findings, and the same causes elsewhere
+
+The user played the staged release build in Xenia (fast mode) and listed
+what was off; then asked for every other place the same causes could show
+before they found it. Each report was replayed from their own session
+first (the logic log's commands, see "Replaying a console session" below),
+then fixed at its cause, then the cause looked for across the game.
+
+Their reports, the cause, the fix:
+- The shopkeeper's hand under the cards: ShopScreen raised the focused
+  slot's z_index (the game reorders nothing). Removed.
+- The shop's music: two causes. FMOD's labeled parameters are discrete
+  (label k is [k, k+1)); our condition ranges were inclusive at the top, so
+  Progress 2 (Merchant) also matched the [1, 2] Enemy region
+  (events.cpp `matches`). And the map opened over the shop keeps
+  MerchantEnd (9) while it is up (ToggleMerchantTrack, GameAudio::
+  merchant_map); the logic's RunContext no longer resets the music when
+  the map opens after a room (Merchant -> 9, a fight -> 7, an act's first
+  map -> 0).
+- No tips on the shop's relics, potions and the removal service: the logic
+  sends each entry's HoverTips (and the removal's text); the client shows
+  them as the game places them (TipFollower::show_for_merchant_slot /
+  show_for_merchant_card).
+- Card trails linger: the trail was freed after the card's fade; the game
+  frees it with the card (NCardFlyVfx.OnCardExitedTree).
+- Hitches on the first card plays: first-use loads. The logic sends the
+  game's preload sets (AssetSets.CommonAssets, the run's characters', the
+  act's, the deck's portraits) with the first decision of a run and of
+  each act (Preload.cs); SceneLibrary::warm reads them a few per frame
+  (24 files, 4 textures) and keeps those textures (Canvas::prefetch);
+  MenuFlow waits for it behind the embark wipe. 803 files, 391 textures,
+  30.8 MB of the 80 MB texture budget. `spire_play --load-trace` lists
+  what is still read on first use.
+- Enemy attacks right after End Turn: the waits match the game's fast
+  mode (banner, 0.5 s, PerformIntent 0.25 s); the early hit was the
+  first-use stall above.
+- The bird elite hurt for no reason, and the last turn's draw of 2:
+  Hellraiser's auto-plays. A card drawn and played within one command's
+  steps is not in the decision's hand, where the client builds the cards
+  coming in, so its draw, play and damage were invisible. Steps.cs now
+  gives such a card's coming-in cue its view (AttachPassingViews).
+- A selected card left on top after X and a Power Potion: the potion menu
+  takes the focus in the game (the hand card goes down); now it does here.
+- Character select: back to the Ironclad from a locked character
+  restarted its background. Only the unlocked branch was ported: the
+  locked one (NCharacterSelectScreen.SelectCharacter) keeps the
+  background, shows the locked info and tip; the select sound and the
+  weak shake play as the game's.
+
+The same causes elsewhere (the user's request):
+- Overlays: every overlay's background now sits in a CanvasLayer below
+  the screen (overlay_behind; the engine sorts by layer, then z), as the
+  CombatUi's absolute z had let hand cards draw over them.
+- Sounds the game's node code plays from data (not from the logic):
+  NAncientDialogueLine's line sound (the logic sends each line's sfx),
+  Neow's ambience loop (AncientEventModel.AmbientBgm), the act's chest
+  sound as the chest opens, the battle start banner's two sounds at random.
+- Navigation sounds: a table of every NButton subclass's hover and press
+  sounds (overrides, base calls, hotkeys: a hotkey presses the button).
+  The run's catch-all (any move a hover, A a click, B a back) was wrong
+  on the map (points have no hover sound), card grids (no focus sound, A
+  and Y click), the proceed buttons (silent), the skip buttons (silent),
+  inspect screens (silent), the shop's slots (silent), the potion holders.
+  RunScreen::own_ui_sounds: the map, rewards, card reward, rest site,
+  event, shop, treasure, card select, bundle select and crystal sphere play
+  their controls' own; the game over screen keeps the defaults (they
+  match). The main menu's screens had none at all: the compendium and its
+  screens, settings, character select (back, embark, the hover before the
+  select), the timeline's back click, credits. The pause menu: back on
+  B / Start, a click on Resume. The top bar's hotkeys (deck, map, pause)
+  click as their buttons do.
+- Tips: the rewards screen's buttons show Reward.HoverTips left of the
+  button (the logic sends them); the card library's filters show their
+  tip at (310, the filter's y). Settings rows' tips are mouse-only in the
+  game (none here, as there).
+- The card library: View Stats (Victories: the card's TimesWon) and
+  Multiplayer Cards (unticked: no multiplayer-only cards) were hidden
+  here; the game shows both.
+- Transient entities, the Hellraiser cause in general: a power applied and
+  gone within one command's steps now carries its view (the client looked
+  its look up in the final decision); so does a creature summoned and
+  killed within them (the decision's enemies are the living), which the
+  client now builds hidden from that view so its spawn, hits and death
+  play. None occur in the seeded runs; the mechanism is the cards'.
+- Restarts, the character select's cause in general: the client builds a
+  room's screen anew for each of its decisions (a purchase, an event's
+  next page, a rest site's choice, the card removal's selection over the
+  shop and back) where the game keeps its nodes, so the merchant's idle,
+  Neow's background, the campfire and their particles started over each
+  time. GameClient::collect_loops / restore_loops carry what loops (Spine
+  tracks with the same looping animation, AnimationPlayers, emitters:
+  warmed up as long as they ran, a lifetime at most) to the new screen by
+  node path, the path keyed from the room scene's root (a script ending
+  in Room.cs or Layout.cs) so the room drawn behind an overlay matches.
+  The user's session: every shop rebuild 25-27 of its loops carried, the
+  rest site 12 of 12, the shop back from the removal 27.
+- Checked and fine: the other z_index raises (focused grid cards: the
+  game's MoveToFront), the locked and unseen branches of the collections,
+  bestiary, timeline and library, the potion slosh moments, the run
+  history entries' sounds (dead code in the game: nothing calls AnimateIn).
+
+Replaying a console session: the console logic logs every command as
+`[CMD] {json}` in spire360_logic.txt (SPIRE_LOG_COMMANDS, set by
+logic_glue.c; passed through logic_host) and copies the profile's saves to
+`spire\data\session_start` as it starts. Copy pack-80/data, put
+session_start's files in as user/, then
+`SPIRE_DATA=<copy> out/engine/spire_play work/pack-80/pack.s3p <out> --logic "dotnet out/logic/jit/Spire.Logic.dll" --commands spire360_logic.txt`
+(the commands before the first action start the session). `--frames-after
+N:EVERY --settle 300` captures one screen's animation; `--pad-after N
+--pad ...` with a cut command file drives a moment by pad; `--load-trace`
+lists first-use loads and slow frames; `--audio-trace` logs every sound
+started.
+
+Checks (JIT logic, final engine):
+- seeded traces against traces/base6: differences 0 (traces/new92);
+  scenarios 30 ok (work/scen92); content coverage 829 cases ok
+  (work/cov92); spire_check over new92, the scenarios (continued ones
+  split: work/split92) 2475 responses, 0 failures, audio 22889 voices, 0
+  decoder failures (the 7 absent events are enemy cast sounds the game's
+  banks lack too); PC build 0 warnings, the C89 checks 0.
+- The console's logic (native host, out/logic/c as built): the 15 seeded
+  runs 14 byte-identical to the JIT's, the other an unseeded monster skin;
+  no [ERROR] or trap. With SPIRE_LOG_COMMANDS it logs [CMD] lines and
+  copies the saves to session_start (File.Copy failed there: .NET copies
+  the file's mode, which the WASI runtime has no call for; the bytes are
+  copied instead). logic_host by random_runs needs an absolute path
+  (Windows' CreateProcess does not find a relative one with slashes).
+- By pad and replay: the card library walked to its toggles (the sounds
+  traced, the filter tips, View Stats); a fresh run traced (Neow's
+  ambience and first line, both battle start sounds); the user's session
+  through its shop with the loops counted (above).
+
+Next console build: the logic changed (`out\logic\c` rebuilt here), so
+`xdk\build.cmd spire360` (or build_light) recompiles logic_lib; the engine
+changed; the pack is unchanged. Restage the release folder with the new
+default.xex: `python tools/stage_release.py` (out/release/spire360: the
+XEX as default.xex, spire360.ini with both options off, spire/pack.s3p and
+spire/data). With the
+next report, send spire360_logic.txt and `spire\data\session_start`.
+
+Ahead (the user, 2026-10-26): once the XDK builds are in a good state, a
+branch ports the console build to xSDK and vulkan4xenon (both mature now);
+when it works it becomes main and builds move to GitHub Actions (as
+ctr360's). The first alpha RC will likely come from it. Expected in a few
+days; not started. The RAM, threading and texture budgets are the
+hardware's and carry over; keep XDK-only APIs out where a portable path
+exists and the D3D9 rendering contained, so a Vulkan backend can replace it.
 
 ## Before the console build (2026-10-25): every angle, the debug options, and what they found
 

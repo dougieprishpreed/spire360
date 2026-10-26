@@ -37,7 +37,7 @@ public:
      * removal): no welcome again. */
     void set_again(bool again) { again_ = again; }
     /* Behind the card removal's selection (NOverlayStack): its focused
-     * slot is not raised over it. */
+     * slot shows no hover tip (NMerchantSlot.OnSelected cleared it). */
     void set_behind() { behind_ = true; }
     bool inventory_open() const { return open_; }
     /* NMerchantRoom.OpenInventory (the merchant tip's "Got it!"), as A on
@@ -56,6 +56,7 @@ public:
     int focused_index() const;
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
 
 private:
@@ -104,6 +105,13 @@ private:
     void stop_hand(double linger);
     int nearest(int from, int dx, int dy) const;
     Vec2 slot_centre(const Slot& s) const;
+    /* The decision's entry of a card, relic or potion slot (NULL: the
+     * removal, or none). */
+    const Json* entry_of(const Slot& s) const;
+    /* NMerchantSlot.CreateHoverTip for the focused slot (none behind the
+     * removal's selection) */
+    void show_slot_tips();
+    TipFollower slot_tips_;
     SceneLibrary* lib_;
     Json decision_;
     Node* root_;

@@ -25,6 +25,8 @@ public partial class RunDriver
                     ["description"] = Text(() => new LocString("characters", c.CharacterSelectDesc).GetFormattedText()),
                     ["hp"] = c.StartingHp,
                     ["gold"] = c.StartingGold,
+                    // SelectCharacter's sound
+                    ["select_sfx"] = c.CharacterSelectSfx,
                 };
                 var relic = c.StartingRelics.FirstOrDefault();
                 if (relic != null)

@@ -619,14 +619,20 @@ BestiaryScreen::Action BestiaryScreen::input(const PadState& pad, std::string* c
         pending_.clear();
         return NONE;
     }
+    /* the back button: ui_back; NBestiaryEntry ui_click on the press (no
+     * hover sound); the filter paging plays none */
     if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
         /* OnSubmenuClosed: the mode it was left in */
         *cmd = std::string("{\"cmd\":\"set_setting\",\"name\":\"bestiary_actions\",\"value\":") + (stats_mode_ ? "false" : "true") + "}";
         return BACK;
     }
     if (pad.pressed & PadState::UP) focus(focus_ - 1);
     if (pad.pressed & PadState::DOWN) focus(focus_ + 1);
-    if (pad.pressed & PadState::A) select(focus_);
+    if (pad.pressed & PadState::A) {
+        if (focus_ >= 0 && focus_ < (int)entries_.size() && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        select(focus_);
+    }
     if (pad.pressed & PadState::Y) {
         /* NBestiaryModeButton.ClickedSfx */
         if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_close_epoch");

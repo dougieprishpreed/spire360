@@ -174,6 +174,8 @@ std::string PotionMenu::input(const PadState& pad, CombatScreen* combat, const J
             mode_ = SLOTS;
             focus_slot(slot_);
         } else if ((pad.pressed & PadState::A) && p && button_ >= 0) {
+            /* NPotionPopupButton: NButton's ui_click (no hover sound) */
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
             int idx = (*p)["index"].i();
             if (button_ == 1) {
                 close();

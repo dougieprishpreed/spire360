@@ -1,5 +1,6 @@
 #include "credits_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "loc.h"
@@ -169,7 +170,9 @@ bool CreditsScreen::input(const PadState& pad) {
     if (contents_ && (pad.pressed & PadState::UP)) target_ += 50;
     if (contents_ && (pad.pressed & PadState::DOWN)) target_ -= 50;
     if ((pad.pressed & (PadState::B | PadState::A)) && t_ >= 2.0) {
-        /* CloseScreenDebug -> FadeAndExitScreen */
+        /* CloseScreenDebug -> FadeAndExitScreen; B presses the back button
+         * too (NBackButton.ClickedSfx) */
+        if ((pad.pressed & PadState::B) && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
         exiting_ = true;
         exit_t_ = 0;
         if (contents_) {

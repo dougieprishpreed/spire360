@@ -487,9 +487,10 @@ bool MenuFlow::update(const PadState& in) {
     }
 
     game_->update(PadState());
-    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
-        /* The run's first screen (once the embark wipe is black): the
-         * menus go, the room fades in. */
+    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() && !game_->warming()) {
+        /* The run's first screen (once the embark wipe is black and the
+         * run's assets are read: NCharacterSelectScreen awaits
+         * PreloadManager.LoadRunAssets): the menus go, the room fades in. */
         game_->end_embark_wipe();
         close_screen();
         if (title_node_) {

@@ -84,8 +84,18 @@ public:
     void embark_wipe(const std::string& character);
     bool embark_wiping() const;
     void end_embark_wipe();
+    /* The run's assets still being read ahead (SceneLibrary::warm): the
+     * menus keep the screen as it is (PreloadManager's WaitForCompletion) */
+    bool warming() const;
     /* Plays by itself (tests): choices picked by a seeded generator. */
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
+    /* Auto play answers each screen with the next of these commands (a
+     * session's, in order: spire_play --commands), then by chance. */
+    void set_auto_script(const std::vector<std::string>& commands) {
+        script_ = commands;
+        script_at_ = 0;
+    }
+    size_t script_left() const { return script_.size() - script_at_; }
     /* Auto play answers only the decisions before the until-th (0: all). */
     void set_auto_play_until(int until) { auto_until_ = until; }
     bool auto_playing() const { return auto_ && (auto_until_ <= 0 || decisions_ < auto_until_); }
@@ -223,6 +233,8 @@ private:
     int last_target_;      /* the enemy last aimed at (combat_id; NCombatRoom.LastTargetedCreature) */
     Json decision_;
     std::vector<Choice> choices_;
+    std::vector<std::string> script_; /* set_auto_script */
+    size_t script_at_;
     size_t focus_;
     bool waiting_, ready_, auto_;
     int auto_until_;
@@ -246,6 +258,11 @@ private:
     std::string room_vfx_event_;
     Json event_portrait_;                /* the event's portrait as a page set it */
     void collect_room_cues(const Json& decision);
+    /* the looping animations of the screen a decision replaces in the same
+     * room, by node path (a Spine track's "@track"): name, seconds */
+    void collect_loops(Node* n, const std::string& path);
+    void restore_loops(Node* n, const std::string& path);
+    std::map<std::string, std::pair<std::string, double> > loops_;
     Json transition_pending_;
     std::vector<std::string> queued_; /* sent after the logic's "ready" */
     Json answer_;

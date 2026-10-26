@@ -9,6 +9,9 @@
 #include "../scene/tree.h"
 #include "../scene/canvas.h"
 #include "../scene/particles.h"
+#include "../scene/animation.h"
+#include "../scene/spine_sprite.h"
+#include "../spine/spine.h"
 #include "../scene/value.h"
 #include "combat_screen.h"
 #include "bundle_select_screen.h"
@@ -41,6 +44,8 @@
 #include <stdio.h>
 
 namespace spire {
+
+static std::string anim_path(const std::string& parent, Node* n, size_t index);
 
 /* NTransition.RoomFadeOut/RoomFadeIn. The scene's gradient sweeps down
  * after 0.5 s while the backdrop reaches black over 0.6 s; the next room
@@ -303,7 +308,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), script_at_(0), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), shop_auto_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
@@ -431,6 +436,8 @@ void GameClient::embark_wipe(const std::string& character) {
 
 bool GameClient::embark_wiping() const { return wipe_ && !wipe_->done(); }
 
+bool GameClient::warming() const { return lib_->warming(); }
+
 void GameClient::end_embark_wipe() {
     if (!wipe_) return;
     if (wipe_->parent) wipe_->parent->remove_child(wipe_);
@@ -482,6 +489,8 @@ void GameClient::update(const PadState& pad) {
             ++characters_version_;
         } else if (type == "decision") {
             waiting_ = false;
+            /* PreloadManager's sets of a run or an act starting */
+            if (msg["preload"].size()) lib_->warm(msg["preload"]);
             bool changed_room = !decision_.is_null() && msg["decision"].str() != "map_select" &&
                 msg["context"]["total_floor"].i() != decision_["context"]["total_floor"].i();
             if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
@@ -978,6 +987,15 @@ void GameClient::show(const Json& d) {
         shop_kind_ = shop->focused_kind();
         shop_index_ = shop->focused_index();
     }
+    /* the same room's next decision: its screen's loops carry on */
+    loops_.clear();
+    {
+        const Json& now = d["context"];
+        const Json& was = decision_["context"];
+        if (screen_ && !decision_.is_null() && now["floor"].i(-1) == was["floor"].i(-2) && now["act"] == was["act"] &&
+            now["room_type"] == was["room_type"])
+            collect_loops(screen_, anim_path("", screen_, 0));
+    }
     decision_ = d;
     choices_ = choices(d);
     focus_ = 0;
@@ -1216,6 +1234,8 @@ void GameClient::show(const Json& d) {
     if (kind == "event_choice")
         for (size_t i = 0; i < room_vfx_.size(); ++i) add_room_vfx(lib_, screen_, room_vfx_[i]);
     potions_.attach(screen_, d["player"]);
+    if (!loops_.empty()) restore_loops(screen_, anim_path("", screen_, 0));
+    loops_.clear();
     tree_->root()->add_child(screen_);
     if (deck_previews_) {
         Node* previews = deck_previews_->layer();
@@ -1226,6 +1246,59 @@ void GameClient::show(const Json& d) {
         tree_->root()->remove_child(transition_); tree_->root()->add_child(transition_);
     }
     refresh_plain_screen();
+}
+
+/* A room's screen is rebuilt for each of its decisions (a purchase, an
+ * event's next page, a rest site's choice) where the game keeps its nodes:
+ * what loops in it (Spine tracks, AnimationPlayers, particle emitters)
+ * carries on from where it was instead of starting over, by node path. */
+static std::string anim_path(const std::string& parent, Node* n, size_t index) {
+    /* from a room's scene root (NMerchantRoom, NRestSiteRoom, an event
+     * layout...) on: the same room drawn behind an overlay matches too */
+    const std::string& s = n->script;
+    if ((s.size() > 7 && s.compare(s.size() - 7, 7, "Room.cs") == 0) || (s.size() > 9 && s.compare(s.size() - 9, 9, "Layout.cs") == 0))
+        return "@" + s;
+    return parent + "/" + n->name + format("#%d", (int)index);
+}
+
+void GameClient::collect_loops(Node* n, const std::string& path) {
+    if (n->type == "SpineSprite") {
+        SpAnimationState* st = ((SpineSprite*)n)->animation_state();
+        for (int t = 0; st && t < 4; ++t)
+            if (st->current(t) && st->current_loop(t))
+                loops_[format("%s@%d", path.c_str(), t)] = std::make_pair(st->current(t)->name, (double)st->track_time(t));
+    } else if (n->type == "AnimationPlayer") {
+        std::string a = ((AnimationPlayer*)n)->looping();
+        if (!a.empty()) loops_[path] = std::make_pair(a, ((AnimationPlayer*)n)->position());
+    } else if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") {
+        Particles2D* p = (Particles2D*)n;
+        if (p->emitting && !p->one_shot) loops_[path] = std::make_pair(std::string("particles"), p->clock());
+    }
+    for (size_t i = 0; i < n->children.size(); ++i) collect_loops(n->children[i], anim_path(path, n->children[i], i));
+}
+
+void GameClient::restore_loops(Node* n, const std::string& path) {
+    if (n->type == "SpineSprite") {
+        SpAnimationState* st = ((SpineSprite*)n)->animation_state();
+        for (int t = 0; st && t < 4; ++t) {
+            std::map<std::string, std::pair<std::string, double> >::const_iterator it = loops_.find(format("%s@%d", path.c_str(), t));
+            if (it != loops_.end() && st->current(t) && st->current_loop(t) && st->current(t)->name == it->second.first)
+                st->set_track_time(t, (float)it->second.second);
+        }
+    } else if (n->type == "AnimationPlayer") {
+        std::map<std::string, std::pair<std::string, double> >::const_iterator it = loops_.find(path);
+        if (it != loops_.end()) ((AnimationPlayer*)n)->resume(it->second.first, it->second.second);
+    } else if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") {
+        /* a new emitter fills from empty: warmed up as long as the old one
+         * ran (a lifetime at most), so it shows as full as it was */
+        std::map<std::string, std::pair<std::string, double> >::const_iterator it = loops_.find(path);
+        Particles2D* p = (Particles2D*)n;
+        if (it != loops_.end() && p->emitting && !p->one_shot) {
+            double run = it->second.second, life = p->lifetime * (1.0 + p->lifetime_randomness);
+            if (run > p->preprocess) p->preprocess = run < life ? run : life;
+        }
+    }
+    for (size_t i = 0; i < n->children.size(); ++i) restore_loops(n->children[i], anim_path(path, n->children[i], i));
 }
 
 /* An event's own effects (OnRoomEnter's) and its portrait as a page set
@@ -1291,6 +1364,10 @@ void GameClient::pick(size_t i) {
 
 /* Like tools/random_runs.py: mostly play cards, then end the turn. */
 void GameClient::choose_automatically() {
+    if (script_at_ < script_.size()) {
+        send(script_[script_at_++]);
+        return;
+    }
     if (decision_["decision"].str() == "card_select") {
         int available = (int)decision_["cards"].size();
         int count = decision_["min_select"].i(1);
@@ -1455,8 +1532,12 @@ void GameClient::open_pause() {
         pause_ = NULL;
         return;
     }
-    /* NCapstoneSubmenuStack.ShowScreen. */
-    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/pause_open");
+    /* NTopBarPauseButton's hotkey (NButton's ui_click),
+     * NCapstoneSubmenuStack.ShowScreen. */
+    if (lib_->audio()) {
+        lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        lib_->audio()->ui("event:/sfx/ui/pause_open");
+    }
     add_capstone(pause_node_);
 }
 
@@ -1665,6 +1746,8 @@ void GameClient::open_map_view(const Json& msg) {
         return;
     }
     add_capstone(piles_node_);
+    /* NMerchantRoom: NMapScreen.Opened -> ToggleMerchantTrack */
+    if (lib_->audio() && decision_["context"]["room_type"].str() == "Shop") lib_->audio()->merchant_map(true);
 }
 
 /* The pile screens' input while one is open, or the buttons that open
@@ -1682,6 +1765,8 @@ bool GameClient::piles_input(const PadState& pad) {
         /* B is the drawing's while it or the tools have the pad */
         if ((pad.pressed & (PadState::B | PadState::BACK)) && !map_view_->drawing_active()) {
             if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_close");
+            /* NMapScreen.Closed -> ToggleMerchantTrack */
+            if (lib_->audio() && decision_["context"]["room_type"].str() == "Shop") lib_->audio()->merchant_map(false);
             close_piles();
         } else {
             map_view_->input(pad);
@@ -1694,8 +1779,13 @@ bool GameClient::piles_input(const PadState& pad) {
     if (kind == "card_select" || kind == "card_reward") return false;
     const char* pile = NULL;
     unsigned button = 0;
+    /* the top bar's map and deck buttons' hotkeys: NButton's ui_click (the
+     * combat piles, NCombatCardPile, play none) */
     if ((pad.pressed & PadState::BACK) && kind != "map_select") {
-        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_open");
+        if (lib_->audio()) {
+            lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+            lib_->audio()->ui("event:/sfx/ui/map/map_open");
+        }
         piles_button_ = PadState::BACK;
         piles_asked_ = true;
         send("{\"cmd\":\"view_map\"}");
@@ -1715,6 +1805,7 @@ bool GameClient::piles_input(const PadState& pad) {
         button = PadState::RB;
     }
     if (!pile) return false;
+    if (button == PadState::LB && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
     if (lib_->audio()) lib_->audio()->ui("map_open.mp3");
     piles_button_ = button;
     piles_asked_ = true;
@@ -1735,8 +1826,10 @@ void GameClient::handle_input(const PadState& pad) {
         open_pause();
         return;
     }
-    /* NButton's default click/hover sounds; hand cards have their own cues. */
-    if (!combat_ && lib_->audio()) {
+    /* NButton's default click/hover sounds, for the screens without their
+     * controls' own; hand cards have their own cues, the potions none
+     * (NPotionHolder is no NButton). */
+    if (!combat_ && lib_->audio() && !(ported_ && ported_->own_ui_sounds()) && !potions_.active()) {
         if (pad.pressed & (PadState::UP | PadState::DOWN | PadState::LEFT | PadState::RIGHT)) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
         if (pad.pressed & PadState::A) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         if (pad.pressed & PadState::B) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
@@ -1745,9 +1838,16 @@ void GameClient::handle_input(const PadState& pad) {
     if (potions_.active()) {
         std::string cmd = potions_.input(pad, combat_, decision_["enemies"]);
         if (!cmd.empty()) send(cmd);
+        /* closed: the hand's focus back where it was */
+        if (!potions_.active() && combat_) combat_->set_hand_unfocused(false);
         return;
     }
-    if ((pad.pressed & PadState::X) && !(combat_ && combat_->playing()) && potions_.open()) return;
+    if ((pad.pressed & PadState::X) && !(combat_ && combat_->playing()) && potions_.open()) {
+        /* the potions take the focus: the hand's focused card goes back
+         * down (NHandCardHolder.OnUnfocus) */
+        if (combat_) combat_->set_hand_unfocused(true);
+        return;
+    }
     if (combat_) {
         combat_input(pad);
         return;

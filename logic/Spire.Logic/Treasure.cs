@@ -63,6 +63,8 @@ public partial class RunDriver
                 ["skeleton"] = act.ChestSpineResourcePath,
                 ["skin"] = act.ChestSpineSkinNameNormal,
                 ["skin_outline"] = act.ChestSpineSkinNameStroke,
+                // NTreasureRoom.OpenChest plays it as the chest is pressed.
+                ["open_sfx"] = act.ChestOpenSfx,
             };
         }
         catch { }

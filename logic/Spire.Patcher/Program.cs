@@ -743,6 +743,8 @@ internal sealed class Patcher
                         continue;
                     if (!IsUi(target.DeclaringType)) continue;
                     if (target.Name == ".ctor") continue;
+                    // a node's asset list (static paths, kept by 'strip_bodies')
+                    if (!target.HasThis && IsStaticPathGetter(target.Resolve())) continue;
                     if (target.DeclaringType.IsValueType) continue;
                     if (ins.Previous != null && ins.Previous.OpCode == OpCodes.Constrained) continue;
                     if (target.Parameters.Any(p => p.ParameterType.IsByReference || p.ParameterType.IsPointer)) continue;
@@ -775,6 +777,25 @@ internal sealed class Patcher
     }
 
     /// <summary>
+    /// A node's static path member (AssetPaths, ScenePath, GetAssetPaths,
+    /// GetAllEraTexturePaths, GetPathForAchievement, ...): path strings only,
+    /// which PreloadManager's sets are made of (the logic's Preload.cs).
+    /// </summary>
+    private static bool IsStaticPathGetter(MethodDefinition? m) => m != null && m.IsStatic && IsPathName(m.Name);
+
+    private static bool IsPathName(string name) => name.Contains("Path");
+
+    /// <summary>What the compiler made of such a getter: an iterator's class
+    /// ("&lt;GetAssetPaths&gt;d__16") or a lambda ("&lt;get_AssetPaths&gt;b__0_0").</summary>
+    private static bool IsPathGetterPart(TypeDefinition type, MethodDefinition m)
+    {
+        // a lambda class shared by the type ("<>c"): the lambda's own name
+        string n = type.Name.StartsWith("<") && !type.Name.StartsWith("<>") ? type.Name : m.Name;
+        int close = n.IndexOf('>');
+        return n.StartsWith("<") && close > 1 && IsPathName(n.Substring(1, close - 1));
+    }
+
+    /// <summary>
     /// Every method (constructors aside) of every Godot-derived type in the
     /// given namespaces throws NotSupportedException("headless: Type::Method"). For code the
     /// headless logic never runs (the Godot UI, which the 'ui' patch already cut
@@ -799,6 +820,10 @@ internal sealed class Patcher
                 // A pure seeded selection helper, also used by the adapter's
                 // presentation export; it never touches a Godot node.
                 if (type.FullName == "MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController" && m.Name == "ResolveMusic") continue;
+                // The nodes' asset lists (static paths) make PreloadManager's
+                // sets (AssetSets.CommonAssets, the run's), which the logic
+                // hands the client to read ahead (Preload.cs).
+                if (IsStaticPathGetter(m) || IsPathGetterPart(type, m)) continue;
                 var body = m.Body;
                 body.Instructions.Clear();
                 body.ExceptionHandlers.Clear();

@@ -211,7 +211,15 @@ public partial class RunDriver
         _crystalSphereDoneFloor = -1;
         _eventEntering = null;
         _restSync = null;
+        _musicRoom = null;
+        _musicAct = -1;
+        _preloadKey = null;
     }
+
+    // The room whose track the music plays (RunContext): the last one
+    // entered in this act, the map's after it.
+    private AbstractRoom? _musicRoom;
+    private int _musicAct = -1;
 
     // ─── Test/Debug commands ───
 
@@ -2316,7 +2324,7 @@ public partial class RunDriver
     }
 
     // NPower.RefreshAmount: the icon's label.
-    private Dictionary<string, object?> PowerView(PowerModel pw)
+    internal Dictionary<string, object?> PowerView(PowerModel pw)
     {
         var d = new Dictionary<string, object?>
         {
@@ -2343,6 +2351,36 @@ public partial class RunDriver
     [System.Diagnostics.CodeAnalysis.DynamicDependency("get_SpritePath", typeof(MegaCrit.Sts2.Core.MonsterMoves.Intents.AbstractIntent))]
     /// <summary>A monster's intents as the state shows them (type, the
     /// intent's look, an attack's damage against the players).</summary>
+    /// <summary>An enemy as the combat decision shows it (index: its place
+    /// among the living).</summary>
+    internal Dictionary<string, object?> EnemyView(Creature e, int index, List<Creature>? playerCreatures)
+    {
+        var intents = IntentsView(e, playerCreatures);
+
+        // Enemy powers
+        var ePowers = e.Powers?.Select(PowerView).ToList();
+
+        return new Dictionary<string, object?>
+        {
+            ["index"] = index,
+            // View ids: the monster (its visuals are
+            // scenes/creature_visuals/<id lowercased>.tscn) and the
+            // creature, stable for the whole combat.
+            ["id"] = e.Monster?.Id.Entry,
+            ["combat_id"] = e.CombatId,
+            ["slot"] = string.IsNullOrEmpty(e.SlotName) ? null : e.SlotName,
+            ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
+            ["hp"] = e.CurrentHp,
+            ["max_hp"] = e.MaxHp,
+            ["block"] = e.Block,
+            ["intents"] = intents.Count > 0 ? intents : null,
+            ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
+            ["powers"] = ePowers?.Count > 0 ? ePowers : null,
+            // NCreature.ShowHoverTips: its intents' and powers' tips
+            ["tips"] = Tips(() => e.HoverTips),
+        }.WithCreatureView(e);
+    }
+
     internal static List<Dictionary<string, object?>> IntentsView(Creature e, List<Creature>? playerCreatures)
     {
         var intents = new List<Dictionary<string, object?>>();
@@ -2650,33 +2688,7 @@ public partial class RunDriver
 
         var enemies = combatState?.Enemies?
             .Where(e => e != null && e.IsAlive)
-            .Select((e, i) =>
-            {
-                var intents = IntentsView(e, playerCreatures);
-
-                // Enemy powers
-                var ePowers = e.Powers?.Select(PowerView).ToList();
-
-                return new Dictionary<string, object?>
-                {
-                    ["index"] = i,
-                    // View ids: the monster (its visuals are
-                    // scenes/creature_visuals/<id lowercased>.tscn) and the
-                    // creature, stable for the whole combat.
-                    ["id"] = e.Monster?.Id.Entry,
-                    ["combat_id"] = e.CombatId,
-                    ["slot"] = string.IsNullOrEmpty(e.SlotName) ? null : e.SlotName,
-                    ["name"] = _loc.Monster(e.Monster?.Id.Entry ?? "UNKNOWN"),
-                    ["hp"] = e.CurrentHp,
-                    ["max_hp"] = e.MaxHp,
-                    ["block"] = e.Block,
-                    ["intents"] = intents.Count > 0 ? intents : null,
-                    ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
-                    ["powers"] = ePowers?.Count > 0 ? ePowers : null,
-                    // NCreature.ShowHoverTips: its intents' and powers' tips
-                    ["tips"] = Tips(() => e.HoverTips),
-                }.WithCreatureView(e);
-            }).ToList() ?? new();
+            .Select((e, i) => EnemyView(e, i, playerCreatures)).ToList() ?? new();
 
         // Player powers/buffs
         var playerPowers = player.Creature?.Powers?.Select(PowerView).ToList();
@@ -3075,6 +3087,8 @@ public partial class RunDriver
                 ancient["dialogue_color"] = Rgba(ancientModel.DialogueColor);
                 var character = ancientModel.Owner?.Character ?? _runState!.Players[0].Character;
                 ancient["character_dialogue_color"] = Rgba(character.DialogueColor);
+                // NAncientEventLayout loops it while the layout is up (Neow).
+                ancient["ambient_bgm"] = ancientModel.HasAmbientBgm ? ancientModel.AmbientBgm : null;
                 // A first visit's dialogue (the game picks one of the valid ones
                 // with the chaotic rng and the player's visit counts); the
                 // ancient talks only while its first page is open.
@@ -3099,6 +3113,8 @@ public partial class RunDriver
                                 ["speaker"] = line.Speaker.ToString(),
                                 ["text"] = text,
                                 ["next"] = line.NextButtonText?.GetFormattedText(),
+                                // NAncientDialogueLine.PlaySfx, as the line shows
+                                ["sfx"] = line.GetSfxOrFallbackPath(),
                             });
                         }
                     ancient["dialogue"] = lines;
@@ -3336,6 +3352,8 @@ public partial class RunDriver
             ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
             ["is_stocked"] = e.IsStocked,
+            // NMerchantRelic.CreateHoverTip (focused)
+            ["tips"] = e.Model != null ? Tips(() => e.Model!.HoverTips) : null,
             // NMerchantRelic.OnPreview (Y): NInspectRelicScreen
             ["inspect"] = e.Model != null ? InspectRelicView(e.Model, SaveManager.Instance.GenerateUnlockStateFromProgress().Relics.ToHashSet()) : null,
         }).ToList();
@@ -3348,9 +3366,17 @@ public partial class RunDriver
             ["description"] = _loc.Bilingual("potions", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
             ["is_stocked"] = e.IsStocked,
+            // NMerchantPotion.CreateHoverTip (focused)
+            ["tips"] = e.Model != null ? Tips(() => e.Model!.HoverTips) : null,
         }).ToList();
 
         var removal = merchantRoom.GetLocalInventory().CardRemovalEntry;
+        // NMerchantCardRemoval.CreateHoverTip: the service's title and
+        // description (Amount: what each use adds to the price)
+        var removalDescription = new LocString("merchant_room", "MERCHANT.cardRemovalService.description");
+        removalDescription.Add("Amount", MerchantCardRemovalEntry.PriceIncrease);
+        var removalTip = new MegaCrit.Sts2.Core.HoverTips.HoverTip(
+            new LocString("merchant_room", "MERCHANT.cardRemovalService.title"), removalDescription);
 
         return new Dictionary<string, object?>
         {
@@ -3362,6 +3388,7 @@ public partial class RunDriver
             ["potions"] = potions,
             ["card_removal_cost"] = removal?.Cost,
             ["card_removal_used"] = removal?.Used ?? true,
+            ["card_removal_tips"] = Tips(() => new MegaCrit.Sts2.Core.HoverTips.IHoverTip[] { removalTip }),
             ["player"] = PlayerSummary(player),
         };
     }
@@ -3383,6 +3410,7 @@ public partial class RunDriver
             ["description"] = _loc.Bilingual("relics", (e.Model?.Id.Entry ?? "?") + ".description"),
             ["cost"] = e.Cost,
             ["is_stocked"] = e.IsStocked,
+            ["tips"] = e.Model != null ? Tips(() => e.Model!.HoverTips) : null,
             ["inspect"] = e.Model != null ? InspectRelicView(e.Model, SaveManager.Instance.GenerateUnlockStateFromProgress().Relics.ToHashSet()) : null,
         }).ToList();
         return new Dictionary<string, object?>
@@ -3719,13 +3747,28 @@ public partial class RunDriver
             var selection = MegaCrit.Sts2.Core.Nodes.Audio.NRunMusicController.ResolveMusic(
                 null, musicAct.BgMusicOptions, musicAct.MusicBankPaths, _runState.Rng.Seed);
             var encounter = (_runState.CurrentRoom as CombatRoom)?.Encounter;
-            var roomType = _runState.CurrentRoom?.RoomType;
+            // NRunMusicController.UpdateTrack runs when a room is entered and
+            // when its combat starts and ends. Leaving a room only opens the
+            // map (ProceedFromTerminalRewardsScreen: the room stays; this
+            // driver enters a MapRoom instead), so the map after a room keeps
+            // that room's track; over the merchant's, ToggleMerchantTrack
+            // (NMapScreen.Opened) makes it MerchantEnd. The act's first map
+            // (a MapRoom entered) is Init.
+            var current = _runState.CurrentRoom;
+            if (current is not MapRoom || _runState.CurrentActIndex != _musicAct)
+            {
+                _musicRoom = current is MapRoom ? null : current;
+                _musicAct = _runState.CurrentActIndex;
+            }
+            var musicRoom = current is MapRoom ? _musicRoom : current;
+            var roomType = musicRoom?.RoomType;
             bool combat = roomType is RoomType.Monster or RoomType.Elite or RoomType.Boss;
-            int progress = combat && !CombatManager.Instance.IsInProgress ? 7 : roomType switch
+            int progress = current is MapRoom && musicRoom is MerchantRoom ? 9
+                : combat && !CombatManager.Instance.IsInProgress ? 7 : roomType switch
             {
                 RoomType.Shop => 2, RoomType.RestSite => 3, RoomType.Treasure => 5,
                 RoomType.Monster => 1, RoomType.Elite or RoomType.Boss => 6,
-                RoomType.Event when (_runState.CurrentRoom as EventRoom)?.CanonicalEvent is AncientEventModel => 0,
+                RoomType.Event when (musicRoom as EventRoom)?.CanonicalEvent is AncientEventModel => 0,
                 RoomType.Event => 4, _ => 0,
             };
             ctx["audio"] = new Dictionary<string, object?>
@@ -3747,6 +3790,24 @@ public partial class RunDriver
     {
         var history = CombatManager.Instance?.History;
         return history == null ? 0 : history.CardPlaysStarted.Count(e => e.CardPlay.Card == card);
+    }
+
+    /// <summary>A folder's files copied over another's (made new).</summary>
+    private static void CopyTree(string from, string to)
+    {
+        try
+        {
+            if (Directory.Exists(to)) Directory.Delete(to, recursive: true);
+            Directory.CreateDirectory(to);
+            if (!Directory.Exists(from)) return;
+            foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
+                Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, dir)));
+            // the bytes only: File.Copy also copies the file's mode, which
+            // the console's WASI runtime has no call for (ENOSYS)
+            foreach (var file in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
+                File.WriteAllBytes(Path.Combine(to, Path.GetRelativePath(from, file)), File.ReadAllBytes(file));
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] copy {from} -> {to}: {ex.Message}"); }
     }
 
     /// <summary>
@@ -3823,6 +3884,10 @@ public partial class RunDriver
             _saveStore = store;
             SaveManager.MockInstanceForTesting(new SaveManager(store, forceSynchronous: true));
             Log($"Saves in {store.Root}");
+            // With its commands logged (the console), the session's saves as
+            // it found them, in <data>/session_start: it plays again from
+            // the same profiles (spire_play --commands)
+            if (Protocol.LogCommands) CopyTree(store.Root, Path.Combine(DataDir.Root, "session_start"));
         }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager store: {ex.Message}"); }
 

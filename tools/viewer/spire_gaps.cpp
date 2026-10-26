@@ -126,6 +126,7 @@ int main(int argc, char** argv) {
     size_t slash = pack_path.find_last_of("/\\");
     Loc::init(slash == std::string::npos ? "data" : pack_path.substr(0, slash) + "/data");
     SceneLibrary lib(&pack);
+    lib.set_warm_enabled(false); /* its scenes: the ones shown */
     GameAudio audio(&pack);
     if (audio.events().available()) lib.set_audio(&audio);
     audio.set_dry(g_fast);

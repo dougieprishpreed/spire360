@@ -2510,6 +2510,37 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
             g.who = enemy_who_[j];
             ghosts_.push_back(g);
         }
+        /* A creature summoned and killed within these steps (not among the
+         * decision's living): from its spawn's view, hidden until the spawn
+         * shows it, gone with its death as the others. */
+        const Json& steps = d["steps"];
+        for (size_t s = 0; container && s < steps.size(); ++s)
+            for (size_t k = 0; k < steps[s].size(); ++k) {
+                const Json& ch = steps[s][k];
+                if (ch["t"].str() != "spawn" || !ch["view"].is_object()) continue;
+                const std::string& id = ch["who"].str();
+                if (std::find(who.begin(), who.end(), id) != who.end() || creature_for(id)) continue;
+                const Json& v = ch["view"];
+                Ghost g;
+                if (!make_creature(v["id"].str(), false, g.c)) continue;
+                g.c.node->name = format("CombatEnemy_%d", v["combat_id"].i(-1));
+                container->add_child(g.c.node);
+                g.c.hp_bar_reduction = v["hp_bar_reduction"].f();
+                g.c.data = v;
+                g.c.powers = v["powers"];
+                update_bounds(g.c);
+                refresh_state(g.c, false);
+                set_nameplate_text(g.c.nameplate, v["name"].str());
+                Vec2 slot;
+                if (slot_position(v, &slot)) g.c.node->set_position(slot);
+                else if (places_ && places_->find(v["combat_id"].i()) != places_->end()) g.c.node->set_position((*places_)[v["combat_id"].i()]);
+                else g.c.node->set_position(Vec2(250.0f + (float)(next.size() + ghosts_.size()) * 220.0f, 200));
+                play_idle(g.c.node);
+                setup_creature_spine(g.c.visuals, g.c.data);
+                g.c.node->visible = false;
+                g.who = id;
+                ghosts_.push_back(g);
+            }
         enemies_ = next;
         enemy_who_ = who;
         /* A pet that joined during the fight (Byrdpip hatched mid-combat,
@@ -2669,7 +2700,11 @@ void CombatScreen::move_card(const Json& change) {
         refresh_tips();
     }
     if (to == "hand" && from != "hand") {
-        const Json& cards = pending_["hand"];
+        /* the decision's hand; a card that leaves it again within these
+         * steps (Hellraiser plays it as it is drawn) comes with its view */
+        Json passing = Json::make_array();
+        if (change["view"].is_object()) passing.append(change["view"]);
+        const Json& cards = change["view"].is_object() ? passing : pending_["hand"];
         for (size_t i = 0; hand_box_ && i < cards.size(); ++i) {
             if (cards[i]["instance_id"].i(-2) != id) continue;
             bool exists = false;
@@ -2990,10 +3025,12 @@ bool CombatScreen::apply_state(const Json& ch) {
             next.append(p);
         }
         if (!exists && !ch["removed"].b()) {
-            const Json* metadata = NULL;
+            /* its look: the decision's (the cue's own for a power gone
+             * again within these steps) */
+            const Json* metadata = ch["view"].is_object() ? &ch["view"] : NULL;
             const Json& es = pending_["enemies"];
             const Json& powers = ch["who"].str() == "player" ? pending_["player_powers"] : c->powers;
-            metadata = find_power(powers, ch["power"].str().c_str());
+            if (!metadata) metadata = find_power(powers, ch["power"].str().c_str());
             for (size_t i = 0; !metadata && i < es.size(); ++i)
                 if (format("e%d", es[i]["combat_id"].i()) == ch["who"].str()) metadata = find_power(es[i]["powers"], ch["power"].str().c_str());
             Json p = metadata ? *metadata : Json();
@@ -4023,7 +4060,9 @@ void CombatScreen::add_cue(const Cue& c) {
 /* NPlayerTurnBanner / NEnemyTurnBanner / NCombatStartBanner (the scenes in
  * scenes/combat), over everything. */
 void CombatScreen::show_banner(const std::string& kind, int round) {
-    if (lib_->audio()) lib_->audio()->ui(kind == "start" ? "battle_start_1.mp3" : kind == "enemy" ? "enemy_turn.mp3" : "player_turn.mp3");
+    /* NCombatStartBanner: Rng.Chaotic.NextItem(TmpSfx.BattleStart) */
+    if (lib_->audio()) lib_->audio()->ui(kind == "start" ? format("battle_start_%d.mp3", (int)(chaotic_rand() % 2) + 1)
+                                         : kind == "enemy" ? "enemy_turn.mp3" : "player_turn.mp3");
     if (!root_) return;
     std::string path = "scenes/combat/" + kind + "_banner.tscn";
     if (kind == "start") path = "scenes/combat/combat_start_banner.tscn";
@@ -4492,6 +4531,7 @@ bool CombatScreen::fly(MovingCard& m, double dt) {
                 stop_particles(m.trail);
                 Trail t = { m.trail, 0 };
                 fading_trails_.push_back(t);
+                m.faded_trail = m.trail;
                 m.trail = NULL;
             }
             if (body && body->is_control()) {
@@ -4541,6 +4581,15 @@ bool CombatScreen::fly(MovingCard& m, double dt) {
     }
     if (m.trail) follow(m.trail, card);
     if (done) {
+        /* NCardFlyVfx.OnCardExitedTree: its trail goes with the card */
+        for (size_t i = 0; m.faded_trail && i < fading_trails_.size(); ++i)
+            if (fading_trails_[i].node == m.faded_trail) {
+                if (m.faded_trail->parent) m.faded_trail->parent->remove_child(m.faded_trail);
+                delete m.faded_trail;
+                fading_trails_.erase(fading_trails_.begin() + (long)i);
+                break;
+            }
+        m.faded_trail = NULL;
         if (card->parent) card->parent->remove_child(card);
         delete card;
         delete m.path_scene;

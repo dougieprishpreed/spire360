@@ -3,6 +3,7 @@
 
 #include "canvas.h"
 #include "controls.h"
+#include "scene.h"
 #include "script.h"
 #include "shaders.h"
 #include "tween.h"
@@ -20,6 +21,7 @@ struct SceneTree::DrawItem {
     CanvasItem* ci;
     Xform2D xf;
     Color modulate;
+    int layer; /* the CanvasLayer's (0: the default canvas) */
     int z;
     int seq;
     bool has_clip;
@@ -39,11 +41,12 @@ enum { GROUP_NONE = 0, GROUP_BEGIN = 1, GROUP_MASK = 2 };
 
 struct DrawOrder {
     bool operator()(const SceneTree::DrawItem* a, const SceneTree::DrawItem* b) const {
+        if (a->layer != b->layer) return a->layer < b->layer;
         return a->z != b->z ? a->z < b->z : a->seq < b->seq;
     }
 };
 
-SceneTree::SceneTree() : items_drawn(0), design_size_(1920, 1080), canvas_(NULL) {
+SceneTree::SceneTree() : items_drawn(0), design_size_(1920, 1080), canvas_(NULL), layer_(0) {
     root_.name = "root";
     root_.type = "Window";
 }
@@ -171,9 +174,13 @@ void SceneTree::collect(Node* n, const Xform2D& parent_xf, const Color& parent_m
         return;
     }
     if (!n->is_canvas_item()) {
-        /* CanvasItems under a plain Node start again from the canvas. */
+        /* CanvasItems under a plain Node start again from the canvas; a
+         * CanvasLayer's are a canvas of their own, drawn in layer order. */
+        int was = layer_;
+        if (n->type == "CanvasLayer") layer_ = ((CanvasLayer*)n)->layer;
         for (size_t i = 0; i < n->children.size(); ++i)
             collect(n->children[i], to_screen_, Color(), 0, NULL, NULL, in_group, out);
+        layer_ = was;
         return;
     }
     CanvasItem* ci = (CanvasItem*)n;
@@ -200,6 +207,7 @@ void SceneTree::collect(Node* n, const Xform2D& parent_xf, const Color& parent_m
     d.ci = ci;
     d.xf = xf;
     d.modulate = mod * ci->self_modulate;
+    d.layer = layer_;
     d.z = my_z;
     d.seq = (int)out.size();
     d.has_clip = child_clip != NULL;
@@ -259,7 +267,10 @@ void SceneTree::render_viewport(Canvas& canvas, SubViewport* vp) {
     if (w <= 0 || h <= 0) return;
     Xform2D xf(Vec2(w / units.x, 0), Vec2(0, h / units.y), Vec2(0, 0));
     std::vector<DrawItem> items;
+    int was = layer_;
+    layer_ = 0; /* a viewport's canvas has its own layers */
     for (size_t i = 0; i < vp->children.size(); ++i) collect(vp->children[i], xf, Color(), 0, NULL, NULL, false, items);
+    layer_ = was;
     if (!canvas.renderer()->begin_capture(w, h)) return;
     if (!vp->transparent_bg) {
         /* Godot's default clear colour */
@@ -275,11 +286,13 @@ void SceneTree::render_viewport(Canvas& canvas, SubViewport* vp) {
 
 void SceneTree::render(Canvas& canvas) {
     canvas.begin_frame();
+    if (SceneLibrary* lib = SceneLibrary::current()) lib->warm_step(canvas);
     skipped.clear();
     items_drawn = 0;
     std::vector<DrawItem> items;
     canvas_ = &canvas;
     viewports_.clear();
+    layer_ = 0;
     collect(&root_, to_screen_, Color(), 0, NULL, NULL, false, items);
     /* the viewports first (one inside another: found as its turn comes) */
     for (size_t i = 0; i < viewports_.size(); ++i) render_viewport(canvas, viewports_[i]);

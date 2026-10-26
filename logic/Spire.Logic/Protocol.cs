@@ -21,6 +21,13 @@ public sealed class Protocol
         _out = output;
     }
 
+    /// <summary>
+    /// SPIRE_LOG_COMMANDS: each command on stderr as "[CMD] {json}" (the
+    /// console's logic log), so a session can be played again on PC
+    /// (spire_play --commands).
+    /// </summary>
+    public static readonly bool LogCommands = Environment.GetEnvironmentVariable("SPIRE_LOG_COMMANDS") is { Length: > 0 } v && v != "0";
+
     /// <summary>Next non-empty command, or null at end of input.</summary>
     public JsonElement? ReadCommand()
     {
@@ -29,6 +36,7 @@ public sealed class Protocol
         {
             line = line.Trim();
             if (line.Length == 0) continue;
+            if (LogCommands) Console.Error.WriteLine("[CMD] " + line);
             try
             {
                 using var doc = JsonDocument.Parse(line);

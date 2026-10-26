@@ -128,6 +128,16 @@ public:
     int effective_texture_flags() const;
 };
 
+/* Godot's CanvasLayer: its subtree is a canvas of its own, drawn in layer
+ * order (lower first; the default canvas is layer 0), its z from 0 again;
+ * a CanvasLayer inside one is a layer of its own number. */
+class CanvasLayer : public Node {
+public:
+    CanvasLayer() : layer(1) {}
+    int layer;
+    virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+};
+
 class Node2D : public CanvasItem {
 public:
     Node2D();

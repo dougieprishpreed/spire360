@@ -68,10 +68,13 @@ private:
         std::string id;   /* CHARACTER id, or RANDOM_CHARACTER */
         bool locked;
     };
-    void select(int i, bool animate);
+    /* feedback: the selection's sound and shake (not when the screen only
+     * shows it again: the profile's progress came) */
+    void select(int i, bool animate, bool feedback = true);
     void refresh_info();
     void refresh_locks();
     const Json* progress_for(const std::string& id) const;
+    std::string unlock_text(const std::string& id) const;
     void set_ascension_range(int max, int level);
     void set_ascension(int level);
     const Json* data_for(const std::string& id) const;

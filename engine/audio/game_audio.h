@@ -22,6 +22,9 @@ public:
     void steps(const Json& steps);
     void decision(const Json& decision);
     void menu();
+    /* NRunMusicController.ToggleMerchantTrack (NMerchantRoom, the map
+     * screen opened or closed over it): Progress MerchantEnd or Merchant */
+    void merchant_map(bool open);
     void ui(const std::string& path, float volume = 1);
     /* Cues run on the clock as ever but nothing is decoded or mixed (a tool
      * sweeping traces: spire_gaps --fast). */

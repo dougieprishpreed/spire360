@@ -78,8 +78,10 @@ def compile_bank(bank, sources):
                 for p in params.values()}, 'nodes': {}, 'buses': {}, 'events': {}}
 
     def conditions(evaluators):
-        # The bank's evaluator stream uses inclusive ranges; Basic2/Type30
-        # join two alternatives (the treasure/unknown Progress branch).
+        # The bank's evaluator stream gives [min, max] ranges (the engine
+        # excludes max for a discrete parameter: a label k is k..k+1);
+        # Basic2/Type30 join two alternatives (the treasure/unknown Progress
+        # branch).
         result, parameter = [], None
         for e in evaluators:
             if e['type'] == 'Type11':

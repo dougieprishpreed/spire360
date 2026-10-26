@@ -37,7 +37,10 @@ DROP = {
     "ancient_border", "ancient_text_bg", "enchantment_view", "overlay", "card_overlay",  # a card's look (NCard)
     "death_fade", "death_padding", "death_anim_length",  # a monster's death (NCreature.AnimDie)
     "run_time", "icon_base", "relic_icon_base", "inspect_upgrade", "inspect", "item_views",  # NRunTimer (wall clock)
+    "open_sfx",  # NTreasureRoom.OpenChest's sound (the act's ChestOpenSfx)
     "crystal_sphere",  # the finished NCrystalSphereScreen under its rewards
+    "preload",  # PreloadManager's sets for the client to read ahead
+    "card_removal_tips",  # NMerchantCardRemoval's hover tip
     "peek",  # NPeekButton enabled: a fight in progress
     "drawing_color",  # the map's line colour (Character.MapDrawingColor)
     "room_view",  # a finished fight's room behind its rewards (a continued run)

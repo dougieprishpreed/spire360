@@ -42,6 +42,7 @@ public:
     Control* row_for(int reward_index) const;
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual bool busy() const { return delay_ > 0; }
     virtual void frame(double dt);
 
@@ -65,6 +66,8 @@ private:
     bool animate_in_, terminal_, can_skip_, fresh_;
     double delay_;
     Node* overlay_[2]; /* the backstop and the screen, hidden while delayed */
+    Node* root_;
+    TipFollower tips_; /* NRewardButton.OnFocus: Reward.HoverTips, left of it */
     TweenSet tweens_;
 };
 

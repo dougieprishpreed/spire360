@@ -46,12 +46,19 @@ private:
         bool on;
         Node* reticle;
     };
+    static bool plays_button_sounds(const Item& it);
+    /* The filter's Loc (card_library ..._TIP; NULL: none, the characters'
+     * pools and the sorters) */
+    static const char* filter_tip(const Item& it);
+    void clear_filter_tip();
+    Action input_items(const PadState& pad, std::string* cmd);
     void add(Node* screen, const char* unique, Kind kind, const std::string& key);
     void refresh_item(Item& it);
     void rebuild();
     void layout();
     void focus_card(int i);
     void focus_item(int i);
+    bool view_on(const char* key) const;
     bool passes(const Json& c) const;
     int compare(const Json& a, const Json& b) const;
 
@@ -67,6 +74,8 @@ private:
     std::vector<int> order_; /* indices into cards_ shown */
     int focus_;              /* in order_; -1: the sidebar */
     int item_focus_;
+    int sounded_item_; /* the sidebar item last given its hover sound */
+    Control* filter_tip_; /* the focused filter's HoverTip(Loc), under root_ */
     int columns_;
     float scroll_, scroll_to_, lim_lo_, lim_hi_, view_h_;
     Node* count_label_;

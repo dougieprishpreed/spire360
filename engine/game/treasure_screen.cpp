@@ -2,6 +2,7 @@
 #include "loc.h"
 #include "top_bar.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/particles.h"
@@ -191,12 +192,25 @@ std::string TreasureScreen::input(const PadState& pad) {
     if (stage_ == "closed") {
         if (pad.pressed & PadState::A) {
             sent_ = true;
+            /* NTreasureButton (NButton): ui_click; OpenChest: the act's
+             * chest sound as it is pressed */
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+            const Json& sfx = decision_["chest"]["open_sfx"];
+            if (sfx.is_string() && !sfx.str().empty() && lib_->audio()) {
+                Json cue;
+                cue.set("t", Json::make_string("sfx"));
+                cue.set("op", Json::make_string("play"));
+                cue.set("path", sfx);
+                lib_->audio()->cue(cue);
+            }
             return protocol_action("open_chest");
         }
         return std::string();
     }
     if (stage_ == "open" && (pad.pressed & PadState::A) && decision_["relics"].size() > 0) {
-        /* OnPress: the relic sinks (1.9). */
+        /* OnPress: the relic sinks (1.9); NTreasureRoomRelicHolder plays
+         * NButton's ui_click (the proceed button none). */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         if (relic_) tweens_.tween(&relic_->scale, Vec2(1.9f, 1.9f), 0.4f, TRANS_EXPO, EASE_OUT);
         sent_ = true;
         return protocol_action("pick_relic", format("\"relic_index\":%d", decision_["relics"][(size_t)0]["index"].i()));

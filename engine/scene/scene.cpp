@@ -4,6 +4,7 @@
 #include "animation.h"
 
 #include "../core/pack.h"
+#include "canvas.h"
 #include "controls.h"
 #include "particles.h"
 #include "path_2d.h"
@@ -63,7 +64,8 @@ static SceneLibrary* g_library = NULL;
 
 SceneLibrary* SceneLibrary::current() { return g_library; }
 
-SceneLibrary::SceneLibrary(const Pack* pack) : pack_(pack), audio_(NULL), default_theme_(NULL), default_font_(NULL) {
+SceneLibrary::SceneLibrary(const Pack* pack)
+    : pack_(pack), audio_(NULL), warm_enabled_(true), default_theme_(NULL), default_font_(NULL) {
     g_library = this;
     default_font_ = new FontRes("FontFile");
     default_font_->file = DEFAULT_FONT_NAME;
@@ -118,6 +120,7 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
     std::map<std::string, SceneFile*>::iterator it = files_.find(name);
     if (it != files_.end()) return it->second;
     SceneFile* f = NULL;
+    double started = load_trace_start();
     const PackEntry* e = pack_ ? pack_->find(name.c_str()) : NULL;
     std::vector<u8> data;
     if (e && e->type == PACK_SCENE && pack_->read(e, data)) {
@@ -132,6 +135,7 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
         }
     }
     files_[name] = f;
+    if (f) load_traced("scene", name, started);
     return f;
 }
 
@@ -407,6 +411,7 @@ ThemeRes* SceneLibrary::build_theme(const Json& p, const SceneFile* ctx) {
 /* ---- nodes ---- */
 
 static Node* new_node(const std::string& type) {
+    if (type == "CanvasLayer") return new CanvasLayer();
     if (type == "Control") return new Control();
     if (type == "TextureRect") return new TextureRect();
     if (type == "NinePatchRect") return new NinePatchRect();
@@ -446,6 +451,47 @@ static Node* new_node(const std::string& type) {
     if (godot_is_a(type, "Control")) return new Control();
     if (godot_is_a(type, "Node2D")) return new Node2D();
     return new Node();
+}
+
+/* The pack files a scene or resource file refers to ({"ext": path}). */
+static void ext_refs(const Json& v, std::deque<std::string>& out) {
+    if (v.is_object()) {
+        if (v["ext"].is_string()) out.push_back(v["ext"].str());
+        const std::vector<std::string>& keys = v.keys();
+        for (size_t i = 0; i < keys.size(); ++i) ext_refs(v.get(keys[i]), out);
+    } else if (v.is_array()) {
+        for (size_t i = 0; i < v.size(); ++i) ext_refs(v[i], out);
+    }
+}
+
+void SceneLibrary::warm(const Json& paths) {
+    if (!warm_enabled_) return;
+    /* a new batch: what a run before warmed may have been evicted since
+     * (the files stay parsed, the canvas skips textures it holds) */
+    if (warm_queue_.empty()) warmed_.clear();
+    for (size_t i = 0; i < paths.size(); ++i) {
+        const std::string& p = paths[i].str();
+        warm_queue_.push_back(p.compare(0, 6, "res://") == 0 ? p.substr(6) : p);
+    }
+}
+
+void SceneLibrary::warm_step(Canvas& canvas) {
+    /* a frame's share: the console reads a texture in tens of ms */
+    int files = 0, textures = 0;
+    while (!warm_queue_.empty() && files < 24 && textures < 4) {
+        std::string p = warm_queue_.front();
+        warm_queue_.pop_front();
+        if (!warmed_.insert(p).second) continue;
+        const PackEntry* e = pack_ ? pack_->find(p.c_str()) : NULL;
+        if (!e) continue;
+        if (e->type == PACK_TEXTURE) {
+            if (canvas.prefetch(p)) ++textures;
+        } else if (e->type == PACK_SCENE) {
+            const SceneFile* f = file(p);
+            ++files;
+            if (f) ext_refs(f->doc, warm_queue_);
+        }
+    }
 }
 
 Node* SceneLibrary::create_node(const std::string& type) {

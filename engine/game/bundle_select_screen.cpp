@@ -2,6 +2,7 @@
 #include "card_view.h"
 #include "loc.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
@@ -47,7 +48,7 @@ Node* BundleSelectScreen::build(const Json& d, std::string* error) {
     focus_ = open_ = -1;
     Control* root = full_rect_control("BundleOverlay");
     if (background_) {
-        root->add_child(background_);
+        root->add_child(overlay_behind(background_));
         background_ = NULL;
     }
     /* UseSharedBackstop. */
@@ -174,7 +175,11 @@ void BundleSelectScreen::close_preview() {
 
 std::string BundleSelectScreen::input(const PadState& pad) {
     if (bundles_.empty()) return std::string();
+    /* The bundles' hitboxes play NButton's sounds; the preview's confirm
+     * ui_click, its cancel (NBackButton) ui_back. */
     if (open_ >= 0) {
+        if ((pad.pressed & (PadState::B | PadState::Y | PadState::A)) && lib_->audio())
+            lib_->audio()->ui((pad.pressed & PadState::B) ? "event:/sfx/ui/clicks/ui_back" : "event:/sfx/ui/clicks/ui_click");
         if (pad.pressed & PadState::B) close_preview();
         else if (pad.pressed & (PadState::Y | PadState::A))
             return protocol_action("select_bundle",
@@ -183,9 +188,14 @@ std::string BundleSelectScreen::input(const PadState& pad) {
     }
     int n = (int)bundles_.size();
     /* Focus neighbours wrap left / right. */
+    int was = focus_;
     if (pad.pressed & PadState::LEFT) focus((focus_ + n - 1) % n);
     if (pad.pressed & PadState::RIGHT) focus((focus_ + 1) % n);
-    if ((pad.pressed & PadState::A) && focus_ >= 0) open_preview(focus_);
+    if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
+    if ((pad.pressed & PadState::A) && focus_ >= 0) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        open_preview(focus_);
+    }
     return std::string();
 }
 

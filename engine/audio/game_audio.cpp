@@ -80,6 +80,11 @@ void GameAudio::menu() {
     ambience(""); events_.global_parameter("Progress", 0);
     music("event:/music/menu_update");
 }
+void GameAudio::merchant_map(bool open) {
+    ScopedLock lock(lock_);
+    context_progress_ = open ? 9 : 2;
+    events_.global_parameter("Progress", (float)context_progress_);
+}
 void GameAudio::stop_room_loops(const std::string& owner) {
     ScopedLock lock(lock_);
     for (std::map<std::string, Loop>::iterator i = loops_.begin(); i != loops_.end();) {

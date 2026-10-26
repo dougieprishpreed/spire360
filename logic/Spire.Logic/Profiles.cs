@@ -265,6 +265,8 @@ public partial class RunDriver
             d["singleplayer_enabled"] = othersEnabled;
             d["compendium_available"] = sm.IsCompendiumAvailable();
             d["characters"] = CharacterProgress();
+            // The Random button's while it is locked (CharacterModel.GetUnlockText)
+            d["random_unlock_text"] = Text(() => ModelDb.Character<RandomCharacter>().GetUnlockText().GetFormattedText());
             // NAscensionPanel.RefreshAscensionText.
             var ascensions = new List<Dictionary<string, object?>>();
             for (int i = 0; i <= MaxAscensionLevel; i++)

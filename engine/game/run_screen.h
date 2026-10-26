@@ -40,6 +40,11 @@ public:
     /* One frame of pad input: a command for the logic, or "" for none. */
     virtual std::string input(const PadState& pad) = 0;
     virtual bool busy() const { return false; }
+    /* The screen plays its controls' own sounds (NButton's HoveredSfx as
+     * one takes the focus, ClickedSfx as it is pressed; card holders, map
+     * points, the proceed button... play other or none); false: the
+     * client's NButton defaults for any move, A and B. */
+    virtual bool own_ui_sounds() const { return false; }
     /* What the room gives NGame.SetScreenShakeTarget (NEventRoom's event
      * container, NMerchantRoom, NRestSiteRoom, NTreasureRoom); NULL for
      * none. Set by build. */

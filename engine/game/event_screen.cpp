@@ -2,6 +2,7 @@
 #include "top_bar.h"
 #include "combat_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/rich_text.h"
@@ -54,6 +55,16 @@ EventScreen::EventScreen(SceneLibrary* lib)
 
 EventScreen::~EventScreen() { delete combat_; }
 
+/* SfxCmd.Play / PlayLoop of a path the logic gave (none: nothing). */
+static void play_sfx_cue(SceneLibrary* lib, const char* op, const Json& path) {
+    if (!path.is_string() || path.str().empty() || !lib->audio()) return;
+    Json cue;
+    cue.set("t", Json::make_string("sfx"));
+    cue.set("op", Json::make_string(op));
+    cue.set("path", path);
+    lib->audio()->cue(cue);
+}
+
 void EventScreen::play_room_steps(const Json& steps) {
     sparring_ = false;
     if (combat_) combat_->play_steps(steps);
@@ -102,6 +113,9 @@ Node* EventScreen::build(const Json& d, std::string* error) {
     }
     root->add_child(layout);
     root->add_child(frame_driver(this));
+    /* NAncientEventLayout.InitializeVisuals: the ancient's ambience loops
+     * until the room goes (the floor's loops stop with it). */
+    if (ancient_) play_sfx_cue(lib_, "loop", d["ancient"]["ambient_bgm"]);
     /* NEventRoom's container; a combat layout's room holds the shake */
     shake_target_ = !combat && layout->is_control() ? (Control*)layout : NULL;
     return root;
@@ -433,6 +447,8 @@ void EventScreen::show_line(int i) {
         num = ln->position.y + ln->size.y;
         Node* icon = ln->find_unique(dl[(size_t)i]["speaker"].str() != "Character" ? "AncientIcon" : "CharacterIcon");
         set_visible(icon, true);
+        /* NAncientDialogueLine.PlaySfx */
+        play_sfx_cue(lib_, "play", dl[(size_t)i]["sfx"]);
     }
     if (last) {
         set_visible(next_button_, false);
@@ -454,20 +470,29 @@ void EventScreen::show_line(int i) {
 
 std::string EventScreen::input(const PadState& pad) {
     if (ancient_ && laid_out_ && line_ < (int)lines_.size() - 1) {
-        if (pad.pressed & PadState::A) show_line(line_ + 1);
+        /* NAncientDialogueHitbox: NButton's ui_click, no hover sound */
+        if (pad.pressed & PadState::A) {
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+            show_line(line_ + 1);
+        }
         return std::string();
     }
     if (!enabled_ || time_ < enable_at_ || options_.empty()) return std::string();
     int n = (int)options_.size();
+    /* NEventOptionButton plays NButton's sounds. */
+    int was = focus_;
     if (focus_ < 0) {
         if (pad.pressed & (PadState::UP | PadState::DOWN | PadState::A)) focus(0);
+        if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
         return std::string();
     }
     if (pad.pressed & PadState::UP) focus((focus_ + n - 1) % n);
     if (pad.pressed & PadState::DOWN) focus((focus_ + 1) % n);
+    if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if (pad.pressed & PadState::A) {
         const Option& op = options_[(size_t)focus_];
         if (op.locked) return std::string();
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         return protocol_action("choose_option", format("\"option_index\":%d", op.index));
     }
     return std::string();

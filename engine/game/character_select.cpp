@@ -2,6 +2,7 @@
 #include "top_bar.h"
 #include "../audio/game_audio.h"
 #include "loc.h"
+#include "screen_shake.h"
 
 #include "../scene/controls.h"
 #include "../scene/node.h"
@@ -29,6 +30,13 @@ const Json* CharacterSelectScreen::progress_for(const std::string& id) const {
     for (size_t i = 0; i < cs.size(); ++i)
         if (cs[i]["id"].str() == id) return &cs[i];
     return NULL;
+}
+
+/* CharacterModel.GetUnlockText (Random's: the menu's own field) */
+std::string CharacterSelectScreen::unlock_text(const std::string& id) const {
+    if (id == RANDOM_ID) return progress_["random_unlock_text"].str();
+    const Json* p = progress_for(id);
+    return p ? (*p)["unlock_text"].str() : std::string();
 }
 
 const Json* CharacterSelectScreen::data_for(const std::string& id) const {
@@ -115,6 +123,8 @@ Node* CharacterSelectScreen::build(const Json& characters, const std::string& se
         buttons_.push_back(bt);
     }
     screen->add_child(frame_driver(this));
+    /* NMainMenu is the screen shake's target (the selections' shakes) */
+    if (screen->is_control()) screen->add_child(make_shake_driver((Control*)screen));
     refresh_locks();
     int first = 0;
     for (size_t i = 0; i < buttons_.size(); ++i)
@@ -136,7 +146,7 @@ void CharacterSelectScreen::set_progress(const Json& menu) {
     refresh_locks();
     int i = focus_;
     focus_ = -1;
-    if (i >= 0) select(i, false);
+    if (i >= 0) select(i, false, false);
     /* a character the timeline just unlocked: its animation, once */
     if (!unlock_played_ && menu["pending_unlock"].is_string())
         for (size_t k = 0; k < buttons_.size(); ++k)
@@ -266,11 +276,13 @@ void CharacterSelectScreen::set_data(const Json& characters) {
 }
 
 /* NCharacterSelectScreen.SelectCharacter's panel: the name, HP and gold,
- * description and starting relic (Random: question marks, no relic). */
+ * description and starting relic (Random: question marks, no relic; a
+ * locked character: "Locked", how to unlock it, its relic darkened). */
 void CharacterSelectScreen::refresh_info() {
     if (!info_ || focus_ < 0) return;
     const std::string& id = buttons_[(size_t)focus_].id;
     bool random = id == RANDOM_ID;
+    bool locked = buttons_[(size_t)focus_].locked;
     const Json* d = data_for(id);
     std::string key = id + ".title";
     std::string title = d ? (*d)["title"].str() : Loc::get("characters", key.c_str());
@@ -280,10 +292,14 @@ void CharacterSelectScreen::refresh_info() {
         title = Loc::get("characters", "RANDOM_CHARACTER.title");
         desc = Loc::get("characters", "RANDOM_CHARACTER.description");
     }
+    if (locked) {
+        title = Loc::get("main_menu_ui", "CHARACTER_SELECT.locked.title");
+        desc = unlock_text(id);
+    }
     set_label(info_->get_node("VBoxContainer/Name"), title);
     set_label(info_->get_node("VBoxContainer/DescriptionLabel"), desc);
     std::string hp = "\?\?/\?\?", gold = "\?\?\?"; /* (no trigraphs) */
-    if (d && !random) {
+    if (d && !random && !locked) {
         hp = format("%d/%d", (*d)["hp"].i(), (*d)["hp"].i());
         gold = format("%d", (*d)["gold"].i());
     }
@@ -297,10 +313,13 @@ void CharacterSelectScreen::refresh_info() {
         std::string rid = lower(relic_icon_base(r));
         set_texture(lib_, icon, "images/atlases/relic_atlas.sprites/" + rid + ".tres");
         set_texture(lib_, outline, "images/atlases/relic_outline_atlas.sprites/" + rid + ".tres");
-        if (icon) icon->self_modulate = Color(1, 1, 1, 1);
-        if (outline) outline->self_modulate = Color(0, 0, 0, 0.5f); /* halfTransparentBlack */
-        set_label(relic->get_node("Name/RichTextLabel"), r["title"].str());
-        set_label(relic->get_node("Description"), r["description"].str());
+        /* locked: ninetyPercentBlack over halfTransparentWhite */
+        if (icon) icon->self_modulate = locked ? Color(0, 0, 0, 0.9f) : Color(1, 1, 1, 1);
+        if (outline) outline->self_modulate = locked ? Color(1, 1, 1, 0.5f) : Color(0, 0, 0, 0.5f); /* halfTransparentBlack */
+        set_label(relic->get_node("Name/RichTextLabel"),
+                  locked ? Loc::get("main_menu_ui", "CHARACTER_SELECT.lockedRelic.title") : r["title"].str());
+        set_label(relic->get_node("Description"),
+                  locked ? Loc::get("main_menu_ui", "CHARACTER_SELECT.lockedRelic.description") : r["description"].str());
     } else {
         if (icon) icon->self_modulate = Color(0, 0, 0, 0);
         if (outline) outline->self_modulate = Color(0, 0, 0, 0);
@@ -310,9 +329,11 @@ void CharacterSelectScreen::refresh_info() {
 }
 
 /* Focus enters a button: NCharacterSelectButton.Select (s 1, v 1.1, the
- * outline pulsing) and the screen's SelectCharacter (the background, the
- * info panel sliding in from 300 px left); the others deselect. */
-void CharacterSelectScreen::select(int i, bool animate) {
+ * outline pulsing) and the screen's SelectCharacter (the character's
+ * sound, a weak shake, the background, the info panel sliding in from
+ * 300 px left; a locked one: no background, its unlock text); the others
+ * deselect. */
+void CharacterSelectScreen::select(int i, bool animate, bool feedback) {
     if (i < 0 || i >= (int)buttons_.size() || i == focus_) return;
     if (tip_) {
         if (tip_->parent) tip_->parent->remove_child(tip_);
@@ -345,12 +366,31 @@ void CharacterSelectScreen::select(int i, bool animate) {
     /* OnFocus: the hover scale (1.1) while focused. */
     tweens_.kill(&b.node->scale);
     b.node->scale = Vec2(1.1f, 1.1f);
+    if (feedback) {
+        const Json* d = data_for(b.id);
+        if (b.id != RANDOM_ID && d && lib_->audio()) lib_->audio()->ui((*d)["select_sfx"].str());
+        ScreenShake::get().shake("Weak", "Short", 90.0f);
+    }
+    /* The background: CharacterModel.CharacterSelectBg (none while locked). */
+    if (bg_box_) {
+        while (!bg_box_->children.empty()) {
+            Node* c = bg_box_->children.back();
+            bg_box_->remove_child(c);
+            delete c;
+        }
+        Node* bg = b.locked ? NULL : instance(lib_, "scenes/screens/char_select/char_select_bg_" + lower(b.id) + ".tscn");
+        if (bg) bg_box_->add_child(bg);
+    }
+    refresh_info();
+    if (info_ && animate) {
+        tweens_.tween_from(&info_->offset[SIDE_LEFT], info_left_ - 300, info_left_, 0.5f, TRANS_EXPO, EASE_OUT);
+        tweens_.tween_from(&info_->offset[SIDE_RIGHT], info_right_ - 300, info_right_, 0.5f, TRANS_EXPO, EASE_OUT);
+    }
     if (b.locked) {
         /* OnFocus while locked: "Locked" and how to unlock it, above the
-         * button; the screen keeps the last character. */
-        const Json* p = progress_for(b.id);
-        tip_ = make_hover_tip(lib_, Loc::get("main_menu_ui", "CHARACTER_SELECT.locked.title"),
-                              p ? (*p)["unlock_text"].str() : std::string());
+         * button; no ascension (the panel hidden). */
+        set_ascension_range(0, 0);
+        tip_ = make_hover_tip(lib_, Loc::get("main_menu_ui", "CHARACTER_SELECT.locked.title"), unlock_text(b.id));
         if (tip_) {
             Vec2 at = b.node->global_transform().xform(Vec2(0, 0));
             tip_->set_position(at + Vec2(-90.0f, -180.0f));
@@ -375,30 +415,21 @@ void CharacterSelectScreen::select(int i, bool animate) {
         }
         set_ascension_range(max, level);
     }
-    /* The background: CharacterModel.CharacterSelectBg. */
-    if (bg_box_) {
-        while (!bg_box_->children.empty()) {
-            Node* c = bg_box_->children.back();
-            bg_box_->remove_child(c);
-            delete c;
-        }
-        Node* bg = instance(lib_, "scenes/screens/char_select/char_select_bg_" + lower(b.id) + ".tscn");
-        if (bg) bg_box_->add_child(bg);
-    }
-    refresh_info();
-    if (info_ && animate) {
-        tweens_.tween_from(&info_->offset[SIDE_LEFT], info_left_ - 300, info_left_, 0.5f, TRANS_EXPO, EASE_OUT);
-        tweens_.tween_from(&info_->offset[SIDE_RIGHT], info_right_ - 300, info_right_, 0.5f, TRANS_EXPO, EASE_OUT);
-    }
 }
 
 CharacterSelectScreen::Action CharacterSelectScreen::input(const PadState& pad) {
     if (starting_ || buttons_.empty() || unlock_t_ > -100) return NONE;
     int n = (int)buttons_.size();
-    /* Focus neighbours wrap left / right. */
+    /* Focus neighbours wrap left / right; the button's OnFocus (its hover
+     * sound) runs before the Select its FocusEntered also calls. */
+    if ((pad.pressed & (PadState::LEFT | PadState::RIGHT)) && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if (pad.pressed & PadState::LEFT) select((focus_ + n - 1) % n, true);
     if (pad.pressed & PadState::RIGHT) select((focus_ + 1) % n, true);
-    if (pad.pressed & PadState::B) return BACK;
+    if (pad.pressed & PadState::B) {
+        /* NBackButton.ClickedSfx */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
     /* The ascension panel's tab hotkeys. */
     if (max_ascension_ > 0 && (pad.pressed & (PadState::LB | PadState::RB))) {
         int level = ascension_ + ((pad.pressed & PadState::RB) ? 1 : -1);
@@ -409,6 +440,8 @@ CharacterSelectScreen::Action CharacterSelectScreen::input(const PadState& pad) 
     }
     if ((pad.pressed & (PadState::A | PadState::START)) && buttons_[(size_t)focus_].locked) return NONE;
     if (pad.pressed & (PadState::A | PadState::START)) {
+        /* the embark button (NConfirmButton): NButton's ui_click */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         embark_id_ = buttons_[(size_t)focus_].id;
         if (embark_id_ == RANDOM_ID) {
             /* RandomCharacter: one of the others, chosen now. */

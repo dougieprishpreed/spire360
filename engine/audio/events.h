@@ -20,6 +20,9 @@ public:
     /* The bank an event would play from, parsed the same way. */
     void preload_for(const std::string& path);
     u32 play(const std::string& path, float volume = 1, const Json& parameters = Json());
+    /* A test aid (spire_play --audio-trace): every play logged with its
+     * path. */
+    static void set_trace(bool on);
     void parameter(u32 instance, const std::string& name, float value);
     void parameter_label(u32 instance, const std::string& name, const std::string& label);
     void global_parameter(const std::string& name, float value);

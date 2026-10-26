@@ -55,7 +55,7 @@ void Canvas::end_frame() {
         std::map<std::string, CachedTexture>::iterator oldest = textures_.end();
         for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it) {
             if (!it->second.texture) continue;
-            bool expired = frame_ > it->second.frame && frame_ - it->second.frame > 120;
+            bool expired = !it->second.kept && frame_ > it->second.frame && frame_ - it->second.frame > 120;
             if (texture_bytes_ <= texture_budget_ && !expired) continue;
             if (oldest == textures_.end() || it->second.touched < oldest->second.touched) oldest = it;
         }
@@ -173,6 +173,19 @@ bool Canvas::derive(const DerivedImage& d, TextureData& out) {
     return true;
 }
 
+bool Canvas::prefetch(const std::string& path) {
+    const std::string key = "pack:" + path;
+    if (textures_.count(key)) return false;
+    std::vector<u8> data;
+    TextureData td;
+    double started = load_trace_start();
+    if (!pack_ || !pack_->read(path.c_str(), data) || !Pack::parse_texture(data, td) || !cache_texture(key, td))
+        return false;
+    textures_[key].kept = true;
+    load_traced("texture (warm)", path, started);
+    return true;
+}
+
 Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (!img) return NULL;
     if (img->render_target) return img->rendered;
@@ -181,14 +194,22 @@ Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (it != textures_.end()) return cached_texture(key);
     std::vector<u8> data;
     TextureData td;
+    double started = load_trace_start();
     if (img->derived) {
-        if (derive(*img->derived, td)) return cache_texture(key, td);
+        if (derive(*img->derived, td)) {
+            Texture* t = cache_texture(key, td);
+            load_traced("texture", img->path, started);
+            return t;
+        }
         log_warn("texture %s: could not be made", img->path.c_str());
         textures_[key] = CachedTexture();
         return NULL;
     }
-    if (pack_ && pack_->read(img->path.c_str(), data) && Pack::parse_texture(data, td))
-        return cache_texture(key, td);
+    if (pack_ && pack_->read(img->path.c_str(), data) && Pack::parse_texture(data, td)) {
+        Texture* t = cache_texture(key, td);
+        load_traced("texture", img->path, started);
+        return t;
+    }
     log_warn("texture %s: not in the pack", img->path.c_str());
     textures_[key] = CachedTexture(); /* warn once for a missing resource */
     return NULL;

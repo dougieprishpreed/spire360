@@ -497,7 +497,13 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
         }
         return NONE;
     }
-    if (pad.pressed & PadState::B) return BACK;
+    /* the back button: ui_back; NSettingsButtons play NButton's sounds,
+     * the tickboxes their ticks', the sliders, paginators, dropdowns and
+     * the tab hotkeys none */
+    if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
     if (pad.pressed & (PadState::LB | PadState::RB)) {
         show_tab(tab_ == 0 ? 1 : 0);
         return NONE;
@@ -509,6 +515,7 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
         for (int k = focus_ + step; k >= 0 && k < n; k += step)
             if (lines_[(size_t)k].tab == tab_) {
                 focus(k);
+                if (lines_[(size_t)k].kind == BUTTON && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
                 break;
             }
         return NONE;
@@ -516,6 +523,7 @@ SettingsScreen::Action SettingsScreen::input(const PadState& pad, std::string* c
     Line& l = lines_[(size_t)focus_];
     if (pad.pressed & (PadState::LEFT | PadState::RIGHT)) *cmd = change(l, (pad.pressed & PadState::LEFT) ? -1 : 1);
     else if (pad.pressed & PadState::A) {
+        if (l.kind == BUTTON && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         if (l.kind == DROPDOWN) {
             if (language_enabled_) open_dropdown();
             return NONE;

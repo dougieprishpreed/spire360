@@ -276,6 +276,8 @@ void MapScreen::focus_tool(int i) {
         delete tool_tip_;
         tool_tip_ = NULL;
     }
+    /* NMapDrawButton & co. (NButton): ui_hover as one takes the focus */
+    if (i >= 0 && i != tool_focus_ && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     tool_focus_ = i;
     for (int k = 0; k < 3; ++k) {
         Control* ic = tool_icons_[k];
@@ -893,6 +895,9 @@ std::string MapScreen::input(const PadState& pad) {
     if ((pad.pressed & PadState::LEFT) && focus_ > 0) focus(focus_ - 1);
     if ((pad.pressed & PadState::RIGHT) && focus_ + 1 < n) focus(focus_ + 1);
     if (pad.pressed & PadState::A) {
+        /* NMapPoint: NButton's ui_click on the press (its OnFocus plays
+         * nothing) */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         const Point& p = points_[(size_t)choices_[(size_t)focus_]];
         return protocol_action("select_map_node", format("\"col\":%d,\"row\":%d", p.col, p.row));
     }

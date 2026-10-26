@@ -155,13 +155,37 @@ void ShopScreen::purchase_failed(const Slot& s, const char* kind) {
     say(kind);
 }
 
+const Json* ShopScreen::entry_of(const Slot& s) const {
+    const char* key = s.kind == "card" ? "cards" : s.kind == "relic" ? "relics" : s.kind == "potion" ? "potions" : NULL;
+    for (size_t k = 0; key && k < decision_[key].size(); ++k)
+        if (decision_[key][k]["index"].i((int)k) == s.index) return &decision_[key][k];
+    return NULL;
+}
+
+void ShopScreen::show_slot_tips() {
+    slot_tips_.hide();
+    if (behind_ || !root_ || focus_ < 0 || focus_ >= (int)slots_list_.size()) return;
+    const Slot& s = slots_list_[(size_t)focus_];
+    if (s.kind == "removal") {
+        slot_tips_.show_for_merchant_slot(lib_, root_, s.node, decision_["card_removal_tips"], true);
+        return;
+    }
+    const Json* entry = entry_of(s);
+    if (!entry) return;
+    if (s.kind == "card") {
+        Node* hitbox = s.node->find_unique("Hitbox");
+        if (hitbox && hitbox->is_control())
+            slot_tips_.show_for_merchant_card(lib_, root_, s.node, (Control*)hitbox, (*entry)["tips"]);
+        return;
+    }
+    slot_tips_.show_for_merchant_slot(lib_, root_, s.node, (*entry)["tips"], false);
+}
+
 void ShopScreen::purchased(const Slot& s) {
     sfx("event:/sfx/npcs/merchant/merchant_thank_yous");
     g_say_next = "purchaseSuccess";
-    const char* key = s.kind == "card" ? "cards" : s.kind == "relic" ? "relics" : s.kind == "potion" ? "potions" : NULL;
-    const Json* entry = NULL;
-    for (size_t k = 0; key && k < decision_[key].size(); ++k)
-        if (decision_[key][k]["index"].i((int)k) == s.index) entry = &decision_[key][k];
+    slot_tips_.hide(); /* NMerchantSlot.OnSelected: ClearHoverTip */
+    const Json* entry = entry_of(s);
     if (!entry) return;
     const char* holder_name = s.kind == "card" ? "CardHolder" : s.kind == "relic" ? "RelicHolder" : "PotionHolder";
     Node* holder = s.node->find_unique(holder_name);
@@ -368,6 +392,7 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
     }
     Node* root = room;
     root->add_child(frame_driver(this));
+    root_ = root; /* the hover tips' parent, from the first focus on */
     open_ = false;
     if (start_open_ && inventory_) {
         open_inventory(false);
@@ -380,7 +405,6 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
         proceed_.enable(start_open_);
         focus_merchant(true);
     }
-    root_ = root;
     shake_target_ = room->is_control() ? (Control*)room : NULL; /* NMerchantRoom */
     /* the purchase's line, after its decision */
     if (!g_say_next.empty() && again_) say(g_say_next.c_str());
@@ -467,22 +491,25 @@ void ShopScreen::close_inventory() {
     focus_merchant(true);
 }
 
-/* NMerchantSlot.OnFocus (the hover scale at once) / OnUnfocus (back over
- * 0.5 s, Expo Out). */
+/* NMerchantSlot.OnFocus (the hover scale at once, its hover tip) /
+ * OnUnfocus (back over 0.5 s, Expo Out; the tip cleared). The slots keep
+ * their order: the merchant's hand is drawn over all of them. */
 void ShopScreen::focus_slot(int i) {
     if (focus_ >= 0 && focus_ < (int)slots_list_.size() && focus_ != i) {
         Control* o = slots_list_[(size_t)focus_].node;
         tweens_.tween(&o->scale, Vec2(SMALL_SCALE, SMALL_SCALE), 0.5f, TRANS_EXPO, EASE_OUT);
-        o->z_index = 0;
         stop_hand(2); /* OnMerchantHandUnhovered */
     }
     focus_ = i;
-    if (i < 0 || i >= (int)slots_list_.size()) return;
+    if (i < 0 || i >= (int)slots_list_.size()) {
+        slot_tips_.hide();
+        return;
+    }
     point_hand(i); /* OnMerchantHandHovered */
     Control* n = slots_list_[(size_t)i].node;
     tweens_.kill(&n->scale);
     n->scale = Vec2(HOVER_SCALE, HOVER_SCALE);
-    n->z_index = behind_ ? 0 : 1;
+    show_slot_tips();
 }
 
 Vec2 ShopScreen::slot_centre(const Slot& s) const {
@@ -526,6 +553,8 @@ void ShopScreen::close_inspect() {
     inspect_node_ = NULL;
     inspect_card_ = NULL;
     inspect_relic_ = NULL;
+    /* the focus back on the slot: OnFocus's tip again */
+    if (open_) show_slot_tips();
 }
 
 void ShopScreen::open_rug() {
@@ -544,11 +573,9 @@ std::string ShopScreen::input(const PadState& pad) {
         /* NMerchantSlot._GuiInput: confirm previews (a card or a relic in
          * its inspect screen; the others nothing) and is handled */
         const Slot& s = slots_list_[(size_t)focus_];
-        const char* key = s.kind == "card" ? "cards" : s.kind == "relic" ? "relics" : NULL;
-        const Json* entry = NULL;
-        for (size_t k = 0; key && k < decision_[key].size(); ++k)
-            if (decision_[key][k]["index"].i((int)k) == s.index) entry = &decision_[key][k];
+        const Json* entry = s.kind == "card" || s.kind == "relic" ? entry_of(s) : NULL;
         if (entry && root_) {
+            slot_tips_.hide(); /* OnPreview: ClearHoverTip */
             Json list = Json::make_array();
             list.append(*entry);
             std::string err;
@@ -564,8 +591,12 @@ std::string ShopScreen::input(const PadState& pad) {
         }
         return std::string();
     }
+    /* The slots' hitboxes are plain NClickableControls (no sounds); the
+     * merchant button and the inventory's back button play NButton's,
+     * the proceed button none. */
     if (!open_) {
         if ((pad.pressed & PadState::A) && inventory_) {
+            if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
             open_rug();
             return std::string();
         }
@@ -573,6 +604,7 @@ std::string ShopScreen::input(const PadState& pad) {
         return std::string();
     }
     if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
         close_inventory();
         return std::string();
     }
@@ -619,6 +651,7 @@ void ShopScreen::stop_hand(double linger) {
 void ShopScreen::frame(double dt) {
     tweens_.update(dt);
     proceed_.frame(dt);
+    slot_tips_.frame();
     if (auto_tail_ > 0) auto_tail_ -= dt;
     if (!auto_.empty()) {
         /* LordsParasol.PurchaseEverything: Open after 0.75 s; each item

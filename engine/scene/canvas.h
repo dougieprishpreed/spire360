@@ -28,6 +28,10 @@ public:
     /* Generated sampler textures share the same ownership and budget. */
     Texture* cached_texture(const std::string& key);
     Texture* cache_texture(const std::string& key, const TextureData& data);
+    /* A pack texture loaded before its first draw (SceneLibrary's warm-up):
+     * kept until the budget needs its room (an idle one is not released).
+     * False: it was there already, or the pack has no such texture. */
+    bool prefetch(const std::string& path);
     /* A renderer texture its owner no longer uses (a SubViewport's capture),
      * destroyed at the next begin_frame. */
     static void release_later(Texture* t);
@@ -85,7 +89,8 @@ private:
         Texture* texture;
         size_t bytes;
         u64 touched, frame;
-        CachedTexture() : texture(NULL), bytes(0), touched(0), frame(0) {}
+        bool kept; /* prefetch: no idle release */
+        CachedTexture() : texture(NULL), bytes(0), touched(0), frame(0), kept(false) {}
     };
     std::map<std::string, CachedTexture> textures_;
     size_t texture_bytes_, texture_budget_;

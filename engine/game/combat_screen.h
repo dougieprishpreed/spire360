@@ -463,7 +463,7 @@ private:
     Json state_, pending_; /* pending_: the last response (its cards' and powers' data) */
     int played_instance_;  /* the last played card that left the hand */
     struct MovingCard {
-        MovingCard() : burn_at(-1), arrive(-1) {}
+        MovingCard() : faded_trail(NULL), burn_at(-1), arrive(-1) {}
         Holder holder;
         Vec2 from, to;
         float from_scale, to_scale;
@@ -478,6 +478,9 @@ private:
         float speed, accel, fdur, ftime, scale_from, scale_t;
         Vec2 ctrl;
         Node* trail;       /* NCardTrailVfx following the card (owned by the tree) */
+        /* NCardFlyVfx's trail once fading: freed with the card
+         * (OnCardExitedTree), its fade cut short */
+        Node* faded_trail;
         Node* path_scene;  /* the power swoosh's scene (owned here) */
         float from_angle;  /* degrees */
         double mp_t;       /* NCard.AnimMultiCardPlay's time, < 0: none */

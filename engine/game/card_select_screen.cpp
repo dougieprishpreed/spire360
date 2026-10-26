@@ -3,6 +3,7 @@
 #include "card_view.h"
 #include "loc.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/node.h"
 #include "../scene/scene.h"
@@ -115,7 +116,7 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
     Control* root = full_rect_control("CardSelectScreen");
     root_ = root;
     if (background_) {
-        root->add_child(background_);
+        root->add_child(overlay_behind(background_));
         background_ = NULL;
     }
     /* The overlays' shared backstop (its colour is in run.tscn, not in the
@@ -462,6 +463,20 @@ std::string CardSelectScreen::input(const PadState& pad) {
         return std::string();
     }
     if (peek_.peeking()) return std::string();
+    /* The cards (NGridCardHolder) play no focus sound and ui_click on A or
+     * Y; NConfirmButton ui_click, the close and preview cancel buttons
+     * (NBackButton) ui_back, the skip button (NChoiceSelectionSkipButton)
+     * none. */
+    if (lib_->audio()) {
+        const char* sfx = NULL;
+        if (row_) sfx = (pad.pressed & (PadState::A | PadState::Y)) && focus_ >= 0 && focus_ < n ? "event:/sfx/ui/clicks/ui_click" : NULL;
+        else if (preview_) sfx = (pad.pressed & (PadState::A | PadState::Y)) ? "event:/sfx/ui/clicks/ui_click"
+                                 : (pad.pressed & PadState::B) ? "event:/sfx/ui/clicks/ui_back" : NULL;
+        else if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < n) sfx = "event:/sfx/ui/clicks/ui_click";
+        else if ((pad.pressed & PadState::Y) && confirm_.shown) sfx = "event:/sfx/ui/clicks/ui_click";
+        else if ((pad.pressed & PadState::B) && cancelable_) sfx = "event:/sfx/ui/clicks/ui_back";
+        if (sfx) lib_->audio()->ui(sfx);
+    }
     if (row_ && (pad.pressed & PadState::Y) && focus_ >= 0 && focus_ < n) {
         Json list = Json::make_array();
         list.append(decision_["cards"][(size_t)focus_]);

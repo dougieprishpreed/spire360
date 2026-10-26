@@ -28,6 +28,7 @@ public:
     void set_previous(const Json& prev) { previous_ = prev; }
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
 
 private:

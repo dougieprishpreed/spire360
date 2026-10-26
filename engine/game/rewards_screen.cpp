@@ -16,7 +16,7 @@ static const unsigned CREAM = 0xFFF6E2, GOLD = 0xEFC851, OUTLINE = 0x225157, GOL
 
 RewardsScreen::RewardsScreen(SceneLibrary* lib)
     : lib_(lib), background_(NULL), window_(NULL), focus_(-1), start_focus_(0), animate_in_(true), terminal_(true),
-      can_skip_(true), fresh_(false), delay_(0) {
+      can_skip_(true), fresh_(false), delay_(0), root_(NULL) {
     overlay_[0] = overlay_[1] = NULL;
 }
 
@@ -66,8 +66,9 @@ Node* RewardsScreen::build(const Json& d, std::string* error) {
     terminal_ = d["terminal"].b(true);
     can_skip_ = d["can_skip"].b(true);
     Control* root = full_rect_control("RewardsOverlay");
+    root_ = root;
     if (background_) {
-        root->add_child(background_);
+        root->add_child(overlay_behind(background_));
         background_ = NULL;
     }
     const Json& rewards = d["rewards"];
@@ -189,6 +190,10 @@ void RewardsScreen::focus(int i) {
     }
     focus_ = i;
     Row& r = rows_[(size_t)i];
+    const Json& rewards = decision_["rewards"];
+    tips_.hide();
+    for (size_t k = 0; k < rewards.size(); ++k)
+        if (rewards[k]["index"].i((int)k) == r.index) tips_.show_left(lib_, root_, r.node, rewards[k]["tips"]);
     if (r.label && r.label->is_control()) {
         ((Control*)r.label)->add_theme_color_override("default_color", hex(GOLD));
         ((Control*)r.label)->add_theme_color_override("font_outline_color", hex(GOLD_OUTLINE));
@@ -207,11 +212,16 @@ void RewardsScreen::focus(int i) {
 
 std::string RewardsScreen::input(const PadState& pad) {
     int n = (int)rows_.size();
-    /* Up / down: the neighbours, no wrapping. */
+    /* Up / down: the neighbours, no wrapping. NRewardButton plays NButton's
+     * sounds; the proceed button (Y) none. */
+    int was = focus_;
     if (n > 0 && (pad.pressed & PadState::UP) && focus_ > 0) focus(focus_ - 1);
     if (n > 0 && (pad.pressed & PadState::DOWN) && focus_ < n - 1) focus(focus_ + 1);
-    if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < n)
+    if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
+    if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < n) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         return protocol_action("take_reward", format("\"reward_index\":%d", rows_[(size_t)focus_].index));
+    }
     if ((pad.pressed & PadState::Y) && proceed_.enabled()) return protocol_action("proceed");
     return std::string();
 }
@@ -227,6 +237,7 @@ void RewardsScreen::frame(double dt) {
     }
     tweens_.update(dt);
     proceed_.frame(dt);
+    tips_.frame();
 }
 
 } /* namespace spire */

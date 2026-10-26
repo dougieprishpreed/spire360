@@ -23,7 +23,7 @@
         "MegaCrit.Sts2.Core.Nodes",
         "MegaCrit.sts2.Core.Nodes"
       ],
-      "note": "The Godot UI layer never runs headless (the 'ui' patch redirects every call into it). Method bodies of the Godot-derived classes there (nodes, and what is nested in them) become a throw so the AOT builds do not compile the UI (console code size). Constructors stay, and plain helper classes in those namespaces (EpochComparer) are untouched. A 'headless: ...' NotSupportedException in a log means the logic reached UI code."
+      "note": "The Godot UI layer never runs headless (the 'ui' patch redirects every call into it). Method bodies of the Godot-derived classes there (nodes, and what is nested in them) become a throw so the AOT builds do not compile the UI (console code size). Constructors stay, as do the static AssetPaths getters (paths only: PreloadManager's sets, which the logic hands the client to read ahead), and plain helper classes in those namespaces (EpochComparer) are untouched. A 'headless: ...' NotSupportedException in a log means the logic reached UI code."
     },
     {
       "id": "godot.null_safe",

@@ -23,7 +23,7 @@ static const float SMALL_SCALE = 0.8f, HOVER_SCALE = 1.0f;
 static Control* control_of(Node* n) { return n && n->is_control() ? (Control*)n : NULL; }
 
 CardLibraryScreen::CardLibraryScreen(SceneLibrary* lib)
-    : lib_(lib), root_(NULL), upgrades_(false), rows_(NULL), focus_(-1), item_focus_(0), columns_(1), scroll_(0),
+    : lib_(lib), root_(NULL), upgrades_(false), rows_(NULL), focus_(-1), item_focus_(0), sounded_item_(0), filter_tip_(NULL), columns_(1), scroll_(0),
       scroll_to_(0), lim_lo_(0), lim_hi_(0), view_h_(1000), count_label_(NULL), no_results_(NULL), inspect_(NULL),
       inspect_node_(NULL) {}
 
@@ -62,8 +62,6 @@ Node* CardLibraryScreen::build(const std::string& character, std::string* error)
     root->add_child(back);
     root->add_child(screen);
     hide(screen->find_unique("SearchBar"));
-    hide(screen->find_unique("MultiplayerCards"));
-    hide(screen->find_unique("Stats"));
     show_glyph(lib_, find_named(screen->find_unique("BackButton"), "HotkeyIcon"), "b");
     Node* grid = screen->find_unique("CardGrid");
     hide(grid ? grid->get_node("Scrollbar") : NULL);
@@ -99,6 +97,10 @@ Node* CardLibraryScreen::build(const std::string& character, std::string* error)
     add(screen, "Cost3+", TICK, "cost:3");
     add(screen, "CostX", TICK, "cost:X");
     add(screen, "AlphabetSorter", SORTER, "3");
+    /* NLibraryStatTickboxes: Multiplayer Cards (ticked), View Stats, View
+     * Upgrades */
+    add(screen, "MultiplayerCards", VIEW, "multiplayer");
+    add(screen, "Stats", VIEW, "stats");
     add(screen, "Upgrades", VIEW, "upgrades");
     static const char* const sorter_labels[4] = { "SORT_RARITY", "SORT_TYPE", "SORT_COST", "SORT_ALPHABET" };
     for (size_t i = 0; i < items_.size(); ++i) {
@@ -111,7 +113,11 @@ Node* CardLibraryScreen::build(const std::string& character, std::string* error)
             for (int k = 0; k < 4; ++k)
                 if (it.key == rl[k][0]) set_label(it.node->get_node("Label"), Loc::get("card_library", rl[k][1]));
         }
-        if (it.kind == VIEW) set_label(it.node->get_node("Label"), Loc::get("card_library", "VIEW_UPGRADES"));
+        if (it.kind == VIEW) {
+            it.on = it.key == "multiplayer";
+            set_label(it.node->get_node("Label"), Loc::get("card_library", it.key == "multiplayer" ? "VIEW_MULTIPLAYER_CARDS"
+                                                                         : it.key == "stats" ? "VIEW_STATS" : "VIEW_UPGRADES"));
+        }
         refresh_item(it);
     }
     /* NCardLibrary(): rarity, type, cost, alphabet */
@@ -174,7 +180,15 @@ void CardLibraryScreen::set_cards(const Json& msg) {
     if (!order_.empty()) focus_card(0);
 }
 
+bool CardLibraryScreen::view_on(const char* key) const {
+    for (size_t i = 0; i < items_.size(); ++i)
+        if (items_[i].kind == VIEW && items_[i].key == key) return items_[i].on;
+    return false;
+}
+
 bool CardLibraryScreen::passes(const Json& c) const {
+    /* UpdateFilter's multiplayerCardFilter */
+    if (c["multiplayer_only"].b() && !view_on("multiplayer")) return false;
     /* a group with ticks lets through what one of them matches */
     static const char* const groups[3] = { "type:", "rarity:", "cost:" };
     for (int g = 0; g < 3; ++g) {
@@ -257,6 +271,18 @@ void CardLibraryScreen::rebuild() {
         Control* hc = (Control*)h;
         Node* card = make_card(lib_, upgrades_ && c["upgrade_preview"].is_object() ? c["upgrade_preview"] : c);
         if (card) hc->add_child(card);
+        /* NCardLibraryGrid.ShowStats: NCardLibraryStats (Victories: the
+         * card's TimesWon) over each card */
+        if (view_on("stats")) {
+            Node* st = instance(lib_, "scenes/screens/card_library/card_library_stats.tscn");
+            if (st) {
+                std::string text = Loc::get("card_library", "VICTORIES");
+                size_t at = text.find("{Victories}");
+                if (at != std::string::npos) text.replace(at, 11, format("%d", c["times_won"].i()));
+                set_label(st->find_unique("Label"), text);
+                hc->add_child(st);
+            }
+        }
         hc->scale = Vec2(SMALL_SCALE, SMALL_SCALE);
         rows_->add_child(hc);
         holders_.push_back(hc);
@@ -290,6 +316,7 @@ void CardLibraryScreen::layout() {
 }
 
 void CardLibraryScreen::focus_card(int i) {
+    clear_filter_tip();
     int n = (int)holders_.size();
     if (focus_ >= 0 && focus_ < n) {
         Control* old = holders_[(size_t)focus_];
@@ -333,6 +360,19 @@ void CardLibraryScreen::focus_item(int i) {
     }
     focus_ = -1;
     tips_.hide();
+    /* NCardPoolFilter / NCardTypeTickbox / NCardRarityTickbox /
+     * NCardCostTickbox.OnFocus: NHoverTipSet.CreateAndShow(new HoverTip(Loc))
+     * at (310, the filter's y) */
+    clear_filter_tip();
+    const char* key = filter_tip(items_[(size_t)i]);
+    if (key && root_ && items_[(size_t)i].node) {
+        filter_tip_ = make_hover_tip(lib_, std::string(), Loc::get("card_library", key));
+        if (filter_tip_) {
+            filter_tip_->z_index = 10;
+            filter_tip_->set_position(Vec2(310, items_[(size_t)i].node->global_transform().origin.y));
+            root_->add_child(filter_tip_);
+        }
+    }
     for (size_t k = 0; k < items_.size(); ++k) {
         bool on = (int)k == i;
         if (items_[k].reticle) set_visible(items_[k].reticle, on);
@@ -341,7 +381,45 @@ void CardLibraryScreen::focus_item(int i) {
     }
 }
 
+const char* CardLibraryScreen::filter_tip(const Item& it) {
+    static const char* const keys[][2] = {
+        { "colorless", "POOL_COLORLESS_TIP" }, { "ancients", "POOL_ANCIENT_TIP" }, { "misc", "POOL_MISC_TIP" },
+        { "type:Attack", "TYPE_ATTACK_TIP" },  { "type:Skill", "TYPE_SKILL_TIP" }, { "type:Power", "TYPE_POWER_TIP" },
+        { "type:Other", "TYPE_OTHER_TIP" },    { "rarity:Common", "RARITY_COMMON_TIP" },
+        { "rarity:Uncommon", "RARITY_UNCOMMON_TIP" }, { "rarity:Rare", "RARITY_RARE_TIP" },
+        { "rarity:Other", "RARITY_OTHER_TIP" }, { "cost:0", "COST_ZERO_TIP" }, { "cost:1", "COST_ONE_TIP" },
+        { "cost:2", "COST_TWO_TIP" },          { "cost:3", "COST_THREE_TIP" }, { "cost:X", "COST_X_TIP" } };
+    if (it.kind != POOL && it.kind != TICK) return NULL;
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i)
+        if (it.key == keys[i][0]) return keys[i][1];
+    return NULL;
+}
+
+void CardLibraryScreen::clear_filter_tip() {
+    if (!filter_tip_) return;
+    if (filter_tip_->parent) filter_tip_->parent->remove_child(filter_tip_);
+    delete filter_tip_;
+    filter_tip_ = NULL;
+}
+
+/* The sidebar's NButtons (NCardPoolFilter, NCardTypeTickbox,
+ * NCardCostTickbox, NCardViewSortButton) play NButton's sounds; the
+ * NTickboxes (rarity, View Upgrades) only their tick's. */
+bool CardLibraryScreen::plays_button_sounds(const Item& it) {
+    return it.kind != VIEW && !(it.kind == TICK && it.key.compare(0, 7, "rarity:") == 0);
+}
+
 CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::string* cmd) {
+    Action a = input_items(pad, cmd);
+    /* the focus onto a sidebar button: its hover sound (the cards play none) */
+    if (focus_ < 0 && item_focus_ != sounded_item_ && item_focus_ >= 0 && item_focus_ < (int)items_.size() &&
+        plays_button_sounds(items_[(size_t)item_focus_]) && lib_->audio())
+        lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
+    sounded_item_ = focus_ < 0 ? item_focus_ : -1;
+    return a;
+}
+
+CardLibraryScreen::Action CardLibraryScreen::input_items(const PadState& pad, std::string* cmd) {
     cmd->clear();
     if (inspect_) {
         if (!inspect_->input(pad)) {
@@ -353,7 +431,13 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
         }
         return NONE;
     }
-    if (pad.pressed & PadState::B) return BACK;
+    if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
+    /* a card (NGridCardHolder): ui_click on A */
+    if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < (int)order_.size() && lib_->audio())
+        lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
     if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < (int)order_.size() &&
         cards_[(size_t)order_[(size_t)focus_]]["visibility"].str() == "visible") {
         /* ShowCardDetail: NInspectCardScreen over the shown, discovered cards */
@@ -380,8 +464,10 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
     if (pad.pressed & PadState::Y) {
         /* View Upgrades */
         for (size_t k = 0; k < items_.size(); ++k)
-            if (items_[k].kind == VIEW) {
+            if (items_[k].kind == VIEW && items_[k].key == "upgrades") {
                 items_[k].on = !items_[k].on;
+                /* NUpgradePreviewTickbox's hotkey: ForceToggleTick */
+                if (lib_->audio()) lib_->audio()->ui(items_[k].on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
                 upgrades_ = items_[k].on;
                 refresh_item(items_[k]);
             }
@@ -423,6 +509,9 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
     }
     if (pad.pressed & PadState::A) {
         Item& it = items_[(size_t)item_focus_];
+        /* NCardPoolFilter.OnPress: NButton's only while not the selected */
+        if (plays_button_sounds(it) && !(it.kind == POOL && it.key == pool_) && lib_->audio())
+            lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         if (it.kind == POOL) {
             if (it.key != pool_) {
                 pool_ = it.key;
@@ -435,8 +524,8 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
             }
         } else if (it.kind == TICK) {
             it.on = !it.on;
-            /* NTickbox.ForceToggleTick */
-            if (lib_->audio()) lib_->audio()->ui(it.on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
+            /* NTickbox.ForceToggleTick (the rarities' NCardRarityTickbox) */
+            if (!plays_button_sounds(it) && lib_->audio()) lib_->audio()->ui(it.on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
             refresh_item(it);
             rebuild();
         } else if (it.kind == SORTER) {
@@ -454,7 +543,7 @@ CardLibraryScreen::Action CardLibraryScreen::input(const PadState& pad, std::str
         } else if (it.kind == VIEW) {
             it.on = !it.on;
             if (lib_->audio()) lib_->audio()->ui(it.on ? "event:/sfx/ui/clicks/ui_checkbox_on" : "event:/sfx/ui/clicks/ui_checkbox_off");
-            upgrades_ = it.on;
+            if (it.key == "upgrades") upgrades_ = it.on;
             refresh_item(it);
             rebuild();
         }

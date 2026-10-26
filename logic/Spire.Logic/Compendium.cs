@@ -57,6 +57,7 @@ public partial class RunDriver
         EnsureModelDbInitialized();
         if (Array.IndexOf(LibraryPools, pool) < 0) return Error("Unknown pool " + pool);
         var seen = SaveManager.Instance.Progress?.DiscoveredCards?.ToHashSet() ?? new HashSet<ModelId>();
+        var cardStats = SaveManager.Instance.Progress?.CardStats;
         var unlockState = SaveManager.Instance.GenerateUnlockStateFromProgress();
         var unlocked = ModelDb.AllCardPools.SelectMany(p => p.GetUnlockedCards(unlockState, CardMultiplayerConstraint.None)).ToHashSet();
         var pools = ModelDb.AllCardPools.ToList();
@@ -90,6 +91,9 @@ public partial class RunDriver
                 ["canonical_cost"] = card.EnergyCost?.Canonical ?? 0,
                 ["costs_x"] = (card.EnergyCost?.CostsX ?? false) || card.HasStarCostX,
                 ["upgrade_preview"] = visibility == "visible" ? UpgradePreviewView(card) : null,
+                // NCardLibraryStats.UpdateStats; the Multiplayer Cards tickbox's filter
+                ["times_won"] = cardStats != null && cardStats.TryGetValue(model.Id, out var cs) ? cs.TimesWon : 0,
+                ["multiplayer_only"] = model.MultiplayerConstraint == CardMultiplayerConstraint.MultiplayerOnly ? true : null,
             });
             return d;
         }).ToList();

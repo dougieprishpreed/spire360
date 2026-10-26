@@ -121,31 +121,41 @@ Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
     return box;
 }
 
-void TipFollower::show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips) {
-    hide();
-    if (!parent || !holder) return;
-    tips_ = make_tip_set(lib, tips);
-    if (!tips_) return;
-    owner_ = holder;
-    card_ = true;
-    below_ = left_ = false;
-    tips_->z_index = 10;
-    tips_->modulate.a = 0; /* placed on the next frame, after the layout */
-    parent->add_child(tips_);
-}
-
-void TipFollower::show_for_control(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips, float extra_x) {
+void TipFollower::attach(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
     hide();
     if (!parent || !owner) return;
     tips_ = make_tip_set(lib, tips);
     if (!tips_) return;
     owner_ = owner;
-    card_ = false;
-    below_ = left_ = false;
-    extra_ = extra_x;
+    slot_ = NULL;
+    card_ = below_ = left_ = false;
+    merchant_ = 0;
+    extra_ = 0;
     tips_->z_index = 10;
     tips_->modulate.a = 0; /* placed on the next frame, after the layout */
     parent->add_child(tips_);
+}
+
+void TipFollower::show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips) {
+    attach(lib, parent, holder, tips);
+    card_ = tips_ != NULL;
+}
+
+void TipFollower::show_for_control(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips, float extra_x) {
+    attach(lib, parent, owner, tips);
+    extra_ = extra_x;
+}
+
+void TipFollower::show_for_merchant_slot(SceneLibrary* lib, Node* parent, Control* slot, const Json& tips, bool removal) {
+    attach(lib, parent, slot, tips);
+    if (tips_) merchant_ = removal ? 2 : 1;
+}
+
+void TipFollower::show_for_merchant_card(SceneLibrary* lib, Node* parent, Control* slot, Control* hitbox, const Json& tips) {
+    attach(lib, parent, hitbox, tips);
+    if (!tips_) return;
+    merchant_ = 3;
+    slot_ = slot;
 }
 
 void TipFollower::show_below(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
@@ -165,6 +175,7 @@ void TipFollower::hide() {
     }
     tips_ = NULL;
     owner_ = NULL;
+    slot_ = NULL;
 }
 
 void TipFollower::frame() {
@@ -173,6 +184,37 @@ void TipFollower::frame() {
     float s = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
     Vec2 c = xf.origin;
     float w = tips_->size.x, h = tips_->size.y;
+    if (merchant_ == 3) {
+        /* SetAlignment(hitbox, Right / Left), CorrectVerticalOverflow; past
+         * the right edge, CorrectHorizontalOverflow puts them left of it */
+        bool left = slot_ && slot_->global_transform().origin.x > 1920.0f * 0.75f;
+        float x = left ? c.x - w : c.x + owner_->size.x * owner_->scale.x;
+        if (!left && x + w > 1920.0f) x = c.x - w;
+        float y = c.y;
+        if (y + h > 1080.0f) y = 1080.0f - h;
+        tips_->set_position(Vec2(x, y));
+        tips_->modulate.a = 1;
+        return;
+    }
+    if (merchant_) {
+        /* the slot's Size * 0.5 * Scale (its own scale: small or hovered) */
+        float hx = owner_->size.x * owner_->scale.x * 0.5f, hy = owner_->size.y * owner_->scale.y * 0.5f;
+        float x, y = c.y;
+        if (c.x > 1920.0f * 0.5f) {
+            x = c.x - w; /* SetAlignment(Left), then its overflow check */
+            if (y + h > 1080.0f) y = 1080.0f - h;
+            x -= hx;
+        } else if (merchant_ == 1) {
+            x = c.x + hx * 2.0f; /* SetAlignment(Right) */
+            if (y + h > 1080.0f) y = 1080.0f - h;
+            x += hx;
+        } else {
+            x = c.x + hx; /* the removal: no alignment, at the slot */
+        }
+        tips_->set_position(Vec2(x, y - hy));
+        tips_->modulate.a = 1;
+        return;
+    }
     if (left_) {
         float x = c.x - w, y = c.y;
         if (x < 0) x = 0;
@@ -322,6 +364,14 @@ Control* full_rect_control(const char* name) {
     for (int i = 0; i < 4; ++i) c->offset[i] = 0;
     c->mouse_filter = 2;
     return c;
+}
+
+Node* overlay_behind(Node* background) {
+    CanvasLayer* layer = (CanvasLayer*)SceneLibrary::create_node("CanvasLayer");
+    layer->name = "OverlayBackground";
+    layer->layer = -1;
+    layer->add_child(background);
+    return layer;
 }
 
 namespace {

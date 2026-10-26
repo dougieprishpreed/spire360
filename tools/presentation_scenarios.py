@@ -530,6 +530,10 @@ def main():
             if state.get("decision") == "crystal_sphere":
                 case.status = "error"
                 case.notes.append("the minigame from before the quit came back")
+            # the save is from before the sphere (enter_room is not a map
+            # room): Neow again, then the map; the sphere entered again
+            if case.status == "ok" and state.get("decision") != "map_select":
+                state = run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 40)
             if state.get("decision") == "map_select":
                 state = run.step(case, lg, {"cmd": "enter_room", "type": "event", "event": "CRYSTAL_SPHERE"})
             for _ in range(200):
@@ -604,6 +608,9 @@ def main():
             case.status = "error"
             case.notes.append("the last act's two bosses were not both fought")
     bad = [c for c in run.cases if c.status != "ok"]
+    # a case's status can change after it printed (the double boss checks)
+    for c in bad:
+        print(f"failed: {c.suite}/{c.name}: {c.status} {c.notes[-2:]}", flush=True)
     return 1 if bad else 0
 
 

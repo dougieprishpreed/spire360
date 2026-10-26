@@ -130,6 +130,8 @@ public:
     virtual void draw(Canvas& c);
     void restart();
     size_t active_count() const;
+    /* Seconds it has run (stepped). */
+    double clock() const { return clock_; }
     bool finished() const { return !emitting && active_count() == 0 && pending_.empty(); }
 
 private:

@@ -1,5 +1,6 @@
 #include "compendium_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../core/pack.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
@@ -177,10 +178,18 @@ CompendiumScreen::Action CompendiumScreen::input(const PadState& pad, std::strin
         if (bestiary_->input(pad, cmd) == BestiaryScreen::BACK) close_sub();
         return NONE;
     }
-    if (pad.pressed & PadState::B) return BACK;
+    /* NShortSubmenuButton / NCompendiumBottomButton play NButton's sounds,
+     * the back button ui_back. */
+    if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
+    int was = focus_;
     if (pad.pressed & (PadState::LEFT | PadState::UP)) focus(focus_ - 1);
     if (pad.pressed & (PadState::RIGHT | PadState::DOWN)) focus(focus_ + 1);
+    if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < (int)buttons_.size()) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         const char* key = buttons_[(size_t)focus_].key;
         std::string err;
         if (strcmp(key, "library") == 0) {

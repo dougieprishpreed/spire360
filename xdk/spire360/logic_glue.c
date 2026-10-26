@@ -17,12 +17,13 @@ static void run_start(void* p) {
 
 /* root: the folder mounted as the logic's "/" (it reads /data); extra:
  * more of its environment ("NAME=value", the debug options of
- * spire360.ini), extra_count of them (at most 6). Returns 0 once the guest
- * thread runs. */
+ * spire360.ini), extra_count of them (at most 5). Returns 0 once the guest
+ * thread runs. The logic logs each command it reads (SPIRE_LOG_COMMANDS):
+ * a test session plays again on PC (spire_play --commands). */
 int spire_logic_start(const char* root, const char* const* extra, int extra_count) {
     static const char* const argv[1] = { "spire-logic" };
-    static const char* env[8] = { "SPIRE_DATA=/data", "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1" };
-    int envc = 2;
+    static const char* env[8] = { "SPIRE_DATA=/data", "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1", "SPIRE_LOG_COMMANDS=1" };
+    int envc = 3;
     srt_config cfg;
     FILE* stderr_log;
     while (extra_count-- > 0 && envc < 8) env[envc++] = *extra++;

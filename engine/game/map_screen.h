@@ -27,6 +27,7 @@ public:
     explicit MapScreen(SceneLibrary* lib);
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
     bool busy() const {
         return opening_ < 0.45 || travel_t_ >= 0 || (act_anim_ >= 0 && act_anim_ < act_delay_ + act_duration_ * 0.25);

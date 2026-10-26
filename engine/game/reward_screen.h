@@ -25,6 +25,7 @@ public:
     void set_background(Node* room) { background_ = room; }
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
     /* The offer's card holders (NGridCardHolder), in order */
     Control* holder(size_t i) const { return i < holders_.size() ? holders_[i] : NULL; }

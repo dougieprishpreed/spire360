@@ -105,6 +105,14 @@ void log_warn(const char* fmt, ...);
  * apps send them to their log file. */
 typedef void (*LogSink)(const char* line);
 void set_log_sink(LogSink sink);
+/* A test aid (spire_play --load-trace): with a clock (milliseconds) set,
+ * what is read from the pack on first use (scene files, textures, audio
+ * samples) is logged with the time it took. load_trace_start: the clock,
+ * or < 0 when off. */
+typedef double (*LoadClock)();
+void set_load_trace(LoadClock clock);
+double load_trace_start();
+void load_traced(const char* kind, const std::string& name, double started);
 
 } /* namespace spire */
 

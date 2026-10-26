@@ -429,7 +429,65 @@ internal static class Steps
         if (_steps.Count == 0) return null;
         var copy = new List<List<Dictionary<string, object?>>>(_steps);
         _steps.Clear();
+        AttachPassingViews(copy);
+        _seenCards.Clear();
+        _seenPowers.Clear();
+        _seenCreatures.Clear();
         return copy;
+    }
+
+    // The cards the snapshots of this command's steps saw, by id.
+    private static readonly Dictionary<int, CardModel> _seenCards = new();
+    // The powers they saw, by creature and power id.
+    private static readonly Dictionary<(string, string), PowerModel> _seenPowers = new();
+    // The creatures they saw.
+    private static readonly Dictionary<string, Creature> _seenCreatures = new();
+
+    /// <summary>
+    /// A card that comes into the hand and goes again within one command's
+    /// steps (drawn and played by Hellraiser, drawn and exhausted) is not in
+    /// the decision's hand, where the client finds the cards it shows coming
+    /// in: its coming in gets the card's view.
+    /// </summary>
+    private static void AttachPassingViews(List<List<Dictionary<string, object?>>> steps)
+    {
+        var entering = new Dictionary<int, Dictionary<string, object?>>();
+        // A power applied and gone again within them (not in the decision's
+        // powers either, where the client finds a new power's look): its
+        // coming gets the power's view.
+        var applied = new Dictionary<(string, string), Dictionary<string, object?>>();
+        // So is a creature that comes and dies within them (summoned and
+        // killed: the decision's enemies are the living): its spawn gets the
+        // enemy's view.
+        var spawned = new Dictionary<string, Dictionary<string, object?>>();
+        foreach (var step in steps)
+            foreach (var c in step)
+            {
+                if (c.TryGetValue("t", out var ct) && ct is string kind && (kind == "spawn" || kind == "death" || kind == "despawn") &&
+                    c["who"] is string cwho)
+                {
+                    if (kind == "spawn") spawned[cwho] = c;
+                    else if (spawned.TryGetValue(cwho, out var came) && !came.ContainsKey("view") &&
+                             _seenCreatures.TryGetValue(cwho, out var creature) && Hooks.Driver != null)
+                        came["view"] = Hooks.Driver.EnemyView(creature, -1, null);
+                    continue;
+                }
+                if (c.TryGetValue("t", out var pt) && (pt as string) == "power" && c["who"] is string who && c["power"] is string pid)
+                {
+                    if (c.ContainsKey("added")) applied[(who, pid)] = c;
+                    else if (c.ContainsKey("removed") && applied.TryGetValue((who, pid), out var came) && !came.ContainsKey("view") &&
+                             _seenPowers.TryGetValue((who, pid), out var power) && Hooks.Driver != null)
+                        came["view"] = Hooks.Driver.PowerView(power);
+                    continue;
+                }
+                if (c.TryGetValue("t", out var t) && (t as string) != "card") continue;
+                if (c["card"] is not int id) continue;
+                bool toHand = (c["to"] as string) == "hand", fromHand = (c["from"] as string) == "hand";
+                if (toHand && !fromHand) entering[id] = c;
+                else if (fromHand && entering.TryGetValue(id, out var came) && !came.ContainsKey("view") &&
+                         _seenCards.TryGetValue(id, out var card) && Hooks.Driver != null)
+                    came["view"] = Hooks.Driver.DeckCardView(card);
+            }
     }
 
     // ---- snapshot ----
@@ -522,6 +580,7 @@ internal static class Steps
             if (c == null) continue;
             int id = IdOf(c);
             s.Cards[id] = (name, i, c.Id.Entry);
+            _seenCards[id] = c;
             if (keepOrder) s.Hand.Add(id);
             i++;
         }
@@ -530,6 +589,7 @@ internal static class Steps
     private static void AddCreature(Snapshot s, string who, Creature? c, string? monster)
     {
         if (c == null) return;
+        if (monster != null) _seenCreatures[who] = c;
         var cs = new CreatureSnap
         {
             Who = who,
@@ -543,7 +603,11 @@ internal static class Steps
         {
             if (c.Powers != null)
                 foreach (var p in c.Powers)
-                    if (p != null) cs.Powers[p.Id.Entry] = Convert.ToInt32(p.Amount);
+                    if (p != null)
+                    {
+                        cs.Powers[p.Id.Entry] = Convert.ToInt32(p.Amount);
+                        _seenPowers[(who, p.Id.Entry)] = p;
+                    }
         }
         catch { }
         try
@@ -597,7 +661,9 @@ internal static class Steps
             foreach (var (pid, amt) in cb.Powers)
             {
                 ca.Powers.TryGetValue(pid, out var old);
-                if (old != amt || !ca.Powers.ContainsKey(pid))
+                if (!ca.Powers.ContainsKey(pid))
+                    d.Add(new Dictionary<string, object?> { ["t"] = "power", ["who"] = who, ["power"] = pid, ["from"] = old, ["to"] = amt, ["added"] = true });
+                else if (old != amt)
                     d.Add(new Dictionary<string, object?> { ["t"] = "power", ["who"] = who, ["power"] = pid, ["from"] = old, ["to"] = amt });
             }
             foreach (var (pid, amt) in ca.Powers)

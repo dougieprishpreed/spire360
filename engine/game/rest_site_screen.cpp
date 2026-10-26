@@ -274,12 +274,16 @@ std::string RestSiteScreen::input(const PadState& pad) {
     }
     if (chosen_ || options_.empty()) return std::string();
     int n = (int)options_.size();
-    /* Focus neighbours wrap left / right. */
+    /* Focus neighbours wrap left / right. NRestSiteButton plays NButton's
+     * sounds; the proceed button (Y) none. */
+    int was = focus_;
     if (pad.pressed & PadState::LEFT) focus((focus_ + n - 1) % n);
     if (pad.pressed & PadState::RIGHT) focus((focus_ + 1) % n);
+    if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if ((pad.pressed & PadState::A) && focus_ >= 0) {
         Option& o = options_[(size_t)focus_];
         if (!o.enabled) return std::string(); /* _isUnclickable */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         /* OnPress: the button sinks (0.9); the options disabled while the
          * choice runs. */
         if (o.visuals) tweens_.tween(&o.visuals->scale, Vec2(0.9f, 0.9f), 1.0f, TRANS_EXPO, EASE_OUT);

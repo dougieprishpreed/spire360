@@ -1,5 +1,6 @@
 #include "run_history_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/rich_text.h"
 #include "../scene/scene.h"
@@ -390,6 +391,7 @@ void RunHistoryScreen::focus(int i) {
     focus_ = i;
     Entry& e = entries_[(size_t)i];
     const Json& d = *e.data;
+    if (e.kind == BADGE && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if (e.kind == POINT) {
         highlight(e, true);
         tip_ = make_point_tip(d["tip"]);
@@ -436,7 +438,15 @@ RunHistoryScreen::Action RunHistoryScreen::input(const PadState& pad, std::strin
         if (!open) close_inspect();
         return NONE;
     }
-    if (pad.pressed & PadState::B) return BACK;
+    /* the back button: ui_back; NRelicBasicHolder, NDeckHistoryEntry and
+     * NRunHistoryPlayerIcon ui_click on the press (no hover sound), NBadge
+     * NButton's both, the map points (NMapPointHistoryEntry) none */
+    if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
+    if ((pad.pressed & PadState::A) && focus_ >= 0 && entries_[(size_t)focus_].kind != POINT && lib_->audio())
+        lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
     if ((pad.pressed & PadState::A) && focus_ >= 0 &&
         (entries_[(size_t)focus_].kind == RELIC || entries_[(size_t)focus_].kind == CARD)) {
         /* OnRelicClicked / ShowEntry: the inspect screen over the list */
@@ -467,6 +477,8 @@ RunHistoryScreen::Action RunHistoryScreen::input(const PadState& pad, std::strin
     /* the arrows: LB the older run, RB the newer, the contents sliding in */
     int step = (pad.pressed & PadState::LB) ? 1 : (pad.pressed & PadState::RB) ? -1 : 0;
     if (step && index_ + step >= 0 && index_ + step < count_) {
+        /* NRunHistoryArrowButton's hotkey: NButton's ui_click */
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         *cmd = query(index_ + step);
         if (contents_) {
             tweens_.tween_from(&contents_->modulate.a, 0.0f, 1.0f, 0.4f);

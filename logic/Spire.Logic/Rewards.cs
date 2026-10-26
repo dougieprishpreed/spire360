@@ -131,6 +131,9 @@ public partial class RunDriver
                 ["icon"] = RewardIconPath(r),
                 ["skipped"] = _rewardSkipped.Contains(r),
             };
+            // NRewardButton.OnFocus: the reward's hover tips (its relic's,
+            // potion's or card's, a linked set's)
+            d["tips"] = Tips(() => r.HoverTips);
             if (r is GoldReward g) d["gold"] = g.Amount;
             if (r is PotionReward p && p.Potion != null) d["potion_id"] = p.Potion.Id.Entry;
             if (r is RelicReward rr && rr.ClaimedRelic == null)

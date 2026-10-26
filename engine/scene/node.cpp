@@ -351,6 +351,12 @@ int CanvasItem::effective_texture_flags() const {
 
 Node2D::Node2D() : scale(1, 1), rotation(0), skew(0) { flags |= NF_NODE2D; }
 
+bool CanvasLayer::set(const std::string& key, const Json& v, const PropCtx& ctx) {
+    if (key == "layer") layer = (int)jv_float(v, 1);
+    else return Node::set(key, v, ctx);
+    return true;
+}
+
 bool Node2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     if (key == "position") jv_vec2(v, position);
     else if (key == "rotation") rotation = jv_float(v);

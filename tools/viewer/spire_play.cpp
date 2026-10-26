@@ -40,10 +40,23 @@
  * --replay-run <trace.jsonl>: a recorded run (random_runs.py, coverage)
  * played back in place of the logic, one recorded answer per command.
  *
+ * --commands FILE: a session again (with --logic): FILE's commands (JSON
+ * lines, or a console logic log's "[CMD] " lines): those before the first
+ * action start it (select_profile, set_setting, start_game_run with its
+ * seed...), then auto play answers each screen with the next one.
+ *
  * --pad-after N: auto play up to screen N (the number printed for it),
  * then the --pad presses on it.
  *
  * --no-shots: the run without the PNGs (soaks).
+ *
+ * --load-trace: what is read from the pack on first use (scene files,
+ * textures, audio banks) with the milliseconds it took, and each frame
+ * over 8 ms (the client's update and the frame's), in the order they come:
+ * what a first use costs (the console's hitches, many times these).
+ *
+ * --audio-trace: every sound event or stream started, by path (which
+ * screens play what).
  *
  * --mem-every N: the "memory:" line (resident, textures, scene files
  * cached) every N screens (default 50).
@@ -361,6 +374,21 @@ static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
     ++ft.frames;
 }
 
+/* --load-trace: the frame drawn too (textures load when first drawn), and
+ * reported when the client's update and the frame's process took over
+ * 8 ms (the software drawing's own time is no measure of the console's). */
+static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float scale, double update_ms, double t0) {
+    static long frame_no = 0;
+    double d0 = now_ms();
+    sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
+    tree.render(canvas);
+    sw.end();
+    double end = now_ms();
+    ++frame_no;
+    if (d0 - t0 + update_ms > 8.0)
+        log_info("frame %ld: update %.1f ms, process %.1f ms (draw %.1f)", frame_no, update_ms, d0 - t0, end - d0);
+}
+
 static bool save_text(const std::string& path, const std::string& text) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
@@ -379,6 +407,8 @@ int main(int argc, char** argv) {
     bool audio_device = false, audio_thread = false, menu = false, seed_given = false;
     double menu_hold = 0;
     const char* replay = NULL;
+    const char* commands_path = NULL;
+    bool load_trace = false;
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
     int hp = 0;
@@ -402,6 +432,7 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
+        else if (strcmp(argv[i], "--audio-trace") == 0) AudioEvents::set_trace(true);
         else if (strcmp(argv[i], "--audio-thread") == 0) audio_thread = true; /* the console's audio thread, muted unless --audio */
         else if (strcmp(argv[i], "--menu") == 0) menu = true;
         else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
@@ -409,6 +440,7 @@ int main(int argc, char** argv) {
             menu = true;
         }
         else if (strcmp(argv[i], "--replay-run") == 0 && i + 1 < argc) replay = argv[++i]; /* a run trace */
+        else if (strcmp(argv[i], "--commands") == 0 && i + 1 < argc) commands_path = argv[++i];
         else if (strcmp(argv[i], "--menu-hold") == 0 && i + 1 < argc) menu_hold = atof(argv[++i]);
         else if (strcmp(argv[i], "--shots-at") == 0 && i + 1 < argc) {
             /* menu frames (60 a second) to save as frame_NNNN.png */
@@ -427,6 +459,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--steps") == 0 && i + 1 < argc) steps = atoi(argv[++i]);
         else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
         else if (strcmp(argv[i], "--no-shots") == 0) no_shots = true;
+        else if (strcmp(argv[i], "--load-trace") == 0) load_trace = true;
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
@@ -456,6 +489,7 @@ int main(int argc, char** argv) {
     sa.sa_sigaction = on_crash;
     sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, NULL);
+    if (load_trace) set_load_trace(now_ms);
     if (logic_cmd.empty() && !replay) {
         fprintf(stderr, "spire_play: --logic is required\n");
         return 2;
@@ -501,6 +535,9 @@ int main(int argc, char** argv) {
     GameClient game(&lib, &tree, replay ? (LogicLink*)&replayed : (LogicLink*)&link);
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
+    /* the software renderer's textures are decoded (4 bytes a pixel): with
+     * the console's budget a fight's would be read again every frame */
+    if (load_trace) canvas.set_texture_budget((size_t)1 << 30);
     if (menu) {
         /* The menus, driven by the pad script; then the run plays itself. */
         MenuFlow* flow = new MenuFlow(&lib, &tree, &game, pack.game_version());
@@ -721,7 +758,31 @@ int main(int argc, char** argv) {
     size_t pad_at = 0;
     FrameTimes frame_times;
     if (fast && !replay) game.request("{\"cmd\":\"set_setting\",\"name\":\"fast_mode\",\"value\":true}");
-    game.start_run(character, seed);
+    if (commands_path) {
+        std::ifstream in(commands_path);
+        if (!in) {
+            fprintf(stderr, "spire_play: cannot read %s\n", commands_path);
+            return 2;
+        }
+        std::vector<std::string> start, script;
+        std::string line;
+        while (std::getline(in, line)) {
+            size_t at = line.find("[CMD] ");
+            if (at != std::string::npos) line = line.substr(at + 6);
+            if (!line.empty() && line[line.size() - 1] == '\r') line.erase(line.size() - 1);
+            if (line.empty() || line[0] != '{') continue;
+            if (script.empty() && line.find("\"cmd\":\"action\"") == std::string::npos &&
+                line.find("\"cmd\": \"action\"") == std::string::npos)
+                start.push_back(line);
+            else
+                script.push_back(line);
+        }
+        for (size_t i = 0; i < start.size(); ++i) game.request(start[i]);
+        game.set_auto_script(script);
+        printf("commands: %u to start, %u to play\n", (unsigned)start.size(), (unsigned)script.size());
+    } else {
+        game.start_run(character, seed);
+    }
     if (hp > 0) game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
     if (!mash.empty()) {
         game.set_auto_play(auto_seed);
@@ -775,8 +836,10 @@ int main(int argc, char** argv) {
         fflush(stdout);
         return 0;
     }
-    int shown = 0, idle = 0, frame_n = 0, waited = 0;
+    int shown = 0, idle = 0, frame_n = 0, waited = 0, after_script = 0;
     while (shown < steps) {
+        /* --commands: the session's last command answered and played out */
+        if (commands_path && game.script_left() == 0 && ++after_script > 600) break;
         PadState pad;
         if (pad_at < pad_script.size() && !game.busy() &&
             (pad_after == 0 ? game.decision_count() > 0 : shown > pad_after)) {
@@ -791,7 +854,9 @@ int main(int argc, char** argv) {
             pad_script.clear();
         }
         int before = game.decision_count();
+        double u0 = load_trace ? now_ms() : 0;
         game.update(pad);
+        double update_ms = load_trace ? now_ms() - u0 : 0;
         if (pad.pressed && game.decision_count() == before) {
             /* The screen half a second after this press (focus, targeting:
              * their moves and tweens). */
@@ -811,7 +876,9 @@ int main(int argc, char** argv) {
              * a second for the intro animations), then save it. */
             tree.layout();
             for (int f = 0; f < settle; ++f) {
+                double f0 = now_ms();
                 run_frame(tree, audio, frame_times);
+                if (load_trace) trace_frame(tree, sw, canvas, scale, f == 0 ? update_ms : 0, f0);
                 if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
                     /* the steps after that screen as they play */
                     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -851,7 +918,9 @@ int main(int argc, char** argv) {
         } else {
             /* Time goes on while waiting (a fight's last blow plays before
              * the screen after it). */
+            double f0 = now_ms();
             run_frame(tree, audio, frame_times);
+            if (load_trace) trace_frame(tree, sw, canvas, scale, update_ms, f0);
             if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
                 /* the steps after that screen as they play */
                 sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));

@@ -7,10 +7,14 @@
 
 #include "node.h"
 
+#include <deque>
+#include <set>
+
 namespace spire {
 
 class Pack;
 class GameAudio;
+class Canvas;
 
 struct SceneFile {
     std::string name; /* pack name */
@@ -60,6 +64,16 @@ public:
             if (it->second) out.push_back(it->first);
     }
 
+    /* PreloadManager's sets (the logic's "preload": the run's assets, the
+     * act's): their scene and resource files read and their textures
+     * loaded ahead of their first use, a few each frame (warm_step, from
+     * SceneTree::render), so a first card play does not stop to read
+     * them. Off: nothing is warmed (spire_gaps counts the scenes shown). */
+    void warm(const Json& paths);
+    void warm_step(Canvas& canvas);
+    bool warming() const { return !warm_queue_.empty(); }
+    void set_warm_enabled(bool on) { warm_enabled_ = on; }
+
 private:
     Resource* build(const std::string& cls, const Json& props, const SceneFile* ctx, const std::string& path);
     ThemeRes* build_theme(const Json& props, const SceneFile* ctx);
@@ -71,6 +85,9 @@ private:
     std::map<std::string, SceneFile*> files_;
     std::map<std::string, Resource*> ext_;
     std::vector<Resource*> owned_; /* subs and inline objects */
+    std::deque<std::string> warm_queue_;
+    std::set<std::string> warmed_;
+    bool warm_enabled_;
     Json default_theme_doc_;
     ThemeRes* default_theme_;
     FontRes* default_font_;

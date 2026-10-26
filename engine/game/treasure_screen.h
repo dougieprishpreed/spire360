@@ -27,6 +27,7 @@ public:
     void set_previous_stage(const std::string& stage) { previous_ = stage; }
     virtual Node* build(const Json& decision, std::string* error);
     virtual std::string input(const PadState& pad);
+    virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
 
 private:

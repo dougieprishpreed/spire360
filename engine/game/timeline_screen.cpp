@@ -841,7 +841,12 @@ TimelineScreen::Action TimelineScreen::input(const PadState& pad, std::string* c
         break;
     }
     if (pad.pressed & PadState::B) {
-        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/map/map_close");
+        /* NBackButton.ClickedSfx as it is pressed, OnBackButtonPressed's
+         * map_close */
+        if (lib_->audio()) {
+            lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+            lib_->audio()->ui("event:/sfx/ui/map/map_close");
+        }
         clear_tip();
         return BACK;
     }

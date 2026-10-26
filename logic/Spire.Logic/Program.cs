@@ -89,6 +89,7 @@ internal static class Program
 
             if (result == null) continue;
             AttachSteps(result);
+            driver.AttachPreload(result);
             proto.Write(result);
             // Thread-pool work means game code ran where the scheduler's
             // context was not installed: on the console's runtime (no

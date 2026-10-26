@@ -1,5 +1,6 @@
 #include "stats_screen.h"
 
+#include "../audio/game_audio.h"
 #include "../scene/controls.h"
 #include "../scene/scene.h"
 #include "../scene/value.h"
@@ -139,7 +140,11 @@ void StatsScreen::focus(int i) {
 
 StatsScreen::Action StatsScreen::input(const PadState& pad, std::string* cmd) {
     cmd->clear();
-    if (pad.pressed & PadState::B) return BACK;
+    /* the back button: ui_back (the NStatEntries play none) */
+    if (pad.pressed & PadState::B) {
+        if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+        return BACK;
+    }
     if (focus_ < 0) return NONE;
     Vec2 dir;
     if (pad.pressed & PadState::LEFT) dir = Vec2(-1, 0);

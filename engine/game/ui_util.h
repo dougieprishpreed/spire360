@@ -66,6 +66,11 @@ void set_capstone_open(bool open);
 
 /* A full-screen Control (anchors 0..1), named. */
 Control* full_rect_control(const char* name);
+/* An overlay's background (the room as it is) in a CanvasLayer under the
+ * default canvas: nothing in the room (its CombatUi's absolute z: a
+ * focused hand card, a played card) is drawn over the overlay, which the
+ * game keeps on a canvas layer above the room. */
+Node* overlay_behind(Node* background);
 /* An InspectPrompt (the card selection screens'): Y and "to inspect". */
 void setup_inspect_prompt(SceneLibrary* lib, Node* prompt);
 
@@ -75,7 +80,7 @@ void setup_inspect_prompt(SceneLibrary* lib, Node* prompt);
  * card's centre). The tips are nodes of the screen's tree. */
 class TipFollower {
 public:
-    TipFollower() : tips_(NULL), owner_(NULL), card_(true), below_(false), left_(false), extra_(0) {}
+    TipFollower() : tips_(NULL), owner_(NULL), slot_(NULL), card_(true), below_(false), left_(false), merchant_(0), extra_(0) {}
     void show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips);
     /* NHoverTipSet.CreateAndShow(owner, tips, GetHoverTipAlignment(owner))
      * with SetFollowOwner: right of the owner, or left of it past 3/4 of
@@ -86,14 +91,26 @@ public:
     void show_below(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
     /* HoverTipAlignment.Left: the tips' right edge at the owner's left. */
     void show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
+    /* NMerchantRelic / NMerchantPotion / NMerchantCardRemoval.CreateHoverTip:
+     * past the screen's middle, the tips' right edge at the slot, then up
+     * and left by half the slot; else right of it (the removal: from its
+     * position), then right and up by half the slot. */
+    void show_for_merchant_slot(SceneLibrary* lib, Node* parent, Control* slot, const Json& tips, bool removal);
+    /* NMerchantCard.CreateHoverTip: SetAlignment(hitbox, the slot's
+     * GetHoverTipAlignment): right of the hitbox (its unscaled width), or
+     * left of it with the slot past 3/4 of the screen. */
+    void show_for_merchant_card(SceneLibrary* lib, Node* parent, Control* slot, Control* hitbox, const Json& tips);
     void hide();
     /* Each frame (after the layout). */
     void frame();
 
 private:
+    void attach(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
     Control* tips_;
     Control* owner_;
+    Control* slot_; /* show_for_merchant_card: the slot that picks the side */
     bool card_, below_, left_;
+    int merchant_; /* 0, 1: relic or potion, 2: card removal, 3: card */
     float extra_;
 };
 

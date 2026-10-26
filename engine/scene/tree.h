@@ -53,6 +53,7 @@ private:
     static int hit_stop_trans_;
     Xform2D to_screen_;
     Canvas* canvas_; /* during render */
+    int layer_;      /* during collect: the CanvasLayer the items are in (0: the default canvas) */
 };
 
 } /* namespace spire */
