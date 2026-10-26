@@ -252,6 +252,11 @@ bool MenuFlow::update(const PadState& in) {
         chars_->set_data(game_->characters());
     }
 
+    if (logo_ || title_waiting_) {
+        /* The logic's start (its ready, the profile's main_menu) is read
+         * meanwhile: the menu waits for it. */
+        game_->update(PadState());
+    }
     if (logo_) {
         logo_->input(pad);
         if (logo_->done() && menu_ready_) {

@@ -5,6 +5,7 @@
 //   game:\spire\pack.s3p   the converter's build output (convert.py build)
 //   game:\spire\data\      its data folder (localization, res_dirs.json)
 //   game:\spire360.txt     log: startup, logic errors, frame timings
+//   game:\spire360.ini     optional debug options (read_ini)
 //
 // Pad: on the title screen A starts a run. In a run: D-pad picks, A
 // confirms, Y ends the turn. Back writes the log now; Back + Start quits.
@@ -29,7 +30,8 @@
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
 
-extern "C" int spire_logic_start(const char* root);
+extern "C" int spire_logic_start(const char* root, const char* const* extra, int extra_count);
+extern "C" unsigned spire_logic_memory_kb(void);
 
 using namespace spire;
 
@@ -61,6 +63,63 @@ static void logf(const char* fmt, ...) {
 }
 
 static void engine_log(const char* line) { logf("%s", line); }
+
+static std::string ini_word(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n"), z = s.find_last_not_of(" \t\r\n");
+    std::string w = a == std::string::npos ? std::string() : s.substr(a, z - a + 1);
+    for (size_t i = 0; i < w.size(); ++i)
+        if (w[i] >= 'A' && w[i] <= 'Z') w[i] = (char)(w[i] - 'A' + 'a');
+    return w;
+}
+
+/* game:\spire360.ini: debug options for testing, "name=value" lines (';' or
+ * '#' starts a comment; 1, on, true or yes turns an option on):
+ *   invincible=1   the player keeps their HP; hits play as usual (numbers,
+ *                  hurt animations)
+ *   godmode=1      the game's dev console godmode: Strength, Buffer and
+ *                  Regen 999999999 on the player at each fight
+ * They reach the logic as its environment (logic/Spire.Logic/
+ * DebugOptions.cs). No file: all off. */
+static void read_ini(const char* path, std::vector<std::string>& env) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s(line);
+        size_t c = s.find_first_of(";#");
+        if (c != std::string::npos) s.erase(c);
+        size_t eq = s.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = ini_word(s.substr(0, eq)), val = ini_word(s.substr(eq + 1));
+        bool on = val == "1" || val == "on" || val == "true" || val == "yes";
+        if (key == "invincible") {
+            if (on) env.push_back("SPIRE_INVINCIBLE=1");
+        } else if (key == "godmode") {
+            if (on) env.push_back("SPIRE_GODMODE=1");
+        } else {
+            logf("spire360.ini: unknown option '%s'", key.c_str());
+            continue;
+        }
+        logf("spire360.ini: %s %s", key.c_str(), on ? "on" : "off");
+    }
+    fclose(f);
+}
+
+/* Every allocation on the console is backed by physical memory (no paging):
+ * what is left of it, and the logic's linear memory (committed as it grows,
+ * never given back). */
+static unsigned free_memory_mb() {
+    MEMORYSTATUS ms;
+    GlobalMemoryStatus(&ms);
+    return (unsigned)(ms.dwAvailPhys >> 20);
+}
+
+static void log_memory(const char* when) {
+    MEMORYSTATUS ms;
+    GlobalMemoryStatus(&ms);
+    logf("memory %s: %u MB free of %u MB, logic %u MB", when, (unsigned)(ms.dwAvailPhys >> 20),
+         (unsigned)(ms.dwTotalPhys >> 20), spire_logic_memory_kb() / 1024);
+}
 
 static double now_ms() {
     LARGE_INTEGER f, c;
@@ -198,14 +257,20 @@ void __cdecl main() {
         return;
     }
     logf("pack: %u entries, game version %s", (unsigned)pack.count(), pack.game_version().c_str());
+    log_memory("at start");
+    std::vector<std::string> debug_env;
+    read_ini("game:\\spire360.ini", debug_env);
+    std::vector<const char*> debug_ptrs;
+    for (size_t i = 0; i < debug_env.size(); ++i) debug_ptrs.push_back(debug_env[i].c_str());
     double t0 = now_ms();
-    int rc = spire_logic_start("game:/spire");
+    int rc = spire_logic_start("game:/spire", debug_ptrs.empty() ? NULL : &debug_ptrs[0], (int)debug_ptrs.size());
     if (rc != 0) {
         logf("logic: could not start (%d)", rc);
         flush_log();
         return;
     }
     logf("logic: started in %.1f ms", now_ms() - t0);
+    log_memory("with the logic");
     Loc::init("game:\\spire\\data");
     install_game_scripts();
     SceneLibrary* lib = new SceneLibrary(&pack);
@@ -234,10 +299,17 @@ void __cdecl main() {
     unsigned prev = 0;
     double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, acc_update = 0, worst = 0, wait_start = 0;
     int frames = 0, shown = 0, slow = 0;
+    unsigned least_free = free_memory_mb();
+    bool low_logged = false, logic_ended = false;
     for (;;) {
-        XINPUT_STATE xs;
-        ZeroMemory(&xs, sizeof(xs));
-        unsigned held = XInputGetState(0, &xs) == ERROR_SUCCESS ? pad_bits(xs.Gamepad) : 0;
+        /* Any controller plays: on a console the pad can be signed in to
+         * any of the four slots. */
+        unsigned held = 0;
+        for (DWORD user = 0; user < XUSER_MAX_COUNT; ++user) {
+            XINPUT_STATE xs;
+            ZeroMemory(&xs, sizeof(xs));
+            if (XInputGetState(user, &xs) == ERROR_SUCCESS) held |= pad_bits(xs.Gamepad);
+        }
         PadState pad;
         pad.held = held;
         pad.pressed = held & ~prev;
@@ -275,6 +347,12 @@ void __cdecl main() {
                 logf("logic stopped: %s", game->last_error().c_str());
                 flush_log();
                 break;
+            }
+            if (link.finished() && !logic_ended) {
+                /* a trap or an exit with no error answer (out of memory, ...) */
+                log_memory("as the logic ended");
+                logf("logic: its thread has ended (its output: spire360_logic.txt)");
+                logic_ended = true;
             }
         }
 
@@ -315,10 +393,16 @@ void __cdecl main() {
                  update_ms, f1 - f0, f2 - f1, game->decision_count());
         if (work > 16.7) ++slow;
         if (++frames == 600) {
+            unsigned free_mb = free_memory_mb();
+            if (free_mb < least_free) least_free = free_mb;
             logf("per frame: %.2f ms update, %.2f ms process + layout, %.2f ms draw, %.2f ms present; %ld draw calls; "
-                 "worst %.1f ms, %d of %d over 16.7 ms",
+                 "worst %.1f ms, %d of %d over 16.7 ms; memory %u MB free, logic %u MB",
                  acc_update / frames, acc_ms / frames, acc_draw / frames, acc_present / frames, renderer.draw_calls(), worst,
-                 slow, frames);
+                 slow, frames, free_mb, spire_logic_memory_kb() / 1024);
+            if (free_mb < 24 && !low_logged) {
+                log_memory("low");
+                low_logged = true;
+            }
             frames = slow = 0;
             acc_ms = acc_draw = acc_present = acc_update = worst = 0;
         }
@@ -330,7 +414,7 @@ void __cdecl main() {
     delete tree;
     delete fonts;
     delete lib;
-    logf("spire360 done");
+    logf("spire360 done (least free memory %u MB)", least_free);
     flush_log();
     if (g_log_file) { fclose(g_log_file); g_log_file = NULL; }
 }

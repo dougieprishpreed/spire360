@@ -39,6 +39,11 @@ class Node {
 public:
     Node();
     virtual ~Node();
+    /* A freed node is no tween's target any more (TweenSet::forget): a
+     * screen's tweens can outlive a node they move. The size is the
+     * deleted node's own (its class's). */
+    static void* operator new(size_t size);
+    static void operator delete(void* p, size_t size);
 
     std::string name;
     std::string type; /* Godot class the scene asked for */
@@ -94,6 +99,7 @@ class MaterialRes;
 class CanvasItem : public Node {
 public:
     CanvasItem();
+    virtual ~CanvasItem();
     bool visible;
     Color modulate, self_modulate;
     bool show_behind_parent, top_level;

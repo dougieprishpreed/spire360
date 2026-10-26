@@ -804,7 +804,12 @@ void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, Blen
         flags_ = flags;
         dirty_ = true;
     }
+    /* DrawPrimitiveUP copies a batch into the command ring buffer (on the
+     * console 2 MB, sent in 32 segments of 64 KB: D3DRING_BUFFER_PARAMETERS'
+     * defaults): a draw holds at most a segment's worth of whole triangles. */
+    const size_t max_vertices = 65536 / sizeof(GpuVertex) / 3 * 3;
     for (int i = 0; i < count; ++i) {
+        if (i % 3 == 0 && batch_.size() + 3 > max_vertices) flush();
         GpuVertex g;
         g.x = v[i].pos.x;
         g.y = v[i].pos.y;

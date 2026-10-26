@@ -2,6 +2,7 @@
 
 #include "scene.h"
 #include "script.h"
+#include "tween.h"
 #include "value.h"
 
 #include <math.h>
@@ -150,6 +151,13 @@ Node::~Node() {
     for (size_t i = 0; i < children.size(); ++i) delete children[i];
 }
 
+void* Node::operator new(size_t size) { return ::operator new(size); }
+
+void Node::operator delete(void* p, size_t size) {
+    TweenSet::forget(p, size);
+    ::operator delete(p);
+}
+
 unsigned Control::theme_generation = 1;
 
 void Node::add_child(Node* child) {
@@ -273,6 +281,13 @@ CanvasItem::CanvasItem()
     : visible(true), show_behind_parent(false), top_level(false), clip_children(0), z_index(0), z_as_relative(true),
       material(NULL), use_parent_material(false), texture_filter(0), texture_repeat(0) {
     flags |= NF_CANVAS_ITEM;
+}
+
+CanvasItem::~CanvasItem() {
+    /* The shader parameters are the map's own blocks, outside the node
+     * (Node's operator delete covers the node itself). */
+    for (std::map<std::string, float>::iterator it = shader_params.begin(); it != shader_params.end(); ++it)
+        TweenSet::forget(&it->second, sizeof(float));
 }
 
 bool CanvasItem::set(const std::string& key, const Json& v, const PropCtx& ctx) {

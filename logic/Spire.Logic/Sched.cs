@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Spire.Logic;
@@ -141,6 +143,21 @@ public static class Sched
     /// waits briefly for it, and counts it so the WASI build's assumption
     /// (the game queues none once patched) stays checked.
     /// </summary>
+    /// <summary>What the pending thread-pool items are (ThreadPool's own
+    /// list for debuggers): their types name the async method or delegate.</summary>
+    [DynamicDependency("GetQueuedWorkItems", typeof(ThreadPool))]
+    private static string DescribePoolWork()
+    {
+        try
+        {
+            var m = typeof(ThreadPool).GetMethod("GetQueuedWorkItems", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+            if (m?.Invoke(null, null) is IEnumerable<object> items)
+                return ": " + string.Join(", ", items.Select(i => i is Delegate d ? d.Method.ToString() : i.GetType().ToString()));
+        }
+        catch (Exception ex) { return $" ({ex.GetType().Name})"; }
+        return "";
+    }
+
     public static void Settle(int maxRounds = 10_000)
     {
         int idleRounds = 0;
@@ -153,7 +170,7 @@ public static class Sched
                 PoolWorkSeen += pending;
                 if (OperatingSystem.IsWasi())
                 {
-                    Log.Error($"Sched.Settle: {pending} thread-pool item(s) pending on a runtime without threads");
+                    Log.Error($"Sched.Settle: {pending} thread-pool item(s) pending on a runtime without threads{DescribePoolWork()}");
                     return;
                 }
                 Thread.Sleep(0);

@@ -27,6 +27,7 @@
 #include <fstream>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 using namespace spire;
@@ -67,7 +68,19 @@ static void combat_event_case(SceneLibrary& lib, const Json& decision) {
     Node* enemy = enemies && !enemies->children.empty() ? enemies->children[0] : NULL;
     Node* health = enemy ? enemy->find_unique("HealthBar") : NULL;
     check(health && health->is_canvas_item() && !((CanvasItem*)health)->visible, "visual-only enemy health display is visible");
-    check(find_named(root, "Portrait") == NULL, "combat event used the portrait layout");
+    /* the portrait layout's node, not a card's art (an option's card tip:
+     * Punch Off's Injury) */
+    Node* portrait = NULL;
+    std::vector<Node*> stack(1, root);
+    while (!stack.empty() && !portrait) {
+        Node* n = stack.back();
+        stack.pop_back();
+        if (n->name == "Card") continue;
+        if (n->name == "Portrait") portrait = n;
+        for (size_t c = 0; c < n->children.size(); ++c) stack.push_back(n->children[c]);
+    }
+    if (portrait) fprintf(stderr, "combat event %s: a Portrait at %s\n", decision["event_id"].str().c_str(), portrait->path().c_str());
+    check(portrait == NULL, "combat event used the portrait layout");
     PadState pad; pad.pressed = PadState::A;
     std::string command = screen.input(pad);
     Json response = Json::parse(command.c_str(), command.size(), &error);
@@ -622,11 +635,30 @@ int main(int argc, char** argv) {
                     }
             }
             if (d["decision"].str() == "combat_play" && !tree.root()->children.empty()) {
+                /* the fight's room (a confirm popup a logic-driven trace never
+                 * answered can sit before it: Trial's Double Down) */
                 Node* room = tree.root()->children[0];
+                for (size_t c = 0; c < tree.root()->children.size(); ++c)
+                    if (tree.root()->children[c]->name == "CombatRoom") room = tree.root()->children[c];
                 for (size_t o = 0; o < d["orbs"].size(); ++o) {
                     const Json& orb = d["orbs"][o];
                     int id = orb["instance_id"].i((int)o + 1);
                     Node* node = find_named(room, format("CombatOrb_%d", id).c_str());
+                    if (!node) {
+                        fprintf(stderr, "%s response %d: orb %d (%s) absent; the room's orbs:", argv[file], responses, id,
+                                orb["id"].str().c_str());
+                        std::vector<Node*> stack(1, room);
+                        while (!stack.empty()) {
+                            Node* n = stack.back();
+                            stack.pop_back();
+                            if (n->name.compare(0, 9, "CombatOrb") == 0) fprintf(stderr, " %s", n->name.c_str());
+                            for (size_t c = 0; c < n->children.size(); ++c) stack.push_back(n->children[c]);
+                        }
+                        fprintf(stderr, " (room %s; the root's children:", room->name.c_str());
+                        for (size_t c = 0; c < tree.root()->children.size(); ++c)
+                            fprintf(stderr, " %s", tree.root()->children[c]->name.c_str());
+                        fprintf(stderr, ")\n");
+                    }
                     check(node != NULL, "channelled orb was absent after its response played");
                     ++orb_checks;
                     for (size_t p = 0; p < old_orbs.size(); ++p)
@@ -678,12 +710,24 @@ int main(int argc, char** argv) {
                 for (size_t h = 0; holders && h < holders->children.size(); ++h) {
                     Node* holder = holders->children[h];
                     if (holder->queued_for_deletion() || !holder->is_control()) continue;
+                    /* a played or autoplayed card in the play pile or flying
+                     * to its pile is raised to z 2 (CombatScreen): not in the
+                     * hand (a full hand and Havoc's card made 11) */
+                    if (((Control*)holder)->z_index >= 2) continue;
                     ++count;
                     Vec2 at = ((Control*)holder)->global_transform().origin;
                     if (fabsf(at.x) > 10000 || fabsf(at.y) > 10000) placed = false;
                 }
-                if (count > 10 || !placed)
-                    fprintf(stderr, "%s response %d: %d hand holders%s\n", argv[file], responses, count, placed ? "" : ", one off the screen");
+                if (count > 10 || !placed || getenv("SPIRE_CHECK_HANDS")) {
+                    fprintf(stderr, "%s response %d: %d hand holders (the decision's hand %d)%s\n", argv[file], responses, count,
+                            (int)d["hand"].size(), placed ? "" : ", one off the screen");
+                    for (size_t h = 0; getenv("SPIRE_CHECK_HANDS") && holders && h < holders->children.size(); ++h) {
+                        Node* title = find_named(holders->children[h], "TitleLabel");
+                        fprintf(stderr, "  holder %s%s\n",
+                                title && title->type == "Label" ? ((Label*)title)->text.c_str() : "?",
+                                holders->children[h]->queued_for_deletion() ? " (freed)" : "");
+                    }
+                }
                 check(count <= 10, "the hand has more than 10 card holders");
                 check(placed, "a hand card holder is far off the screen");
                 ++hand_checks;

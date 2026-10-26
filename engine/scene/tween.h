@@ -21,6 +21,14 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
 
 class TweenSet {
 public:
+    TweenSet();
+    TweenSet(const TweenSet& other);
+    TweenSet& operator=(const TweenSet& other);
+    ~TweenSet();
+    /* Every live set drops its tweens on [p, p + size): memory about to be
+     * freed (Node's operator delete, a CanvasItem's shader parameters), so
+     * a node deleted mid-tween is not written to afterwards. */
+    static void forget(const void* p, size_t size);
     /* Tweens *p to `to` over `seconds`, from its value when it starts
      * (after `delay` seconds: Godot's SetDelay, or intervals before it). */
     void tween(float* p, float to, float seconds, TweenTrans trans = TRANS_LINEAR, TweenEase ease = EASE_IN_OUT,
@@ -50,6 +58,11 @@ private:
         TweenEase ease;
     };
     std::vector<Item> items_;
+    /* the live sets (forget) */
+    TweenSet* prev_;
+    TweenSet* next_;
+    static TweenSet* first_;
+    void link();
 };
 
 } /* namespace spire */

@@ -27,7 +27,7 @@ TimelineScreen::TimelineScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), slots_box_(NULL), line_(NULL), moved_(NULL), inspect_(NULL), holder_(NULL),
       backstop_(NULL), reminder_(NULL), tutorial_(NULL), tip_(NULL), unlock_(NULL), queue_at_(0), mode_(LOADING),
       focus_(-1), pan_(0), pan_target_(0), t_(0), unlock_t_(0), inspect_ready_(0.4), info_text_at_(-1), closing_unlock_(false),
-      tutorial_done_(false) {
+      tutorial_done_(false), tutorial_close_at_(-1) {
     paginator_left_[0] = paginator_left_[1] = 0;
 }
 
@@ -321,6 +321,10 @@ void TimelineScreen::refresh_reminder() {
 
 void TimelineScreen::set_data(const Json& d) {
     if (d["type"].str() != "timeline") return;
+    if (tutorial_ && tutorial_close_at_ >= 0 && unlock_t_ < tutorial_close_at_) {
+        held_ = d;
+        return;
+    }
     if (mode_ == WAITING && d["revealed"].is_object()) {
         /* A reveal: the inspect screen with the unlock, then its screens;
          * the timeline takes the answer's slots after them. */
@@ -809,6 +813,7 @@ TimelineScreen::Action TimelineScreen::input(const PadState& pad, std::string* c
             mode_ = LOADING;
             tutorial_done_ = true;
             if (tutorial_) tweens_.tween(&tutorial_->modulate.a, 0, 0.5f);
+            tutorial_close_at_ = unlock_t_ + 0.5;
             if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/timeline/ui_timeline_open");
         }
         return NONE;
@@ -866,6 +871,13 @@ void TimelineScreen::frame(double dt) {
     tweens_.update(dt);
     t_ += dt;
     unlock_t_ += dt;
+    if (!held_.is_null() && unlock_t_ >= tutorial_close_at_) {
+        /* the tutorial has faded out: SpawnFirstTimeTimeline */
+        Json d = held_;
+        held_ = Json();
+        tutorial_close_at_ = -1;
+        set_data(d);
+    }
     /* NEpochOffscreenVfx._Process: an obtained slot off the screen shows
      * at the edge it went past (0.75 in 0.5 s, 60 px under its top); back
      * on the screen it goes (0.2 s). */

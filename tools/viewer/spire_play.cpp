@@ -23,6 +23,20 @@
  * logo (unless the settings skip it) plays out before the first press;
  * --shots-at F1,F2,... saves those frames (60 a second) as frame_FFFF.png.
  *
+ * --menu --monkey SEED: random pad input from the logo on (the menus, the
+ * run's screens and overlays, held buttons now and then); each screen of a
+ * run takes 0-59 presses (also while effects play, as a player mashes),
+ * then auto play answers it (overlays closed first) so runs go on. Reports
+ * the logic's errors, long frames, a client busy (waiting or playing) a
+ * minute on one screen, a run screen or the menus with no progress for
+ * 5 / 10 minutes (a PNG of each), memory every minute; runs
+ * --monkey-minutes M of play (default 20; Quit starts the menus again).
+ * The last presses are printed with each report and a crash.
+ *
+ * --sync: each command's answer is taken as it is sent (the frames no
+ * longer depend on the logic's speed): with --seed and --monkey a session
+ * repeats press for press.
+ *
  * --replay-run <trace.jsonl>: a recorded run (random_runs.py, coverage)
  * played back in place of the logic, one recorded answer per command.
  *
@@ -30,6 +44,9 @@
  * then the --pad presses on it.
  *
  * --no-shots: the run without the PNGs (soaks).
+ *
+ * --mem-every N: the "memory:" line (resident, textures, scene files
+ * cached) every N screens (default 50).
  *
  * --hp N: the player's max HP and HP set to N once the run starts (a soak
  * that reaches the end of the run).
@@ -73,17 +90,39 @@ using namespace spire;
 /* The pipe link, keeping the last decision line (saved with its screen). */
 class RecordingLink : public LogicLink {
 public:
-    explicit RecordingLink(PipeLink* inner) : echo(false), trace(NULL), inner_(inner) {}
+    explicit RecordingLink(PipeLink* inner) : echo(false), sync(false), trace(NULL), inner_(inner) {}
     virtual bool send(const std::string& line) {
         if (echo) printf("> %s\n", line.c_str());
         if (trace) {
             fprintf(trace, ">%s\n", line.c_str());
             fflush(trace);
         }
-        return inner_->send(line);
+        bool ok = inner_->send(line);
+        if (ok && sync) wait_answer();
+        return ok;
+    }
+    /* --sync: the answer (one line per command) is taken at once, so a
+     * session's frames do not depend on how fast the logic answers. */
+    void wait_answer() {
+        std::string got;
+        for (long tries = 0; tries < 600000; ++tries) {
+            if (inner_->poll(got)) {
+                held_.push_back(got);
+                if (!got.empty() && got[0] == '{') return;
+                continue;
+            }
+            if (inner_->finished()) return;
+            usleep(200);
+        }
+        fprintf(stderr, "spire_play: --sync: no answer in 2 minutes\n");
     }
     virtual bool poll(std::string& line) {
-        if (!inner_->poll(line)) return false;
+        if (!held_.empty()) {
+            line = held_.front();
+            held_.pop_front();
+        } else if (!inner_->poll(line)) {
+            return false;
+        }
         if (trace && !line.empty() && line[0] == '{') {
             fprintf(trace, "%s\n", line.c_str());
             fflush(trace);
@@ -96,11 +135,21 @@ public:
     virtual bool finished() { return inner_->finished(); }
     std::string last_decision;
     bool echo;   /* --menu: the commands sent, on stdout */
+    bool sync;   /* --sync: wait_answer after each command */
     FILE* trace; /* --menu: every line both ways (spire_check replays it) */
 
 private:
     PipeLink* inner_;
+    std::deque<std::string> held_;
 };
+
+/* --monkey's last presses, printed with a report or a crash. */
+static std::deque<std::string> g_presses;
+
+#ifdef SPIRE_DEBUG_HEAP
+/* tools/viewer/debug_heap.cpp (build_debug.sh): writes into freed blocks */
+void debug_heap_check(size_t recent);
+#endif
 
 /* --replay: the responses of a recorded menu trace, each group handed out
  * when the client sends the command it answered (a debugging aid: the run
@@ -161,6 +210,7 @@ private:
 static void on_crash(int sig, siginfo_t* info, void* ctx) {
     ucontext_t* uc = (ucontext_t*)ctx;
     fprintf(stderr, "spire_play: signal %d at address %p\n", sig, info ? info->si_addr : NULL);
+    for (size_t k = 0; k < g_presses.size(); ++k) fprintf(stderr, "  press %s\n", g_presses[k].c_str());
 #if defined(__x86_64__)
     unsigned long long pc = (unsigned long long)uc->uc_mcontext.rip;
     unsigned long long* fp = (unsigned long long*)uc->uc_mcontext.rbp;
@@ -249,6 +299,52 @@ static double now_ms() {
     return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 
+/* --monkey: a random button, weighted towards what the screens use most. */
+static unsigned monkey_button(unsigned r) {
+    static const struct {
+        unsigned bit;
+        unsigned weight;
+    } table[] = { { PadState::A, 24 },      { PadState::B, 9 },        { PadState::X, 4 },
+                  { PadState::Y, 7 },       { PadState::UP, 9 },       { PadState::DOWN, 9 },
+                  { PadState::LEFT, 9 },    { PadState::RIGHT, 9 },    { PadState::LB, 3 },
+                  { PadState::RB, 3 },      { PadState::LT, 2 },       { PadState::RT, 2 },
+                  { PadState::START, 4 },   { PadState::RS_UP, 1 },    { PadState::RS_DOWN, 1 },
+                  { PadState::RS_LEFT, 1 }, { PadState::RS_RIGHT, 1 }, { PadState::LS, 1 } };
+    unsigned total = 0;
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) total += table[i].weight;
+    unsigned pick = r % total;
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
+        if (pick < table[i].weight) return table[i].bit;
+        pick -= table[i].weight;
+    }
+    return PadState::A;
+}
+
+static const char* button_name(unsigned bits) {
+    static const struct {
+        unsigned bit;
+        const char* name;
+    } names[] = { { PadState::A, "A" },         { PadState::B, "B" },           { PadState::X, "X" },
+                  { PadState::Y, "Y" },         { PadState::UP, "UP" },         { PadState::DOWN, "DOWN" },
+                  { PadState::LEFT, "LEFT" },   { PadState::RIGHT, "RIGHT" },   { PadState::LB, "LB" },
+                  { PadState::RB, "RB" },       { PadState::LT, "LT" },         { PadState::RT, "RT" },
+                  { PadState::START, "START" }, { PadState::RS_UP, "RS_UP" },   { PadState::RS_DOWN, "RS_DOWN" },
+                  { PadState::RS_LEFT, "RS_LEFT" }, { PadState::RS_RIGHT, "RS_RIGHT" }, { PadState::LS, "LS" } };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        if (bits == names[i].bit) return names[i].name;
+    return "?";
+}
+
+/* The process's resident memory in MB (/proc/self/statm), 0 if unknown. */
+static long resident_mb() {
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (!f) return 0;
+    long size = 0, resident = 0;
+    if (fscanf(f, "%ld %ld", &size, &resident) != 2) resident = 0;
+    fclose(f);
+    return resident * sysconf(_SC_PAGESIZE) / (1024 * 1024);
+}
+
 static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
     double t0 = now_ms();
     tree.process(1.0 / 60.0);
@@ -297,6 +393,10 @@ int main(int argc, char** argv) {
      * 10 frames */
     std::vector<unsigned> mash;
     int mash_every = 8;
+    unsigned monkey = 0; /* --monkey SEED: random presses (--menu) */
+    bool sync = false;   /* --sync: each answer taken with its command (repeatable sessions) */
+    int mem_every = 50;  /* --mem-every N: the memory line every N screens */
+    int monkey_minutes = 20;
     std::vector<int> shots_at;
     int frames_after = -1, frames_every = 10; /* screen after which every so many frames are saved */
     for (int i = 3; i < argc; ++i) {
@@ -343,6 +443,13 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--pad-run") == 0 && i + 1 < argc) parse_pad(argv[++i], run_script);
         else if (strcmp(argv[i], "--mash") == 0 && i + 1 < argc) parse_pad(argv[++i], mash);
         else if (strcmp(argv[i], "--mash-every") == 0 && i + 1 < argc) mash_every = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--monkey") == 0 && i + 1 < argc) {
+            monkey = (unsigned)strtoul(argv[++i], NULL, 10);
+            if (!monkey) monkey = 1;
+        }
+        else if (strcmp(argv[i], "--monkey-minutes") == 0 && i + 1 < argc) monkey_minutes = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--sync") == 0) sync = true;
+        else if (strcmp(argv[i], "--mem-every") == 0 && i + 1 < argc) mem_every = atoi(argv[++i]) > 0 ? atoi(argv[i]) : 50;
     }
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -385,6 +492,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     RecordingLink link(&pipe);
+    if (sync && !replay) {
+        link.sync = true;
+        link.wait_answer(); /* the logic's "ready" */
+    }
     SceneTree tree;
     tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
     GameClient game(&lib, &tree, replay ? (LogicLink*)&replayed : (LogicLink*)&link);
@@ -392,31 +503,91 @@ int main(int argc, char** argv) {
     Canvas canvas(&sw, &pack);
     if (menu) {
         /* The menus, driven by the pad script; then the run plays itself. */
-        MenuFlow flow(&lib, &tree, &game, pack.game_version());
+        MenuFlow* flow = new MenuFlow(&lib, &tree, &game, pack.game_version());
         if (seed_given) game.set_run_seed(seed);
         size_t run_at = 0;
         bool hp_set = false;
         if (!replay) {
-            link.echo = true;
+            link.echo = !monkey;
             link.trace = fopen((out_dir + "/trace.jsonl").c_str(), "wb");
         }
         size_t at = 0;
         int idle = 0, quiet = 0, shots = 0, decisions = 0;
         double hold = menu_hold;
         bool autoplay = false;
-        for (int frame = 0; frame < 60 * 60 * 30; ++frame) {
+        /* --monkey's state: its generator, the screen's press budget, the
+         * last presses (printed with each report) */
+        unsigned mrng = monkey * 2654435761u + 12345u;
+        int m_seen = -1, m_budget = 0, m_presses = 0, m_wait = 60, m_hold = 0, m_still = 0, m_menu_still = 0,
+            m_reports = 0;
+        unsigned m_hold_bits = 0;
+        bool m_was_in_run = false;
+        double m_busy_since = 0;
+        std::string m_error;
+        int frame_limit = monkey ? 60 * 60 * monkey_minutes : 60 * 60 * 30;
+        for (int frame = 0; frame < frame_limit; ++frame) {
             PadState pad;
             /* the intro logo plays out untouched */
-            bool settled = !game.busy() && !flow.in_logo() && idle >= 60;
+            bool settled = !game.busy() && !flow->in_logo() && idle >= 60;
             if (hold > 0 && settled) {
                 hold -= 1.0 / 60.0;
                 settled = false;
             }
-            if (hp > 0 && !hp_set && flow.in_run() && game.decision_count() > 0) {
+            if (hp > 0 && !hp_set && flow->in_run() && game.decision_count() > 0) {
                 game.request(format("{\"cmd\":\"set_player\",\"max_hp\":%d,\"hp\":%d}", hp, hp));
                 hp_set = true;
             }
-            if (settled && at < pad_script.size()) {
+            if (monkey) {
+                if (flow->in_run() && !m_was_in_run && game.decision_count() > 0) {
+                    /* auto play only once a screen's presses are used up */
+                    game.set_auto_play(monkey);
+                    game.set_auto_play_until(game.decision_count());
+                    m_was_in_run = true;
+                }
+                if (!flow->in_run()) m_was_in_run = false;
+                if (game.decision_count() != m_seen) {
+                    m_seen = game.decision_count();
+                    mrng = mrng * 1103515245u + 12345u;
+                    m_budget = (int)((mrng >> 16) % 60);
+                    m_presses = m_still = 0;
+                    m_busy_since = 0; /* busy across decisions is the game going on */
+                }
+                if (m_hold > 0) {
+                    /* a held button (long presses, the map's drawing) */
+                    pad.held = m_hold_bits;
+                    --m_hold;
+                } else if (flow->in_run() && m_presses >= m_budget && !flow->starting() && !game.busy()) {
+                    /* auto play answers the screen; a pad cannot pick under
+                     * an overlay, so it is closed first */
+                    if (game.overlay_open() || m_presses == m_budget) {
+                        /* B once anyway: a card raised to aim, an open
+                         * inventory go back first */
+                        if (++m_wait >= 20) {
+                            pad.pressed = pad.held = PadState::B;
+                            m_wait = 0;
+                            if (m_presses == m_budget) ++m_presses;
+                        }
+                    } else if (!game.auto_playing()) {
+                        game.set_auto_play_until(game.decision_count() + 1);
+                    }
+                } else if (!flow->in_logo() && --m_wait <= 0) {
+                    mrng = mrng * 1103515245u + 12345u;
+                    unsigned bits = monkey_button(mrng >> 8);
+                    mrng = mrng * 1103515245u + 12345u;
+                    if ((mrng >> 16) % 20 == 0) {
+                        m_hold_bits = bits;
+                        m_hold = 30 + (int)((mrng >> 20) % 60);
+                    }
+                    pad.pressed = pad.held = bits;
+                    mrng = mrng * 1103515245u + 12345u;
+                    m_wait = 3 + (int)((mrng >> 16) % 18);
+                    ++m_presses;
+                    g_presses.push_back(format("frame %d, decision %d %s: %s%s", frame, game.decision_count(),
+                                            flow->in_run() ? game.decision()["decision"].str().c_str() : "(menus)",
+                                            button_name(bits), m_hold > 0 ? " (held)" : ""));
+                    if (g_presses.size() > 30) g_presses.pop_front();
+                }
+            } else if (settled && at < pad_script.size()) {
                 apply_pad(pad_script[at++], pad);
                 idle = 0;
                 quiet = 0; /* the last screen is shot once its press has settled */
@@ -425,7 +596,7 @@ int main(int argc, char** argv) {
                 idle = 0;
                 quiet = 0;
                 if (run_at == run_script.size()) game.set_auto_play_until(0);
-            } else if (at >= pad_script.size() && flow.in_run() && !autoplay) {
+            } else if (at >= pad_script.size() && flow->in_run() && !autoplay) {
                 game.set_auto_play(auto_seed);
                 if (!run_script.empty()) game.set_auto_play_until(pad_after > 0 ? pad_after : 1);
                 autoplay = true;
@@ -438,14 +609,25 @@ int main(int argc, char** argv) {
                 write_png(format("%s/menu_final.png", out_dir.c_str()).c_str(), sw.framebuffer());
                 break;
             }
-            if (!flow.update(pad)) break;
-            std::string ev = flow.take_event();
+            double frame_start = now_ms();
+            if (!flow->update(pad)) {
+                if (!monkey) break;
+                /* Quit: the game again from its start (the logic stays) */
+                printf("monkey: Quit chosen at frame %d: the menus again\n", frame);
+                delete flow;
+                flow = new MenuFlow(&lib, &tree, &game, pack.game_version());
+                m_was_in_run = false;
+            }
+            std::string ev = flow->take_event();
             if (!ev.empty()) printf("menu: %s\n", ev.c_str());
             tree.layout();
             tree.process(1.0 / 60.0);
             audio.update(1.0 / 60.0);
             tree.layout(1);
-            if (!flow.in_logo()) ++idle;
+#ifdef SPIRE_DEBUG_HEAP
+            debug_heap_check(4096);
+#endif
+            if (!flow->in_logo()) ++idle;
             for (size_t s = 0; s < shots_at.size(); ++s)
                 if (shots_at[s] == frame) {
                     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
@@ -453,18 +635,18 @@ int main(int argc, char** argv) {
                     sw.end();
                     write_png(format("%s/frame_%04d.png", out_dir.c_str(), frame).c_str(), sw.framebuffer());
                 }
-            if (flow.in_run() || flow.starting() || game.busy() || flow.in_logo()) quiet = 0;
+            if (flow->in_run() || flow->starting() || game.busy() || flow->in_logo()) quiet = 0;
             else ++quiet;
             /* A shot of the first settled menu, then 45 frames after each
              * press (--pad-run's too). */
             int presses = (int)(at + run_at);
-            bool shot = (idle == 45 && shots < presses + 1 && (at > 0 || !game.busy()));
+            bool shot = !monkey && (idle == 45 && shots < presses + 1 && (at > 0 || !game.busy()));
             if (shot) {
                 sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
                 tree.render(canvas);
                 sw.end();
                 write_png(format("%s/menu_%02d.png", out_dir.c_str(), shots).c_str(), sw.framebuffer());
-                printf("menu_%02d after %d presses%s\n", shots, presses, flow.in_run() ? " (in a run)" : "");
+                printf("menu_%02d after %d presses%s\n", shots, presses, flow->in_run() ? " (in a run)" : "");
                 fflush(stdout);
                 ++shots;
             }
@@ -480,7 +662,50 @@ int main(int argc, char** argv) {
                 printf("%04d %s%s\n", decisions, game.decision()["decision"].str().c_str(),
                        game.showing_plain_list() ? "  (plain list)" : "");
                 fflush(stdout);
-                if (decisions >= steps) break;
+                if (decisions >= steps && !monkey) break;
+            }
+            if (monkey) {
+                double frame_ms = now_ms() - frame_start;
+                std::string why;
+                if (game.last_error() != m_error) {
+                    m_error = game.last_error();
+                    if (!m_error.empty()) why = "logic error: " + m_error;
+                }
+                if (frame_ms > 250)
+                    printf("monkey: long frame %d: %.0f ms, decision %d %s\n", frame, frame_ms, game.decision_count(),
+                           game.decision()["decision"].str().c_str());
+                if (!game.busy()) m_busy_since = 0;
+                else if (m_busy_since == 0) m_busy_since = now_ms();
+                else if (now_ms() - m_busy_since > 60000) {
+                    why = "busy (waiting for the logic or playing) for 60 s";
+                    m_busy_since = now_ms();
+                }
+                if (flow->in_run()) {
+                    m_menu_still = 0;
+                    if (++m_still == 60 * 300) why = "no new decision in 5 minutes";
+                } else if (flow->starting() || !ev.empty()) {
+                    m_menu_still = 0;
+                } else if (++m_menu_still == 60 * 600) {
+                    why = "the menus: nothing happened in 10 minutes";
+                }
+                if (frame % 3600 == 0) {
+                    std::vector<std::string> scenes;
+                    lib.loaded_scenes(scenes);
+                    printf("monkey: minute %d, %d decisions, resident %ld MB, %u scene files cached\n", frame / 3600,
+                           game.decision_count(), resident_mb(), (unsigned)scenes.size());
+                }
+                if (!why.empty()) {
+                    ++m_reports;
+                    printf("monkey: REPORT %d at frame %d, decision %d %s: %s\n", m_reports, frame, game.decision_count(),
+                           flow->in_run() ? game.decision()["decision"].str().c_str() : "(menus)", why.c_str());
+                    for (size_t k = 0; k < g_presses.size(); ++k) printf("monkey:   %s\n", g_presses[k].c_str());
+                    sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                    tree.render(canvas);
+                    sw.end();
+                    write_png(format("%s/monkey_report_%02d.png", out_dir.c_str(), m_reports).c_str(), sw.framebuffer());
+                    fflush(stdout);
+                    if (m_reports >= 40) break;
+                }
             }
             if (!replay && link.finished()) {
                 fprintf(stderr, "spire_play: the logic exited (see %s/logic.log)\n", out_dir.c_str());
@@ -489,6 +714,7 @@ int main(int argc, char** argv) {
             if (!replay) usleep(500);
         }
         printf("%d menu shots, %d decisions\n", shots, decisions);
+        if (monkey) printf("monkey: %d reports, resident %ld MB at the end\n", m_reports, resident_mb());
         return 0;
     }
     if (pad_script.empty() || pad_after > 0) game.set_auto_play(auto_seed);
@@ -606,6 +832,12 @@ int main(int argc, char** argv) {
             if (!replay) save_text(base + ".json", link.last_decision + "\n");
             printf("%04d %s%s%s\n", shown, kind.c_str(), game.last_error().empty() ? "" : "  (logic error before it)",
                    game.showing_plain_list() ? "  (plain list)" : "");
+            if (shown % mem_every == 0) {
+                std::vector<std::string> scenes;
+                lib.loaded_scenes(scenes);
+                printf("memory: %ld MB resident, %lu MB of textures, %u scene files cached\n", resident_mb(),
+                       (unsigned long)(canvas.texture_bytes() >> 20), (unsigned)scenes.size());
+            }
             /* the screen before the pad's: auto play answers it, not the next */
             if (pad_after > 0 && shown == pad_after - 1 && !pad_script.empty())
                 game.set_auto_play_until(game.decision_count() + 1);

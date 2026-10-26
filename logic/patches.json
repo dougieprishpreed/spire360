@@ -1423,6 +1423,30 @@
       "all_overloads": true,
       "optional": true,
       "note": "No leaderboard upload."
+    },
+    {
+      "id": "debug.invincible",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Entities.Creatures.Creature",
+      "method": "LoseHpInternal",
+      "in_types": [
+        "MegaCrit.Sts2.Core.Commands.CreatureCmd::Damage"
+      ],
+      "note": "The debug option SPIRE_INVINCIBLE (spire360.ini): the player keeps their HP through damage, the hit itself as usual (DebugOptions.cs). Off, the call is the original's."
+    },
+    {
+      "id": "debug.invincible_kill",
+      "action": "replace_calls",
+      "type": "MegaCrit.Sts2.Core.Commands.CreatureCmd",
+      "method": "Kill",
+      "params": ["MegaCrit.Sts2.Core.Entities.Creatures.Creature", "System.Boolean"],
+      "in_types": [
+        "MegaCrit.Sts2.Core.Models.Powers.DoomPower",
+        "MegaCrit.Sts2.Core.Models.Powers.SandpitPower",
+        "MegaCrit.Sts2.Core.Models.Powers.TheGambitPower",
+        "MegaCrit.Sts2.Core.Models.Events.TabletOfTruth"
+      ],
+      "note": "SPIRE_INVINCIBLE also keeps the player from the kills that are not damage (Doom, The Insatiable's Sandpit, The Gambit, Tablet of Truth); Give Up and a won run still kill (RunManager, not patched). Off, the call is the original's."
     }
   ]
 }

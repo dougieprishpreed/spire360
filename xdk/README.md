@@ -143,9 +143,22 @@ back, Y presses the proceed arrow (Skip / Proceed) where there is one.
 - Card selection screens: A picks, Y confirms, B cancels.
 - Back: write the log now; Back + Start: quit; Back + Y: gamma ramp on/off.
 
+Any of the four controller slots plays (a console may sign the pad in to
+any of them).
+
 The log is `game:\spire360.txt` (startup, each decision and how long the
-logic took, frame times, any texture missing from the pack). Screens not
-ported yet show the decision's choices as a list.
+logic took, frame times with the free memory and the logic's memory every
+10 s, any texture missing from the pack); the logic's own output
+(warnings, errors, exceptions) goes to `game:\spire360_logic.txt`, new at
+each start. Send both after a test. Screens not ported yet show the
+decision's choices as a list.
+
+Debug options for testing: copy `xdk\spire360\spire360.ini` next to the
+XEX (`game:\spire360.ini`) and set `invincible=1` (the player keeps their
+HP; the hits play as usual) or `godmode=1` (the game's dev console
+godmode: Strength, Buffer and Regen 999999999 each fight). The log lists
+the options read; no file, all off. On PC the same options are the
+logic's environment: `SPIRE_INVINCIBLE=1`, `SPIRE_GODMODE=1`.
 
 ## spire_view: the engine drawing the game's scenes on the console
 

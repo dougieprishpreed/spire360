@@ -170,8 +170,13 @@ def act(rng, state):
     return a("proceed")
 
 
-def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None, game=False, fast=False):
+def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, timing_path=None, game=False, fast=False,
+         save_quit=0.0, ascension=0):
     rng = random.Random(seed)
+    # --save-quit: Save and Quit, then Continue, once per floor at a random
+    # decision of it (its own generator: the run's choices stay as drawn)
+    sq_rng = random.Random(seed + "-save-quit")
+    sq_floor = None
     tmp = None
     if game:
         # The game's flow writes saves: each run gets a new profile in its
@@ -195,7 +200,7 @@ def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, 
         if game:
             s.send({"cmd": "select_profile", "profile": 1})
             s.send({"cmd": "set_unlock_all", "on": True})
-            state = s.send({"cmd": "start_game_run", "character": character, "seed": seed})
+            state = s.send({"cmd": "start_game_run", "character": character, "seed": seed, "ascension": ascension})
         else:
             state = s.send({"cmd": "start_run", "character": character, "seed": seed})
         if tank:
@@ -233,6 +238,24 @@ def play(cmd, env, character, seed, max_steps, trace_path, verbose, tank=False, 
             if same > 30:
                 result.update(status="stuck", steps=step, decision=d, floor=state.get("context", {}).get("floor"))
                 return result
+            floor = state.get("context", {}).get("total_floor")
+            if save_quit and floor != sq_floor and sq_rng.random() < save_quit:
+                sq_floor = floor
+                m = s.send({"cmd": "return_to_menu"})
+                if m.get("type") != "main_menu" or not m.get("has_run_save"):
+                    result.setdefault("errors", []).append(f"save and quit at {d} (floor {floor}): "
+                                                           f"{m.get('type')} {m.get('message', '')[:200]}")
+                    errors += 1
+                state = s.send({"cmd": "continue_run"})
+                result["save_quits"] = result.get("save_quits", 0) + 1
+                key = f"{d} -> {state.get('decision') if state.get('type') == 'decision' else state.get('type')}"
+                result.setdefault("continued", {})[key] = result.get("continued", {}).get(key, 0) + 1
+                if state.get("type") != "decision":
+                    result.setdefault("errors", []).append(f"continue at {d} (floor {floor}): {state.get('message', '')[:300]}")
+                    errors += 1
+                    state = s.send({"cmd": "get_state"})
+                last_key = None
+                continue
             state = s.send(act(rng, state))
         result.update(status="step_limit", steps=max_steps)
         return result
@@ -260,6 +283,9 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--tank", action="store_true", help="999 HP so random play reaches the later acts")
     ap.add_argument("--fast", action="store_true", help="the settings' Fast mode on (its waits in the steps)")
+    ap.add_argument("--save-quit", type=float, default=0.0,
+                    help="with --game: Save and Quit then Continue once per floor, at each decision with this chance")
+    ap.add_argument("--ascension", type=int, default=0, help="with --game: the runs' ascension")
     ap.add_argument("--game", action="store_true",
                     help="the game's flow (start_game_run on a new profile with everything unlocked); needs --data-dir")
     a = ap.parse_args()
@@ -278,7 +304,8 @@ def main():
             seed = f"{a.seed_prefix}-{character.lower()}-{i}"
             trace = os.path.join(a.trace_dir, seed + ".jsonl") if a.trace_dir else None
             timing = os.path.join(a.timing_dir, seed + ".jsonl") if a.timing_dir else None
-            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing, a.game, a.fast)
+            r = play(cmd, env, character, seed, a.max_steps, trace, a.verbose, a.tank, timing, a.game, a.fast,
+                     a.save_quit, a.ascension)
             results.append(r)
             print(json.dumps(r)[:600], flush=True)
     ok = [r for r in results if r["status"] in ("victory", "defeat")]

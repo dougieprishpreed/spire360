@@ -202,6 +202,15 @@ public partial class RunDriver
         _cardSelector.CancelPending();
         _selectorScope?.Dispose();
         _selectorScope = null;
+        // The minigame shown (Crystal Sphere): a run continued from a save
+        // made during it plays the event again (EventRoom.Resume), not the
+        // old model, whose owner is the run that ended (its rewards threw:
+        // "Trying to sync crystal sphere rewards for non-local player")
+        _crystalSphere = null;
+        _crystalSphereDone = null;
+        _crystalSphereDoneFloor = -1;
+        _eventEntering = null;
+        _restSync = null;
     }
 
     // ─── Test/Debug commands ───
@@ -975,9 +984,16 @@ public partial class RunDriver
 
         // CardModel.EnqueueManualPlay: the card's enqueue effect (Inflame's
         // ground fire and power-up, Fan of Knives, ...) alongside the play.
-        TaskHelper.RunSafely(card.OnEnqueuePlayVfx(target));
+        // With the scheduler's context, as every game call that may start
+        // async work: an await reached without it has no context to resume
+        // in, and a completion under the context then queues it to the thread
+        // pool, which the console's runtime never runs.
         var playAction = new PlayCardAction(card, target);
-        RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
+        Sched.Call(() =>
+        {
+            TaskHelper.RunSafely(card.OnEnqueuePlayVfx(target));
+            RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(playAction);
+        });
         WaitForActionExecutor();
 
         // Check if card play had no effect (hand unchanged, same card still at same index)
@@ -1372,7 +1388,11 @@ public partial class RunDriver
         try
         {
             var action = new MegaCrit.Sts2.Core.GameActions.UsePotionAction(potion, target, CombatManager.Instance.IsInProgress);
-            RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(action);
+            // With the scheduler's context (see DoPlayCard): the Fake
+            // Merchant's fight started by a thrown potion ran its turn loop
+            // without one, and its end was queued to the thread pool (the
+            // console never ran it: the next fight broke)
+            Sched.Call(() => RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(action));
             WaitForActionExecutor();
             Sched.Pump();
 

@@ -190,8 +190,16 @@ float tween_interpolate(TweenTrans trans, TweenEase ease, float t, float b, floa
     }
 }
 
+#ifdef SPIRE_DEBUG_HEAP
+/* tools/viewer/debug_heap.cpp: who tweened what (a write after a delete) */
+extern "C" void debug_heap_note_target(const void* p);
+#endif
+
 void TweenSet::add(float* p, float from, bool from_current, float to, float seconds, TweenTrans trans,
                    TweenEase ease, float delay) {
+#ifdef SPIRE_DEBUG_HEAP
+    debug_heap_note_target(p);
+#endif
     /* A tween starting now replaces the ones on *p; a delayed one waits
      * (a sequence: in, then out) and takes over when it starts. */
     if (delay <= 0) kill(p);
@@ -226,6 +234,43 @@ void TweenSet::tween_from(Vec2* p, const Vec2& from, const Vec2& to, float secon
                           float delay) {
     tween_from(&p->x, from.x, to.x, seconds, trans, ease, delay);
     tween_from(&p->y, from.y, to.y, seconds, trans, ease, delay);
+}
+
+TweenSet* TweenSet::first_ = NULL;
+
+TweenSet::TweenSet() { link(); }
+
+TweenSet::TweenSet(const TweenSet& other) : items_(other.items_) { link(); }
+
+TweenSet& TweenSet::operator=(const TweenSet& other) {
+    items_ = other.items_;
+    return *this;
+}
+
+void TweenSet::link() {
+    prev_ = NULL;
+    next_ = first_;
+    if (first_) first_->prev_ = this;
+    first_ = this;
+}
+
+TweenSet::~TweenSet() {
+    if (prev_) prev_->next_ = next_;
+    else first_ = next_;
+    if (next_) next_->prev_ = prev_;
+}
+
+void TweenSet::forget(const void* p, size_t size) {
+    const char* from = (const char*)p;
+    const char* to = from + size;
+    for (TweenSet* s = first_; s; s = s->next_) {
+        std::vector<Item>& items = s->items_;
+        for (size_t i = 0; i < items.size();) {
+            const char* at = (const char*)items[i].p;
+            if (at >= from && at < to) items.erase(items.begin() + (long)i);
+            else ++i;
+        }
+    }
 }
 
 void TweenSet::kill(float* p) {

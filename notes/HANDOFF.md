@@ -10,6 +10,230 @@ PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it).
 
+## Before the console build (2026-10-25): every angle, the debug options, and what they found
+
+The user asked for every angle before spending an XDK build and a Xenia
+(and first real-console) test on it. The earlier audits all compared the
+logic with the game or replayed recorded runs; what nothing had done:
+run the console's own logic build, drive the client with a pad the way a
+player does (menus included), or look at what only real hardware
+enforces. That is this section.
+
+Debug options (the user's request): `game:\spire360.ini` next to the XEX
+(sample: `xdk/spire360/spire360.ini`; no file, all off), read by
+main.cpp into the logic's environment:
+- `invincible=1` (SPIRE_INVINCIBLE): the player keeps their HP; each hit
+  plays as dealt (number, spark, hurt animation, shake, the lose-HP hooks)
+  and the HP is put back (patch debug.invincible: Creature.LoseHpInternal
+  in CreatureCmd.Damage; the game kills only a target that is also dead).
+  Max HP losses still apply. A run with it: 15,776 player hurt animations,
+  the HP changed only by Max HP and heals.
+- `godmode=1` (SPIRE_GODMODE): the game's own dev console godmode
+  (GodModeConsoleCmd: Strength, Buffer, Regen 999999999 at each combat's
+  set-up); a random Silent run won in 422 steps.
+- Off, the logic is the same game: seeded traces 0 differences.
+On PC the same environment variables work (dotnet and logic_host).
+
+The console's logic (AOT -> wasm -> C) on PC: the logic had changed in
+five commits since the last Xenia build and only the .NET JIT had run it.
+build_logic.py stages wasm, c, native (MSVC from vcvars64, 2 jobs: 9 min)
+and the native host played the 25 seeded runs: 23 byte-identical to the
+JIT's, steps included (tools/strict_compare.py: every key but the wall
+clock and host paths); the other 2 differ only in the game's unseeded
+visual randomness (monster skins, one effect value), which differs between
+two JIT runs of the same seed too. trace_compare's "differences" there are
+line 0 only: the ready line's data_dir. The logic's linear memory: 69 MB
+through a whole run.
+
+logic_host: `--data DIR` (and SPIRE_DATA from the environment) mounts a
+data folder as "/", so the coverage tools' per-case copies work; the
+debug options pass through; it exits when the logic does (it waited on
+stdin before: each run cost the driver's 30 s kill) and prints the linear
+memory at exit.
+
+**The boot blocker** (found by the first menu-mode run): since cb355bd
+the logo waits for the logic's first main_menu answer (menu_ready_), but
+MenuFlow::update returned during the logo before game_->update, the only
+reader of the logic's pipe: the "ready" line was never read, nothing was
+sent, and the game would have stayed on the logo's black forever (Xenia
+and hardware; the last Xenia build predates cb355bd). The skip-intro wait
+(title_waiting_) had the same hole. Both now read the logic while they
+wait. No earlier check could see it: every capture since used
+--replay-run (no menus).
+
+Random pad input (spire_play `--menu --monkey SEED`): from the logo on,
+a weighted random press every 3-20 frames (held now and then), also
+while effects play; each run screen takes 0-59 presses, then B once and
+auto play answers it so runs go on; Quit starts the menus again. Reports:
+the logic's errors, long frames, a client busy for a minute, no progress
+for 5 / 10 minutes (PNG each), memory each minute, the last 30 presses
+with any report or crash. `--sync` takes each command's answer as it is
+sent, so a session with `--seed` repeats press for press (the logic's
+speed no longer moves the frames). `work/monkey90.sh` runs sessions.
+
+The crash it found (seeds 7 async, 11 sync), and its class: the
+Timeline's first-time tutorial fades out (0.5 s tween on its
+modulate.a) when A is pressed, and the logic's answer deleted the node at
+once; the tween kept writing into freed memory for the rest of the half
+second. In release that memory was reused (JSON maps: a crash in
+Rb_tree::find); on the console a heap corruption after the first game
+over that unlocks an epoch. Found with the debug build:
+tools/viewer/build_debug.sh (out/engine-dbg: -O0 -g, -DSPIRE_DEBUG_HEAP,
+tools/viewer/debug_heap.cpp: freed blocks poisoned and held back, writes
+into them reported with the deleting frames and, through a TweenSet hook,
+the frames that started the last tween on that address;
+RtlCaptureStackBackTrace, since Cygwin's x64 code keeps no rbp chain).
+Fixed for the whole class: TweenSet keeps a list of the live sets and
+Node's class operator delete (which gets the deleted node's own size)
+makes every set drop its tweens inside the node; CanvasItem's destructor
+does the same for its shader parameters (the map's own blocks). The
+Timeline also holds the answer until the tutorial has faded, as
+NTimelineTutorial.CloseTutorial spawns the timeline after its tween.
+
+Real hardware (what Xenia does not enforce), reviewed one by one:
+- Controller slot: the XEX read pad 0 only; a console can sign the pad in
+  to any of the four. It now ORs XInputGetState of all four
+  (XUSER_MAX_COUNT).
+- Memory: every allocation on a console is backed by its 512 MB (about
+  480 for a title); Xenia gives virtual allocations host memory. The XEX
+  image alone is 104 MB; the logic's linear memory 69 MB (reserved 384,
+  committed as it grows) plus its 16 MB thread stack; textures up to the
+  canvas's 80 MB budget plus the render targets; the engine's heap (the
+  SceneLibrary caches every scene file it parsed and never evicts; see
+  the memory measurements below). The log now has "memory at start / with
+  the logic: N MB free of M MB, logic K MB" and, every 10 s with the frame
+  times, the free memory and the logic's size; "memory low" under 24 MB
+  free; the least free at exit.
+- The logic's stderr (warnings, errors, exceptions; 10-25 KB a run) went
+  to the debug output only: lost on a console without a debugger. It now
+  goes to game:\spire360_logic.txt (new each start). A logic thread that
+  ends without an error answer is logged (it froze the screen silently),
+  and the runtime logs a memory.grow it cannot commit (out of memory).
+- Command ring buffer: D3D9Renderer sent a whole batch per
+  DrawPrimitiveUP with no cap; the XDK's ring buffer is 2 MB in 32
+  segments of 64 KB (D3DRING_BUFFER_PARAMETERS defaults, from the XDK
+  help). A draw now holds at most 64 KB of whole triangles (2046
+  vertices); only very large batches split.
+- Checked, no change needed: wasm loads and stores (w2c2 copies through
+  integers and byte-swaps: no unaligned float access), EDRAM layout (back
+  buffer, group surface, screen copies inside 10 MB, no depth buffer),
+  texture tiling (XGTileTextureLevel), no devkit-only APIs or xbdm, the
+  logic pipe (mutex + condition: safe under the PowerPC's weaker memory
+  ordering), FATX names (the longest the game writes is 31 characters of
+  42), the new XDK names (XUSER_MAX_COUNT, GlobalMemoryStatus,
+  MEMORYSTATUS: in the XDK headers).
+
+Random-input results after the fixes: 18 sessions of 5-6 minutes (12
+--sync on the release build, 3 on the debug build with the checking heap,
+3 with the logic's real latency as on the console; invincible and godmode
+among them), each from the logo through the menus (profiles, settings,
+compendium, timeline) into runs, Save and Quit, Give Up and Quit: about
+900 decisions, no crash, no write after delete, no stall. Two tool
+artifacts were fixed on the way (the monkey waited for "busy" to end
+while the shuffle FTUE paused the fight for a press; godmode's queued
+plays kept the client busy across decisions).
+
+Save and Quit / Continue across whole runs (random_runs.py `--game
+--save-quit P`: once per floor at a random decision, P = 0.3; 10 runs,
+every character, 15-40 continues each, plus Ascension 10): it found the
+Crystal Sphere's: the driver kept the minigame it was showing
+(Minigames.cs `_crystalSphere`) through Save and Quit, so Continue showed
+the old model instead of the event again, and finishing it threw in
+OneOffSynchronizer.DoLocalCrystalSphereRewards (the old run's player is not
+the local one): no rewards. EndRun now drops the minigame fields (and
+`_eventEntering`, `_restSync`); scenario `crystal_sphere_continue` failed
+before and passes after. With the fix the 10 runs win, 0 errors.
+
+Invincibility and kills that are not damage: two invincible runs died at
+full HP (The Insatiable's Sandpit eats the player; Doom). Patch
+debug.invincible_kill (CreatureCmd.Kill(Creature, bool) in DoomPower,
+SandpitPower, TheGambitPower, TabletOfTruth) spares the player; Give Up
+and a won run still kill (RunManager, not patched). The Sandpit hid the
+body first: a debug cue NCreature.ShowVisuals brings it back (the client
+handles it).
+
+Memory (spire_play, 64-bit, no textures): a whole run's heap grows only
+with the scene cache, about 40 KB per scene file (75 MB at 534 files, 80
+MB at 664, Act 2); menus and the compendium add their scenes. The 150 MB
+some random sessions showed were the tool's own FTUE screenshots (the
+software renderer's decoded textures: debug_heap's "big block" report).
+Console estimate: XEX 104 + logic 69 + its stack 16 + engine heap ~60-90 +
+textures <= 80 + targets ~12 + D3D ring 2 = about 345-375 MB of ~480: it
+fits, with the log to confirm it on hardware.
+
+The console's logic, game flow (found only by running it there; the JIT
+passes all of these):
+- Unlock all (the profile screen's toggle) threw NotSupportedException:
+  SetUnlockAll wrote spire360.json with System.Text.Json's reflection
+  serializer, which has no code for Dictionary<string, bool> in the AOT
+  builds. It writes with the protocol's own writer now (Json.Serialize).
+  The coverage act runs turn unlock-all on first, so all 11 failed on the
+  native host until then.
+- A run save from the PC game whose map has drawings could not be read
+  ("Unrecoverable: the underlying compression routine could not be
+  loaded"): SerializableMapDrawingsJsonConverter gzips the drawings and the
+  wasm link left out System.IO.Compression's native shim and zlib.
+  Spire.Logic.csproj now links libSystem.IO.Compression.Native.a and
+  libz.a (target SpireLinkCompression, before LinkNativeLlvm) with a
+  DirectPInvoke; profile_check on an imported PC profile passes natively.
+  (Declaring the DirectPInvoke without the libraries made the call an
+  "unreachable" trap: the logic thread died. Both or neither.)
+- The Fake Merchant's fight (a Foul Potion thrown in its shop) broke the
+  next fight: RunDriver enqueued card plays and potions straight onto the
+  ActionQueueSet, outside Sched.Call, so a fight a potion started ran its
+  turn loop with no synchronization context; at the fight's teardown
+  (CombatTurnState.Cancel, under the context) .NET could not inline that
+  continuation and queued it to the thread pool, which the console's
+  runtime never runs: the turn loop never ended and the next room showed
+  rewards instead of a fight. Both enqueues run under Sched.Call now. The
+  logic warns "thread-pool work ran during <cmd>" on the JIT whenever a
+  command runs pool work (none in the seeded runs or the 829 coverage
+  cases after the fix); Sched.Settle names the pending items on WASI.
+  Scenario `fake` now plays a fight after the Fake Merchant's.
+
+spire_check on save-and-continue and pad traces: it replays decisions only,
+so tools/split_traces.py cuts traces into segments at each continue_run /
+new run (a continued fight is a fresh build in the client); three check assumptions
+were fixed on the way (a played card in flight counted as a hand holder,
+the room taken as the root's first child while an unanswered confirm popup
+sat before it, a card tip's art taken for the portrait layout).
+
+Known, not changed: the console's logic formats "Last Saved" in UTC (WASI
+has no time zone; the PC shows local time). Language switching is not
+reachable on the console pack (its languages.json offers English only).
+
+Next console build: the logic changed and `out\logic\c` is already built
+from it here (stages patch, wasm, c, native), so `xdk\build.cmd spire360`
+is enough (logic_lib recompiles: the whole translated logic changed); the
+engine changed; the pack and data are unchanged (work/pack-80). Copy
+`xdk\spire360\spire360.ini` next to the XEX for the debug options.
+
+Checks, final logic and engine:
+- JIT: seeded traces against traces/base6, differences 0 (traces/new90c;
+  strict against the earlier JIT runs: identical but the unseeded skins);
+  content coverage 829 cases ok (work/cov90j), no command running
+  thread-pool work; scenarios 30 ok (double_boss_continue,
+  crystal_sphere_continue, fake with the next fight among them); save and
+  continue runs 10 of 10 won (invincible), 0 errors.
+- The console's logic (native host, out/logic/c as built): seeded runs 22
+  of 25 identical to the JIT's (3: the unseeded skins); coverage 818
+  cases ok before the act runs, then the acts suite 11 of 11; scenarios 30
+  ok; profile_check 6 of 6 (an imported PC profile with map drawings);
+  save and continue runs 4 won and 1 at the step limit (the Regent's run
+  takes the corrected Crystal Sphere path); no [ERROR], trap or pending
+  thread-pool work in any of its logs; linear memory 69 MB.
+- Pad: 22 random sessions in all (the last 4 on the final build, 2 of them
+  driving the console's logic), no crash, stall or write after delete.
+- spire_check on the seeded runs, scenarios and the segmented
+  save-and-continue and pad traces: 20,322 responses, 4,954 orb checks,
+  16,310 hand checks, 0 failures; audio 0 decoder failures, 7 absent
+  events, all the game's own default paths missing from its banks
+  (Vine Shambler, Slithering Strangler, Brute Ruby Raider, Crusher,
+  Rocket, Bowlbug Silk, Living Shield).
+- Builds: the PC tools with -std=c++98 -pedantic -Wall, 0 warnings;
+  srt_core.c and logic_host.c strict C89 -Werror; the D3D9 renderer check.
+  No XDK build.
+
 ## The four review lists (2026-10-25): every item has a verdict, and what they found
 
 The presentation audit's long lists (call 171, script 163, asset 124) and

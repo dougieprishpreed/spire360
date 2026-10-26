@@ -53,6 +53,10 @@ spire_play --replay-run (frame captures) and spire_check replay.
   sand_castle Sand Castle's upgrades (the preview grid at three columns)
   double_boss Ascension 10's last act (enter_act): the first boss's rewards
             lead to the second boss on the map, then The Architect
+  double_boss_continue the same, with Save and Quit and Continue between the
+            two bosses
+  crystal_sphere_continue Save and Quit during the Crystal Sphere, then
+            Continue: the event again, its rewards at the end
 
 Each writes OUT/scenario/<name>.jsonl and .log (content_coverage's Runner).
 """
@@ -200,7 +204,21 @@ def main():
         if state.get("decision") == "combat_play":
             run.step(case, lg, {"cmd": "set_player", "enemy_hp": 5})
             state = run.step(case, lg, {"cmd": "get_state"})
-        run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 200)
+        state = run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 200)
+        # the next fight starts and ends (its turn loop waits for the Fake
+        # Merchant fight's to finish: CombatManager.WaitForPreviousTurnLoopToFinish)
+        run.step(case, lg, {"cmd": "set_player", "max_hp": 999, "hp": 999})
+        state = run.step(case, lg, {"cmd": "enter_room", "type": "monster"})
+        if state.get("decision") != "combat_play":
+            case.status = "error"
+            case.notes.append(f"the next fight did not start ({state.get('decision')})")
+        else:
+            run.step(case, lg, {"cmd": "set_player", "enemy_hp": 1})
+            state = run.step(case, lg, {"cmd": "get_state"})
+            state = run.play_until(case, lg, state, lambda s: s.get("decision") in ("rewards", "map_select"), 100)
+            if state.get("decision") not in ("rewards", "map_select"):
+                case.status = "error"
+                case.notes.append(f"the next fight did not end ({state.get('decision')})")
         run.finish(case, lg)
     if not only or "pandora" in only:
         case = cc.Case("scenario", "pandora")
@@ -485,15 +503,61 @@ def main():
         if not cues(case, "NGridCardPreviewContainer.ForceMaxColumnsUntilEmpty"):
             case.status = "error"
             case.notes.append("no forced columns cue")
-    if not only or "double_boss" in only:
-        # Ascension 10 (DoubleBoss): the last act's first boss, its rewards
-        # proceed to the map, its second boss, then the act change's vote
-        # (The Architect)
-        data = os.path.join(a.work, "scenario", "double_boss_data")
+    if not only or "crystal_sphere_continue" in only:
+        # Save and Quit during the Crystal Sphere, then Continue: the run goes
+        # on from its save (the event again), not from the minigame shown
+        # before the quit, whose owner is the ended run's player (its rewards
+        # threw "Trying to sync crystal sphere rewards for non-local player")
+        data = os.path.join(a.work, "scenario", "crystal_sphere_continue_data")
         shutil.rmtree(data, ignore_errors=True)
         shutil.copytree(a.data, data, ignore=shutil.ignore_patterns("user"))
-        case = cc.Case("scenario", "double_boss")
-        lg = cc.Logic(a.cmd, data, os.path.join(a.work, "scenario", "double_boss.jsonl"))
+        case = cc.Case("scenario", "crystal_sphere_continue")
+        trace = os.path.join(a.work, "scenario", "crystal_sphere_continue.jsonl")
+        lg = cc.Logic(a.cmd, data, trace)
+        rewards = False
+        try:
+            run.step(case, lg, {"cmd": "select_profile", "profile": 1})
+            run.step(case, lg, {"cmd": "set_unlock_all", "on": True})
+            run.step(case, lg, {"cmd": "start_game_run", "character": "Ironclad", "ascension": 0,
+                                "seed": "crystal_sphere_continue"})
+            state = run.step(case, lg, {"cmd": "enter_room", "type": "event", "event": "CRYSTAL_SPHERE"})
+            state = run.play_until(case, lg, state, lambda s: s.get("decision") == "crystal_sphere", 10)
+            cell = next((c for c in state.get("cells") or [] if c.get("hidden")), {"x": 5, "y": 5})
+            run.step(case, lg, {"cmd": "action", "action": "crystal_sphere_click", "args": {"x": cell["x"], "y": cell["y"]}})
+            run.step(case, lg, {"cmd": "return_to_menu"})
+            state = run.step(case, lg, {"cmd": "continue_run"})
+            case.notes.append(f"continued at {state.get('decision')}")
+            if state.get("decision") == "crystal_sphere":
+                case.status = "error"
+                case.notes.append("the minigame from before the quit came back")
+            if state.get("decision") == "map_select":
+                state = run.step(case, lg, {"cmd": "enter_room", "type": "event", "event": "CRYSTAL_SPHERE"})
+            for _ in range(200):
+                if state.get("decision") in ("rewards", "map_select", "game_over") or case.status != "ok":
+                    break
+                state = run.step(case, lg, cc.act_for(run.rng, state))
+            rewards = state.get("decision") == "rewards"
+        finally:
+            run.finish(case, lg)
+        log = open(trace[:-6] + ".log", encoding="utf-8", errors="replace").read()
+        if "non-local player" in log:
+            case.status = "error"
+            case.notes.append("crystal sphere rewards for a non-local player")
+        if not rewards:
+            case.status = "error"
+            case.notes.append(f"no rewards after the sphere ({state.get('decision')})")
+    for name, save_quit in (("double_boss", False), ("double_boss_continue", True)):
+        if only and name not in only:
+            continue
+        # Ascension 10 (DoubleBoss): the last act's first boss, its rewards
+        # proceed to the map, its second boss, then the act change's vote
+        # (The Architect). double_boss_continue: Save and Quit on the map
+        # between the two, then Continue.
+        data = os.path.join(a.work, "scenario", name + "_data")
+        shutil.rmtree(data, ignore_errors=True)
+        shutil.copytree(a.data, data, ignore=shutil.ignore_patterns("user"))
+        case = cc.Case("scenario", name)
+        lg = cc.Logic(a.cmd, data, os.path.join(a.work, "scenario", name + ".jsonl"))
         bosses = []
         try:
             run.step(case, lg, {"cmd": "select_profile", "profile": 1})
@@ -520,11 +584,20 @@ def main():
                         state = run.play_until(case, lg, state, lambda s: s.get("decision") != "combat_play", 6)
                     case.notes = [n for n in case.notes if n != "step limit"]
                 elif d == "map_select":
+                    if save_quit and bosses == [False]:
+                        run.step(case, lg, {"cmd": "return_to_menu"})
+                        state = run.step(case, lg, {"cmd": "continue_run"})
+                        case.notes.append(f"continued between the bosses at {state.get('decision')}")
+                        save_quit = False
+                        continue
                     state = run.step(case, lg, cc.act_for(run.rng, state))
                 else:
                     state = run.play_until(case, lg, state, lambda s: s.get("decision") in ("combat_play", "map_select", "game_over")
                                            or s.get("event_id") == "the_architect", 200)
             case.notes.append(f"bosses (second?): {bosses}; ended at {state.get('decision')} {state.get('event_id') or ''}")
+            if save_quit:
+                case.status = "error"
+                case.notes.append("no Save and Quit between the bosses")
         finally:
             run.finish(case, lg)
         if bosses != [False, True]:

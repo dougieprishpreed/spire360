@@ -125,7 +125,15 @@ U8* w2c2HostMemoryReserve(U64 initialBytes, U64 maxBytes, U64* capacityBytes) {
 }
 
 int w2c2HostMemoryGrow(U8* data, U64 oldBytes, U64 newBytes) {
-    return srt_plat_commit(data, oldBytes, newBytes) == 0;
+    char msg[128];
+    if (srt_plat_commit(data, oldBytes, newBytes) == 0) {
+        return 1;
+    }
+    /* memory.grow answers -1: the guest's allocation fails */
+    sprintf(msg, "[srt] memory: cannot commit %lu KB more (at %lu KB): out of memory\n",
+            (unsigned long)((newBytes - oldBytes) / 1024), (unsigned long)(oldBytes / 1024));
+    srt_plat_log(2, msg, strlen(msg));
+    return 0;
 }
 
 void w2c2HostMemoryRelease(U8* data) {

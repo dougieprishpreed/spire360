@@ -28,6 +28,7 @@ internal static class Program
         Ledger.Open();
         // IL-patch handlers must exist before any game code runs.
         Hooks.Install();
+        DebugOptions.Install();
 
         // UTF-8 both ways whatever the platform's console code page is
         // (Windows would otherwise use the OEM code page for redirected pipes).
@@ -49,6 +50,7 @@ internal static class Program
             ["data_dir"] = DataDir.Root,
         });
 
+        long poolWorkDone = ThreadPool.CompletedWorkItemCount;
         while (true)
         {
             var cmd = proto.ReadCommand();
@@ -88,6 +90,16 @@ internal static class Program
             if (result == null) continue;
             AttachSteps(result);
             proto.Write(result);
+            // Thread-pool work means game code ran where the scheduler's
+            // context was not installed: on the console's runtime (no
+            // threads) that work never runs (Sched.Settle reports it there)
+            long poolDone = ThreadPool.CompletedWorkItemCount;
+            if (poolDone != poolWorkDone)
+            {
+                Log.Warn($"thread-pool work ran during {Protocol.Str(cmd.Value, "cmd")} {Protocol.Str(cmd.Value, "action")}: " +
+                         "game code outside Sched");
+                poolWorkDone = poolDone;
+            }
             if (result.TryGetValue("type", out var rt) && (rt as string) == "quit_result")
                 break;
         }

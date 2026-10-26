@@ -95,7 +95,12 @@ public partial class RunDriver
         if (_profileId <= 0) return Error("No profile selected");
         var options = ReadOptions();
         options[_profileId.ToString()] = on;
-        var body = JsonSerializer.Serialize(new Dictionary<string, object> { ["unlock_all"] = options });
+        // The protocol's own writer: System.Text.Json's reflection has no
+        // code for Dictionary<string, bool> in the AOT builds (the console's
+        // toggle threw NotSupportedException)
+        var byProfile = new Dictionary<string, object?>();
+        foreach (var kv in options) byProfile[kv.Key] = kv.Value;
+        var body = Json.Serialize(new Dictionary<string, object?> { ["unlock_all"] = byProfile });
         _saveStore?.WriteFile("spire360.json", body);
         return MainMenu();
     }

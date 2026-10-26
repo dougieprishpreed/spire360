@@ -108,6 +108,9 @@ public:
     bool menu_requested() const { return menu_requested_; }
     /* The pause menu or its Give Up confirmation is open. */
     bool paused() const { return pause_ != NULL; }
+    /* Something over the run's screen takes the pad (the pause menu, the
+     * pile and map views, settings, compendium, the potion menu). */
+    bool overlay_open() const { return pause_ || piles_ || map_view_ || settings_screen_ || compendium_ || potions_.active(); }
     /* The decision shown has no ported screen: the plain list of choices. */
     bool showing_plain_list() const { return plain_; }
     /* The logic's error for the last command sent, empty when it had none. */

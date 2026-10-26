@@ -3411,6 +3411,10 @@ bool CombatScreen::creature_call(const std::string& method, const Json& args) {
     } else if (method == "HideVisuals") {
         /* SandpitPower.AfterRemoved: Visuals.Visible = false */
         if (c->visuals) set_visible(c->visuals, false);
+    } else if (method == "ShowVisuals") {
+        /* the debug option invincible spared the player Sandpit's kill
+         * (logic DebugOptions.cs): the body back */
+        if (c->visuals) set_visible(c->visuals, true);
     } else if (method == "PerformIntent") {
         /* AnimHideIntent(0.4): the intents fade out over 0.5 s after 0.4 s. */
         Control* row = ctl(c->node, "Intents");
@@ -4254,6 +4258,7 @@ void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finis
                                         ch["call"].str() == "NCreature.FaceDirection" ||
                                         ch["call"].str() == "NCreature.FadeIn" ||
                                         ch["call"].str() == "NCreature.HideVisuals" ||
+                                        ch["call"].str() == "NCreature.ShowVisuals" ||
                                         ch["call"].str() == "NCreature.AnimDisableUi" ||
                                         ch["call"].str() == "NCreature.AnimHideIntent" ||
                                         ch["call"].str() == "NCreature.RefreshIntents" ||

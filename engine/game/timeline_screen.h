@@ -118,6 +118,10 @@ private:
     std::string info_text_;
     bool closing_unlock_;
     bool tutorial_done_; /* the tutorial was acknowledged: its answer spawns Neow */
+    /* NTimelineTutorial.CloseTutorial: the timeline spawns once the
+     * tutorial has faded out (unlock_t_ then); an answer before that waits */
+    double tutorial_close_at_;
+    Json held_;
     TweenSet tweens_;
 };
 

@@ -67,6 +67,20 @@
     <IlcTreatWarningsAsErrors>false</IlcTreatWarningsAsErrors>
     <IlcGenerateMstatFile>true</IlcGenerateMstatFile>
   </PropertyGroup>
+  <!-- System.IO.Compression's native shim and zlib, which the wasm targets
+       leave out: the game's run save keeps the map's drawings gzipped
+       (SerializableMapDrawingsJsonConverter), so a save from the PC game with
+       drawings could not be read ("The underlying compression routine could
+       not be loaded"). -->
+  <ItemGroup Condition="'$(SpireWasm)' == 'true'">
+    <DirectPInvoke Include="libSystem.IO.Compression.Native" />
+  </ItemGroup>
+  <Target Name="SpireLinkCompression" BeforeTargets="LinkNativeLlvm" Condition="'$(SpireWasm)' == 'true'">
+    <ItemGroup>
+      <NativeLibrary Include="$(IlcFrameworkNativePath)libSystem.IO.Compression.Native.a" />
+      <NativeLibrary Include="$(IlcFrameworkNativePath)libz.a" />
+    </ItemGroup>
+  </Target>
   <!-- Each creature's Spine animation lengths (tools/build_logic.py, copy
        stage): what the UI would answer for an animation's length. -->
   <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../lib/game/anim_lengths.json')">
