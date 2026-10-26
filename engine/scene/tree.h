@@ -20,6 +20,12 @@ public:
      * (Godot's canvas_items stretch: 1920x1080 -> 1280x720 is a 2/3 scale). */
     void set_viewport(const Vec2& design_size, const Xform2D& to_screen);
     Node* root() { return &root_; }
+    /* A diagnostic: with a clock (ms) every node's own process and draw
+     * time is added up by its type (a script's behaviour by its script);
+     * log_profile logs the costliest per frame over those frames and
+     * starts again. NULL: off. */
+    static void set_profile(LoadClock clock);
+    static void log_profile(int frames);
 
     void layout(int passes = 3);
     /* One frame of time for every node (particles, animations), dt in s

@@ -25,6 +25,24 @@ public:
     void set_texture_budget(size_t bytes) { texture_budget_ = bytes; }
     size_t texture_bytes() const { return texture_bytes_; }
     size_t texture_count() const;
+    /* The cache's traffic since the last call (created, evicted, the
+     * frames over the budget, the most bytes held), then reset. */
+    struct TextureStats {
+        /* starved: frames whose own textures alone were over the budget
+         * (kept rather than evicted as they were drawn) */
+        unsigned created, evicted, over_frames, starved;
+        size_t peak_bytes;
+    };
+    TextureStats take_texture_stats();
+    /* A test aid (spire_play --console-textures): each texture counted at
+     * its Xbox 360 size (DXT blocks or texels tiled in 32 x 32, in 4 KB
+     * pages) instead of this renderer's, so a PC run fills the budget as
+     * the console does. */
+    void set_console_sizes(bool on) { console_sizes_ = on; }
+    /* A diagnostic: the next frame's draws logged one by one (the image,
+     * its texture's size and format or that it has none, the screen rect,
+     * the colour), text glyphs counted. */
+    void dump_next_frame() { dump_pending_ = true; }
     /* Generated sampler textures share the same ownership and budget. */
     Texture* cached_texture(const std::string& key);
     Texture* cache_texture(const std::string& key, const TextureData& data);
@@ -95,6 +113,11 @@ private:
     std::map<std::string, CachedTexture> textures_;
     size_t texture_bytes_, texture_budget_;
     u64 texture_clock_, frame_;
+    TextureStats stats_;
+    bool console_sizes_;
+    bool dump_pending_, dumping_;
+    unsigned dump_draws_, dump_glyphs_;
+    const char* dump_what_; /* the image emit_quad draws (the dump) */
     void image_quad(ImageTextureRes* img, Rect2 dst, Rect2 src, const Color& mod, int extra_flags);
     bool derive(const DerivedImage& d, TextureData& out);
     /* The last pack image derive decoded (until the frame ends). */

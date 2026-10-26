@@ -62,7 +62,26 @@ D3D9Renderer::~D3D9Renderer() { shutdown(); }
         p = NULL;           \
     } while (0)
 
+void D3D9Renderer::release_retired(bool all) {
+    size_t kept = 0;
+    for (size_t i = 0; i < retired_.size(); ++i) {
+#if defined(_XBOX)
+        if (!all && dev_ && dev_->IsFencePending(retired_[i].fence)) {
+            retired_[kept++] = retired_[i];
+            continue;
+        }
+#endif
+        RELEASE(retired_[i].tex);
+    }
+    (void)all;
+    retired_.resize(kept);
+}
+
 void D3D9Renderer::shutdown() {
+#if defined(_XBOX)
+    if (dev_ && !retired_.empty()) dev_->BlockUntilIdle();
+#endif
+    release_retired(true);
     release_group_target();
     release_screen();
     for (int i = 0; i < EFFECT_COUNT; ++i) RELEASE(effect_ps_[i]);
@@ -187,6 +206,7 @@ Texture* D3D9Renderer::create_texture(const TextureData& d) {
     t->height = d.height;
     t->orig_width = d.orig_width;
     t->orig_height = d.orig_height;
+    t->format = d.format;
     if (!dev_ || d.levels.empty()) { delete t; return NULL; }
     D3DFORMAT fmt = d3d_format(d.format);
     bool block = d.format != TEX_ARGB8;
@@ -194,7 +214,20 @@ Texture* D3D9Renderer::create_texture(const TextureData& d) {
     /* One level for now (no packed mip tail: D3D creates a one-level
      * texture unpacked, its base level at the base address). */
     UINT levels = 1;
-    if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, 0, &t->tex, NULL))) { delete t; return NULL; }
+    HRESULT hr = dev_->CreateTexture(d.width, d.height, levels, 0, fmt, 0, &t->tex, NULL);
+    if (FAILED(hr)) {
+        /* drawn as nothing: logged (the first few) with the memory left */
+        static int logged = 0;
+        if (logged < 20) {
+            ++logged;
+            MEMORYSTATUS ms;
+            GlobalMemoryStatus(&ms);
+            log_warn("d3d9: CreateTexture %dx%d format %d failed (%08lx), %u MB free", d.width, d.height, d.format,
+                     (unsigned long)hr, (unsigned)(ms.dwAvailPhys >> 20));
+        }
+        delete t;
+        return NULL;
+    }
 #else
     UINT levels = (UINT)d.levels.size();
     if (FAILED(dev_->CreateTexture(d.width, d.height, levels, 0, fmt, D3DPOOL_MANAGED, &t->tex, NULL))) { delete t; return NULL; }
@@ -271,6 +304,15 @@ void D3D9Renderer::destroy_texture(Texture* t) {
     if (dev_) for (int stage = 0; stage < 9; ++stage) dev_->SetTexture(stage, NULL);
     dirty_ = true;
     forget_state();
+#if defined(_XBOX)
+    if (dev_ && d->tex) {
+        Retired r;
+        r.tex = d->tex;
+        r.fence = dev_->InsertFence();
+        retired_.push_back(r);
+        d->tex = NULL;
+    }
+#endif
     RELEASE(d->tex);
     delete d;
 }
@@ -286,6 +328,7 @@ void D3D9Renderer::begin(int width, int height, const Color& c) {
     width_ = width;
     height_ = height;
     draws_ = 0;
+    release_retired(false);
     dev_->Clear(0, NULL, D3DCLEAR_TARGET,
                 D3DCOLOR_ARGB((int)(c.a * 255 + 0.5f), (int)(c.r * 255 + 0.5f), (int)(c.g * 255 + 0.5f),
                               (int)(c.b * 255 + 0.5f)),

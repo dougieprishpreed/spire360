@@ -7,9 +7,14 @@
 namespace spire {
 
 Canvas::Canvas(Renderer* r, const Pack* pack)
-    : texture_bytes_(0), texture_budget_(80 * 1024 * 1024), texture_clock_(0), frame_(0), decoded_w_(0), decoded_h_(0),
+    : texture_bytes_(0), texture_budget_(80 * 1024 * 1024), texture_clock_(0), frame_(0), console_sizes_(false),
+      dump_pending_(false), dumping_(false), dump_draws_(0), dump_glyphs_(0), dump_what_(NULL),
+      decoded_w_(0), decoded_h_(0),
       r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false), wind_on_(false), wind_(0),
-      wind_height_(0) {}
+      wind_height_(0) {
+    stats_.created = stats_.evicted = stats_.over_frames = stats_.starved = 0;
+    stats_.peak_bytes = 0;
+}
 
 Canvas::~Canvas() {
     for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it)
@@ -24,6 +29,11 @@ void Canvas::release_later(Texture* t) {
 
 void Canvas::begin_frame() {
     ++frame_;
+    dumping_ = dump_pending_;
+    dump_pending_ = false;
+    dump_draws_ = dump_glyphs_ = 0;
+    if (dumping_) log_info("draw dump: frame %lu, %u textures, %.1f MB", (unsigned long)frame_, (unsigned)texture_count(),
+                           texture_bytes_ / 1048576.0);
     for (size_t i = 0; i < g_released.size(); ++i) r_->destroy_texture(g_released[i]);
     g_released.clear();
     /* Each tree is a canvas of its own: its first screen-reading item
@@ -51,19 +61,57 @@ void Canvas::end_frame() {
         std::vector<u8>().swap(decoded_.px);
         decoded_.w = decoded_.h = 0;
     }
+    if (dumping_) {
+        log_info("draw dump: %u draws, %u glyphs", dump_draws_, dump_glyphs_);
+        dumping_ = false;
+    }
+    if (texture_bytes_ > stats_.peak_bytes) stats_.peak_bytes = texture_bytes_;
+    /* Over the budget the least recently drawn go first, but never one this
+     * frame drew: a frame that needs more than the budget keeps it all
+     * (evicting what was just drawn made it load again each frame, and the
+     * console's GPU read it after it was freed). */
+    if (texture_bytes_ > texture_budget_) ++stats_.over_frames;
     for (;;) {
         std::map<std::string, CachedTexture>::iterator oldest = textures_.end();
         for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it) {
             if (!it->second.texture) continue;
             bool expired = !it->second.kept && frame_ > it->second.frame && frame_ - it->second.frame > 120;
             if (texture_bytes_ <= texture_budget_ && !expired) continue;
+            if (!expired && it->second.frame == frame_) continue;
             if (oldest == textures_.end() || it->second.touched < oldest->second.touched) oldest = it;
         }
         if (oldest == textures_.end()) break;
         texture_bytes_ -= oldest->second.bytes;
         r_->destroy_texture(oldest->second.texture);
         textures_.erase(oldest);
+        ++stats_.evicted;
     }
+    if (texture_bytes_ > texture_budget_) ++stats_.starved;
+}
+
+Canvas::TextureStats Canvas::take_texture_stats() {
+    TextureStats s = stats_;
+    stats_.created = stats_.evicted = stats_.over_frames = stats_.starved = 0;
+    stats_.peak_bytes = texture_bytes_;
+    return s;
+}
+
+/* Xbox 360 texture memory: blocks (DXT) or texels tiled in 32 x 32, the
+ * levels in 4 KB pages (the D3D9 renderer's count on the console). */
+static size_t console_texture_bytes(const TextureData& d) {
+    size_t total = 0;
+    bool block = d.format == TEX_DXT1 || d.format == TEX_DXT5;
+    int levels = d.levels.empty() ? 0 : 1; /* the console uploads the base level only */
+    for (int lv = 0; lv < levels; ++lv) {
+        int w = d.width >> lv, h = d.height >> lv;
+        if (w < 1) w = 1;
+        if (h < 1) h = 1;
+        size_t bx = block ? (size_t)(w + 3) / 4 : (size_t)w, by = block ? (size_t)(h + 3) / 4 : (size_t)h;
+        size_t bytes = ((bx + 31) & ~(size_t)31) * ((by + 31) & ~(size_t)31) *
+                       (size_t)(block ? (d.format == TEX_DXT1 ? 8 : 16) : 4);
+        total += (bytes + 4095) & ~(size_t)4095;
+    }
+    return total;
 }
 
 Texture* Canvas::cached_texture(const std::string& key) {
@@ -82,7 +130,8 @@ Texture* Canvas::cache_texture(const std::string& key, const TextureData& data) 
     if (!entry.texture) return NULL;
     /* Use the backend's allocation estimate, including tiled alignment and
      * decoded software pixels, rather than compressed pack payload bytes. */
-    entry.bytes = entry.texture->memory_bytes;
+    entry.bytes = console_sizes_ ? console_texture_bytes(data) : entry.texture->memory_bytes;
+    ++stats_.created;
     entry.touched = ++texture_clock_;
     entry.frame = frame_;
     textures_[key] = entry;
@@ -226,6 +275,11 @@ void Canvas::emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2&
     v[3] = v[0];
     v[4] = v[2];
     v[5] = Vertex(d, Vec2(uv0.x, uv1.y), c);
+    if (dumping_ && !count_only_ && (flags & DRAW_MSDF)) ++dump_glyphs_;
+    else if (dumping_ && !count_only_)
+        log_info("draw %u: %s %dx%d f%d (%.0f, %.0f) (%.0f, %.0f) colour %.2f %.2f %.2f %.2f blend %d", ++dump_draws_,
+                 dump_what_ ? dump_what_ : "rect", tex ? tex->width : 0, tex ? tex->height : 0, tex ? tex->format : 0, a.x,
+                 a.y, cc.x, cc.y, c.r, c.g, c.b, c.a, (int)blend_);
     if (!count_only_) r_->draw_triangles(tex, v, 6, blend_, flags | tex_flags_);
     ++calls_;
 }
@@ -239,6 +293,7 @@ void Canvas::draw_rect(const Rect2& r, const Color& c) {
  * pixels. */
 void Canvas::image_quad(ImageTextureRes* img, Rect2 dst, Rect2 src, const Color& mod, int extra_flags) {
     Texture* tex = gpu_texture(img);
+    if (dumping_ && !tex && !count_only_) log_info("draw %u: %s (no texture)", ++dump_draws_, img->path.c_str());
     if (!tex) return;
     Vec2 ts = img->size();
     if (ts.x <= 0 || ts.y <= 0) return;
@@ -273,7 +328,9 @@ void Canvas::image_quad(ImageTextureRes* img, Rect2 dst, Rect2 src, const Color&
         uv0.y = uv1.y;
         uv1.y = t;
     }
+    dump_what_ = img->path.c_str();
     emit_quad(tex, dst.pos, dst.end(), uv0, uv1, modulate_ * mod, extra_flags);
+    dump_what_ = NULL;
 }
 
 void Canvas::draw_texture_rect(Texture2DRes* t, const Rect2& r, bool tile, const Color& mod) {
@@ -419,6 +476,10 @@ void Canvas::draw_colored_triangles(const std::vector<Vec2>& v, const std::vecto
 void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, const std::vector<Vec2>& uv,
                             const std::vector<Color>& colors, const std::vector<int>& idx, int flags) {
     Texture* tex = img ? gpu_texture(img) : NULL;
+    if (dumping_ && !count_only_)
+        log_info("draw %u: triangles %s %dx%d f%d, %d vertices%s", ++dump_draws_, img ? img->path.c_str() : "(colour)",
+                 tex ? tex->width : 0, tex ? tex->height : 0, tex ? tex->format : 0, (int)idx.size(),
+                 img && !tex ? " (no texture)" : "");
     if (img && !tex) return;
     if (idx.empty()) return;
     verts_.resize(idx.size());

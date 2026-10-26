@@ -50,6 +50,16 @@
  *
  * --no-shots: the run without the PNGs (soaks).
  *
+ * --profile (with --load-trace): every 600 frames, the node types and
+ * scripts whose process and draw cost the most (the console's profile=1).
+ *
+ * --dump-draws-at N (with --load-trace): frame N's draws logged one by one
+ * (the console's Back + RB).
+ *
+ * --console-textures (with --load-trace): textures counted at their Xbox
+ * 360 sizes against the console's 80 MB budget, the cache's traffic logged
+ * every 600 frames (does a screen load its textures again each frame?).
+ *
  * --load-trace: what is read from the pack on first use (scene files,
  * textures, audio banks) with the milliseconds it took, and each frame
  * over 8 ms (the client's update and the frame's), in the order they come:
@@ -377,8 +387,11 @@ static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
 /* --load-trace: the frame drawn too (textures load when first drawn), and
  * reported when the client's update and the frame's process took over
  * 8 ms (the software drawing's own time is no measure of the console's). */
+static long g_dump_draws_at = -1;
+
 static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float scale, double update_ms, double t0) {
     static long frame_no = 0;
+    if (frame_no + 1 == g_dump_draws_at) canvas.dump_next_frame();
     double d0 = now_ms();
     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
     tree.render(canvas);
@@ -387,6 +400,13 @@ static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float s
     ++frame_no;
     if (d0 - t0 + update_ms > 8.0)
         log_info("frame %ld: update %.1f ms, process %.1f ms (draw %.1f)", frame_no, update_ms, d0 - t0, end - d0);
+    if (frame_no % 600 == 0) {
+        Canvas::TextureStats st = canvas.take_texture_stats();
+        log_info("textures: %u held, %.1f MB (peak %.1f), created %u, evicted %u, %u frames over the budget (%u by their own)",
+                 (unsigned)canvas.texture_count(), canvas.texture_bytes() / 1048576.0, st.peak_bytes / 1048576.0,
+                 st.created, st.evicted, st.over_frames, st.starved);
+        SceneTree::log_profile(600);
+    }
 }
 
 static bool save_text(const std::string& path, const std::string& text) {
@@ -408,7 +428,8 @@ int main(int argc, char** argv) {
     double menu_hold = 0;
     const char* replay = NULL;
     const char* commands_path = NULL;
-    bool load_trace = false;
+    bool load_trace = false, console_textures = false;
+    long dump_draws_at = -1;
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
     int hp = 0;
@@ -460,6 +481,9 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--hp") == 0 && i + 1 < argc) hp = atoi(argv[++i]);
         else if (strcmp(argv[i], "--no-shots") == 0) no_shots = true;
         else if (strcmp(argv[i], "--load-trace") == 0) load_trace = true;
+        else if (strcmp(argv[i], "--console-textures") == 0) console_textures = true;
+        else if (strcmp(argv[i], "--profile") == 0) SceneTree::set_profile(now_ms);
+        else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
@@ -538,6 +562,11 @@ int main(int argc, char** argv) {
     /* the software renderer's textures are decoded (4 bytes a pixel): with
      * the console's budget a fight's would be read again every frame */
     if (load_trace) canvas.set_texture_budget((size_t)1 << 30);
+    g_dump_draws_at = dump_draws_at;
+    if (console_textures) {
+        canvas.set_console_sizes(true);
+        canvas.set_texture_budget((size_t)80 << 20);
+    }
     if (menu) {
         /* The menus, driven by the pad script; then the run plays itself. */
         MenuFlow* flow = new MenuFlow(&lib, &tree, &game, pack.game_version());
@@ -665,6 +694,8 @@ int main(int argc, char** argv) {
             debug_heap_check(4096);
 #endif
             if (!flow->in_logo()) ++idle;
+            /* --load-trace: every frame drawn (the textures load as drawn) */
+            if (load_trace) trace_frame(tree, sw, canvas, scale, 0, now_ms());
             for (size_t s = 0; s < shots_at.size(); ++s)
                 if (shots_at[s] == frame) {
                     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));

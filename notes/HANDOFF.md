@@ -9,7 +9,95 @@ data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
-top (the newest: Xenia session 1, 2026-10-26).
+top (the newest: the first hardware run, 2026-10-26).
+
+## First Xbox 360 hardware run (2026-10-26): what it showed, and the changes
+
+The user ran the build of 9e7a6a1 on a real console (USB, E:\Games\spire360;
+spire360.txt and spire360_logic.txt there). It boots and plays. Their
+report and the log:
+- A long black screen before the logo, a shorter one before the main menu.
+  The log: the logic's first answer took 11 s (its ModelDb, localization
+  and formatter start-up on the console's in-order core) and the title's
+  first frames 3.4 s and 2 s (its scene files and textures read as first
+  drawn). The logo ended after about 9 s and the menu waited on black.
+  Before the first frame (the 105 MB XEX loading from USB, the pack's
+  index, Loc::init) nothing was timed.
+- A very long black screen when starting a run: "decision 1: map_select
+  (response + presentation 30209 ms)", the embark waiting for the warm-up
+  (PreloadManager's sets: about 840 scene files and 370 textures, 0.4 s on
+  PC); free memory went from 208 MB to 127 MB with it (the parsed scene
+  files stay cached).
+- Black backgrounds in battle; low frame rate (combat: 11-19 ms process +
+  layout, 27-32 ms draw at 450-580 draw calls, so about 20 fps); draws of
+  300-2000 ms on the map's first frames.
+- No Neow and the set first fights: the game's own first run ever
+  (Overgrowth.GetUnlockedAncients drops Neow until the Neow epoch is
+  revealed; ApplyActDiscoveryOrderModifications fixes the rooms when
+  NumberOfRuns is 0). Five cards a turn is the game's draw. The user has
+  since imported their PC profile to the USB (tools/import_save.py).
+
+The black backgrounds: not found yet. Nothing in the battle background is
+special (plain TextureRects of DXT textures at sizes the atlases share; no
+SubViewport; the hidden RadialBlur BackBufferCopy only), the EDRAM layout
+keeps the back buffer, group and screen targets apart, and on PC the
+battle draws as it should. One theory was tested and does not hold:
+counted at the console's sizes (spire_play --console-textures, through the
+menus into a run), a run peaks at 69-76 MB of the 80 MB budget and no frame
+goes over, so the cache never evicted what a frame drew. Two changes stay
+as safety on the console all the same:
+- Canvas::end_frame never evicts a texture the frame drew (a frame needing
+  more than the budget keeps it all; counted as "by their own").
+- D3D9Renderer releases a destroyed texture only once the GPU has passed a
+  fence inserted then (InsertFence / IsFencePending; BlockUntilIdle at
+  shutdown): D3D on the console frees the memory at once while the GPU may
+  still have the frame's draws queued.
+To find it: Back + RB on the console logs the next frame's draws one by one
+(the image, its texture's size and format or "(no texture)", the screen
+rect, the colour; text glyphs counted), spire_play --dump-draws-at N the
+same on PC; and CreateTexture failures are logged.
+
+The waits:
+- The logo holds its teal screen (or, cancelled, its background) until the
+  menu can show, and the menus' scene files and textures are read while
+  it plays (main_menu, character select, its buttons, the Ironclad's
+  background).
+- The warm-up reads for 4 ms of each frame on the console
+  (SceneLibrary::set_warm_clock; the PC tools keep the fixed counts) and
+  logs its totals as it ends ("warm: N files, M textures in X ms over F
+  frames"); a Spine skeleton data file it reaches has its atlas and
+  skeleton parsed and its pages queued (warming a scene missed them: the
+  main menu's 4.6 MB background still loaded at its first draw). The embark waits for it two
+  seconds at most; the rest is read in the background.
+
+New ini option profile=1: every 10 s the node types (and behaviours by
+script) costing the most process and draw time per frame
+(SceneTree::set_profile; spire_play --profile the same on PC), and the
+frame line's "process + layout" is split into process and layout.
+
+New in spire360.txt: "pack: ... (N ms after start)", "start-up: data,
+fonts and the logo in N ms; the first frame N ms after start", and every
+10 s after the frame line "textures: N held, X MB (peak Y MB of 80), C
+created, E evicted, F frames over the budget (S by their own)". CreateTexture
+failures are logged (the first 20, with the free memory). New ini option
+trace_loads=1: each scene file, texture and bank read with its ms, and each
+frame over 8 ms split into update, process + layout and draw.
+
+To look at next (with the next hardware log): the frame rate (process +
+layout and draw per frame; the draw calls), what the start-up spends
+before the first frame, the logic's 11 s start, the memory the parsed
+scene files hold.
+
+Checks: PC build 0 warnings, C89 checks 0, xdk_api_check clean; spire_check
+over traces/new92 and the scenarios 2475 responses, 0 failures; two random
+pad sessions from the logo (5 minutes each, menus, embark, runs) 0 reports.
+The logic is unchanged (out/logic/c as for 9e7a6a1). The console-only code
+(fences, the start-up timings, the ini options, Back + RB) compiles only in
+the XDK build.
+
+For the next hardware run: profile=1 and trace_loads=1 in spire360.ini for
+one session (the log grows large); Back + RB once in a battle with the
+black background; whether the same build shows black backgrounds in Xenia.
 
 ## Xenia session 1 (2026-10-26): the user's release-build findings, and the same causes elsewhere
 

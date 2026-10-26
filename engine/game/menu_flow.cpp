@@ -22,7 +22,7 @@ namespace spire {
 MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
     : lib_(lib), tree_(tree), game_(game), version_(version), logo_(NULL), logo_node_(NULL), title_(new TitleScreen(lib)), title_node_(NULL),
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
-      screen_(TITLE), chars_version_(0), decisions_seen_(0), starting_(false), in_run_(false),
+      screen_(TITLE), chars_version_(0), decisions_seen_(0), embark_wait_(0), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false), menu_ready_(false), title_waiting_(false) {
     tutorials_ = NULL;
     tutorials_node_ = NULL;
@@ -48,6 +48,14 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
         }
     }
     if (!logo_) title_waiting_ = true;
+    /* The menus' scene files and textures read while the logo plays, so the
+     * title does not stop to read them as it first shows. */
+    Json first = Json::make_array();
+    first.append(Json::make_string("scenes/screens/main_menu.tscn"));
+    first.append(Json::make_string("scenes/screens/character_select_screen.tscn"));
+    first.append(Json::make_string("scenes/screens/char_select/char_select_button.tscn"));
+    first.append(Json::make_string("scenes/screens/char_select/char_select_bg_ironclad.tscn"));
+    lib_->warm(first);
     /* The game data loads while the logo plays; the last profile is read
      * as the game does at start-up, before the menu shows. */
     game_->request_characters();
@@ -258,6 +266,8 @@ bool MenuFlow::update(const PadState& in) {
         game_->update(PadState());
     }
     if (logo_) {
+        /* the logo holds its last look until the menu can show */
+        logo_->set_ready(menu_ready_);
         logo_->input(pad);
         if (logo_->done() && menu_ready_) {
             logo_node_->parent->remove_child(logo_node_);
@@ -487,10 +497,16 @@ bool MenuFlow::update(const PadState& in) {
     }
 
     game_->update(PadState());
-    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() && !game_->warming()) {
+    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() && game_->warming() &&
+        ++embark_wait_ < 120)
+        return !quit_;
+    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
         /* The run's first screen (once the embark wipe is black and the
          * run's assets are read: NCharacterSelectScreen awaits
-         * PreloadManager.LoadRunAssets): the menus go, the room fades in. */
+         * PreloadManager.LoadRunAssets): the menus go, the room fades in.
+         * Two seconds of it at most: the console reads them for half a
+         * minute, so the rest is read in the background meanwhile. */
+        embark_wait_ = 0;
         game_->end_embark_wipe();
         close_screen();
         if (title_node_) {

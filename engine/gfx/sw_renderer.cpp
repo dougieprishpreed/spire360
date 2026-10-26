@@ -19,6 +19,7 @@ Texture* SwRenderer::create_texture(const TextureData& d) {
     t->height = d.height;
     t->orig_width = d.orig_width;
     t->orig_height = d.orig_height;
+    t->format = d.format;
     if (d.levels.empty() || d.levels[0].empty() ||
         !decode_texture_level(d.format, d.width, d.height, &d.levels[0][0], d.levels[0].size(), t->img,
                               (d.flags & TEXF_DATA) == 0)) {

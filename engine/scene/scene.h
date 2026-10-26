@@ -73,6 +73,13 @@ public:
     void warm_step(Canvas& canvas);
     bool warming() const { return !warm_queue_.empty(); }
     void set_warm_enabled(bool on) { warm_enabled_ = on; }
+    /* A clock (ms) and each frame's share of it: warm_step reads until the
+     * share is spent (one file at least) instead of a fixed count, and logs
+     * each batch's total as it ends. The console's reads are far slower. */
+    void set_warm_clock(LoadClock clock, double ms_per_frame) {
+        warm_clock_ = clock;
+        warm_share_ = ms_per_frame;
+    }
 
 private:
     Resource* build(const std::string& cls, const Json& props, const SceneFile* ctx, const std::string& path);
@@ -88,6 +95,9 @@ private:
     std::deque<std::string> warm_queue_;
     std::set<std::string> warmed_;
     bool warm_enabled_;
+    LoadClock warm_clock_;
+    double warm_share_, warm_spent_;
+    int warm_files_, warm_textures_, warm_frames_;
     Json default_theme_doc_;
     ThemeRes* default_theme_;
     FontRes* default_font_;

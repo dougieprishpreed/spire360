@@ -16,10 +16,11 @@ enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2, DRAW_MSDF = 4, DRAW_GROUP = 8 };
 
 class Texture {
 public:
-    Texture() : width(0), height(0), orig_width(0), orig_height(0), memory_bytes(0), premultiplied(false) {}
+    Texture() : width(0), height(0), orig_width(0), orig_height(0), format(0), memory_bytes(0), premultiplied(false) {}
     virtual ~Texture() {}
     int width, height;           /* stored pixels */
     int orig_width, orig_height; /* layout units (the game's size) */
+    int format;                  /* TexFormat (0: a target or generated) */
     size_t memory_bytes;        /* renderer allocation estimate */
     bool premultiplied;         /* a capture (end_capture): premultiplied alpha */
 };

@@ -65,7 +65,8 @@ static SceneLibrary* g_library = NULL;
 SceneLibrary* SceneLibrary::current() { return g_library; }
 
 SceneLibrary::SceneLibrary(const Pack* pack)
-    : pack_(pack), audio_(NULL), warm_enabled_(true), default_theme_(NULL), default_font_(NULL) {
+    : pack_(pack), audio_(NULL), warm_enabled_(true), warm_clock_(NULL), warm_share_(0), warm_spent_(0), warm_files_(0),
+      warm_textures_(0), warm_frames_(0), default_theme_(NULL), default_font_(NULL) {
     g_library = this;
     default_font_ = new FontRes("FontFile");
     default_font_->file = DEFAULT_FONT_NAME;
@@ -476,9 +477,15 @@ void SceneLibrary::warm(const Json& paths) {
 }
 
 void SceneLibrary::warm_step(Canvas& canvas) {
-    /* a frame's share: the console reads a texture in tens of ms */
+    if (warm_queue_.empty()) return;
+    /* a frame's share: a time with a clock (the console reads a texture in
+     * tens of ms), else 24 files and 4 textures */
     int files = 0, textures = 0;
-    while (!warm_queue_.empty() && files < 24 && textures < 4) {
+    double start = warm_clock_ ? warm_clock_() : 0;
+    ++warm_frames_;
+    while (!warm_queue_.empty()) {
+        if (warm_clock_ ? (files + textures > 0 && warm_clock_() - start >= warm_share_) : (files >= 24 || textures >= 4))
+            break;
         std::string p = warm_queue_.front();
         warm_queue_.pop_front();
         if (!warmed_.insert(p).second) continue;
@@ -489,8 +496,27 @@ void SceneLibrary::warm_step(Canvas& canvas) {
         } else if (e->type == PACK_SCENE) {
             const SceneFile* f = file(p);
             ++files;
-            if (f) ext_refs(f->doc, warm_queue_);
+            if (!f) continue;
+            ext_refs(f->doc, warm_queue_);
+            /* a Spine skeleton: its atlas and skeleton read now and its
+             * pages queued (a sprite's first draw reads them otherwise) */
+            if (f->doc["type"].str() == "SpineSkeletonDataResource") {
+                Resource* r = ext(p);
+                SpineDataRes* sd = r && r->kind == Resource::RES_SPINE_DATA ? (SpineDataRes*)r : NULL;
+                if (sd && sd->data(this))
+                    for (int i = 0; sd->page(i); ++i) warm_queue_.push_back(sd->page(i)->path);
+            }
         }
+    }
+    warm_files_ += files;
+    warm_textures_ += textures;
+    if (warm_clock_) warm_spent_ += warm_clock_() - start;
+    if (warm_queue_.empty()) {
+        if (warm_clock_)
+            log_info("warm: %d files, %d textures in %.0f ms over %d frames", warm_files_, warm_textures_, warm_spent_,
+                     warm_frames_);
+        warm_files_ = warm_textures_ = warm_frames_ = 0;
+        warm_spent_ = 0;
     }
 }
 

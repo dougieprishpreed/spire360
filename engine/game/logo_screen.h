@@ -24,6 +24,9 @@ public:
     Node* build(std::string* error);
     void input(const PadState& pad);
     bool done() const { return phase_ == DONE; }
+    /* Whether the menu can show: until then the logo (or, cancelled, its
+     * background) stays instead of fading to black. */
+    void set_ready(bool ready) { ready_ = ready; }
     virtual void frame(double dt);
     /* SettingsSave.SkipIntroLogo as the game reads it at start-up
      * (data/user/settings.save); false when there is none. */
@@ -35,7 +38,7 @@ private:
     SceneLibrary* lib_;
     Phase phase_;
     double t_;
-    bool cancelled_;
+    bool cancelled_, ready_;
     Control* bg_;
     Control* container_;
     SpineSprite* logo_;

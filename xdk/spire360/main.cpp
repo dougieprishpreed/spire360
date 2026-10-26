@@ -78,8 +78,14 @@ static std::string ini_word(const std::string& s) {
  *                  hurt animations)
  *   godmode=1      the game's dev console godmode: Strength, Buffer and
  *                  Regen 999999999 on the player at each fight
- * They reach the logic as its environment (logic/Spire.Logic/
+ *   trace_loads=1  every scene file, texture and audio bank read from the
+ *                  pack logged with the ms it took, and frames over 8 ms
+ *                  (what the console's first uses and the warm-up cost)
+ *   profile=1      every 10 s, the node types (and scripts) whose process
+ *                  and draw cost the most per frame
+ * The first two reach the logic as its environment (logic/Spire.Logic/
  * DebugOptions.cs). No file: all off. */
+static bool g_trace_loads = false, g_profile = false;
 static void read_ini(const char* path, std::vector<std::string>& env) {
     FILE* f = fopen(path, "rb");
     if (!f) return;
@@ -96,6 +102,10 @@ static void read_ini(const char* path, std::vector<std::string>& env) {
             if (on) env.push_back("SPIRE_INVINCIBLE=1");
         } else if (key == "godmode") {
             if (on) env.push_back("SPIRE_GODMODE=1");
+        } else if (key == "trace_loads") {
+            g_trace_loads = on;
+        } else if (key == "profile") {
+            g_profile = on;
         } else {
             logf("spire360.ini: unknown option '%s'", key.c_str());
             continue;
@@ -226,6 +236,7 @@ static void set_gamma(IDirect3DDevice9* dev, bool on) {
 void __cdecl main() {
     set_log_sink(engine_log);
     logf("spire360 starting");
+    double started = now_ms();
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
     D3DPRESENT_PARAMETERS pp;
     ZeroMemory(&pp, sizeof(pp));
@@ -256,7 +267,8 @@ void __cdecl main() {
         flush_log();
         return;
     }
-    logf("pack: %u entries, game version %s", (unsigned)pack.count(), pack.game_version().c_str());
+    logf("pack: %u entries, game version %s (%.0f ms after start)", (unsigned)pack.count(), pack.game_version().c_str(),
+         now_ms() - started);
     log_memory("at start");
     std::vector<std::string> debug_env;
     read_ini("game:\\spire360.ini", debug_env);
@@ -271,9 +283,14 @@ void __cdecl main() {
     }
     logf("logic: started in %.1f ms", now_ms() - t0);
     log_memory("with the logic");
+    if (g_trace_loads) set_load_trace(now_ms);
+    if (g_profile) SceneTree::set_profile(now_ms);
+    double d0 = now_ms();
     Loc::init("game:\\spire\\data");
     install_game_scripts();
     SceneLibrary* lib = new SceneLibrary(&pack);
+    /* the warm-up's reads: 4 ms of each frame */
+    lib->set_warm_clock(now_ms, 4.0);
     GameAudio audio(&pack);
     lib->set_audio(&audio);
     if (!audio.open_output()) logf("audio: XAudio2 output unavailable");
@@ -296,8 +313,11 @@ void __cdecl main() {
     GameClient* game = new GameClient(lib, tree, &link);
     MenuFlow* flow = new MenuFlow(lib, tree, game, pack.game_version());
     tree->layout();
+    logf("start-up: data, fonts and the logo in %.0f ms; the first frame %.0f ms after start", now_ms() - d0,
+         now_ms() - started);
     unsigned prev = 0;
     double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, acc_update = 0, worst = 0, wait_start = 0;
+    double acc_process = 0, acc_layout = 0;
     int frames = 0, shown = 0, slow = 0;
     unsigned least_free = free_memory_mb();
     bool low_logged = false, logic_ended = false;
@@ -325,6 +345,13 @@ void __cdecl main() {
             set_gamma(dev, gamma);
             logf("gamma ramp %s", gamma ? "on" : "off");
             pad.pressed &= ~PadState::Y;
+        }
+        /* Back + RB: the next frame's draws into the log */
+        bool dumped = false;
+        if ((held & PadState::BACK) && (pad.pressed & PadState::RB)) {
+            canvas.dump_next_frame();
+            dumped = true;
+            pad.pressed &= ~PadState::RB;
         }
         double u0 = now_ms();
         ++g_frame;
@@ -365,11 +392,15 @@ void __cdecl main() {
         double f0 = now_ms();
         g_trace_phase = "process";
         tree->process(dt > 0.1 ? 0.1 : dt);
+        double fp = now_ms();
         g_trace_phase = "audio";
         audio.update(dt > 0.1 ? 0.1 : dt);
+        double fa = now_ms();
         g_trace_phase = "layout";
         tree->layout(1);
         double f1 = now_ms();
+        acc_process += fp - f0;
+        acc_layout += f1 - fa;
         g_trace_phase = "draw";
         renderer.begin(1280, 720, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
         tree->render(canvas);
@@ -379,6 +410,7 @@ void __cdecl main() {
         g_trace_phase = "present";
         dev->Present(NULL, NULL, NULL, NULL);
         double f3 = now_ms();
+        if (dumped) flush_log();
         acc_ms += f1 - f0;
         acc_draw += f2 - f1;
         acc_present += f3 - f2;
@@ -387,6 +419,9 @@ void __cdecl main() {
          * vertical blank) */
         double work = update_ms + (f2 - f0);
         if (work > worst) worst = work;
+        if (g_trace_loads && work > 8)
+            logf("frame %u: %.1f ms (update %.1f, process + layout %.1f, draw %.1f)", g_frame, work, update_ms, f1 - f0,
+                 f2 - f1);
         /* a frame long enough to see: where its time went */
         if (work > 250)
             logf("long frame %u: %.0f ms (update %.0f, process + layout %.0f, draw %.0f), decision %d", g_frame, work,
@@ -399,12 +434,20 @@ void __cdecl main() {
                  "worst %.1f ms, %d of %d over 16.7 ms; memory %u MB free, logic %u MB",
                  acc_update / frames, acc_ms / frames, acc_draw / frames, acc_present / frames, renderer.draw_calls(), worst,
                  slow, frames, free_mb, spire_logic_memory_kb() / 1024);
+            Canvas::TextureStats ts = canvas.take_texture_stats();
+            logf("textures: %u held, %.1f MB (peak %.1f MB of 80), %u created, %u evicted, "
+                 "%u frames over the budget (%u by their own)",
+                 (unsigned)canvas.texture_count(), canvas.texture_bytes() / 1048576.0, ts.peak_bytes / 1048576.0,
+                 ts.created, ts.evicted, ts.over_frames, ts.starved);
+            logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
+            SceneTree::log_profile(frames);
             if (free_mb < 24 && !low_logged) {
                 log_memory("low");
                 low_logged = true;
             }
             frames = slow = 0;
             acc_ms = acc_draw = acc_present = acc_update = worst = 0;
+            acc_process = acc_layout = 0;
         }
     }
     g_quitting = true;

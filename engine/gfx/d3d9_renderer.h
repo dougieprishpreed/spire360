@@ -114,6 +114,15 @@ private:
     IDirect3DPixelShader9* ps_;
     IDirect3DVertexDeclaration9* decl_;
     IDirect3DTexture9* white_;
+    /* Xbox 360: D3D frees a released texture's memory at once while the
+     * GPU may still read it for the frames it has queued; a destroyed
+     * texture is released once the GPU has passed the fence set then. */
+    struct Retired {
+        IDirect3DTexture9* tex;
+        DWORD fence;
+    };
+    std::vector<Retired> retired_;
+    void release_retired(bool all);
     std::vector<GpuVertex> batch_;
     /* pending state (what the batch was recorded with) */
     D3D9Texture* tex_;

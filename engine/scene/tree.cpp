@@ -87,6 +87,42 @@ void SceneTree::layout(int passes) {
     }
 }
 
+/* The profile: ms and counts of process and draw by node type or script. */
+struct ProfileCost {
+    double process_ms, draw_ms;
+    unsigned processed, drawn;
+    ProfileCost() : process_ms(0), draw_ms(0), processed(0), drawn(0) {}
+};
+static LoadClock g_profile_clock = NULL;
+static std::map<std::string, ProfileCost> g_profile;
+
+static ProfileCost& profile_of(const Node* n, bool behavior) {
+    if (behavior) {
+        size_t s = n->script.find_last_of('/');
+        return g_profile["script " + (s == std::string::npos ? n->script : n->script.substr(s + 1))];
+    }
+    return g_profile[n->type];
+}
+
+void SceneTree::set_profile(LoadClock clock) {
+    g_profile_clock = clock;
+    g_profile.clear();
+}
+
+void SceneTree::log_profile(int frames) {
+    if (!g_profile_clock || frames <= 0) return;
+    std::vector<std::pair<double, std::string> > order;
+    for (std::map<std::string, ProfileCost>::const_iterator it = g_profile.begin(); it != g_profile.end(); ++it)
+        order.push_back(std::make_pair(-(it->second.process_ms + it->second.draw_ms), it->first));
+    std::sort(order.begin(), order.end());
+    for (size_t i = 0; i < order.size() && i < 12; ++i) {
+        const ProfileCost& c = g_profile[order[i].second];
+        log_info("profile: %-28s process %.2f ms (%u), draw %.2f ms (%u) per frame", order[i].second.c_str(),
+                 c.process_ms / frames, c.processed / frames, c.draw_ms / frames, c.drawn / frames);
+    }
+    g_profile.clear();
+}
+
 void SceneTree::process_node(Node* n, double dt) {
     g_trace_node = n;
     if (n->queued_for_deletion()) return;
@@ -95,6 +131,25 @@ void SceneTree::process_node(Node* n, double dt) {
         if (!n->behavior) note_unported_script(n->script);
     }
     if (n->is_canvas_item() && !((CanvasItem*)n)->visible) return;
+    if (g_profile_clock && (n->behavior || (n->flags & NF_PROCESS))) {
+        double t0 = g_profile_clock();
+        if (n->behavior) {
+            n->behavior->process(n, dt);
+            double t1 = g_profile_clock();
+            ProfileCost& c = profile_of(n, true);
+            c.process_ms += t1 - t0;
+            ++c.processed;
+            t0 = t1;
+        }
+        if (n->flags & NF_PROCESS) {
+            n->process(dt);
+            ProfileCost& c = profile_of(n, false);
+            c.process_ms += g_profile_clock() - t0;
+            ++c.processed;
+        }
+        for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
+        return;
+    }
     if (n->behavior) n->behavior->process(n, dt);
     if (n->flags & NF_PROCESS) n->process(dt);
     for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
@@ -351,7 +406,15 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
         canvas.set_item(d.xf, d.modulate, blend, d.ci->effective_texture_flags() | extra_flags);
         canvas.set_clip(d.has_clip ? &d.clip : NULL);
         g_trace_node = d.ci;
-        d.ci->draw(canvas);
+        if (g_profile_clock) {
+            double t0 = g_profile_clock();
+            d.ci->draw(canvas);
+            ProfileCost& c = profile_of(d.ci, false);
+            c.draw_ms += g_profile_clock() - t0;
+            ++c.drawn;
+        } else {
+            d.ci->draw(canvas);
+        }
         shader_end(canvas, d.material);
         ++items_drawn;
     }

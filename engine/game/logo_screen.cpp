@@ -10,7 +10,7 @@
 namespace spire {
 
 LogoScreen::LogoScreen(SceneLibrary* lib)
-    : lib_(lib), phase_(FADE_IN), t_(0), cancelled_(false), bg_(NULL), container_(NULL), logo_(NULL), black_(NULL), rest_y_(0) {}
+    : lib_(lib), phase_(FADE_IN), t_(0), cancelled_(false), ready_(true), bg_(NULL), container_(NULL), logo_(NULL), black_(NULL), rest_y_(0) {}
 
 bool LogoScreen::skip_intro() { return Loc::settings_save()["skip_intro_logo"].b(); }
 
@@ -102,14 +102,17 @@ void LogoScreen::frame(double dt) {
     case FADE_IN:
         if (cancelled_) {
             /* the transition's token: the fade ends, the animation does not play */
-            enter(FADE_OUT);
+            if (ready_) enter(FADE_OUT);
         } else if (t_ >= 0.8) {
             enter(WAIT);
         }
         break;
     case WAIT:
-        if (cancelled_) enter(FADE_OUT);
-        else if (t_ >= 1.0) enter(PLAY);
+        if (cancelled_) {
+            if (ready_) enter(FADE_OUT);
+        } else if (t_ >= 1.0) {
+            enter(PLAY);
+        }
         break;
     case PLAY: {
         SpAnimationState* st = logo_ ? logo_->animation_state() : NULL;
@@ -118,10 +121,10 @@ void LogoScreen::frame(double dt) {
         break;
     }
     case CANCEL:
-        if (t_ >= 0.25) enter(FADE_OUT);
+        if (t_ >= 0.25 && ready_) enter(FADE_OUT);
         break;
     case TEAL:
-        if (t_ >= 3.0) enter(FADE_OUT);
+        if (t_ >= 3.0 && ready_) enter(FADE_OUT);
         break;
     case FADE_OUT:
         if (t_ >= 0.8) phase_ = DONE;
