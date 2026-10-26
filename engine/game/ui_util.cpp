@@ -184,6 +184,12 @@ void TipFollower::frame() {
     float s = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
     Vec2 c = xf.origin;
     float w = tips_->size.x, h = tips_->size.y;
+    /* not laid out yet (made this frame): placed with no size it showed for
+     * a frame beside where it belongs */
+    if (w <= 0 || h <= 0) {
+        tips_->modulate.a = 0;
+        return;
+    }
     if (merchant_ == 3) {
         /* SetAlignment(hitbox, Right / Left), CorrectVerticalOverflow; past
          * the right edge, CorrectHorizontalOverflow puts them left of it */

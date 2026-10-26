@@ -98,6 +98,8 @@ static std::map<std::string, ProfileCost> g_profile;
 
 static ProfileCost& profile_of(const Node* n, bool behavior) {
     if (behavior) {
+        /* a behaviour from code (a screen's FrameDriver): by where it is */
+        if (n->script.empty()) return g_profile["code in " + (n->parent ? n->parent->name : n->name)];
         size_t s = n->script.find_last_of('/');
         return g_profile["script " + (s == std::string::npos ? n->script : n->script.substr(s + 1))];
     }

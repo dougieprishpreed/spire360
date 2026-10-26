@@ -40,6 +40,15 @@ private:
     Vec2 minsize_;
     FontRes* font_;
     int font_size_;
+    /* shape()'s inputs when it last ran: the lines are shaped again only
+     * when one of them changes (draw, the minimum size and the line count
+     * ask several times a frame) */
+    std::string shaped_text_;
+    FontRes* shaped_font_;
+    int shaped_size_, shaped_autowrap_, shaped_trim_, shaped_visible_, shaped_max_lines_, shaped_skipped_;
+    int shaped_line_sp_, shaped_para_sp_;
+    float shaped_width_, shaped_ratio_;
+    bool shaped_upper_, shaped_valid_;
 };
 
 } /* namespace spire */

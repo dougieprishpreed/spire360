@@ -44,6 +44,9 @@ public:
     static Json make_array() { Json j; j.type_ = ARRAY; return j; }
     void set(const std::string& key, const Json& value);
     void append(const Json& value);
+    /* Contents exchanged in place (no copy: C++03 has no moves, and a
+     * copy of a tree copies every node in it). */
+    void swap(Json& other);
     bool operator==(const Json& other) const;
     bool operator!=(const Json& other) const { return !(*this == other); }
 

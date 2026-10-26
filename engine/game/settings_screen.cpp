@@ -60,7 +60,7 @@ static float language_completion(const std::string& code) {
             while ((got = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, got);
             fclose(f);
             std::string err;
-            counts = Json::parse(text.c_str(), text.size(), &err);
+            Json::parse(text.c_str(), text.size(), &err).swap(counts);
         }
     }
     float eng = counts["eng"].f(0);
@@ -380,7 +380,7 @@ static bool pack_has_language(SceneLibrary* lib, const std::string& code) {
         std::vector<u8> raw;
         if (lib && lib->pack() && lib->pack()->read("spire/languages.json", raw) && !raw.empty()) {
             std::string err;
-            doc = Json::parse((const char*)&raw[0], raw.size(), &err);
+            Json::parse((const char*)&raw[0], raw.size(), &err).swap(doc);
         }
     }
     const Json& l = doc["languages"];

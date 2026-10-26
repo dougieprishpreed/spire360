@@ -9,7 +9,81 @@ data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
-top (the newest: the first hardware run, 2026-10-26).
+top (the newest: the second hardware run, 2026-10-26).
+
+## Second hardware run (2026-10-26): its log, a shop rule, and the console's frame costs
+
+The user ran a2d6fb1 on the console with their PC profile imported
+(tools/import_save.py) and trace_loads=1, profile=1 (spire360.txt 7000
+lines on E:\Games\spire360). The embark no longer waits; fights are slow,
+the shop smooth until its inventory opens.
+
+Their findings and the causes:
+- A second card removal in the same shop, at the same price: the shop's
+  UI marks the service used (NMerchantCardRemoval.OnCardRemovalUsed,
+  reached from MerchantCardRemovalEntry.OnTryPurchase through
+  NRun.Instance, null headless; FillSlot does it when a hook forbids
+  removals: the Hoarder modifier). RunDriver.ShopState now applies both
+  (Hook.ShouldAllowMerchantCardRemoval as the shop opens, SetUsed on the
+  entry's PurchaseCompleted) and DoRemoveCard refuses a used service. The
+  price was right: it rises at the next shop (CalcCost with
+  CardShopRemovalsUsed).
+- The same cause, swept: the UI methods the logic calls
+  (presentation_verdicts.tsv "call" rows) followed through their own and
+  their fields' node classes for changes to game state; and the Nodes code
+  as a whole. Found: NCard.Model's setter marks a run's card as seen
+  (SaveManager.MarkCardAsSeen: Progress.DiscoveredCards and the run's
+  discoveries the game over screen counts) and nothing headless did for
+  cards in hands, rewards and shops; AddCardView now does. Relics and
+  potions are marked by game code the logic runs (obtaining, rewards, the
+  shop's entries). Not mirrored: NHoverTipSet's marks as a tip shows (the
+  logic builds every item's tips up front, so it would mark what was never
+  focused). The audit's verdict for OnCardRemovalUsed had looked at the
+  presentation only.
+- A potion's tip flashed beside the next: TipFollower showed a tip the
+  frame it was made, before the layout gave it a size; it now waits.
+- The continued run's fight showed the main menu's background: the title
+  stays until the run's first screen is shown, and the two seconds' wait
+  for the warm-up (behind the embark wipe) held it with no wipe on
+  Continue; a continued run no longer waits.
+- Underdocks fights look dark: on PC too (ushots), so the port's, not the
+  console's. Its lights: CPUParticles2D haze of light.png (alpha 0.1,
+  little_light_script.gd, ported), water glints through
+  vfx_stepped_shader_fire_add (22 sprites), water reflection; no 2D lights,
+  nothing skipped. Waiting on a screenshot of the PC game's Underdocks
+  fight to compare.
+
+The console's frame costs (profile=1, per frame in fights): Label draw 10-19
+ms (27-42 labels), RichTextLabel 10-12 ms, GPUParticles2D 4-13 ms, Spine
+2-5 ms, TextureRect 1-6 ms, layout 5-8 ms; process spikes to seconds at
+first uses ("script": the screens' FrameDrivers instancing effects).
+Scene files parsed at 0.15 MB/s (PC: 19 MB/s): sovereign_blade.tscn, 77 KB,
+1.6 s; the warm-up's 837 files 30.8 s.
+- Json's parser copied every parsed value into its parent (a subtree copy
+  at each level: C++03 has no moves) and every array element again as the
+  vector grew: values are now parsed into their place, arrays grow by swap,
+  the parsed document is swapped into place (Json::swap). PC: the 841
+  files of the warm-up 141 -> 68 ms; the console's allocator and cache
+  pay far more per copy.
+- Label::shape and RichTextLabel::layout ran every frame (draw, the
+  minimum size and the line count each called them): each now keeps its
+  lines until an input changes (text, font, size, width, wrap, visible
+  characters...).
+
+The profile now names a behaviour from code by its parent ("code in
+CombatRoom"), so the screens' FrameDrivers are told apart.
+
+Checks: seeded traces against base6 differences 0 (traces/new94);
+scenarios 30 ok (work/scen94); content coverage 829 ok (work/cov94);
+spire_check 2475 responses 0 failures; two random pad sessions 0 reports;
+Continue from the user's profile (session_start) shows its fight with no
+title behind it; the console's logic rebuilt (out/logic/c), native runs 14
+of 15 identical to the JIT's (the other an unseeded skin), no error or
+trap; PC build 0 warnings.
+
+To look at next: the console's numbers with these; GPUParticles2D's cost;
+the warm-up's memory (the parsed scene files stay); Underdocks with the
+reference.
 
 ## First Xbox 360 hardware run (2026-10-26): what it showed, and the changes
 

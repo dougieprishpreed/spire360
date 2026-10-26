@@ -93,7 +93,7 @@ void SceneLibrary::init_default_theme() {
     std::string text;
     for (int i = 0; DEFAULT_THEME_JSON[i]; ++i) text += DEFAULT_THEME_JSON[i];
     std::string err;
-    default_theme_doc_ = Json::parse(text.c_str(), text.size(), &err);
+    Json::parse(text.c_str(), text.size(), &err).swap(default_theme_doc_);
     if (!err.empty()) log_warn("default theme: %s", err.c_str());
     ThemeRes* t = new ThemeRes();
     owned_.push_back(t);
@@ -128,7 +128,8 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
         std::string err;
         f = new SceneFile();
         f->name = name;
-        f->doc = Json::parse(data.empty() ? "" : (const char*)&data[0], data.size(), &err);
+        /* swapped in: assigning copied the whole parsed tree */
+        Json::parse(data.empty() ? "" : (const char*)&data[0], data.size(), &err).swap(f->doc);
         if (!err.empty()) {
             log_warn("%s: %s", name.c_str(), err.c_str());
             delete f;

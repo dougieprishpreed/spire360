@@ -214,6 +214,7 @@ public partial class RunDriver
         _musicRoom = null;
         _musicAct = -1;
         _preloadKey = null;
+        _wiredRemoval = null;
     }
 
     // The room whose track the music plays (RunContext): the last one
@@ -1235,6 +1236,7 @@ public partial class RunDriver
 
         var removal = merchantRoom.GetLocalInventory().CardRemovalEntry;
         if (removal == null) return Error("No card removal available");
+        if (removal.Used) return Error("Card removal already used");
         if (player.Gold < removal.Cost) return Error("Not enough gold");
 
         try
@@ -2185,6 +2187,15 @@ public partial class RunDriver
 
     private static void AddCardView(Dictionary<string, object?> d, CardModel c, PileType pile)
     {
+        // NCard.Model's setter: a card of the player's shown in a run is seen
+        // (Progress.DiscoveredCards, and the run's discoveries the game over
+        // screen counts); headless no NCard is made, so its view marks it.
+        try
+        {
+            if ((c.RunState != null || c.CombatState != null) && MegaCrit.Sts2.Core.Context.LocalContext.IsMine(c))
+                SaveManager.Instance.MarkCardAsSeen(c);
+        }
+        catch (Exception ex) { Spire.Logic.Log.Warn($"card seen: {ex.Message}"); }
         d["tips"] = Tips(() => c.HoverTips);
         static string Res(string p) => p.StartsWith("res://") ? p.Substring(6) : p;
         static float[] Rgba(Godot.Color col) => new[] { col.R, col.G, col.B, col.A };
@@ -3291,10 +3302,25 @@ public partial class RunDriver
         return ShopState(room, player);
     }
 
+    // The card removal service the shop's rules were applied to.
+    private MerchantCardRemovalEntry? _wiredRemoval;
+
     private Dictionary<string, object?> ShopState(MerchantRoom merchantRoom, Player player)
     {
         var inv = merchantRoom.GetLocalInventory();
         if (inv == null) { Ledger.Skip("shop_without_inventory", ""); ForceToMap(); return MapSelectState(); }
+        // NMerchantCardRemoval (the shop's UI) marks the service used: in
+        // FillSlot when a hook forbids removals, in OnCardRemovalUsed once a
+        // removal is done (MerchantCardRemovalEntry.OnTryPurchase calls it
+        // through NRun, which the headless game has not). Without it a second
+        // removal could be bought in the same shop at the same price.
+        var service = inv.CardRemovalEntry;
+        if (service != null && !ReferenceEquals(service, _wiredRemoval))
+        {
+            _wiredRemoval = service;
+            if (!MegaCrit.Sts2.Core.Hooks.Hook.ShouldAllowMerchantCardRemoval(_runState!, player)) service.SetUsed();
+            service.PurchaseCompleted += (_, _) => service.SetUsed();
+        }
 
         int characterCards = inv.CharacterCardEntries.Count;
         var cards = inv.CharacterCardEntries.Concat(inv.ColorlessCardEntries)

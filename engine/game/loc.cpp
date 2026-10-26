@@ -66,7 +66,7 @@ static const Json& table_of(std::map<std::string, Json>*& tables, const std::str
     while ((got = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, got);
     fclose(f);
     std::string err;
-    t = Json::parse(text.c_str(), text.size(), &err);
+    Json::parse(text.c_str(), text.size(), &err).swap(t);
     if (!err.empty()) log_warn("localization: %s: %s", path.c_str(), err.c_str());
     return t;
 }

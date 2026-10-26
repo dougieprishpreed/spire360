@@ -13,7 +13,9 @@ Label::Label()
     : h_align(HALIGN_LEFT), v_align(VALIGN_TOP), autowrap(AUTOWRAP_OFF),
       trim_flags(BREAK_TRIM_START_EDGE_SPACES | BREAK_TRIM_END_EDGE_SPACES), overrun(0), clip_text(false),
       uppercase(false), visible_characters(-1), max_lines_visible(-1), lines_skipped(0), visible_ratio(1.0f),
-      font_(NULL), font_size_(16) {}
+      font_(NULL), font_size_(16), shaped_font_(NULL), shaped_size_(0), shaped_autowrap_(0), shaped_trim_(0),
+      shaped_visible_(0), shaped_max_lines_(0), shaped_skipped_(0), shaped_line_sp_(0), shaped_para_sp_(0),
+      shaped_width_(0), shaped_ratio_(0), shaped_upper_(false), shaped_valid_(false) {}
 
 bool Label::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     if (key == "text") text = v.str();
@@ -58,6 +60,27 @@ void Label::shape() {
     StyleBoxRes* style = theme_stylebox("normal");
     Vec2 smin = style ? style->minimum_size() : Vec2();
     float width = (float)(int)(size.x - smin.x);
+    int line_sp = theme_constant("line_spacing"), para_sp = theme_constant("paragraph_spacing");
+    if (shaped_valid_ && text == shaped_text_ && font_ == shaped_font_ && font_size_ == shaped_size_ &&
+        width == shaped_width_ && autowrap == shaped_autowrap_ && trim_flags == shaped_trim_ &&
+        visible_characters == shaped_visible_ && visible_ratio == shaped_ratio_ && uppercase == shaped_upper_ &&
+        max_lines_visible == shaped_max_lines_ && lines_skipped == shaped_skipped_ && line_sp == shaped_line_sp_ &&
+        para_sp == shaped_para_sp_)
+        return;
+    shaped_valid_ = true;
+    shaped_text_ = text;
+    shaped_font_ = font_;
+    shaped_size_ = font_size_;
+    shaped_width_ = width;
+    shaped_autowrap_ = autowrap;
+    shaped_trim_ = trim_flags;
+    shaped_visible_ = visible_characters;
+    shaped_ratio_ = visible_ratio;
+    shaped_upper_ = uppercase;
+    shaped_max_lines_ = max_lines_visible;
+    shaped_skipped_ = lines_skipped;
+    shaped_line_sp_ = line_sp;
+    shaped_para_sp_ = para_sp;
     std::vector<u32> all;
     utf8_decode(text, all);
     if (uppercase) to_upper(all);

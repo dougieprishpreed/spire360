@@ -116,7 +116,12 @@ struct RichTextLabel::Para {
 RichTextLabel::RichTextLabel()
     : bbcode(false), fit_content(false), scroll_active(true), autowrap(AUTOWRAP_WORD_SMART),
       trim_flags(BREAK_TRIM_START_EDGE_SPACES | BREAK_TRIM_END_EDGE_SPACES), h_align(HALIGN_LEFT), v_align(VALIGN_TOP),
-      visible_characters(-1), visible_ratio(1.0f), elapsed_time(0), paras_(new std::vector<Para>()), laid_width_(-1) {
+      visible_characters(-1), visible_ratio(1.0f), elapsed_time(0), paras_(new std::vector<Para>()), parsed_bbcode_(false),
+      laid_width_(-1), laid_line_sep_(0), laid_para_sep_(0), laid_flags_(0) {
+    for (int i = 0; i < 5; ++i) {
+        laid_fonts_[i] = NULL;
+        laid_sizes_[i] = 0;
+    }
     flags |= NF_PROCESS;
 }
 
@@ -521,10 +526,10 @@ void RichTextLabel::parse() {
 /* ---- layout (_shape_line / TextParagraph / _realign) ---- */
 
 void RichTextLabel::layout(float width) {
-    std::string key = text + (bbcode ? "1" : "0");
-    if (key != parsed_key_) {
+    if (text != parsed_text_ || bbcode != parsed_bbcode_ || paras_->empty()) {
         parse();
-        parsed_key_ = key;
+        parsed_text_ = text;
+        parsed_bbcode_ = bbcode;
         laid_width_ = -1;
     }
     /* Fonts and sizes come from the theme; re-resolve every layout. */
@@ -539,6 +544,16 @@ void RichTextLabel::layout(float width) {
     else if (autowrap == AUTOWRAP_WORD) flags = BREAK_WORD_BOUND | BREAK_MANDATORY;
     else if (autowrap == AUTOWRAP_ARBITRARY) flags = BREAK_GRAPHEME_BOUND | BREAK_MANDATORY;
     flags |= trim_flags;
+    bool same = laid_width_ == width && line_sep == laid_line_sep_ && para_sep == laid_para_sep_ && flags == laid_flags_;
+    for (int i = 0; same && i < 5; ++i) same = fonts[i] == laid_fonts_[i] && sizes[i] == laid_sizes_[i];
+    if (same) return;
+    for (int i = 0; i < 5; ++i) {
+        laid_fonts_[i] = fonts[i];
+        laid_sizes_[i] = sizes[i];
+    }
+    laid_line_sep_ = line_sep;
+    laid_para_sep_ = para_sep;
+    laid_flags_ = flags;
     float h = 0;
     std::vector<int> br;
     for (size_t p = 0; p < paras_->size(); ++p) {

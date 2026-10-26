@@ -22,7 +22,7 @@ namespace spire {
 MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
     : lib_(lib), tree_(tree), game_(game), version_(version), logo_(NULL), logo_node_(NULL), title_(new TitleScreen(lib)), title_node_(NULL),
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
-      screen_(TITLE), chars_version_(0), decisions_seen_(0), embark_wait_(0), starting_(false), in_run_(false),
+      screen_(TITLE), chars_version_(0), decisions_seen_(0), embark_wait_(0), embarking_(false), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false), menu_ready_(false), title_waiting_(false) {
     tutorials_ = NULL;
     tutorials_node_ = NULL;
@@ -155,6 +155,7 @@ void MenuFlow::embark() {
     if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));
     else game_->start_game_run(chars_->character(), chars_->ascension(), game_->run_seed());
     begin_run();
+    embarking_ = true;
 }
 
 /* The submenu over the title goes; the title takes the pad again. */
@@ -315,6 +316,7 @@ bool MenuFlow::update(const PadState& in) {
                 note("continue");
                 game_->continue_run();
                 begin_run();
+                embarking_ = false;
             } else if (a == TitleScreen::ABANDON) {
                 confirm_ = new ConfirmPopup(lib_);
                 screen_node_ = confirm_->build(&err);
@@ -497,8 +499,8 @@ bool MenuFlow::update(const PadState& in) {
     }
 
     game_->update(PadState());
-    if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() && game_->warming() &&
-        ++embark_wait_ < 120)
+    if (starting_ && embarking_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() &&
+        game_->warming() && ++embark_wait_ < 120)
         return !quit_;
     if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
         /* The run's first screen (once the embark wipe is black and the

@@ -43,6 +43,22 @@ void Json::append(const Json& value) {
     arr_.push_back(value);
 }
 
+void Json::swap(Json& other) {
+    Type t = type_;
+    type_ = other.type_;
+    other.type_ = t;
+    double n = num_;
+    num_ = other.num_;
+    other.num_ = n;
+    bool b = bool_;
+    bool_ = other.bool_;
+    other.bool_ = b;
+    str_.swap(other.str_);
+    arr_.swap(other.arr_);
+    keys_.swap(other.keys_);
+    obj_.swap(other.obj_);
+}
+
 bool Json::operator==(const Json& other) const {
     if (type_ != other.type_) return false;
     switch (type_) {
@@ -77,6 +93,11 @@ private:
     bool fail(const char* msg) {
         if (err_.empty()) err_ = format("%s at offset %d", msg, (int)(p_ - s_));
         return false;
+    }
+    static void grow(std::vector<Json>& v, size_t capacity) {
+        std::vector<Json> bigger(capacity);
+        for (size_t i = 0; i < v.size(); ++i) bigger[i].swap(v[i]);
+        v.swap(bigger);
     }
     void ws() {
         while (p_ < end_ && (*p_ == ' ' || *p_ == '\t' || *p_ == '\n' || *p_ == '\r')) ++p_;
@@ -157,10 +178,16 @@ private:
                 if (p_ >= end_ || *p_ != ':') return fail("expected ':'");
                 ++p_;
                 ws();
-                Json v;
-                if (!value(v, depth + 1)) return false;
-                if (o.obj_.find(key) == o.obj_.end()) o.keys_.push_back(key);
-                o.obj_[key] = v;
+                /* parsed into its place: assigning a parsed value copied
+                 * its whole subtree, at every level of the tree */
+                std::map<std::string, Json>::iterator slot = o.obj_.find(key);
+                if (slot == o.obj_.end()) {
+                    o.keys_.push_back(key);
+                    slot = o.obj_.insert(std::make_pair(key, Json())).first;
+                } else {
+                    Json().swap(slot->second);
+                }
+                if (!value(slot->second, depth + 1)) return false;
                 ws();
                 if (p_ < end_ && *p_ == ',') { ++p_; continue; }
                 if (p_ < end_ && *p_ == '}') { ++p_; return true; }
@@ -172,13 +199,21 @@ private:
             ++p_;
             ws();
             if (p_ < end_ && *p_ == ']') { ++p_; return true; }
+            /* grown by swapping the parsed elements over (a vector's
+             * growth copied every element and its subtree) */
+            size_t n = 0;
             for (;;) {
                 ws();
-                o.arr_.push_back(Json());
-                if (!value(o.arr_.back(), depth + 1)) return false;
+                if (n == o.arr_.size()) grow(o.arr_, n ? n * 2 : 4);
+                if (!value(o.arr_[n], depth + 1)) return false;
+                ++n;
                 ws();
                 if (p_ < end_ && *p_ == ',') { ++p_; continue; }
-                if (p_ < end_ && *p_ == ']') { ++p_; return true; }
+                if (p_ < end_ && *p_ == ']') {
+                    ++p_;
+                    o.arr_.resize(n);
+                    return true;
+                }
                 return fail("expected ',' or ']'");
             }
         }

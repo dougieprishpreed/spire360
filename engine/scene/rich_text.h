@@ -66,9 +66,14 @@ private:
     void parse();
     void layout(float width);
     std::vector<Para>* paras_;
+    /* parse()'s input, and layout()'s when it last ran: the paragraphs are
+     * shaped again only when one of them changes (draw and the minimum
+     * size ask for the layout several times a frame) */
     std::string parsed_text_;
-    std::string parsed_key_;
+    bool parsed_bbcode_;
     float laid_width_;
+    FontRes* laid_fonts_[5];
+    int laid_sizes_[5], laid_line_sep_, laid_para_sep_, laid_flags_;
 };
 
 } /* namespace spire */

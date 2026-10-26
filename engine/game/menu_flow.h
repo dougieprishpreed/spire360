@@ -81,8 +81,11 @@ private:
     Screen screen_;
     Json menu_;
     int chars_version_, decisions_seen_;
-    /* frames the run's first screen has waited for the warm-up */
+    /* frames the run's first screen has waited for the warm-up (behind
+     * the embark wipe only: a continued run has none, so it does not wait
+     * with the title still up) */
     int embark_wait_;
+    bool embarking_;
     bool starting_, in_run_, quit_, leaving_run_;
     /* NGame.LaunchMainMenu reads the profile before the menu shows: the
      * title waits (after the logo, on black) for the logic's first
