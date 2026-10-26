@@ -2,7 +2,7 @@
 """Print a shader's code from a pack: a .gdshader/.tres file name, or an
 inline one as "<entry>::<sub id>" (shader_survey.py's names).
 
-    python tools/shader_code.py work/pack-sound-effects/pack.s3p shaders/scrolling_smoke.tres
+    python tools/shader_code.py work/pack-80/pack.s3p shaders/scrolling_smoke.tres
 """
 import json
 import os

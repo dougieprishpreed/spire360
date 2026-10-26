@@ -6,7 +6,7 @@ them (each ledger records a UI call with its caller). A read no run reached
 is presentation (or rules behind a UI check) the audit has never looked at:
 content the coverage harness does not drive into that path.
 
-    python tools/ui_reach_audit.py --runs work/cov73 [--runs work/scen74 ...]
+    python tools/ui_reach_audit.py --runs work/cov90j [--runs work/scen90 ...]
                                    [--decomp decomp] [--all]
 
 Prints the unreached sites by UI type (--all: the reached ones too).

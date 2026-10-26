@@ -7,7 +7,7 @@ Spire360's logic reads and writes the same files, in the same format, under
 <data>/user/, so importing is a copy:
 
     python tools/import_save.py --to out/data
-    python tools/import_save.py --from "%APPDATA%/SlayTheSpire2/steam/7656..." --to work/pack/data
+    python tools/import_save.py --from "%APPDATA%/SlayTheSpire2/steam/7656..." --to work/pack-80/data
 
 and taking a profile back to the PC is the reverse (the PC folder is backed
 up first, and --force is required because it overwrites the game's saves):

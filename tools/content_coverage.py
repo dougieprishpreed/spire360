@@ -3,7 +3,7 @@ event, encounter and act of the game played through the real logic, with
 everything unlocked.
 
     python tools/content_coverage.py --cmd "dotnet out/logic/jit/Spire.Logic.dll" \
-        --data work/pack/data --work work/coverage [--suite cards,relics,...] [--limit N]
+        --data work/pack-80/data --work work/coverage [--suite cards,relics,...] [--limit N]
 
 Suites (default: all):
   cards       each card generated into the hand and played (and upgraded)

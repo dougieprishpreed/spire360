@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Which of the game's shaders the engine draws, and where the others are used.
 
-    python tools/shader_survey.py work/pack-sound-effects/pack.s3p [--json out.json]
+    python tools/shader_survey.py work/pack-80/pack.s3p [--json out.json]
 
 Reads every scene and resource in a pack (the converter's JSON), finds each
 ShaderMaterial's shader (a .gdshader / .tres file, or an inline one named

@@ -257,6 +257,23 @@ name over FATX's 42 characters, no data/user saves). The spire folder next
 to xdk/spire360/Release's XEX still holds the 10-20 pack and the Xenia
 test's saves: pack-80 replaces it.
 
+Cleanup (2026-10-26, the user's request; 38.4 GB freed): the superseded
+packs (pack, pack-next, pack-sound, pack-sound-effects, pack-audio,
+pack-lang, doom-pack, the audio test packs, out/pack.s3p and out/data, the
+two old spire folders under xdk/spire360/Release), every old run folder in
+work/ (cov*, cap*, scen*, sq90*, monkey90, pace*, ftue*, formp-*, ...),
+every trace set but base6, new90c and native90c, and the build output of
+the old XDK test projects (spire_view, logic_runner, bigcode). Kept in
+work/: toolchain, pack-80, play-data, import-test, cov90j and scen90 (the
+latest coverage and scenario runs, the audits' inputs), the extracted
+resources and references (res*, *-reference, *-src, fmod-parser, legacy,
+baseline-shots, setup), xenia-saves (the Xenia tests' data/user folders,
+10-16 and 10-22) and all loose scripts. Kept elsewhere: out/logic,
+out/engine*, out/release, xdk/logic_lib (its incremental build),
+converter/.cache, logic's obj. A language pack comes back from pack-80
+with `convert.py refont` (fonts only). Run folders named in the sections
+below are gone unless listed here.
+
 ## The four review lists (2026-10-25): every item has a verdict, and what they found
 
 The presentation audit's long lists (call 171, script 163, asset 124) and
