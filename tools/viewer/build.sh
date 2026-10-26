@@ -5,15 +5,15 @@
 set -e
 cd "$(dirname "$0")/../.."
 mkdir -p out/engine
-# C99 maths VS2010 does not have; g++ -std=c++98 still declares them.
-if grep -nE '\b(fminf?|fmaxf?|roundf?|truncf?|l?lroundf?|cbrtf?|log2f?|exp2f?|copysignf?|nearbyintf?|rintf?|remainderf?|fdimf?|expm1f?|log1pf?|isnan|isinf|isfinite|signbit|fpclassify|strtof|strtoll|strtoull)[[:space:]]*\(' \
-        engine/*/*.cpp engine/*/*.h xdk/spire360/*.cpp; then
-    echo "build.sh: C99 functions above are missing from VS2010" >&2
-    exit 1
-fi
 CXX=${CXX:-g++}
 if [ -z "${PYTHON:-}" ]; then
     if command -v python >/dev/null 2>&1; then PYTHON=python; else PYTHON=python3; fi
+fi
+# C99 functions VS2010 does not have and CRT functions the XDK's Release
+# build drops (getenv, ...); g++ -std=c++98 still declares them all.
+if ! $PYTHON tools/viewer/xdk_api_check.py .; then
+    echo "build.sh: the XDK's Release build has no such function (guard it with _XBOX)" >&2
+    exit 1
 fi
 # The POSIX host uses fseeko/usleep; MSYS2 hides them in strict ANSI mode.
 FLAGS="-std=c++98 -pedantic -D_DEFAULT_SOURCE -D_LARGEFILE_SOURCE -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"

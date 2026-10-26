@@ -6,11 +6,16 @@
 namespace spire {
 
 /* SPIRE_CUE_TRACE in the environment (a diagnostic, off by default): each
- * cue played, dropped or taken back, on stderr as it happens */
+ * cue played, dropped or taken back, on stderr as it happens. The console
+ * has no environment (its Release CRT has no getenv). */
 static bool trace_on() {
+#if defined(_XBOX)
+    return false;
+#else
     static int on = -1;
     if (on < 0) on = getenv("SPIRE_CUE_TRACE") ? 1 : 0;
     return on != 0;
+#endif
 }
 
 static void trace(const char* what, const std::string& key) {

@@ -234,6 +234,22 @@ Checks, final logic and engine:
   srt_core.c and logic_host.c strict C89 -Werror; the D3D9 renderer check.
   No XDK build.
 
+The XDK build (2026-10-26, the user's xdk\build_light.cmd): logic_lib
+built; spire360 stopped at one error, cue_ledger.cpp's getenv (C3861). A
+Release build defines NDEBUG and with it _XBSTRICT, under which the XDK's
+CRT headers drop getenv and the rest of the environment, working
+directory, process and console functions; g++ -std=c++98 declares them,
+so the PC build passed. Fixed (the cue trace is off on the console) and
+for the class: tools/viewer/xdk_api_check.py, which build.sh runs in place
+of its C99 grep, lists calls in the XEX's sources and the runtime to the
+C99 functions VS2010 lacks and to the CRT functions _XBSTRICT drops,
+skipping lines the console compiles out (_XBOX, _MSC_VER). A one-off scan
+of every C library function the XEX calls against the XDK's headers (with
+_XBSTRICT) and of every <header> it includes found nothing else; the
+symbols main.cpp adds (GlobalMemoryStatus: xapilib.lib) are in libraries
+the project links. The C files (logic_glue.c) had not compiled yet: they
+come after the C++ batch.
+
 ## The four review lists (2026-10-25): every item has a verdict, and what they found
 
 The presentation audit's long lists (call 171, script 163, asset 124) and
