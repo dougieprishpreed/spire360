@@ -250,6 +250,13 @@ symbols main.cpp adds (GlobalMemoryStatus: xapilib.lib) are in libraries
 the project links. The C files (logic_glue.c) had not compiled yet: they
 come after the C++ batch.
 
+The rebuilt XEX (0 errors) is staged for the console in
+out/release/spire360 (ignored): default.xex, spire360.ini (both options
+0), spire/pack.s3p and spire/data from work/pack-80 (copies verified, no
+name over FATX's 42 characters, no data/user saves). The spire folder next
+to xdk/spire360/Release's XEX still holds the 10-20 pack and the Xenia
+test's saves: pack-80 replaces it.
+
 ## The four review lists (2026-10-25): every item has a verdict, and what they found
 
 The presentation audit's long lists (call 171, script 163, asset 124) and
