@@ -161,14 +161,14 @@ void Node::operator delete(void* p, size_t size) {
 unsigned Control::theme_generation = 1;
 
 void Node::add_child(Node* child) {
-    ++Control::theme_generation;
+    Control::forget_theme_below(child);
     if (child->parent) child->parent->remove_child(child);
     child->parent = this;
     children.push_back(child);
 }
 
 void Node::add_child_before(Node* child, Node* sibling) {
-    ++Control::theme_generation;
+    Control::forget_theme_below(child);
     if (child->parent) child->parent->remove_child(child);
     child->parent = this;
     for (size_t i = 0; i < children.size(); ++i)
@@ -180,7 +180,7 @@ void Node::add_child_before(Node* child, Node* sibling) {
 }
 
 void Node::remove_child(Node* child) {
-    ++Control::theme_generation;
+    Control::forget_theme_below(child);
     for (size_t i = 0; i < children.size(); ++i) {
         if (children[i] == child) {
             children.erase(children.begin() + i);
@@ -375,7 +375,7 @@ void Control::begin_layout_pass() { ++g_layout_pass; }
 
 Control::Control()
     : grow_h(GROW_END), grow_v(GROW_END), size_flags_h(SIZE_FILL), size_flags_v(SIZE_FILL), stretch_ratio(1),
-      rotation(0), scale(1, 1), clip_contents(false), mouse_filter(0), focus_mode(0), theme(NULL), constants_gen_(0),
+      rotation(0), scale(1, 1), clip_contents(false), mouse_filter(0), focus_mode(0), theme(NULL), answers_gen_(0),
       min_pass_(0) {
     flags |= NF_CONTROL;
     for (int i = 0; i < 4; ++i) {
@@ -414,14 +414,14 @@ bool Control::set(const std::string& key, const Json& v, const PropCtx& ctx) {
     else if (key == "layout_mode" || key == "anchors_preset" || key == "layout_direction") {
         /* Editor bookkeeping: the anchors and offsets are stored explicitly. */
     } else if (key == "theme") {
-        ++theme_generation;
+        forget_theme_below(this);
         Resource* r = ctx.resource(v);
         theme = r && r->kind == Resource::RES_THEME ? (ThemeRes*)r : NULL;
     } else if (key == "theme_type_variation") {
-        ++theme_generation;
+        forget_theme();
         theme_type_variation = v.str();
     } else if (key.compare(0, 15, "theme_override_") == 0) {
-        ++theme_generation;
+        forget_theme();
         std::string k = key.substr(15); /* "colors/font_color" */
         if (k.compare(0, 6, "fonts/") == 0 || k.compare(0, 7, "styles/") == 0 || k.compare(0, 6, "icons/") == 0) {
             Resource* r = ctx.resource(v);
@@ -551,7 +551,44 @@ void Control::type_chain(std::vector<std::string>& out, ThemeRes** variation_the
     }
 }
 
+void Control::forget_theme_below(Node* n) {
+    if (n->is_control()) ((Control*)n)->forget_theme();
+    for (size_t i = 0; i < n->children.size(); ++i) forget_theme_below(n->children[i]);
+}
+
+Control::ThemeAnswer* Control::theme_answer(char tag, const char* kind, const char* name) {
+    if (answers_gen_ != theme_generation) {
+        answers_gen_ = theme_generation;
+        answers_.clear();
+    }
+    for (size_t i = 0; i < answers_.size(); ++i) {
+        ThemeAnswer& a = answers_[i];
+        if (a.tag == tag && a.name == name && a.kind == kind) return &a;
+    }
+    return NULL;
+}
+
+Control::ThemeAnswer& Control::remember_theme(char tag, const char* kind, const char* name) {
+    ThemeAnswer a;
+    a.tag = tag;
+    a.kind = kind;
+    a.name = name;
+    a.value = NULL;
+    a.res = NULL;
+    a.number = 0;
+    answers_.push_back(a);
+    return answers_.back();
+}
+
 const Json* Control::theme_value(const char* kind, const char* name) {
+    ThemeAnswer* a = theme_answer('v', kind, name);
+    if (a) return a->value;
+    const Json* v = find_theme_value(kind, name);
+    remember_theme('v', kind, name).value = v;
+    return v;
+}
+
+const Json* Control::find_theme_value(const char* kind, const char* name) {
     std::string key = std::string(kind) + "/" + name;
     std::map<std::string, const Json*>::const_iterator ov = override_values.find(key);
     if (ov != override_values.end()) return ov->second;
@@ -573,6 +610,14 @@ const Json* Control::theme_value(const char* kind, const char* name) {
 }
 
 Resource* Control::theme_resource(const char* kind, const char* name) {
+    ThemeAnswer* a = theme_answer('r', kind, name);
+    if (a) return a->res;
+    Resource* r = find_theme_resource(kind, name);
+    remember_theme('r', kind, name).res = r;
+    return r;
+}
+
+Resource* Control::find_theme_resource(const char* kind, const char* name) {
     std::string key = std::string(kind) + "/" + name;
     std::map<std::string, Resource*>::const_iterator ov = override_resources.find(key);
     if (ov != override_resources.end()) return ov->second;
@@ -603,15 +648,11 @@ Color Control::theme_color(const char* name) {
 }
 
 int Control::theme_constant(const char* name) {
-    if (constants_gen_ != theme_generation) {
-        constants_gen_ = theme_generation;
-        constants_.clear();
-    }
-    for (size_t i = 0; i < constants_.size(); ++i)
-        if (constants_[i].first == name) return constants_[i].second;
+    ThemeAnswer* a = theme_answer('k', "constants", name);
+    if (a) return a->number;
     const Json* v = theme_value("constants", name);
     int value = v ? v->i() : 0;
-    constants_.push_back(std::make_pair(std::string(name), value));
+    remember_theme('k', "constants", name).number = value;
     return value;
 }
 
@@ -623,6 +664,14 @@ static int default_font_size_for(Control* self) {
 }
 
 int Control::theme_font_size(const char* name) {
+    ThemeAnswer* a = theme_answer('n', "font_sizes", name);
+    if (a) return a->number;
+    int size = find_theme_font_size(name);
+    remember_theme('n', "font_sizes", name).number = size;
+    return size;
+}
+
+int Control::find_theme_font_size(const char* name) {
     std::string key = std::string("font_sizes/") + name;
     std::map<std::string, const Json*>::const_iterator ov = override_values.find(key);
     if (ov != override_values.end() && ov->second->i() > 0) return ov->second->i();
@@ -660,6 +709,7 @@ void Control::add_theme_color_override(const std::string& name, const Color& c) 
     Json& j = code_overrides[k];
     j = Json::parse(text.c_str(), text.size(), NULL);
     override_values[k] = &j;
+    forget_theme();
 }
 
 void Control::add_theme_font_size_override(const std::string& name, int size) {
@@ -667,14 +717,15 @@ void Control::add_theme_font_size_override(const std::string& name, int size) {
     Json& j = code_overrides[k];
     j = Json::make_number(size);
     override_values[k] = &j;
+    forget_theme();
 }
 
 void Control::add_theme_constant_override(const std::string& name, int value) {
-    ++theme_generation;
     std::string k = "constants/" + name;
     Json& j = code_overrides[k];
     j = Json::make_number(value);
     override_values[k] = &j;
+    forget_theme();
 }
 
 bool Control::has_theme_color_override(const char* name) const {

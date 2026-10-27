@@ -26,6 +26,11 @@ public:
      * starts again. NULL: off. */
     static void set_profile(LoadClock clock);
     static void log_profile(int frames);
+    /* A diagnostic: render() leaving out a kind of draw (what each costs the
+     * GPU; the console's profile=1), and without the warm-up's step. -1:
+     * off, 0: everything drawn. */
+    enum { SKIP_TEXT = 1, SKIP_PARTICLES = 2, SKIP_SPINE = 4, SKIP_BACKGROUND = 8, SKIP_SHADERS = 16, SKIP_IMAGES = 32 };
+    static void set_draw_skip(int mask);
 
     void layout(int passes = 3);
     /* One frame of time for every node (particles, animations), dt in s

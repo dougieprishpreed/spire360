@@ -845,6 +845,20 @@ Node* MapScreen::build(const Json& d, std::string* error) {
     return root;
 }
 
+/* NNormalMapPoint / NAncientMapPoint / NBossMapPoint.HoverScale */
+static float hover_scale(int kind, bool normal) {
+    if (kind == 2 || kind == 3) return 1.05f;
+    return normal ? 1.45f : 1.1f;
+}
+
+/* The icon scales about its pivot: the scene's (the ancient's Icon: its
+ * middle, 100, 100), else its middle (a filled icon has no offsets). */
+static void centre_pivot(Control* icon) {
+    if (icon->pivot_offset.x != 0 || icon->pivot_offset.y != 0) return;
+    Vec2 s = icon->size.x > 0 && icon->size.y > 0 ? icon->size : offset_size(icon);
+    icon->pivot_offset = s * 0.5f;
+}
+
 /* NMapPoint.OnFocus with a pad: the reticle (NSelectionReticle.OnSelect) and
  * the icon at HoverScale; the one left goes back. */
 void MapScreen::focus(int i) {
@@ -854,7 +868,7 @@ void MapScreen::focus(int i) {
             tweens_.tween(&old.reticle->modulate.a, 0.0f, 0.2f, TRANS_SINE, EASE_OUT);
             tweens_.tween(&old.reticle->scale, Vec2(1.05f, 1.05f), 0.2f, TRANS_SINE, EASE_OUT);
         }
-        if (old.icon) tweens_.tween(&old.icon->scale, Vec2(1, 1), 0.5f, TRANS_EXPO, EASE_OUT);
+        if (old.icon) tweens_.tween(&old.icon->scale, Vec2(1, 1), 0.5f, old.normal ? TRANS_EXPO : TRANS_CUBIC, EASE_OUT);
         old.elapsed = 3.926991f; /* OnUnfocus */
     }
     focus_ = i;
@@ -865,8 +879,9 @@ void MapScreen::focus(int i) {
         tweens_.tween_from(&p.reticle->scale, Vec2(0.9f, 0.9f), Vec2(1, 1), 0.5f, TRANS_EXPO, EASE_OUT);
     }
     if (p.icon) {
-        p.icon->pivot_offset = offset_size(p.icon) * 0.5f;
-        tweens_.tween(&p.icon->scale, Vec2(1.45f, 1.45f), 0.05f);
+        centre_pivot(p.icon);
+        float s = hover_scale(p.kind, p.normal);
+        tweens_.tween(&p.icon->scale, Vec2(s, s), 0.05f);
     }
 }
 
@@ -922,9 +937,13 @@ void MapScreen::begin_travel(int col, int row) {
         if (p.normal) add_circle(p, true);
         add_select_vfx(p);
         marker_to_ = offset_pos(p.node) + Vec2(offset_size(p.node).x * 0.5f - 20, -35);
-        if (p.icon) {
+        if (p.icon && p.normal) {
             p.icon->self_modulate = Color();
             tweens_.tween(&p.icon->scale, Vec2(1.5f, 1.5f), 0.2f, TRANS_EXPO, EASE_OUT);
+        } else if (p.icon && p.kind == 1) {
+            /* NAncientMapPoint.OnSelected: back to its size (0.3 s, Back Out) */
+            centre_pivot(p.icon);
+            tweens_.tween(&p.icon->scale, Vec2(1, 1), 0.3f, TRANS_BACK, EASE_OUT);
         }
     }
 }

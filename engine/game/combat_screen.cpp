@@ -67,6 +67,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     creature_focus_ = NULL;
     creature_tips_ = NULL;
     sel_mode_ = 0;
+    sel_hand_index_ = -1;
     sel_row_ = false;
     sel_focus_ = 0;
     sel_box_ = sel_confirm_ = NULL;
@@ -1090,7 +1091,7 @@ void CombatScreen::refresh_tips() {
         tips_ = NULL;
     }
     if (focus < 0 || !root_) return;
-    tips_ = make_tip_set(lib_, holders_[(size_t)focus].data["tips"]);
+    tips_ = make_tip_set(lib_, holders_[(size_t)focus].data["tips"], true);
     if (!tips_) return;
     tips_->z_index = 10;
     tips_->modulate.a = 0; /* placed on the next frame, after the layout */
@@ -1584,38 +1585,40 @@ void CombatScreen::process(double dt) {
         h.node->rotation = h.angle * PI_F / 180.0f;
         h.node->scale = Vec2(h.scale, h.scale);
     }
-    /* The tips follow their card: right of its hitbox (left of it past
-     * three quarters of the screen), kept above the screen's bottom. */
+    /* The tips follow their card (SetAlignmentForCardHolder): the text right
+     * of its hitbox and the cards they name left of it (the sides swapped
+     * past three quarters of the screen; a star cost moves the cards 15 px
+     * further), kept on the screen. */
     if (tips_ && tips_for_ >= 0 && tips_for_ < (int)holders_.size()) {
-        Control* hit = ctl(holders_[(size_t)tips_for_].node, "Hitbox");
-        if (hit) {
+        const Holder& th = holders_[(size_t)tips_for_];
+        Control* hit = ctl(th.node, "Hitbox");
+        Control *text, *cards;
+        tip_parts(tips_, &text, &cards);
+        bool sized = (!text || text->size.y > 0) && (!cards || cards->size.y > 0);
+        if (hit && sized) {
             Xform2D xf = hit->global_transform();
             float sx = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
             Vec2 at = xf.origin;
-            float w = tips_->size.x, hgt = tips_->size.y;
-            float x = at.x > 1920.0f * 0.75f ? at.x - w - 10.0f : at.x + (offset_size(hit).x + 10.0f) * sx;
-            if (x + w > 1920.0f) x = at.x - w - 10.0f; /* CorrectHorizontalOverflow */
-            float y = at.y;
-            if (y + hgt > 1080.0f) y = 1080.0f - hgt;
-            tips_->set_position(Vec2(x, y));
+            bool left = th.node->global_transform().origin.x > 1920.0f * 0.75f;
+            float star = !left && th.data["star_cost"].i() > 0 ? 15.0f : 0.0f;
+            place_tips_beside(tips_, Vec2(at.x - star, at.y), offset_size(hit).x * sx + star, left, 10.0f);
             tips_->modulate.a = 1;
         }
     }
     /* A focused creature's tips: beside its hitbox, on the side towards the
-     * middle of the screen (HoverTip.GetHoverTipAlignment). */
+     * middle of the screen (HoverTip.GetHoverTipAlignment), the cards they
+     * name on the other side (SetAlignment). */
     if (creature_tips_ && creature_focus_) {
         Creature* c = creature_of(creature_focus_);
-        if (c) {
+        Control *text, *cards;
+        tip_parts(creature_tips_, &text, &cards);
+        bool sized = (!text || text->size.y > 0) && (!cards || cards->size.y > 0);
+        if (c && sized) {
             Xform2D xf = c->node->global_transform();
             Vec2 a = xf.xform(c->hitbox.pos), b = xf.xform(c->hitbox.pos + c->hitbox.size);
-            float w = creature_tips_->size.x, hgt = creature_tips_->size.y;
-            float x = (a.x + b.x) * 0.5f > 960.0f ? a.x - w - 10.0f : b.x + 10.0f;
-            if (x + w > 1920.0f) x = 1920.0f - w;
-            if (x < 0) x = 0;
-            float y = a.y;
-            if (y + hgt > 1080.0f) y = 1080.0f - hgt;
-            if (y < 0) y = 0;
-            creature_tips_->set_position(Vec2(x, y));
+            bool left = (a.x + b.x) * 0.5f > 960.0f;
+            Vec2 at(a.x, a.y < 0 ? 0 : a.y);
+            place_tips_beside(creature_tips_, at, b.x - a.x, left, 10.0f);
             creature_tips_->modulate.a = 1;
         }
     }
@@ -4785,7 +4788,7 @@ void CombatScreen::show_creature_tips(Creature& c) {
     }
     if (!root_) return;
     const Json& tips = c.player ? state_["player_tips"] : c.data["tips"];
-    Node* t = make_tip_set(lib_, tips);
+    Node* t = make_tip_set(lib_, tips, true);
     creature_tips_ = t && t->is_control() ? (Control*)t : NULL;
     if (t && !creature_tips_) delete t;
     if (!creature_tips_) return;
@@ -4840,6 +4843,13 @@ void CombatScreen::begin_hand_select(const Json& d) {
     if (!hand || !hand_box_) return;
     sel_ = d;
     sel_mode_ = d["kind"].str() == "hand_upgrade" ? 2 : 1;
+    /* NCombatUi.OnHandSelectModeEntered: the hand (its backstop and the
+     * picked cards) in front of the rest, the card being played included */
+    if (hand->parent) {
+        sel_hand_index_ = hand->index();
+        hand->parent->add_child(hand);
+    }
+    sel_layers(true);
     sel_row_ = false;
     sel_focus_ = 0;
     sel_box_ = ctl(hand, "SelectedHandCardContainer");
@@ -4885,6 +4895,26 @@ void CombatScreen::begin_hand_select(const Json& d) {
     refresh_tips();
 }
 
+/* The hand in front of NCombatUi.PlayContainer puts the cards being
+ * played under the backstop. Here those cards are the hand container's
+ * own (z 2 over the hand), so while selecting they keep z 2 by themselves
+ * and the hand's selection parts rise over them. */
+void CombatScreen::sel_layers(bool on) {
+    Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
+    Node* hand = ui ? find_named(ui, "Hand") : NULL;
+    static const char* const parts[] = { "SelectModeBackstop",      "CardHolderContainer",     "SelectedHandCardContainer",
+                                         "UpgradePreviewContainer", "SelectModeConfirmButton", "SelectionHeader",
+                                         "PeekButton" };
+    for (size_t i = 0; hand && i < sizeof(parts) / sizeof(parts[0]); ++i) {
+        Node* n = hand->find_unique(parts[i]);
+        if (!n) n = find_named(hand, parts[i]);
+        if (n && n->is_canvas_item()) ((CanvasItem*)n)->z_index = on ? 3 : 0;
+    }
+    for (size_t i = 0; i < moving_cards_.size(); ++i)
+        if (moving_cards_[i].kind == 3 || !on) moving_cards_[i].holder.node->z_as_relative = !on;
+    for (size_t i = 0; !on && i < holders_.size(); ++i) holders_[i].node->z_as_relative = true;
+}
+
 /* UpdateSelectModeCardVisibility: only the cards the filter takes; all of
  * them while peeking */
 void CombatScreen::sel_filter() {
@@ -4910,7 +4940,13 @@ void CombatScreen::end_hand_select() {
         set_visible(hand->find_unique("SelectModeBackstop"), false);
         set_visible(hand->find_unique("SelectionHeader"), false);
         set_visible(hand->find_unique("UpgradePreviewContainer"), false);
+        /* OnHandSelectModeExited: back to its place */
+        Node* p = hand->parent;
+        if (p && sel_hand_index_ >= 0 && sel_hand_index_ < (int)p->children.size() - 1)
+            p->add_child_before(hand, p->children[sel_hand_index_]);
     }
+    sel_hand_index_ = -1;
+    sel_layers(false);
     peek_.setup(lib_, hand ? hand->find_unique("PeekButton") : NULL, false);
     if (sel_confirm_) sel_confirm_->visible = false;
     sel_mode_ = 0;
@@ -5183,6 +5219,7 @@ void CombatScreen::update_in_play(MovingCard& m, double dt) {
     }
     m.holder.pos = at;
     m.holder.scale = sc;
+    m.holder.node->z_as_relative = sel_mode_ == 0;
     place(m.holder.node, at.x, at.y + below, 0, 0);
     m.holder.node->rotation = 0;
     m.holder.node->scale = Vec2(sc, sc);

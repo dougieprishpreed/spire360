@@ -1,8 +1,11 @@
 // Canvas shader for the D3D9 renderer (PC D3D9 and Xbox 360). One shader
 // for everything the canvas draws; textures hold straight alpha, the output
 // is premultiplied (blend states assume it). The effect modes branch on
-// their constants ([branch], tex2Dlod: the textures have one level), so a
-// plain draw pays nothing for them. Mirrors the software renderer
+// their constants ([branch], tex2Dlod: the textures have one level). The
+// branches cost a plain draw no work, but the GPU keeps registers for the
+// largest of them: on Xenos that leaves fewer pixels in flight to cover the
+// texture reads, so the draws with no mode on use ps_plain and ps_text (the
+// same arithmetic, their own registers). Mirrors the software renderer
 // (engine/gfx/sw_renderer.cpp) and Godot's canvas shader for MSDF text.
 //
 // PC: compiled at startup with D3DCompile. Xbox 360: compiled by the XDK's
@@ -262,4 +265,30 @@ float4 ps_main(VsOut i) : COLOR {
         c.a = smoothstep(1.0 - g_ripple.w, 1.0, b);
     }
     return float4(c.rgb * c.a, c.a);
+}
+
+// ps_main's last part with no mode on: the texel times the vertex colour.
+float4 ps_plain(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    if (g_premul.x > 0.5) t.rgb = t.a > 0.0 ? t.rgb / t.a : float3(0.0, 0.0, 0.0);
+    float4 c = t * i.color;
+    return float4(c.rgb * c.a, c.a);
+}
+
+// ps_main's MSDF text with no other mode on.
+float4 ps_text(VsOut i) : COLOR {
+    float4 t = tex2D(g_tex, i.uv);
+    float2 dest = 1.0 / fwidth(i.uv);
+    float px_size = max(0.5 * dot(g_msdf.xx / g_msdf.zw, dest), 1.0);
+    float d = median3(t.r, t.g, t.b);
+    float a;
+    if (g_msdf.y > 0.0) {
+        float cr = clamp(g_msdf.y, 0.0, g_msdf.x / 2.0 - 1.0) / g_msdf.x;
+        d = min(d, t.a);
+        a = saturate((d - 0.5 + cr) * px_size);
+    } else {
+        a = saturate((d - 0.5) * px_size + 0.5);
+    }
+    float ca = a * i.color.a;
+    return float4(i.color.rgb * ca, ca);
 }

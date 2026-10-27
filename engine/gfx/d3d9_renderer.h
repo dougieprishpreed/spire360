@@ -67,6 +67,13 @@ public:
     virtual void end();
 
     long draw_calls() const { return draws_; }
+    /* Time in the draw calls since the last take (ms): setting their state,
+     * and DrawPrimitiveUP itself (which waits while the command buffer is
+     * full: the GPU behind). */
+    void take_draw_times(double* state_ms, double* submit_ms);
+    /* The frame drawn so far (before the display's gamma ramp) to a 24-bit
+     * BMP: the console's Back + RB. False where it cannot (the PC). */
+    bool save_screenshot(const char* path);
 
     /* Debugging the canvas groups on the console: how they are drawn.
      * 0 normal; 1 groups off (the children unmasked); 2 the layer through
@@ -112,6 +119,10 @@ private:
     IDirect3DDevice9* dev_;
     IDirect3DVertexShader9* vs_;
     IDirect3DPixelShader9* ps_;
+    /* canvas.hlsl's ps_plain and ps_text: the draws with no mode on (ps_ when
+     * they did not load) */
+    IDirect3DPixelShader9* ps_plain_;
+    IDirect3DPixelShader9* ps_text_;
     IDirect3DVertexDeclaration9* decl_;
     IDirect3DTexture9* white_;
     /* Xbox 360: D3D frees a released texture's memory at once while the
@@ -173,6 +184,7 @@ private:
     EffectParams effect_;
     int width_, height_;
     long draws_;
+    LONGLONG state_ticks_, submit_ticks_;
 };
 
 } /* namespace spire */

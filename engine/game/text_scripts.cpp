@@ -236,7 +236,9 @@ static FontRes* locale_font(int type) {
 
 static void substitute_font(Control* c, int type, const char* theme_font) {
     FontRes* f = locale_font(type);
-    if (f) c->override_resources[std::string("fonts/") + theme_font] = f;
+    if (!f) return;
+    c->override_resources[std::string("fonts/") + theme_font] = f;
+    c->forget_theme();
 }
 
 /* ---- MegaLabel ---- */
@@ -276,6 +278,7 @@ private:
         last_set_ = s;
         size_json_ = Json::make_number(s);
         label_->override_values["font_sizes/font_size"] = &size_json_;
+        label_->forget_theme();
     }
     void adjust() {
         if (!enabled_) return;
@@ -410,6 +413,7 @@ private:
             rtl_->override_values["font_sizes/italics_font_size"] = &size_json_;
             rtl_->override_values["font_sizes/mono_font_size"] = &size_json_;
         }
+        rtl_->forget_theme();
         rtl_->invalidate();
     }
     void adjust() {

@@ -11,6 +11,111 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest: the second hardware run, 2026-10-26).
 
+## Third hardware run (2026-10-26): particles, theme lookups, the GPU probe and a console screenshot
+
+The user ran 138c2e1 (profile=1, trace_loads=0; spire360.txt and
+spire360_logic.txt on E:\Games\spire360, the session's saves in
+spire\data\session_start; work/rp95 holds the copies). Menus and most events
+hold their frame rate; fights crawl whenever effects play; black screens
+before Act 2's map (8 s of logic), Orobas (19.5 s) and floor 19 (13 s).
+
+Their findings and the causes:
+- The black screens before Orobas and floor 19: the watchdog named
+  GPUParticles2D (Orobas' stars: 100 particles, 30 s of preprocess; the
+  hive's bugs1: 150 for 10 s), all with turbulence. The turbulence's curl
+  takes 18 noise4 (288 corner gradients) per particle and step, each fract a
+  float-to-int conversion: on Xenon a load-hit-store stall each (~2,400 per
+  particle step, ~100 us). fast_floor now adds and takes away 1.5 * 2^23
+  (no conversion; a start-up self-check falls back to the old floor if the
+  compiler kept the sums wider), and the curl's six samples share a cell's
+  corner gradients when they fall in one (eps 0.001: strength 1). The same
+  turbulence runs every frame in common effects (vfx_power_up, ...): the
+  fights' 0.3-1.8 s process frames while effects played.
+- Preprocess up to 600 s (glory's and the test subject's stars: 18,000
+  CPU steps): a looping system's particles each restart once a cycle, so
+  only the last two cycles (and a trail) are simulated; the rest only moves
+  the clocks (Particles2D::preprocess_skip, skip_time). One-shot and
+  sub-emitter systems run in full.
+- Text draws 50-70 ms a frame on the console against 0.15 ms of CPU work on
+  PC (--profile-cpu): not the labels' CPU work. Two findings: every theme
+  lookup walked the ancestors with string allocations (~16 lookups per label
+  per draw); Control now keeps its answers (forget_theme on its overrides,
+  forget_theme_below as it moves or its theme changes; theme_generation for
+  the default theme): PC allocations per fight frame 7,700 -> 6,200. And the
+  draw time includes waits in DrawPrimitiveUP when the 2 MB command buffer is
+  full (the GPU behind): Present is ~0 in fights and 20 ms on the main menu.
+  Suspects on the GPU side: the one canvas pixel shader, whose largest
+  branch sets the registers every draw holds (Xenos then keeps fewer pixels
+  in flight to cover texture reads), and single-level textures (no mipmaps
+  on the console) from big atlases drawn small. The first is changed:
+  canvas.hlsl's ps_plain and ps_text (400 and 708 bytes against ps_main's
+  8,780 with D3DCompile) draw everything with no mode on (apply_state; the
+  XDK projects compile them with fxc like ps_main). Mipmaps wait for the
+  probe's numbers.
+- profile=1 now also logs "draw calls: X ms setting their state, Y ms in
+  DrawPrimitiveUP" and, every 10 s, gpu_probe: the frame drawn again from an
+  idle GPU to an idle GPU with nothing left out, then without text,
+  particles, spine, images, shader materials and the fight's background
+  (SceneTree::set_draw_skip; not shown).
+- Survivor's discard choice under the card being played: NCombatUi.
+  OnHandSelectModeEntered moves the hand in front of the PlayContainer; the
+  port's played cards are the hand container's (z 2), so while selecting
+  they keep z 2 by themselves (z_as_relative off) and the backstop, the
+  holders and the selection parts go to z 3 (CombatScreen::sel_layers).
+- Cloak and Dagger's Shiv tip right of its text tip: NHoverTipSet places
+  its text and card containers apart (SetAlignmentForCardHolder: the text
+  right of the hitbox, the cards left of it; swapped past 3/4 of the screen;
+  then CorrectVerticalOverflow / CorrectHorizontalOverflow per container).
+  make_tip_set(..., split) and place_tips_beside; the hand, creature,
+  TipFollower card and merchant card tips use them; the other modes keep
+  the row.
+- Orobas' map icon bigger and off centre on focus: every point's icon went
+  to 1.45 about a pivot from its offsets (the ancient's Icon is anchored:
+  pivot 0, 0). Now each kind's HoverScale (normal 1.45, ancient 1.1, boss
+  1.05) about the scene's pivot (100, 100) or the icon's middle; the ancient
+  unhovers Cubic and selects back to 1 (OnSelected).
+- No Y on the Smith's upgrade: the port honoured RequireManualConfirmation
+  (A highlighted, a Y button opened the preview); the upgrade, enchant and
+  deck screens preview at the count whatever it says (their OnCardClicked):
+  A opens the preview (B back, Y confirm). PC pad run: work/rp95/rest6.
+- Dark Underdocks and Act 2 backgrounds on the console: the draw dump has
+  every layer at full colour; PC renders look right to the user. Console-only.
+  Back + RB now also saves game:\spire360_shot_NN.bmp (the frame before the
+  gamma ramp, Resolve to a linear texture): bright like the PC's means the
+  output (ramp, the TV's black level: this art averages ~27/255), dark
+  means the console's drawing. Not fixed yet.
+- Act 2's map: 8 s of logic for the act change. work/logic_times95.py
+  times a session's commands on a host (the user's data, their [CMD]
+  lines): the native host (out/logic/native, the console's translation)
+  takes 2,195 ms for that select_map_node (the act change, 57 KB answer)
+  and 2,776 ms for select_profile; the JIT 356 and 560 ms; the rest of the
+  session is alike. Not the run history (101 files, 4.1 MB: without it
+  1,867 / 2,853 ms). Suspect the progress save (236 KB, full unlocks)
+  parsed and written by the translated code; to profile on PC before any
+  logic change (a logic change costs the user an hour-long logic_lib
+  compile).
+
+spire_play: --profile counts heap allocations per frame; --profile-cpu
+draws without the software rasterizer (the engine's own draw cost).
+work/rest95.sh drives a scripted scene by pad (CMDS: a [CMD] file; the
+Smith: enter_room rest; Cloak and Dagger's tips: add_to_hand, --settle
+420). The console session's own replay (work/prof95.sh) stops where the
+user returned to the menu and continued (the replay does not follow it).
+
+Checks (the logic is unchanged): PC build 0 warnings; spire_check over
+traces/new94, scen94 and split92: 2475 responses, 0 failures once its
+two-card case expects the deck and upgrade screens' preview at the count
+(it had expected manual confirmation there), audio 22861 voices, 7 absent
+(the known enemy casts), 0 decoder failures; two random pad sessions (native
+and JIT logic) 0 reports, no logic errors; D3D9 renderer syntax for
+Windows, xdk_api_check, the canvas shaders with D3DCompile; pad runs: the
+Smith's preview on one press (work/rp95/rest6), Cloak and Dagger's Block
+tip right of the card and its Shiv left (work/rp95/cd4).
+
+To look at next: the console's numbers with these (the GPU probe,
+draw-call times); the screenshot of a dark fight; mipmaps if images
+dominate the probe; the native logic's act change and profile load.
+
 ## Second hardware run (2026-10-26): its log, a shop rule, and the console's frame costs
 
 The user ran a2d6fb1 on the console with their PC profile imported

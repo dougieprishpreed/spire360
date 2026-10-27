@@ -82,7 +82,9 @@ static std::string ini_word(const std::string& s) {
  *                  pack logged with the ms it took, and frames over 8 ms
  *                  (what the console's first uses and the warm-up cost)
  *   profile=1      every 10 s, the node types (and scripts) whose process
- *                  and draw cost the most per frame
+ *                  and draw cost the most per frame, the time in the draw
+ *                  calls, and the GPU's time for a frame with and without
+ *                  each kind of draw (gpu_probe)
  * The first two reach the logic as its environment (logic/Spire.Logic/
  * DebugOptions.cs). No file: all off. */
 static bool g_trace_loads = false, g_profile = false;
@@ -189,6 +191,44 @@ private:
     double sent_at_;
     bool pending_;
 };
+
+/* profile=1: the frame drawn again with nothing left out, then without
+ * each kind of draw, each from an idle GPU to an idle GPU and not shown:
+ * what each kind costs the GPU (a frame whose draw calls wait on a full
+ * command buffer is the GPU's, not the CPU's). */
+static void gpu_probe(IDirect3DDevice9* dev, D3D9Renderer& renderer, SceneTree* tree, Canvas& canvas, const Color& clear) {
+    static const struct {
+        int mask;
+        const char* name;
+    } kinds[] = { { 0, NULL },
+                  { SceneTree::SKIP_TEXT, "text" },
+                  { SceneTree::SKIP_PARTICLES, "particles" },
+                  { SceneTree::SKIP_SPINE, "spine" },
+                  { SceneTree::SKIP_IMAGES, "images" },
+                  { SceneTree::SKIP_SHADERS, "shader materials" },
+                  { SceneTree::SKIP_BACKGROUND, "the fight's background" } };
+    std::string line = "gpu:";
+    for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i) {
+        dev->BlockUntilIdle();
+        double t0 = now_ms();
+        SceneTree::set_draw_skip(kinds[i].mask);
+        renderer.begin(1280, 720, clear);
+        tree->render(canvas);
+        renderer.end();
+        double t1 = now_ms();
+        dev->BlockUntilIdle();
+        double t2 = now_ms();
+        SceneTree::set_draw_skip(-1);
+        char part[160];
+        if (!kinds[i].name)
+            _snprintf(part, sizeof(part), " a frame %.1f ms (its draw calls made in %.1f)", t2 - t0, t1 - t0);
+        else
+            _snprintf(part, sizeof(part), "%s without %s %.1f", i == 1 ? ";" : ",", kinds[i].name, t2 - t0);
+        part[sizeof(part) - 1] = 0;
+        line += part;
+    }
+    logf("%s", line.c_str());
+}
 
 /* XInput -> the engine's pad bits. Triggers count as pressed past half. */
 static unsigned pad_bits(const XINPUT_GAMEPAD& g) {
@@ -346,7 +386,7 @@ void __cdecl main() {
             logf("gamma ramp %s", gamma ? "on" : "off");
             pad.pressed &= ~PadState::Y;
         }
-        /* Back + RB: the next frame's draws into the log */
+        /* Back + RB: the next frame's draws into the log, and a screenshot */
         bool dumped = false;
         if ((held & PadState::BACK) && (pad.pressed & PadState::RB)) {
             canvas.dump_next_frame();
@@ -407,6 +447,15 @@ void __cdecl main() {
         g_trace_phase = "draw end";
         renderer.end();
         double f2 = now_ms();
+        if (dumped) {
+            /* and the frame itself, as drawn (the gamma ramp is the display's) */
+            static int shots = 0;
+            char path[64];
+            _snprintf(path, sizeof(path), "game:\\spire360_shot_%02d.bmp", ++shots);
+            path[sizeof(path) - 1] = 0;
+            logf("screenshot %s: %s (gamma ramp %s)", path, renderer.save_screenshot(path) ? "saved" : "failed",
+                 gamma ? "on" : "off");
+        }
         g_trace_phase = "present";
         dev->Present(NULL, NULL, NULL, NULL);
         double f3 = now_ms();
@@ -440,7 +489,16 @@ void __cdecl main() {
                  (unsigned)canvas.texture_count(), canvas.texture_bytes() / 1048576.0, ts.peak_bytes / 1048576.0,
                  ts.created, ts.evicted, ts.over_frames, ts.starved);
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
+            double state_ms, submit_ms;
+            renderer.take_draw_times(&state_ms, &submit_ms);
+            if (g_profile)
+                logf("draw calls: %.2f ms setting their state, %.2f ms in DrawPrimitiveUP per frame", state_ms / frames,
+                     submit_ms / frames);
             SceneTree::log_profile(frames);
+            if (g_profile) {
+                gpu_probe(dev, renderer, tree, canvas, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                renderer.take_draw_times(&state_ms, &submit_ms);
+            }
             if (free_mb < 24 && !low_logged) {
                 log_memory("low");
                 low_logged = true;

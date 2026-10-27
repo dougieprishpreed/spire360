@@ -175,12 +175,16 @@ public:
     void add_theme_font_size_override(const std::string& name, int size);
     void add_theme_constant_override(const std::string& name, int value);
     std::map<std::string, Json> code_overrides; /* storage for the above */
-    /* theme_constant's answers (layout asks for the same few each frame),
-     * kept until anything they depend on may have changed: theme_generation
-     * moves on with the tree's shape, a theme or an override set. */
+    /* The theme lookups' answers (layout and each draw ask for the same few
+     * every frame, and a lookup walks the ancestors' themes), kept until
+     * anything they depend on may have changed: forget_theme when this
+     * control's overrides or variation change, forget_theme_below when it
+     * moves in the tree or its theme changes, theme_generation for all
+     * (Godot's default theme). Code that writes override_values or
+     * override_resources directly calls forget_theme. */
     static unsigned theme_generation;
-    unsigned constants_gen_;
-    std::vector<std::pair<std::string, int> > constants_;
+    void forget_theme() { answers_gen_ = 0; }
+    static void forget_theme_below(Node* n);
 
     /* Layout state (Godot's pos_cache / size_cache). */
     Vec2 position, size;
@@ -220,8 +224,22 @@ public:
     static void begin_layout_pass(); /* invalidates every minimum size cache */
 
 private:
+    struct ThemeAnswer {
+        char tag; /* 'v' theme_value, 'r' theme_resource, 'k' theme_constant, 'n' theme_font_size */
+        std::string kind, name;
+        const Json* value;
+        Resource* res;
+        int number;
+    };
+    ThemeAnswer* theme_answer(char tag, const char* kind, const char* name);
+    ThemeAnswer& remember_theme(char tag, const char* kind, const char* name);
+    unsigned answers_gen_;
+    std::vector<ThemeAnswer> answers_;
     const Json* theme_value(const char* kind, const char* name);
+    const Json* find_theme_value(const char* kind, const char* name);
     Resource* theme_resource(const char* kind, const char* name);
+    Resource* find_theme_resource(const char* kind, const char* name);
+    int find_theme_font_size(const char* name);
     void type_chain(std::vector<std::string>& out, ThemeRes** variation_theme);
     u32 min_pass_;
     Vec2 min_cache_;

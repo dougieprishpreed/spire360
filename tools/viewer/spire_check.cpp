@@ -145,7 +145,10 @@ static void selection_cases(SceneLibrary& lib, const Json& sample) {
         screen.input(pad);
         pad.pressed = PadState::A;
         std::string command = screen.input(pad);
-        if (kind >= 4) {
+        /* the deck and upgrade screens preview at the count whatever
+         * RequireManualConfirmation says (their OnCardClicked) */
+        bool manual = kind >= 4 && kind % 4 < 2;
+        if (manual) {
             check(command.empty(), "manual selection submitted without confirmation");
             pad.pressed = PadState::RIGHT; screen.input(pad);
             pad.pressed = PadState::A;
@@ -154,7 +157,7 @@ static void selection_cases(SceneLibrary& lib, const Json& sample) {
             command = screen.input(pad);
         }
         if (command.empty()) command = screen.input(pad); /* deck preview confirm */
-        if (command.empty()) fprintf(stderr, "selection kind %s, manual %d: no confirmation command\n", kinds[kind % 4], kind >= 4 ? 1 : 0);
+        if (command.empty()) fprintf(stderr, "selection kind %s, manual %d: no confirmation command\n", kinds[kind % 4], manual ? 1 : 0);
         check(!command.empty(), "two-card selection cannot be confirmed with the controller");
         Json result = Json::parse(command.c_str(), command.size(), &error);
         check(result["action"].str() == "select_cards" && result["args"]["indices"].str() == "0,1",

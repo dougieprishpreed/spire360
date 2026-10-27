@@ -111,6 +111,12 @@ void SceneTree::set_profile(LoadClock clock) {
     g_profile.clear();
 }
 
+static int g_draw_skip = -1;
+
+void SceneTree::set_draw_skip(int mask) { g_draw_skip = mask; }
+
+static bool skip_draw(const SceneTree::DrawItem& d, int mask);
+
 void SceneTree::log_profile(int frames) {
     if (!g_profile_clock || frames <= 0) return;
     std::vector<std::pair<double, std::string> > order;
@@ -216,10 +222,11 @@ static Rect2 xform_rect(const Xform2D& xf, const Rect2& r) {
 /* Does the item draw anything (Godot: has it any commands)? */
 static bool draws_something(Canvas& canvas, SceneTree::DrawItem& d) {
     long before = canvas.draw_calls();
+    bool was = canvas.count_only();
     canvas.set_count_only(true);
     canvas.set_item(d.xf, d.modulate, BLEND_MIX, d.ci->effective_texture_flags());
     d.ci->draw(canvas);
-    canvas.set_count_only(false);
+    canvas.set_count_only(was);
     return canvas.draw_calls() != before;
 }
 
@@ -343,7 +350,8 @@ void SceneTree::render_viewport(Canvas& canvas, SubViewport* vp) {
 
 void SceneTree::render(Canvas& canvas) {
     canvas.begin_frame();
-    if (SceneLibrary* lib = SceneLibrary::current()) lib->warm_step(canvas);
+    if (SceneLibrary* lib = SceneLibrary::current())
+        if (g_draw_skip < 0) lib->warm_step(canvas);
     skipped.clear();
     items_drawn = 0;
     std::vector<DrawItem> items;
@@ -356,6 +364,19 @@ void SceneTree::render(Canvas& canvas) {
     draw_items(canvas, items);
     canvas.set_clip(NULL);
     canvas.end_frame();
+}
+
+static bool skip_draw(const SceneTree::DrawItem& d, int mask) {
+    const std::string& t = d.ci->type;
+    if ((mask & SceneTree::SKIP_TEXT) && (t == "Label" || t == "RichTextLabel")) return true;
+    if ((mask & SceneTree::SKIP_PARTICLES) && (t == "GPUParticles2D" || t == "CPUParticles2D")) return true;
+    if ((mask & SceneTree::SKIP_SPINE) && t == "SpineSprite") return true;
+    if ((mask & SceneTree::SKIP_SHADERS) && d.material && d.material->kind == Resource::RES_SHADER_MATERIAL) return true;
+    if ((mask & SceneTree::SKIP_IMAGES) && (t == "TextureRect" || t == "Sprite2D" || t == "NinePatchRect")) return true;
+    if (mask & SceneTree::SKIP_BACKGROUND)
+        for (const Node* n = d.ci; n; n = n->parent)
+            if (n->name == "BgContainer") return true;
+    return false;
 }
 
 void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
@@ -386,6 +407,7 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
             continue;
         }
         if (!d.ci) continue;
+        if (g_draw_skip > 0 && d.group == GROUP_NONE && skip_draw(d, g_draw_skip)) continue;
         if (d.group == GROUP_MASK) {
             if (&d != group_mask) continue;
             canvas.renderer()->end_group();

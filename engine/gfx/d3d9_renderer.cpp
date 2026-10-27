@@ -3,6 +3,7 @@
 #include "../core/pack.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #if defined(_XBOX)
@@ -11,6 +12,8 @@
 #define XGTILE_NONPACKED 0x1
 #endif
 #include "canvas_ps.h" /* g_ps_main, from fxc /Fh /Vn g_ps_main */
+#include "canvas_plain_ps.h" /* g_ps_plain */
+#include "canvas_text_ps.h" /* g_ps_text */
 #include "canvas_vs.h" /* g_vs_main */
 #include "effects_ps.h" /* g_effect_ps[id], from effects_build.cmd */
 #else
@@ -28,10 +31,10 @@ static const char* const EFFECTS_HLSL[] = {
 namespace spire {
 
 D3D9Renderer::D3D9Renderer()
-    : dev_(NULL), vs_(NULL), ps_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
+    : dev_(NULL), vs_(NULL), ps_(NULL), ps_plain_(NULL), ps_text_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
       cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
       group_failed_(false), group_debug_(0), group_log_(0), screen_on_(false), screen_levels_(0),
-      screen_failed_(false), width_(0), height_(0), draws_(0) {
+      screen_failed_(false), width_(0), height_(0), draws_(0), state_ticks_(0), submit_ticks_(0) {
     memset(&screen_, 0, sizeof(screen_));
     memset(&effect_, 0, sizeof(effect_));
     effect_on_ = false;
@@ -87,6 +90,8 @@ void D3D9Renderer::shutdown() {
     for (int i = 0; i < EFFECT_COUNT; ++i) RELEASE(effect_ps_[i]);
     RELEASE(vs_);
     RELEASE(ps_);
+    RELEASE(ps_plain_);
+    RELEASE(ps_text_);
     RELEASE(decl_);
     RELEASE(white_);
     dev_ = NULL;
@@ -137,6 +142,8 @@ bool D3D9Renderer::init(IDirect3DDevice9* device, std::string* error) {
         if (error) *error = "CreateVertexShader/CreatePixelShader failed";
         return false;
     }
+    if (FAILED(dev_->CreatePixelShader((const DWORD*)g_ps_plain, &ps_plain_))) ps_plain_ = NULL;
+    if (FAILED(dev_->CreatePixelShader((const DWORD*)g_ps_text, &ps_text_))) ps_text_ = NULL;
 #else
     std::string src;
     for (int i = 0; CANVAS_HLSL[i]; ++i) src += CANVAS_HLSL[i];
@@ -149,6 +156,18 @@ bool D3D9Renderer::init(IDirect3DDevice9* device, std::string* error) {
     if (FAILED(h1) || FAILED(h2)) {
         if (error) *error = "CreateVertexShader/CreatePixelShader failed";
         return false;
+    }
+    const char* lean[2] = { "ps_plain", "ps_text" };
+    IDirect3DPixelShader9** lean_ps[2] = { &ps_plain_, &ps_text_ };
+    for (int i = 0; i < 2; ++i) {
+        ID3DBlob* b = NULL;
+        std::string err;
+        if (!compile(src, lean[i], "ps_3_0", &b, &err)) {
+            log_warn("d3d9: %s: %s", lean[i], err.c_str());
+            continue;
+        }
+        if (FAILED(dev_->CreatePixelShader((const DWORD*)b->GetBufferPointer(), lean_ps[i]))) *lean_ps[i] = NULL;
+        b->Release();
     }
 #endif
     /* The effect shaders; one that does not load leaves its effect off
@@ -960,6 +979,11 @@ void D3D9Renderer::apply_state() {
         set_tex(1, NULL);
     }
     IDirect3DPixelShader9* shader = effect_on_ && effect_ps_[effect_.id] ? effect_ps_[effect_.id] : ps_;
+    if (shader == ps_ && !fire_on_ && !vfx_on_ && !(screen_on_ && screen_levels_ > 0) && !cm_on_ && !ripple_on_ &&
+        !(gm_ && gm_->tex) && !group) {
+        IDirect3DPixelShader9* lean = (flags_ & DRAW_MSDF) ? ps_text_ : ps_plain_;
+        if (lean) shader = lean;
+    }
     if (shader != c_ps_) {
         dev_->SetPixelShader(shader);
         c_ps_ = shader;
@@ -1155,10 +1179,91 @@ void D3D9Renderer::apply_state() {
 
 void D3D9Renderer::flush() {
     if (batch_.empty() || !dev_) return;
+    LARGE_INTEGER t0, t1, t2;
+    QueryPerformanceCounter(&t0);
     if (dirty_) apply_state();
+    QueryPerformanceCounter(&t1);
     dev_->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(batch_.size() / 3), &batch_[0], sizeof(GpuVertex));
+    QueryPerformanceCounter(&t2);
+    state_ticks_ += t1.QuadPart - t0.QuadPart;
+    submit_ticks_ += t2.QuadPart - t1.QuadPart;
     ++draws_;
     batch_.clear();
+}
+
+#if defined(_XBOX)
+static void put_le(FILE* f, unsigned v, int bytes) {
+    for (int i = 0; i < bytes; ++i) fputc((int)((v >> (8 * i)) & 0xFF), f);
+}
+
+/* rows of 32-bit ARGB words (native order) to a bottom-up 24-bit BMP */
+static bool write_bmp(const char* path, const u8* pixels, int pitch, int w, int h) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return false;
+    unsigned row = (unsigned)w * 3, size = 54 + row * (unsigned)h;
+    fputc('B', f);
+    fputc('M', f);
+    put_le(f, size, 4);
+    put_le(f, 0, 4);
+    put_le(f, 54, 4);
+    put_le(f, 40, 4);
+    put_le(f, (unsigned)w, 4);
+    put_le(f, (unsigned)h, 4);
+    put_le(f, 1, 2);
+    put_le(f, 24, 2);
+    put_le(f, 0, 4);
+    put_le(f, row * (unsigned)h, 4);
+    put_le(f, 2835, 4);
+    put_le(f, 2835, 4);
+    put_le(f, 0, 4);
+    put_le(f, 0, 4);
+    std::vector<u8> line(row);
+    for (int y = h - 1; y >= 0; --y) {
+        const u32* src = (const u32*)(pixels + (size_t)y * (size_t)pitch);
+        for (int x = 0; x < w; ++x) {
+            u32 v = src[x];
+            line[x * 3] = (u8)(v & 0xFF);
+            line[x * 3 + 1] = (u8)((v >> 8) & 0xFF);
+            line[x * 3 + 2] = (u8)((v >> 16) & 0xFF);
+        }
+        fwrite(&line[0], 1, row, f);
+    }
+    bool ok = !ferror(f);
+    fclose(f);
+    return ok;
+}
+#endif
+
+bool D3D9Renderer::save_screenshot(const char* path) {
+#if defined(_XBOX)
+    if (!dev_ || width_ <= 0 || height_ <= 0) return false;
+    flush();
+    /* a linear texture, so the CPU reads it row by row */
+    IDirect3DTexture9* shot = NULL;
+    if (FAILED(dev_->CreateTexture(width_, height_, 1, 0, D3DFMT_LIN_A8R8G8B8, 0, &shot, NULL))) return false;
+    bool ok = SUCCEEDED(dev_->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, shot, NULL, 0, 0, NULL, 1.0f, 0, NULL));
+    dev_->BlockUntilIdle();
+    D3DLOCKED_RECT lr;
+    if (ok && SUCCEEDED(shot->LockRect(0, &lr, NULL, D3DLOCK_READONLY))) {
+        ok = write_bmp(path, (const u8*)lr.pBits, lr.Pitch, width_, height_);
+        shot->UnlockRect(0);
+    } else {
+        ok = false;
+    }
+    shot->Release(); /* the GPU is idle: nothing uses it */
+    return ok;
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+void D3D9Renderer::take_draw_times(double* state_ms, double* submit_ms) {
+    LARGE_INTEGER f;
+    QueryPerformanceFrequency(&f);
+    *state_ms = (double)state_ticks_ * 1000.0 / (double)f.QuadPart;
+    *submit_ms = (double)submit_ticks_ * 1000.0 / (double)f.QuadPart;
+    state_ticks_ = submit_ticks_ = 0;
 }
 
 } /* namespace spire */

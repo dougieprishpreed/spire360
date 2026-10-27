@@ -504,7 +504,11 @@ void Particles2D::process(double dt) {
          * of 1, then the frame's time scaled by speed_scale */
         if (!started_) {
             started_ = true;
-            for (double todo = preprocess; preprocess > 0 && todo >= 0; todo -= frame_time) step_gpu(frame_time);
+            int steps = 0;
+            for (double todo = preprocess; preprocess > 0 && todo >= 0; todo -= frame_time) ++steps;
+            int skip = preprocess_skip(steps, frame_time);
+            skip_time(skip * frame_time);
+            for (int i = skip; i < steps; ++i) step_gpu(frame_time);
         }
         double time_scale = speed_scale > 0 ? speed_scale : 0;
         if (fixed_fps > 0) {
@@ -522,13 +526,13 @@ void Particles2D::process(double dt) {
     }
     if (!started_) {
         started_ = true;
-        double todo = preprocess;
+        int steps = 0;
+        for (double todo = preprocess; todo > 0; todo -= frame_time) ++steps;
+        int skip = preprocess_skip(steps, frame_time);
+        skip_time(skip * frame_time);
         double sp = speed_scale;
         speed_scale = 1.0;
-        while (todo > 0) {
-            step(frame_time);
-            todo -= frame_time;
-        }
+        for (int i = skip; i < steps; ++i) step(frame_time);
         speed_scale = sp;
     }
     if (fixed_fps > 0) {
@@ -541,6 +545,29 @@ void Particles2D::process(double dt) {
         frame_remainder_ = todo;
     } else {
         step(dt);
+    }
+}
+
+/* The preprocess's first steps that need not be simulated: a looping
+ * system's particles each restart once a cycle (lifetime), so what the
+ * steps leave is set by the last cycles; the ones before only move the
+ * clocks. The console simulates particles on its CPU, and the game's
+ * backgrounds ask for up to 600 s. Kept: two cycles and a trail. */
+int Particles2D::preprocess_skip(int steps, double frame_time) const {
+    if (one_shot || sub_mode_ || lifetime <= 0 || frame_time <= 0) return 0;
+    double keep = 2.0 * lifetime + (trail_enabled ? trail_lifetime : 0.0);
+    int keep_steps = (int)ceil(keep / frame_time) + 2;
+    return steps > keep_steps ? steps - keep_steps : 0;
+}
+
+/* The clocks moved on t seconds without stepping the particles. */
+void Particles2D::skip_time(double t) {
+    if (t <= 0) return;
+    time_ += t;
+    if (gpu) clock_ += t; /* as step_gpu */
+    if (time_ > lifetime) {
+        cycle_ += (u32)(time_ / lifetime);
+        time_ = fmod(time_, lifetime);
     }
 }
 
@@ -727,10 +754,38 @@ void Particles2D::step(double p_delta) {
  * turbulence"). */
 /* floorf, without the library call (the noise takes ~300 per particle
  * and step); floats past 2^23 are whole already */
-static float fast_floor(float x) {
+static float int_floor(float x) {
     if (x >= 8388608.0f || x <= -8388608.0f) return x;
     int i = (int)x;
     return (float)(i - (x < (float)i ? 1 : 0));
+}
+
+/* The same without a float-to-integer conversion, which on the console
+ * goes through memory and stalls the core for each one: adding and taking
+ * away 1.5 * 2^23 rounds to a whole number (below 2^22), one less when that
+ * rounded up. Each sum is rounded to a float by its assignment. */
+static float magic_floor(float x) {
+    float t = x + 12582912.0f;
+    float r = t - 12582912.0f;
+    return r > x ? r - 1.0f : r;
+}
+
+/* Whether this build's float arithmetic rounds as magic_floor needs (a
+ * compiler that kept the sums wider would make it x) */
+static bool magic_floor_works() {
+    volatile float probe[6] = { 2.5f, -2.5f, 3.75f, -0.25f, 1234.5f, -4194303.5f };
+    for (int i = 0; i < 6; ++i) {
+        float x = probe[i];
+        if (magic_floor(x) != int_floor(x)) return false;
+    }
+    return true;
+}
+
+static const bool g_magic_floor = magic_floor_works();
+
+static float fast_floor(float x) {
+    if (g_magic_floor && x < 4194304.0f && x > -4194304.0f) return magic_floor(x);
+    return int_floor(x);
 }
 
 static float fractf(float x) { return x - fast_floor(x); }
@@ -745,7 +800,15 @@ static void noise_grad(const float in[4], float out[4]) {
     for (int i = 0; i < 4; ++i) out[i] = fractf(p[i] * p[(i + 1) & 3] * 2365.952041f) * 2.0f - 1.0f;
 }
 
-static float noise4(const float in[4]) {
+/* A lattice cell's corner gradients: curl_3d's six samples around a
+ * particle usually fall in one cell, so its gradients are worked out once. */
+struct NoiseCell {
+    bool valid;
+    float base[4];
+    float g[16][4];
+};
+
+static float noise4(const float in[4], NoiseCell& cell) {
     /* domain rotation */
     float d = (in[0] + in[1] + in[2]) * -0.1666667f + in[3] * -0.5f;
     float c[4] = { in[0] + d, in[1] + d, in[2] + d, (in[0] + in[1] + in[2] + in[3]) * 0.5f };
@@ -755,13 +818,21 @@ static float noise4(const float in[4]) {
         delta[i] = c[i] - base[i];
         fade[i] = delta[i] * delta[i] * delta[i] * (10.0f + delta[i] * (-15.0f + delta[i] * 6.0f));
     }
+    if (!cell.valid || base[0] != cell.base[0] || base[1] != cell.base[1] || base[2] != cell.base[2] ||
+        base[3] != cell.base[3]) {
+        cell.valid = true;
+        for (int i = 0; i < 4; ++i) cell.base[i] = base[i];
+        for (int k = 0; k < 16; ++k) {
+            float bp[4] = { base[0] + (float)(k & 1), base[1] + (float)((k >> 1) & 1), base[2] + (float)((k >> 2) & 1),
+                            base[3] + (float)((k >> 3) & 1) };
+            noise_grad(bp, cell.g[k]);
+        }
+    }
     /* the corners' gradients dotted with the offsets (bit 0 x .. bit 3 w) */
     float r[16];
     for (int k = 0; k < 16; ++k) {
         float off[4] = { (float)(k & 1), (float)((k >> 1) & 1), (float)((k >> 2) & 1), (float)((k >> 3) & 1) };
-        float bp[4] = { base[0] + off[0], base[1] + off[1], base[2] + off[2], base[3] + off[3] };
-        float g[4];
-        noise_grad(bp, g);
+        const float* g = cell.g[k];
         r[k] = (delta[0] - off[0]) * g[0] + (delta[1] - off[1]) * g[1] + (delta[2] - off[2]) * g[2] +
                (delta[3] - off[3]) * g[3];
     }
@@ -771,22 +842,24 @@ static float noise4(const float in[4]) {
     return lerpf(lerpf(wz[0], wz[2], fade[1]), lerpf(wz[1], wz[3], fade[1]), fade[0]);
 }
 
-static void noise_3x(const float p[4], float out[3]) {
+static void noise_3x(const float p[4], NoiseCell cells[3], float out[3]) {
     const float w = 1.7320508f * 2048.333333f;
     float a[4] = { p[0], p[1], p[2], p[3] + w }, b[4] = { p[0], p[1], p[2], p[3] - w };
-    out[0] = noise4(p);
-    out[1] = noise4(a);
-    out[2] = noise4(b);
+    out[0] = noise4(p, cells[0]);
+    out[1] = noise4(a, cells[1]);
+    out[2] = noise4(b, cells[2]);
 }
 
 static void curl_3d(const float p[4], float c, float out[3]) {
     float eps = 0.001f + c;
     float n[3][2][3]; /* axis, -/+, the three noises */
+    NoiseCell cells[3];
+    for (int i = 0; i < 3; ++i) cells[i].valid = false;
     for (int axis = 0; axis < 3; ++axis)
         for (int side = 0; side < 2; ++side) {
             float q[4] = { p[0], p[1], p[2], p[3] };
             q[axis] += side ? eps : -eps;
-            noise_3x(q, n[axis][side]);
+            noise_3x(q, cells, n[axis][side]);
         }
     float x = (n[1][1][2] - n[1][0][2]) - (n[2][1][1] - n[2][0][1]);
     float y = (n[2][1][0] - n[2][0][0]) - (n[0][1][2] - n[0][0][2]);

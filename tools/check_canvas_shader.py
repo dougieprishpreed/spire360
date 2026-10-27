@@ -31,7 +31,8 @@ def main():
     compiler.restype = ctypes.c_long
     shaders = Path(__file__).resolve().parents[1] / "engine/gfx/shaders"
     effects = (shaders / "effects.hlsl").read_bytes()
-    jobs = [(shaders / "canvas.hlsl", b"vs_main", b"vs_3_0"), (shaders / "canvas.hlsl", b"ps_main", b"ps_3_0")]
+    jobs = [(shaders / "canvas.hlsl", b"vs_main", b"vs_3_0"), (shaders / "canvas.hlsl", b"ps_main", b"ps_3_0"),
+            (shaders / "canvas.hlsl", b"ps_plain", b"ps_3_0"), (shaders / "canvas.hlsl", b"ps_text", b"ps_3_0")]
     jobs += [(shaders / "effects.hlsl", e, b"ps_3_0") for e in re.findall(rb"^float4 (ps_e\d+)\(", effects, re.M)]
     for path, entry, target in jobs:
         source = path.read_bytes()

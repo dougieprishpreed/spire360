@@ -51,7 +51,11 @@
  * --no-shots: the run without the PNGs (soaks).
  *
  * --profile (with --load-trace): every 600 frames, the node types and
- * scripts whose process and draw cost the most (the console's profile=1).
+ * scripts whose process and draw cost the most (the console's profile=1),
+ * and the heap allocations per frame (the console's allocator makes each
+ * one far dearer than here). --profile-cpu: the frames drawn without the
+ * software rasterizer, so the draw costs are the engine's own, as on the
+ * console (whose GPU draws).
  *
  * --dump-draws-at N (with --load-trace): frame N's draws logged one by one
  * (the console's Back + RB).
@@ -99,6 +103,7 @@
 #include "../../engine/text/font.h"
 
 #include <deque>
+#include <new>
 #include <fstream>
 #include <signal.h>
 #include <stdio.h>
@@ -109,6 +114,22 @@
 #include <unistd.h>
 
 using namespace spire;
+
+/* --profile: the heap allocations (operator new) counted. GCC takes the
+ * malloc/free pair for a mismatch once they are inlined into callers. */
+#if defined(__GNUC__) && __GNUC__ >= 11
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
+static unsigned long g_allocs = 0;
+
+void* operator new(size_t n) throw(std::bad_alloc) {
+    ++g_allocs;
+    void* p = malloc(n ? n : 1);
+    if (!p) throw std::bad_alloc();
+    return p;
+}
+
+void operator delete(void* p) throw() { free(p); }
 
 /* The pipe link, keeping the last decision line (saved with its screen). */
 class RecordingLink : public LogicLink {
@@ -388,13 +409,17 @@ static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
  * reported when the client's update and the frame's process took over
  * 8 ms (the software drawing's own time is no measure of the console's). */
 static long g_dump_draws_at = -1;
+static bool g_profile_cpu = false;
 
 static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float scale, double update_ms, double t0) {
     static long frame_no = 0;
     if (frame_no + 1 == g_dump_draws_at) canvas.dump_next_frame();
     double d0 = now_ms();
+    static unsigned long allocs_from = g_allocs;
     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0, 0, 0, 1));
+    if (g_profile_cpu) canvas.set_count_only(true);
     tree.render(canvas);
+    canvas.set_count_only(false);
     sw.end();
     double end = now_ms();
     ++frame_no;
@@ -406,6 +431,8 @@ static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float s
                  (unsigned)canvas.texture_count(), canvas.texture_bytes() / 1048576.0, st.peak_bytes / 1048576.0,
                  st.created, st.evicted, st.over_frames, st.starved);
         SceneTree::log_profile(600);
+        log_info("allocations: %lu per frame", (g_allocs - allocs_from) / 600);
+        allocs_from = g_allocs;
     }
 }
 
@@ -483,6 +510,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--load-trace") == 0) load_trace = true;
         else if (strcmp(argv[i], "--console-textures") == 0) console_textures = true;
         else if (strcmp(argv[i], "--profile") == 0) SceneTree::set_profile(now_ms);
+        else if (strcmp(argv[i], "--profile-cpu") == 0) g_profile_cpu = true;
         else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);

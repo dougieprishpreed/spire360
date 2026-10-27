@@ -52,7 +52,7 @@ Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::
     return (Control*)n;
 }
 
-Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
+Control* make_tip_set(SceneLibrary* lib, const Json& tips, bool split) {
     if (tips.size() == 0) return NULL;
     Control* box = (Control*)SceneLibrary::create_node("VBoxContainer");
     box->name = "HoverTipSet";
@@ -106,9 +106,9 @@ Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
             delete box;
             return cards;
         }
-        Control* row = (Control*)SceneLibrary::create_node("HBoxContainer");
+        Control* row = (Control*)SceneLibrary::create_node(split ? "Control" : "HBoxContainer");
         row->name = "HoverTipSetWithCards";
-        row->add_theme_constant_override("separation", 4);
+        if (!split) row->add_theme_constant_override("separation", 4);
         row->mouse_filter = 2;
         row->add_child(box);
         row->add_child(cards);
@@ -121,10 +121,85 @@ Control* make_tip_set(SceneLibrary* lib, const Json& tips) {
     return box;
 }
 
+void tip_parts(Control* set, Control** text, Control** cards) {
+    *text = *cards = NULL;
+    if (!set) return;
+    if (set->name == "HoverTipSetWithCards" && set->children.size() == 2 && set->children[0]->is_control() &&
+        set->children[1]->is_control()) {
+        *text = (Control*)set->children[0];
+        *cards = (Control*)set->children[1];
+    } else if (set->name == "CardHoverTipContainer") {
+        *cards = set;
+    } else {
+        *text = set;
+    }
+}
+
+void place_tip_parts(Control* set, const Vec2& text_at, const Vec2& cards_at) {
+    Control *text, *cards;
+    tip_parts(set, &text, &cards);
+    if (text && cards && set->type == "Control") {
+        set->set_position(text_at);
+        text->set_position(Vec2(0, 0));
+        cards->set_position(cards_at - text_at);
+    } else if (text && cards) {
+        set->set_position(text_at); /* a row: the cards follow the text */
+    } else if (text) {
+        text->set_position(text_at);
+    } else if (cards) {
+        cards->set_position(cards_at);
+    }
+}
+
+void place_tips_beside(Control* set, const Vec2& at, float width, bool left, float gap) {
+    Control *text, *cards;
+    tip_parts(set, &text, &cards);
+    Vec2 ts = text ? text->size : Vec2(), cs = cards ? cards->size : Vec2();
+    Vec2 t, c;
+    if (left) {
+        t = Vec2(at.x - ts.x - gap, at.y);
+        c = Vec2(at.x + width, at.y);
+    } else {
+        c = Vec2(at.x - cs.x, at.y);
+        t = Vec2(at.x + width + gap, at.y);
+    }
+    /* CorrectVerticalOverflow */
+    if (t.y + ts.y > 1080.0f) t.y = 1080.0f - ts.y;
+    if (c.y + cs.y > 1080.0f) c.y = 1080.0f - cs.y;
+    /* CorrectHorizontalOverflow */
+    if (c.x + cs.x <= 1920.0f && t.x + ts.x > 1920.0f) {
+        t = Vec2(c.x - ts.x, c.y);
+    } else if (c.x + cs.x > 1920.0f || t.x + ts.x > 1920.0f) {
+        c = Vec2(t.x + ts.x - cs.x, c.y);
+        t.x -= cs.x;
+    } else if (c.x < 0 || t.x < 0) {
+        c = Vec2(t.x, c.y);
+        t.x += cs.x;
+    }
+    place_tip_parts(set, t, c);
+}
+
+/* A tip set's size as a row (the text, then the cards 4 px on) */
+static Vec2 row_size(Control* set) {
+    Control *text, *cards;
+    tip_parts(set, &text, &cards);
+    Vec2 ts = text ? text->size : Vec2(), cs = cards ? cards->size : Vec2();
+    if (!text || !cards) return text ? ts : cs;
+    return Vec2(ts.x + 4.0f + cs.x, maxf(ts.y, cs.y));
+}
+
+/* The set placed as a row at (x, y) */
+static void place_row(Control* set, float x, float y) {
+    Control *text, *cards;
+    tip_parts(set, &text, &cards);
+    float tw = text ? text->size.x : 0;
+    place_tip_parts(set, Vec2(x, y), Vec2(text ? x + tw + 4.0f : x, y));
+}
+
 void TipFollower::attach(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
     hide();
     if (!parent || !owner) return;
-    tips_ = make_tip_set(lib, tips);
+    tips_ = make_tip_set(lib, tips, true);
     if (!tips_) return;
     owner_ = owner;
     slot_ = NULL;
@@ -183,7 +258,8 @@ void TipFollower::frame() {
     Xform2D xf = owner_->global_transform();
     float s = sqrtf(xf.x.x * xf.x.x + xf.x.y * xf.x.y);
     Vec2 c = xf.origin;
-    float w = tips_->size.x, h = tips_->size.y;
+    Vec2 size = row_size(tips_);
+    float w = size.x, h = size.y;
     /* not laid out yet (made this frame): placed with no size it showed for
      * a frame beside where it belongs */
     if (w <= 0 || h <= 0) {
@@ -191,14 +267,9 @@ void TipFollower::frame() {
         return;
     }
     if (merchant_ == 3) {
-        /* SetAlignment(hitbox, Right / Left), CorrectVerticalOverflow; past
-         * the right edge, CorrectHorizontalOverflow puts them left of it */
+        /* SetAlignment(hitbox, the slot's GetHoverTipAlignment) */
         bool left = slot_ && slot_->global_transform().origin.x > 1920.0f * 0.75f;
-        float x = left ? c.x - w : c.x + owner_->size.x * owner_->scale.x;
-        if (!left && x + w > 1920.0f) x = c.x - w;
-        float y = c.y;
-        if (y + h > 1080.0f) y = 1080.0f - h;
-        tips_->set_position(Vec2(x, y));
+        place_tips_beside(tips_, c, owner_->size.x * owner_->scale.x, left, 0);
         tips_->modulate.a = 1;
         return;
     }
@@ -217,7 +288,7 @@ void TipFollower::frame() {
         } else {
             x = c.x + hx; /* the removal: no alignment, at the slot */
         }
-        tips_->set_position(Vec2(x, y - hy));
+        place_row(tips_, x, y - hy);
         tips_->modulate.a = 1;
         return;
     }
@@ -225,7 +296,7 @@ void TipFollower::frame() {
         float x = c.x - w, y = c.y;
         if (x < 0) x = 0;
         if (y + h > 1080.0f) y = 1080.0f - h;
-        tips_->set_position(Vec2(x, y));
+        place_row(tips_, x, y);
         tips_->modulate.a = 1;
         return;
     }
@@ -234,7 +305,7 @@ void TipFollower::frame() {
         float x = c.x, y = c.y + owner_->size.y * s * 1.5f;
         if (x + w > 1920.0f) x = 1920.0f - w;
         if (y + h > 1080.0f) y = 1080.0f - h;
-        tips_->set_position(Vec2(x, y));
+        place_row(tips_, x, y);
         tips_->modulate.a = 1;
         return;
     }
@@ -244,17 +315,13 @@ void TipFollower::frame() {
         float y = c.y;
         if (y + h > 1080.0f) y = 1080.0f - h;
         if (y < 0) y = 0;
-        tips_->set_position(Vec2(x + extra_, y));
+        place_row(tips_, x + extra_, y);
         tips_->modulate.a = 1;
         return;
     }
-    /* The card: 300 x 422 about the holder's origin. */
-    float x = c.x + 150.0f * s + 10.0f;
-    if (c.x > 1920.0f * 0.75f || x + w > 1920.0f) x = c.x - 150.0f * s - 10.0f - w;
-    float y = c.y - 211.0f * s;
-    if (y + h > 1080.0f) y = 1080.0f - h;
-    if (y < 0) y = 0;
-    tips_->set_position(Vec2(x, y));
+    /* SetAlignmentForCardHolder: the card's hitbox, 300 x 422 about the
+     * holder's origin */
+    place_tips_beside(tips_, Vec2(c.x - 150.0f * s, c.y - 211.0f * s), 300.0f * s, c.x > 1920.0f * 0.75f, 10.0f);
     tips_->modulate.a = 1;
 }
 

@@ -558,8 +558,10 @@ private:
     void sel_unpick(int k);
     void sel_layout();
     void sel_filter();
+    void sel_layers(bool on);
     PeekButton peek_; /* the hand's, in its selection mode */
     int sel_mode_; /* 0 none, 1 simple, 2 upgrade */
+    int sel_hand_index_; /* the hand's place in NCombatUi before it moved to the front */
     Json sel_;
     std::vector<Holder> selected_; /* in %SelectedHandCardContainer, picked order */
     bool sel_row_;                 /* the pad on the selected row */

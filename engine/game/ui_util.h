@@ -50,8 +50,23 @@ Xform2D inverse(const Xform2D& t);
  * place() or set_position on the screen's root. */
 Control* make_hover_tip(SceneLibrary* lib, const std::string& title, const std::string& description);
 /* NHoverTipSet's text tips for a model (a decision's "tips": title,
- * description), stacked 5 px apart; NULL when there are none. */
-Control* make_tip_set(SceneLibrary* lib, const Json& tips);
+ * description), stacked 5 px apart, and the cards they name
+ * (NHoverTipCardContainer), 4 px apart; NULL when there are none. With
+ * both: a row of the two, or (split) a plain control holding them that
+ * place_tip_parts places part by part. */
+Control* make_tip_set(SceneLibrary* lib, const Json& tips, bool split = false);
+/* A tip set's text and card parts (NULL when it has none; a set with one
+ * kind is that part). */
+void tip_parts(Control* set, Control** text, Control** cards);
+/* Each part's top-left on the screen (its parent's space must be the
+ * screen's, unscaled). */
+void place_tip_parts(Control* set, const Vec2& text_at, const Vec2& cards_at);
+/* NHoverTipSet.SetAlignmentForCardHolder (gap 10) and SetAlignment(node,
+ * Right / Left) (gap 0): the text tips on one side of the owner (at: its
+ * top-left on the screen, width: its width there), the cards on the other
+ * (Right: text right of it), then CorrectVerticalOverflow and
+ * CorrectHorizontalOverflow. */
+void place_tips_beside(Control* set, const Vec2& at, float width, bool left, float gap);
 /* The settings the logic last answered (NSettingsScreen's values: PrefsSave
  * and SettingsSave), for the screens that follow them; null before. */
 const Json& client_settings();

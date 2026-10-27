@@ -105,6 +105,10 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
     max_ = d["max_select"].i(1);
     cancelable_ = d["cancelable"].b();
     manual_confirm_ = d["manual_confirm"].b();
+    /* The upgrade, enchant and deck screens preview the pick as the count is
+     * reached (their OnCardClicked); only the simple, combat pile and
+     * transform screens wait for RequireManualConfirmation's confirm. */
+    if (kind_ == "upgrade" || kind_ == "enchant" || kind_ == "deck") manual_confirm_ = false;
     holders_.clear();
     cards_.clear();
     picked_.assign(d["cards"].size(), false);

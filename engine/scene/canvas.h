@@ -99,6 +99,7 @@ public:
     long draw_calls() const { return calls_; }
     /* Count the draws without sending them (does an item draw anything?). */
     void set_count_only(bool on) { count_only_ = on; }
+    bool count_only() const { return count_only_; }
 
 private:
     Canvas(const Canvas&);

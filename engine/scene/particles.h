@@ -165,6 +165,8 @@ private:
     Xform2D trail_at(const Particle& p, double age) const;
     void step(double dt);
     void step_gpu(double dt);
+    int preprocess_skip(int steps, double frame_time) const;
+    void skip_time(double t);
     /* an emission from the parent system (emit_subparticle): its
      * transform, and its velocity if kept */
     struct Emission {
