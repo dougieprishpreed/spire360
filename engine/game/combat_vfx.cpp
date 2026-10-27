@@ -1398,12 +1398,16 @@ private:
 };
 
 /* NDecimillipedeRocksVfx: each of _rocks in turn, 100-200 ms apart, plays
- * fall1-4 (once); the effect goes 5 s after the last. */
+ * fall1-4 (once); the effect goes 5 s after the last. Until then each rock
+ * plays idle_loop: its own GDScript (inline in the scene) starts it in
+ * _ready; without it a rock showed its setup pose where it lands. */
 class DecimillipedeRocks : public Effect {
 public:
     DecimillipedeRocks() : next_(0), at_(0) {}
     virtual void begin(Node* n) {
         exported(n, "_rocks", rocks_);
+        for (size_t i = 0; i < rocks_.size(); ++i)
+            if (rocks_[i]->type == "SpineSprite") ((SpineSprite*)rocks_[i])->set_animation("idle_loop", true, 0);
         at_ = 0.1 + (double)(chaotic_rand() % 101) / 1000.0;
     }
     virtual void tick(Node* n, double) {

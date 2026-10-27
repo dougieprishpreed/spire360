@@ -151,6 +151,22 @@ void place_tip_parts(Control* set, const Vec2& text_at, const Vec2& cards_at) {
     }
 }
 
+/* NHoverTipSet.CorrectVerticalOverflow and CorrectHorizontalOverflow: the
+ * text tips' and the cards' top-lefts, by their sizes. */
+static void correct_overflow(Vec2& t, const Vec2& ts, Vec2& c, const Vec2& cs) {
+    if (t.y + ts.y > 1080.0f) t.y = 1080.0f - ts.y;
+    if (c.y + cs.y > 1080.0f) c.y = 1080.0f - cs.y;
+    if (c.x + cs.x <= 1920.0f && t.x + ts.x > 1920.0f) {
+        t = Vec2(c.x - ts.x, c.y);
+    } else if (c.x + cs.x > 1920.0f || t.x + ts.x > 1920.0f) {
+        c = Vec2(t.x + ts.x - cs.x, c.y);
+        t.x -= cs.x;
+    } else if (c.x < 0 || t.x < 0) {
+        c = Vec2(t.x, c.y);
+        t.x += cs.x;
+    }
+}
+
 void place_tips_beside(Control* set, const Vec2& at, float width, bool left, float gap) {
     Control *text, *cards;
     tip_parts(set, &text, &cards);
@@ -163,18 +179,26 @@ void place_tips_beside(Control* set, const Vec2& at, float width, bool left, flo
         c = Vec2(at.x - cs.x, at.y);
         t = Vec2(at.x + width + gap, at.y);
     }
-    /* CorrectVerticalOverflow */
-    if (t.y + ts.y > 1080.0f) t.y = 1080.0f - ts.y;
-    if (c.y + cs.y > 1080.0f) c.y = 1080.0f - cs.y;
-    /* CorrectHorizontalOverflow */
-    if (c.x + cs.x <= 1920.0f && t.x + ts.x > 1920.0f) {
-        t = Vec2(c.x - ts.x, c.y);
-    } else if (c.x + cs.x > 1920.0f || t.x + ts.x > 1920.0f) {
-        c = Vec2(t.x + ts.x - cs.x, c.y);
-        t.x -= cs.x;
-    } else if (c.x < 0 || t.x < 0) {
-        c = Vec2(t.x, c.y);
-        t.x += cs.x;
+    correct_overflow(t, ts, c, cs);
+    place_tip_parts(set, t, c);
+}
+
+void place_tips_for_relic(Control* set, const Vec2& at, const Vec2& icon) {
+    Control *text, *cards;
+    tip_parts(set, &text, &cards);
+    Vec2 ts = text ? text->size : Vec2(), cs = cards ? cards->size : Vec2();
+    bool left = at.x > 1920.0f * 0.75f;
+    Vec2 t(at.x, at.y + icon.y + 10.0f);
+    if (left) t.x -= ts.x - icon.x;
+    /* the cards under the text, from its left (Left: moved there) */
+    Vec2 c(t.x, t.y + ts.y);
+    if (at.y > 1080.0f * 0.75f) t = Vec2(t.x, at.y - ts.y);
+    correct_overflow(t, ts, c, cs);
+    bool overlap = c.x < t.x + ts.x && t.x < c.x + cs.x && c.y < t.y + ts.y && t.y < c.y + cs.y;
+    if (overlap && cs.x > 0 && ts.x > 0) {
+        c = left ? Vec2(t.x + ts.x, t.y) : Vec2(t.x - cs.x, t.y);
+        if (t.y + ts.y > 1080.0f) t.y = 1080.0f - ts.y;
+        if (c.y + cs.y > 1080.0f) c.y = 1080.0f - cs.y;
     }
     place_tip_parts(set, t, c);
 }
@@ -203,7 +227,7 @@ void TipFollower::attach(SceneLibrary* lib, Node* parent, Control* owner, const 
     if (!tips_) return;
     owner_ = owner;
     slot_ = NULL;
-    card_ = below_ = left_ = false;
+    card_ = below_ = left_ = relic_ = false;
     merchant_ = 0;
     extra_ = 0;
     tips_->z_index = 10;
@@ -238,6 +262,11 @@ void TipFollower::show_below(SceneLibrary* lib, Node* parent, Control* owner, co
     below_ = tips_ != NULL;
 }
 
+void TipFollower::show_for_relic(SceneLibrary* lib, Node* parent, Control* icon, const Json& tips) {
+    attach(lib, parent, icon, tips);
+    relic_ = tips_ != NULL;
+}
+
 void TipFollower::show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
     show_for_control(lib, parent, owner, tips);
     left_ = tips_ != NULL;
@@ -264,6 +293,12 @@ void TipFollower::frame() {
      * a frame beside where it belongs */
     if (w <= 0 || h <= 0) {
         tips_->modulate.a = 0;
+        return;
+    }
+    if (relic_) {
+        /* SetAlignmentForRelic (the owner: the relic's icon) */
+        place_tips_for_relic(tips_, c, owner_->size * s);
+        tips_->modulate.a = 1;
         return;
     }
     if (merchant_ == 3) {

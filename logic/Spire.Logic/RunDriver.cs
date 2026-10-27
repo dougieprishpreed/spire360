@@ -3526,11 +3526,23 @@ public partial class RunDriver
         if (!card.IsUpgradable) return null;
         try
         {
-            var clone = ModelDb.GetById<CardModel>(card.Id).ToMutable();
-            for (int i = 0; i < card.CurrentUpgradeLevel; i++)
+            // NUpgradePreview.Reload: Card.CardScope.CloneCard(Card), then UpgradeInternal:
+            // the card as it is (its enchantment, affliction and what changed it), not the
+            // canonical one. Cloned without the scope's AddCard (a preview, not a card of
+            // the run). A canonical card (the compendium's) is upgraded from a mutable copy.
+            CardModel clone;
+            if (card.IsMutable)
             {
-                clone.UpgradeInternal();
-                clone.FinalizeUpgradeInternal();
+                clone = (CardModel)card.ClonePreservingMutability();
+            }
+            else
+            {
+                clone = ModelDb.GetById<CardModel>(card.Id).ToMutable();
+                for (int i = 0; i < card.CurrentUpgradeLevel; i++)
+                {
+                    clone.UpgradeInternal();
+                    clone.FinalizeUpgradeInternal();
+                }
             }
             clone.UpgradeInternal();
             clone.UpgradePreviewType = card.Pile?.IsCombatPile == true

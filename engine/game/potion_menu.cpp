@@ -1,6 +1,7 @@
 #include "potion_menu.h"
 #include "combat_screen.h"
 #include "loc.h"
+#include "top_bar.h"
 #include "ui_util.h"
 #include "../audio/game_audio.h"
 
@@ -14,7 +15,7 @@ namespace spire {
 static const float POTION_SCALE = 0.9f, FOCUS_SCALE = 0.9f * 1.15f;
 
 PotionMenu::PotionMenu(SceneLibrary* lib)
-    : lib_(lib), layer_(NULL), popup_(NULL), mode_(NONE), slot_(0), button_(0), target_(-1) {
+    : lib_(lib), relic_(-1), layer_(NULL), popup_(NULL), mode_(NONE), slot_(0), button_(0), target_(-1) {
     buttons_[0] = buttons_[1] = NULL;
     enabled_[0] = enabled_[1] = false;
 }
@@ -27,11 +28,16 @@ void PotionMenu::attach(Node* screen, const Json& player) {
     layer_ = layer && layer->is_control() ? (Control*)layer : NULL;
     for (size_t i = 0; box && i < box->children.size(); ++i)
         if (box->children[i]->is_control()) holders_.push_back((Control*)box->children[i]);
+    Node* row = find_named(screen, "RelicInventory");
+    for (size_t i = 0; row && i < row->children.size(); ++i)
+        if (row->children[i]->is_control()) relics_.push_back((Control*)row->children[i]);
 }
 
 void PotionMenu::detach() {
     tips_.hide();
     holders_.clear();
+    relics_.clear();
+    relic_ = -1;
     layer_ = NULL;
     popup_ = NULL; /* in the old screen's tree, deleted with it */
     mode_ = NONE;
@@ -44,20 +50,25 @@ const Json* PotionMenu::potion_at(int slot) const {
     return NULL;
 }
 
+/* OnPotionShortcutPressed: the first holder (_potionHolders' child 0) */
 bool PotionMenu::open() {
-    if (holders_.empty() || player_["potions"].size() == 0) return false;
+    if (holders_.empty()) return false;
     mode_ = SLOTS;
-    int first = 0;
-    for (int s = (int)holders_.size() - 1; s >= 0; --s)
-        if (potion_at(s)) first = s;
     slot_ = -1;
-    focus_slot(first);
+    relic_ = -1;
+    focus_slot(0);
     return true;
 }
 
 void PotionMenu::close() {
     tips_.hide();
     close_popup();
+    unfocus_slot();
+    unfocus_relic();
+    mode_ = NONE;
+}
+
+void PotionMenu::unfocus_slot() {
     if (slot_ >= 0 && slot_ < (int)holders_.size()) {
         Control* h = holders_[(size_t)slot_];
         Node* ret = h->find_unique("SelectionReticle");
@@ -65,8 +76,31 @@ void PotionMenu::close() {
         Node* pot = find_named(h, "Potion");
         if (pot && pot->is_control()) ((Control*)pot)->scale = Vec2(POTION_SCALE, POTION_SCALE);
     }
-    mode_ = NONE;
     slot_ = -1;
+}
+
+/* NRelicInventoryHolder.OnFocus: the icon to 1.25 (0.05 s) and its tips
+ * (SetAlignmentForRelic); OnUnfocus back to 1. */
+void PotionMenu::focus_relic(int r) {
+    if (r < 0 || r >= (int)relics_.size()) return;
+    unfocus_relic();
+    relic_ = r;
+    Node* icon = holder_relic_icon(relics_[(size_t)r]);
+    if (!icon || !icon->is_control()) return;
+    Control* ic = (Control*)icon;
+    ic->pivot_offset = ic->size * 0.5f;
+    ic->scale = Vec2(1.25f, 1.25f);
+    const Json& rs = player_["relics"];
+    if ((size_t)r < rs.size()) tips_.show_for_relic(lib_, layer_, ic, rs[(size_t)r]["tips"]);
+}
+
+void PotionMenu::unfocus_relic() {
+    if (relic_ >= 0 && relic_ < (int)relics_.size()) {
+        Node* icon = holder_relic_icon(relics_[(size_t)relic_]);
+        if (icon && icon->is_control()) ((Control*)icon)->scale = Vec2(1, 1);
+    }
+    tips_.hide();
+    relic_ = -1;
 }
 
 /* OnFocus: the reticle and the potion at 1.15; the slot left goes back. */
@@ -162,8 +196,34 @@ std::string PotionMenu::input(const PadState& pad, CombatScreen* combat, const J
         int n = (int)holders_.size();
         if (pad.pressed & PadState::LEFT) focus_slot((slot_ + n - 1) % n);
         if (pad.pressed & PadState::RIGHT) focus_slot((slot_ + 1) % n);
-        if ((pad.pressed & PadState::A) && potion_at(slot_)) open_popup();
-        else if (pad.pressed & (PadState::B | PadState::X)) close();
+        if ((pad.pressed & PadState::DOWN) && !relics_.empty()) {
+            /* the holders' FocusNeighborBottom: the first relic */
+            tips_.hide();
+            unfocus_slot();
+            mode_ = RELICS;
+            focus_relic(0);
+        } else if ((pad.pressed & PadState::A) && potion_at(slot_)) {
+            open_popup();
+        } else if (pad.pressed & (PadState::B | PadState::X)) {
+            close();
+        }
+        return std::string();
+    }
+    if (mode_ == RELICS) {
+        int n = (int)relics_.size();
+        if (n == 0 || (pad.pressed & (PadState::B | PadState::X))) {
+            close();
+            return std::string();
+        }
+        /* NRelicInventory.UpdateNavigation: left / right around the row,
+         * up to the first potion slot */
+        if (pad.pressed & PadState::LEFT) focus_relic((relic_ + n - 1) % n);
+        if (pad.pressed & PadState::RIGHT) focus_relic((relic_ + 1) % n);
+        if (pad.pressed & PadState::UP) {
+            unfocus_relic();
+            mode_ = SLOTS;
+            focus_slot(0);
+        }
         return std::string();
     }
     if (mode_ == POPUP) {

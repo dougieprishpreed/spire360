@@ -67,6 +67,11 @@ void place_tip_parts(Control* set, const Vec2& text_at, const Vec2& cards_at);
  * (Right: text right of it), then CorrectVerticalOverflow and
  * CorrectHorizontalOverflow. */
 void place_tips_beside(Control* set, const Vec2& at, float width, bool left, float gap);
+/* NHoverTipSet.SetAlignmentForRelic: the text under the relic's icon (at:
+ * its top-left on the screen, icon: its size there; past 3/4 of the screen
+ * its right edge at the icon's), the cards under the text, above the relic
+ * low on the screen. */
+void place_tips_for_relic(Control* set, const Vec2& at, const Vec2& icon);
 /* The settings the logic last answered (NSettingsScreen's values: PrefsSave
  * and SettingsSave), for the screens that follow them; null before. */
 const Json& client_settings();
@@ -95,7 +100,9 @@ void setup_inspect_prompt(SceneLibrary* lib, Node* prompt);
  * card's centre). The tips are nodes of the screen's tree. */
 class TipFollower {
 public:
-    TipFollower() : tips_(NULL), owner_(NULL), slot_(NULL), card_(true), below_(false), left_(false), merchant_(0), extra_(0) {}
+    TipFollower()
+        : tips_(NULL), owner_(NULL), slot_(NULL), card_(true), below_(false), left_(false), relic_(false), merchant_(0),
+          extra_(0) {}
     void show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips);
     /* NHoverTipSet.CreateAndShow(owner, tips, GetHoverTipAlignment(owner))
      * with SetFollowOwner: right of the owner, or left of it past 3/4 of
@@ -104,6 +111,9 @@ public:
     /* HoverTipAlignment.Center set at the owner's position plus 1.5 of its
      * height down (NPotionHolder.OnFocus). */
     void show_below(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
+    /* NRelicInventoryHolder.OnFocus: SetAlignmentForRelic, the owner the
+     * relic's icon. */
+    void show_for_relic(SceneLibrary* lib, Node* parent, Control* icon, const Json& tips);
     /* HoverTipAlignment.Left: the tips' right edge at the owner's left. */
     void show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
     /* NMerchantRelic / NMerchantPotion / NMerchantCardRemoval.CreateHoverTip:
@@ -124,7 +134,7 @@ private:
     Control* tips_;
     Control* owner_;
     Control* slot_; /* show_for_merchant_card: the slot that picks the side */
-    bool card_, below_, left_;
+    bool card_, below_, left_, relic_;
     int merchant_; /* 0, 1: relic or potion, 2: card removal, 3: card */
     float extra_;
 };

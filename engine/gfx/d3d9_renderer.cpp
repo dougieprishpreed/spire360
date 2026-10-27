@@ -1196,8 +1196,20 @@ static void put_le(FILE* f, unsigned v, int bytes) {
     for (int i = 0; i < bytes; ++i) fputc((int)((v >> (8 * i)) & 0xFF), f);
 }
 
-/* rows of 32-bit ARGB words (native order) to a bottom-up 24-bit BMP */
-static bool write_bmp(const char* path, const u8* pixels, int pitch, int w, int h) {
+/* A texel's place in Xenos' tiled layout (32-bit texels; XGAddress2DTiled-
+ * Offset): Resolve writes it even into a LIN_ texture. */
+static u32 tiled_offset(u32 x, u32 y, u32 width) {
+    const u32 log_bpp = 2;
+    u32 aligned = (width + 31) & ~31u;
+    u32 macro = ((x >> 5) + (y >> 5) * (aligned >> 5)) << (log_bpp + 7);
+    u32 micro = ((x & 7) + ((y & 6) << 2)) << log_bpp;
+    u32 offset = macro + ((micro & ~15u) << 1) + (micro & 15) + ((y & 8) << (3 + log_bpp)) + ((y & 1) << 4);
+    return (((offset & ~511u) << 3) + ((offset & 448) << 2) + (offset & 63) + ((y & 16) << 7) +
+            (((((y & 8) >> 2) + (x >> 3)) & 3) << 6)) >> log_bpp;
+}
+
+/* tiled 32-bit ARGB words (native order) to a bottom-up 24-bit BMP */
+static bool write_bmp(const char* path, const u8* pixels, int w, int h) {
     FILE* f = fopen(path, "wb");
     if (!f) return false;
     unsigned row = (unsigned)w * 3, size = 54 + row * (unsigned)h;
@@ -1218,10 +1230,10 @@ static bool write_bmp(const char* path, const u8* pixels, int pitch, int w, int 
     put_le(f, 0, 4);
     put_le(f, 0, 4);
     std::vector<u8> line(row);
+    const u32* src = (const u32*)pixels;
     for (int y = h - 1; y >= 0; --y) {
-        const u32* src = (const u32*)(pixels + (size_t)y * (size_t)pitch);
         for (int x = 0; x < w; ++x) {
-            u32 v = src[x];
+            u32 v = src[tiled_offset((u32)x, (u32)y, (u32)w)];
             line[x * 3] = (u8)(v & 0xFF);
             line[x * 3 + 1] = (u8)((v >> 8) & 0xFF);
             line[x * 3 + 2] = (u8)((v >> 16) & 0xFF);
@@ -1238,14 +1250,15 @@ bool D3D9Renderer::save_screenshot(const char* path) {
 #if defined(_XBOX)
     if (!dev_ || width_ <= 0 || height_ <= 0) return false;
     flush();
-    /* a linear texture, so the CPU reads it row by row */
+    /* (a LIN_ format, though Resolve writes the tiled layout: write_bmp
+     * untiles; the console's shots of 2026-10-27 show it) */
     IDirect3DTexture9* shot = NULL;
     if (FAILED(dev_->CreateTexture(width_, height_, 1, 0, D3DFMT_LIN_A8R8G8B8, 0, &shot, NULL))) return false;
     bool ok = SUCCEEDED(dev_->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, shot, NULL, 0, 0, NULL, 1.0f, 0, NULL));
     dev_->BlockUntilIdle();
     D3DLOCKED_RECT lr;
     if (ok && SUCCEEDED(shot->LockRect(0, &lr, NULL, D3DLOCK_READONLY))) {
-        ok = write_bmp(path, (const u8*)lr.pBits, lr.Pitch, width_, height_);
+        ok = write_bmp(path, (const u8*)lr.pBits, width_, height_);
         shot->UnlockRect(0);
     } else {
         ok = false;

@@ -1,9 +1,11 @@
 /* The potions on the top bar with a pad (NTopBar's potion shortcut, X):
- * the slots take the focus (left / right, the holder's reticle and the
- * potion a little larger); A opens the potion's popup (NPotionPopup: Use,
- * Discard; up / down, A), B goes back, X leaves. A potion aimed at an enemy
- * then aims like a card (the combat screen's arrow from the slot; left /
- * right, A throws, B cancels). */
+ * the slots take the focus, the first one whether or not it holds a
+ * potion (left / right, the holder's reticle and the potion a little
+ * larger); A opens the potion's popup (NPotionPopup: Use, Discard; up /
+ * down, A), B goes back, X leaves. Down goes to the relic row (left / right
+ * around it, each relic larger with its tips; up back to the first slot).
+ * A potion aimed at an enemy then aims like a card (the combat screen's
+ * arrow from the slot; left / right, A throws, B cancels). */
 #ifndef SPIRE_POTION_MENU_H
 #define SPIRE_POTION_MENU_H
 
@@ -23,7 +25,7 @@ public:
     void attach(Node* screen, const Json& player);
     void detach();
     bool active() const { return mode_ != NONE; }
-    /* X: the slots take the focus; false when there are no potions. */
+    /* X: the first slot takes the focus; false with no top bar. */
     bool open();
     void close();
     /* While active: a command for the logic or "". `combat` (may be NULL)
@@ -31,8 +33,11 @@ public:
     std::string input(const PadState& pad, CombatScreen* combat, const Json& enemies);
 
 private:
-    enum Mode { NONE, SLOTS, POPUP, AIM };
+    enum Mode { NONE, SLOTS, POPUP, AIM, RELICS };
     void focus_slot(int s);
+    void unfocus_slot();
+    void focus_relic(int r);
+    void unfocus_relic();
     void open_popup();
     void close_popup();
     void focus_button(int b);
@@ -40,6 +45,8 @@ private:
     SceneLibrary* lib_;
     Json player_;
     std::vector<Control*> holders_;
+    std::vector<Control*> relics_; /* the relic row's holders */
+    int relic_;
     Control* layer_; /* where the popup goes (the top bar's layer) */
     Control* popup_;
     Control* buttons_[2];

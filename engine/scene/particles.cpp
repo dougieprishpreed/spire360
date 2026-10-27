@@ -790,99 +790,102 @@ static float fast_floor(float x) {
 
 static float fractf(float x) { return x - fast_floor(x); }
 
-static void noise_grad(const float in[4], float out[4]) {
-    static const float M[4][4] = { { 0.143081f, 0.001724f, 0.280166f, 0.262771f },
-                                   { 0.645401f, -0.047791f, -0.146698f, 0.595016f },
-                                   { -0.499665f, -0.095734f, 0.425674f, -0.207367f },
-                                   { -0.013596f, -0.848588f, 0.423736f, 0.17044f } };
-    float p[4];
-    for (int i = 0; i < 4; ++i) p[i] = fractf(M[i][0] * in[0] + M[i][1] * in[1] + M[i][2] * in[2] + M[i][3] * in[3]);
-    for (int i = 0; i < 4; ++i) out[i] = fractf(p[i] * p[(i + 1) & 3] * 2365.952041f) * 2.0f - 1.0f;
+/* The noise is written with scalar arguments and locals only: on the
+ * console's core a value stored and read straight back stalls it (a
+ * load-hit-store, ~40 cycles), and the small arrays, pointers and int to
+ * float conversions of a loop over the corners did that hundreds of times
+ * per noise. The arithmetic and its order are the shader's (and the
+ * earlier port's): the results are the same. */
+
+/* noise_grad at the corner (x, y, z, w), dotted with the offset (dx .. dw) */
+static float corner(float x, float y, float z, float w, float dx, float dy, float dz, float dw) {
+    float p0 = fractf(0.143081f * x + 0.001724f * y + 0.280166f * z + 0.262771f * w);
+    float p1 = fractf(0.645401f * x + -0.047791f * y + -0.146698f * z + 0.595016f * w);
+    float p2 = fractf(-0.499665f * x + -0.095734f * y + 0.425674f * z + -0.207367f * w);
+    float p3 = fractf(-0.013596f * x + -0.848588f * y + 0.423736f * z + 0.17044f * w);
+    float g0 = fractf(p0 * p1 * 2365.952041f) * 2.0f - 1.0f;
+    float g1 = fractf(p1 * p2 * 2365.952041f) * 2.0f - 1.0f;
+    float g2 = fractf(p2 * p3 * 2365.952041f) * 2.0f - 1.0f;
+    float g3 = fractf(p3 * p0 * 2365.952041f) * 2.0f - 1.0f;
+    return dx * g0 + dy * g1 + dz * g2 + dw * g3;
 }
 
-/* A lattice cell's corner gradients: curl_3d's six samples around a
- * particle usually fall in one cell, so its gradients are worked out once. */
-struct NoiseCell {
-    bool valid;
-    float base[4];
-    float g[16][4];
-};
-
-static float noise4(const float in[4], NoiseCell& cell) {
+static float noise4(float ix, float iy, float iz, float iw) {
     /* domain rotation */
-    float d = (in[0] + in[1] + in[2]) * -0.1666667f + in[3] * -0.5f;
-    float c[4] = { in[0] + d, in[1] + d, in[2] + d, (in[0] + in[1] + in[2] + in[3]) * 0.5f };
-    float base[4], delta[4], fade[4];
-    for (int i = 0; i < 4; ++i) {
-        base[i] = fast_floor(c[i]);
-        delta[i] = c[i] - base[i];
-        fade[i] = delta[i] * delta[i] * delta[i] * (10.0f + delta[i] * (-15.0f + delta[i] * 6.0f));
-    }
-    if (!cell.valid || base[0] != cell.base[0] || base[1] != cell.base[1] || base[2] != cell.base[2] ||
-        base[3] != cell.base[3]) {
-        cell.valid = true;
-        for (int i = 0; i < 4; ++i) cell.base[i] = base[i];
-        for (int k = 0; k < 16; ++k) {
-            float bp[4] = { base[0] + (float)(k & 1), base[1] + (float)((k >> 1) & 1), base[2] + (float)((k >> 2) & 1),
-                            base[3] + (float)((k >> 3) & 1) };
-            noise_grad(bp, cell.g[k]);
-        }
-    }
-    /* the corners' gradients dotted with the offsets (bit 0 x .. bit 3 w) */
-    float r[16];
-    for (int k = 0; k < 16; ++k) {
-        float off[4] = { (float)(k & 1), (float)((k >> 1) & 1), (float)((k >> 2) & 1), (float)((k >> 3) & 1) };
-        const float* g = cell.g[k];
-        r[k] = (delta[0] - off[0]) * g[0] + (delta[1] - off[1]) * g[1] + (delta[2] - off[2]) * g[2] +
-               (delta[3] - off[3]) * g[3];
-    }
-    float wz[4];
-    for (int j = 0; j < 4; ++j)
-        wz[j] = lerpf(lerpf(r[j], r[8 + j], fade[3]), lerpf(r[4 + j], r[12 + j], fade[3]), fade[2]);
-    return lerpf(lerpf(wz[0], wz[2], fade[1]), lerpf(wz[1], wz[3], fade[1]), fade[0]);
+    float d = (ix + iy + iz) * -0.1666667f + iw * -0.5f;
+    float cx = ix + d, cy = iy + d, cz = iz + d, cw = (ix + iy + iz + iw) * 0.5f;
+    float bx = fast_floor(cx), by = fast_floor(cy), bz = fast_floor(cz), bw = fast_floor(cw);
+    float dx = cx - bx, dy = cy - by, dz = cz - bz, dw = cw - bw;
+    float fx = dx * dx * dx * (10.0f + dx * (-15.0f + dx * 6.0f));
+    float fy = dy * dy * dy * (10.0f + dy * (-15.0f + dy * 6.0f));
+    float fz = dz * dz * dz * (10.0f + dz * (-15.0f + dz * 6.0f));
+    float fw = dw * dw * dw * (10.0f + dw * (-15.0f + dw * 6.0f));
+    float bx1 = bx + 1.0f, by1 = by + 1.0f, bz1 = bz + 1.0f, bw1 = bw + 1.0f;
+    float dx1 = dx - 1.0f, dy1 = dy - 1.0f, dz1 = dz - 1.0f, dw1 = dw - 1.0f;
+    /* the 16 corners (bit 0 x .. bit 3 w) */
+    float r0 = corner(bx, by, bz, bw, dx, dy, dz, dw), r1 = corner(bx1, by, bz, bw, dx1, dy, dz, dw);
+    float r2 = corner(bx, by1, bz, bw, dx, dy1, dz, dw), r3 = corner(bx1, by1, bz, bw, dx1, dy1, dz, dw);
+    float r4 = corner(bx, by, bz1, bw, dx, dy, dz1, dw), r5 = corner(bx1, by, bz1, bw, dx1, dy, dz1, dw);
+    float r6 = corner(bx, by1, bz1, bw, dx, dy1, dz1, dw), r7 = corner(bx1, by1, bz1, bw, dx1, dy1, dz1, dw);
+    float r8 = corner(bx, by, bz, bw1, dx, dy, dz, dw1), r9 = corner(bx1, by, bz, bw1, dx1, dy, dz, dw1);
+    float r10 = corner(bx, by1, bz, bw1, dx, dy1, dz, dw1), r11 = corner(bx1, by1, bz, bw1, dx1, dy1, dz, dw1);
+    float r12 = corner(bx, by, bz1, bw1, dx, dy, dz1, dw1), r13 = corner(bx1, by, bz1, bw1, dx1, dy, dz1, dw1);
+    float r14 = corner(bx, by1, bz1, bw1, dx, dy1, dz1, dw1), r15 = corner(bx1, by1, bz1, bw1, dx1, dy1, dz1, dw1);
+    float wz0 = lerpf(lerpf(r0, r8, fw), lerpf(r4, r12, fw), fz);
+    float wz1 = lerpf(lerpf(r1, r9, fw), lerpf(r5, r13, fw), fz);
+    float wz2 = lerpf(lerpf(r2, r10, fw), lerpf(r6, r14, fw), fz);
+    float wz3 = lerpf(lerpf(r3, r11, fw), lerpf(r7, r15, fw), fz);
+    return lerpf(lerpf(wz0, wz2, fy), lerpf(wz1, wz3, fy), fx);
 }
 
-static void noise_3x(const float p[4], NoiseCell cells[3], float out[3]) {
-    const float w = 1.7320508f * 2048.333333f;
-    float a[4] = { p[0], p[1], p[2], p[3] + w }, b[4] = { p[0], p[1], p[2], p[3] - w };
-    out[0] = noise4(p, cells[0]);
-    out[1] = noise4(a, cells[1]);
-    out[2] = noise4(b, cells[2]);
-}
-
-static void curl_3d(const float p[4], float c, float out[3]) {
-    float eps = 0.001f + c;
-    float n[3][2][3]; /* axis, -/+, the three noises */
-    NoiseCell cells[3];
-    for (int i = 0; i < 3; ++i) cells[i].valid = false;
-    for (int axis = 0; axis < 3; ++axis)
-        for (int side = 0; side < 2; ++side) {
-            float q[4] = { p[0], p[1], p[2], p[3] };
-            q[axis] += side ? eps : -eps;
-            noise_3x(q, cells, n[axis][side]);
-        }
-    float x = (n[1][1][2] - n[1][0][2]) - (n[2][1][1] - n[2][0][1]);
-    float y = (n[2][1][0] - n[2][0][0]) - (n[0][1][2] - n[0][0][2]);
-    float z = (n[0][1][1] - n[0][0][1]) - (n[1][1][0] - n[1][0][0]);
+/* The shader's curl_3d of noise_3x (the noise at w, w + W and w - W): of
+ * its 18 noises the curl reads 12 (each axis two of the three). */
+static void curl_3d(float px, float py, float pz, float pw, float c, float* ox, float* oy, float* oz) {
+    const float W = 1.7320508f * 2048.333333f;
+    float e = 0.001f + c;
+    /* axis x: the w + W and w - W noises */
+    float x_a1 = noise4(px + e, py, pz, pw + W), x_b1 = noise4(px - e, py, pz, pw + W);
+    float x_a2 = noise4(px + e, py, pz, pw - W), x_b2 = noise4(px - e, py, pz, pw - W);
+    /* axis y: w and w - W */
+    float y_a0 = noise4(px, py + e, pz, pw), y_b0 = noise4(px, py - e, pz, pw);
+    float y_a2 = noise4(px, py + e, pz, pw - W), y_b2 = noise4(px, py - e, pz, pw - W);
+    /* axis z: w and w + W */
+    float z_a0 = noise4(px, py, pz + e, pw), z_b0 = noise4(px, py, pz - e, pw);
+    float z_a1 = noise4(px, py, pz + e, pw + W), z_b1 = noise4(px, py, pz - e, pw + W);
+    float x = (y_a2 - y_b2) - (z_a1 - z_b1);
+    float y = (z_a0 - z_b0) - (x_a2 - x_b2);
+    float z = (x_a1 - x_b1) - (y_a0 - y_b0);
     float l = sqrtf(x * x + y * y + z * z);
     float k = l > 0 ? 1.0f / l : 0.0f;
-    out[0] = x * k;
-    out[1] = y * k;
-    out[2] = z * k;
+    *ox = x * k;
+    *oy = y * k;
+    *oz = z * k;
 }
 
 /* get_noise_direction (TIME: the shaders' time) */
-Vec2 Particles2D::noise_direction(const float pos[3], float* z) const {
+Vec2 Particles2D::noise_direction(float x, float y, float z, float* nz) const {
     float adj_contrast = maxf(mat.turb_strength - 1.0f, 0.0f) * 70.0f;
     float t = (float)g_shader_time;
-    float p[4] = { pos[0] * mat.turb_scale + t * mat.turb_speed[0], pos[1] * mat.turb_scale + t * mat.turb_speed[1],
-                   pos[2] * mat.turb_scale + t * mat.turb_speed[2], t * mat.turb_speed_random };
-    float d[3];
-    curl_3d(p, adj_contrast, d);
+    float dx, dy, dz;
+    curl_3d(x * mat.turb_scale + t * mat.turb_speed[0], y * mat.turb_scale + t * mat.turb_speed[1],
+            z * mat.turb_scale + t * mat.turb_speed[2], t * mat.turb_speed_random, adj_contrast, &dx, &dy, &dz);
     /* mix(0.9 * d, d, strength - 9) */
     float k = 0.9f + 0.1f * (mat.turb_strength - 9.0f);
-    *z = d[2] * k;
-    return Vec2(d[0] * k, d[1] * k);
+    *nz = dz * k;
+    return Vec2(dx * k, dy * k);
+}
+
+double Particles2D::turbulence_cost_us(LoadClock clock, bool* fast) {
+    *fast = g_magic_floor;
+    if (!clock) return 0;
+    volatile float sink = 0;
+    double t0 = clock();
+    for (int i = 0; i < 2000; ++i) {
+        float x, y, z;
+        curl_3d((float)(i % 97) * 0.37f, (float)(i % 89) * 0.23f, 0.0f, 0.5f, 562.0f, &x, &y, &z);
+        sink = sink + x + y + z;
+    }
+    return (clock() - t0) * 1000.0 / 2000.0;
 }
 
 /* get_random_direction_from_spread (2D) */
@@ -1008,7 +1011,7 @@ void Particles2D::gpu_start(Particle& p, u32 number, const Emission* from) {
     if (mat.turbulence) {
         float disp = lerpf(mat.turb_displacement_min, mat.turb_displacement_max, rand_from_seed(s));
         float nz;
-        Vec2 n = noise_direction(pos, &nz);
+        Vec2 n = noise_direction(pos[0], pos[1], pos[2], &nz);
         pos[0] += n.x * disp;
         pos[1] += n.y * disp;
     }
@@ -1169,9 +1172,8 @@ void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec
     }
     if (mat.turbulence) {
         float life_infl = mat.turb_influence_over_life.valid() ? mat.turb_influence_over_life.r(lp) : 1.0f;
-        float at[3] = { pos.x, pos.y, 0 };
         float nz;
-        Vec2 n = noise_direction(at, &nz);
+        Vec2 n = noise_direction(pos.x, pos.y, 0.0f, &nz);
         float nl = sqrtf(n.x * n.x + n.y * n.y + nz * nz);
         if (!collided && nl > 0) {
             n = n * (1.0f / nl);

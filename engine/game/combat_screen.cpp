@@ -70,7 +70,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     sel_hand_index_ = -1;
     sel_row_ = false;
     sel_focus_ = 0;
-    sel_box_ = sel_confirm_ = NULL;
+    sel_box_ = sel_confirm_ = sel_confirm_placed_ = NULL;
     sel_confirm_x_ = sel_confirm_y_ = 0;
     sel_confirm_shown_ = false;
     long_press_on_ = false;
@@ -2139,6 +2139,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     rewards_at_ = -1;
     death_end_.clear();
     fade_gone_at_.clear();
+    sel_confirm_placed_ = NULL;
     root_ = root;
     state_ = d;
     vfx_box_ = ctl(root, "CombatVfxContainer");
@@ -4874,8 +4875,13 @@ void CombatScreen::begin_hand_select(const Json& d) {
     if (sel_confirm_) {
         Control* c = sel_confirm_;
         float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], h = c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
-        sel_confirm_x_ = 1920.0f - (c->offset[SIDE_RIGHT] + 120.0f);
-        sel_confirm_y_ = 1080.0f - (-c->offset[SIDE_BOTTOM] + 110.0f);
+        /* from the scene's offsets, the first time only: later selections
+         * find it moved */
+        if (c != sel_confirm_placed_) {
+            sel_confirm_placed_ = c;
+            sel_confirm_x_ = 1920.0f - (c->offset[SIDE_RIGHT] + 120.0f);
+            sel_confirm_y_ = 1080.0f - (-c->offset[SIDE_BOTTOM] + 110.0f);
+        }
         for (int s2 = 0; s2 < 4; ++s2) c->anchor[s2] = 0;
         place(c, sel_confirm_x_ + 180.0f, sel_confirm_y_, w, h);
         c->visible = true;

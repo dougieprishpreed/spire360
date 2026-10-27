@@ -60,6 +60,10 @@
  * --dump-draws-at N (with --load-trace): frame N's draws logged one by one
  * (the console's Back + RB).
  *
+ * --skip-draws MASK: every frame drawn without those kinds of draw
+ * (SceneTree::SKIP_*: 1 text, 2 particles, 4 spine, 8 the fight's
+ * background, 16 shader materials, 32 images), to see what each adds.
+ *
  * --console-textures (with --load-trace): textures counted at their Xbox
  * 360 sizes against the console's 80 MB budget, the cache's traffic logged
  * every 600 frames (does a screen load its textures again each frame?).
@@ -511,6 +515,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--console-textures") == 0) console_textures = true;
         else if (strcmp(argv[i], "--profile") == 0) SceneTree::set_profile(now_ms);
         else if (strcmp(argv[i], "--profile-cpu") == 0) g_profile_cpu = true;
+        else if (strcmp(argv[i], "--skip-draws") == 0 && i + 1 < argc) SceneTree::set_draw_skip(atoi(argv[++i]));
         else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);

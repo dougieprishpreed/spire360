@@ -65,6 +65,12 @@ CardSelectScreen::CardSelectScreen(SceneLibrary* lib)
 CardSelectScreen::Button CardSelectScreen::button(Node* n, bool is_confirm) {
     Button b = { control(n), 0, 0, 0, false };
     if (!b.node) return b;
+    std::map<Control*, Button>::iterator known = buttons_.find(b.node);
+    if (known != buttons_.end()) {
+        b = known->second;
+        show_button(b, false, true);
+        return b;
+    }
     Control* c = b.node;
     float w = c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], h = c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP];
     if (is_confirm) {
@@ -78,6 +84,7 @@ CardSelectScreen::Button CardSelectScreen::button(Node* n, bool is_confirm) {
     for (int s = 0; s < 4; ++s) c->anchor[s] = 0;
     place(c, b.x + b.hide_dx, b.y, w, h);
     show_glyph(lib_, find_named(c, "HotkeyIcon"), is_confirm ? "y" : "b");
+    buttons_[c] = b;
     return b;
 }
 
@@ -100,6 +107,7 @@ void CardSelectScreen::show_button(Button& b, bool shown, bool at_once) {
 
 Node* CardSelectScreen::build(const Json& d, std::string* error) {
     decision_ = d;
+    buttons_.clear();
     kind_ = d["kind"].is_string() ? d["kind"].str() : std::string("deck");
     min_ = d["min_select"].i(1);
     max_ = d["max_select"].i(1);

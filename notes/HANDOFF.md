@@ -11,6 +11,94 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest: the second hardware run, 2026-10-26).
 
+## Fourth hardware run (2026-10-27): the noise's real stall, the display, and the user's findings
+
+The user ran 2806b33 (profile=1; spire360.txt, spire360_logic.txt and six
+Back + RB screenshots on E:\Games\spire360; copies in work/rp96). Effects
+in fights a little faster; map and many event screens at 60; black screens
+still at fight and act loads.
+
+- The screenshots: Resolve writes the tiled layout even into a LIN_
+  texture, so the BMPs looked like noise. work/untile_bmp.py untiles them
+  (XGAddress2DTiledOffset as Xenia has it): work/rp96/u1..u6.png.
+  write_bmp now untiles on the console.
+- Dark fight backgrounds (Underdocks, Act 2): the screenshots (the frame as
+  drawn, before the gamma ramp) look as the PC's do; on the user's display
+  they are very dark while the creatures look normal. So it is the output,
+  which is ours alone (the user's other games are fine on the same
+  display): the gamma ramp (out = in^0.88 since the Xenia sessions) or the
+  front buffer (pp.FrontBufferFormat left 0). Back + Y now cycles the
+  ramp's presets (GAMMA_PRESETS: 0 in^0.88, 1 none, 2 in^0.75, 3 in^0.62,
+  4 in^0.88 squeezed into 16-235), each named in the log, and
+  spire360.ini's gamma=N starts with one: the user picks the one that
+  matches the PC, then it becomes the default.
+- Frame costs (profile=1): label draws fell from ~54 ms to ~4 ms a frame
+  (the theme cache); a fight frame's draw calls take 16-40 ms of CPU; the
+  GPU keeps up (gpu_probe: a frame 13-40 ms, its draw calls made in
+  12-37). But process went up to ~90 ms in fights: GPUParticles2D 88 ms a
+  frame for 5 systems, the hive's bugs1 (150 particles, turbulence) most of
+  it, ~195 us per particle step against ~3 us on PC. The magic floor was
+  not the stall: the noise passed its corners through small arrays, int to
+  float conversions ((float)(k & 1)) and pointers, each a store read back
+  at once: a load-hit-store on Xenon. noise4 / curl_3d / noise_direction
+  are now scalar arguments and locals only, and the curl evaluates the 12
+  noises it reads (of 18). work/noise_test.cpp: 0 of 200,000 curls differ
+  from the earlier code. profile=1 logs "particles: turbulence X us per
+  particle step (floor with/without conversions)" at start.
+- The Smith's preview had no B or Y button: they were drawn ~4,000 px
+  below the screen. CardSelectScreen::button worked out a button's corner
+  from its offsets each time the preview opened, and the first opening had
+  moved them (the PC run opened it once). Now once per button (buttons_).
+  The same in the fights' hand selection (sel_confirm_placed_): its Y
+  button left the screen from the second selection of a fight.
+- An enchanted card's upgrade preview lost its enchantment:
+  UpgradePreviewView cloned the canonical card and upgraded it to the
+  card's level, which loses the enchantment, affliction and anything that
+  changed the card (Ritual Dagger's damage...). NUpgradePreview clones the
+  card itself (CardScope.CloneCard): now ClonePreservingMutability (not
+  added to the scope) then UpgradeInternal; canonical cards (the
+  compendium's) as before. A logic change.
+- X did nothing with no potions, and down did not reach the relics:
+  OnPotionShortcutPressed focuses the first holder, potion or not; the
+  holders' bottom neighbour is the first relic; the relics go left / right
+  around the row (up to the first potion), each OnFocus: the icon to 1.25
+  and its tips (SetAlignmentForRelic: place_tips_for_relic,
+  TipFollower::show_for_relic). PotionMenu's RELICS mode.
+- The Decimillipede's "black rock marks" as it attacks:
+  vfx_decimillipede_rocks.tscn's rocks carry an inline GDScript (no path)
+  that plays idle_loop in _ready; the port ran none, so each rock showed its
+  setup pose where it lands until its turn to fall. DecimillipedeRocks
+  starts them. The only other inline GDScript is decimillipede.tscn's (a
+  keyboard test rig, not in fights). Its dead segments: the user's video
+  frames (retail v0.104) show them as our console shot does, so not wrong.
+  Still open: the yellow-green dots where a live segment meets a dead one
+  (console shot u3).
+- Brightness against the retail frame the user sent (a YouTube capture of
+  v0.104, the hive): the raw hive layers composited average 19/255, our PC
+  render (work/rp95/hive1) and the console's frame are near that, retail is
+  about twice as bright with the creatures and cards alike. The particles
+  add +1.5/255 on PC (spire_play --skip-draws 2: hive2). No hdr_2d in
+  project.binary, no brightness setting in the game; the art may differ
+  between v0.104 and v0.111. The user's display shows our frame darker than
+  the frame itself: the gamma presets decide that part first.
+- Not yet: the sandpit boss's sand (the user is not sure it is wrong);
+  black screens at fight and act loads; the native logic's act change.
+
+Checks: PC build 0 warnings; seeded traces against base6 differences 0
+(traces/new96, run with --data-dir work/play-data); scenarios 30 ok
+(work/scen96); content coverage 829 ok (work/cov96); spire_check over
+new96, scen96 and split96: 2475 responses, 0 failures, audio 22870 voices,
+7 absent, 0 decoder failures; the console's logic rebuilt (out/logic/c):
+strict_compare 14 of 15 identical to the JIT (the unseeded skin),
+scenarios 30 ok, no trap; the Smith's preview opened three times keeps
+its buttons (work/rp95/rest7). Two random pad sessions were still running
+at the pause (work/monkey90/g96*).
+
+Next build: logic and engine changed: xdkuild.cmd spire360 (logic_lib
+compiles again). Copy default.xex; in a dark fight cycle Back + Y and note
+which preset matches the PC.
+
+
 ## Third hardware run (2026-10-26): particles, theme lookups, the GPU probe and a console screenshot
 
 The user ran 138c2e1 (profile=1, trace_loads=0; spire360.txt and

@@ -18,6 +18,8 @@
 #define SPIRE_CARD_SELECT_SCREEN_H
 
 #include "../scene/tween.h"
+
+#include <map>
 #include "peek_button.h"
 #include "run_screen.h"
 #include "ui_util.h"
@@ -53,6 +55,9 @@ private:
     std::string confirm();
     void show_button(Button& b, bool shown, bool at_once = false);
     Button button(Node* n, bool confirm);
+    /* each button's place, worked out once (a preview's buttons come
+     * again each time it opens, already moved) */
+    std::map<Control*, Button> buttons_;
 
     SceneLibrary* lib_;
     Node* background_;

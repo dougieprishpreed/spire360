@@ -130,6 +130,9 @@ public:
     virtual void draw(Canvas& c);
     void restart();
     size_t active_count() const;
+    /* A diagnostic: the turbulence noise's time per particle step (us), and
+     * whether its floor runs without float-to-int conversions. */
+    static double turbulence_cost_us(LoadClock clock, bool* fast_floor);
     /* Seconds it has run (stepped). */
     double clock() const { return clock_; }
     bool finished() const { return !emitting && active_count() == 0 && pending_.empty(); }
@@ -181,7 +184,7 @@ private:
     void emit_to(Particles2D* sub, const Particle& p);
     void gpu_display(const Particle& p, float life, float scale[3], float* anim_offset, float* anim_speed,
                      Color* color) const;
-    Vec2 noise_direction(const float pos[3], float* z) const;
+    Vec2 noise_direction(float x, float y, float z, float* nz) const;
     void apply_process_material(Resource* m);
     bool collision(const Particle& p, Vec2* normal, float* depth);
     std::vector<Particle> particles_;

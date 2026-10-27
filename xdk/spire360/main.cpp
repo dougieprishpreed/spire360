@@ -10,12 +10,13 @@
 // Pad: on the title screen A starts a run. In a run: D-pad picks, A
 // confirms, Y ends the turn. Back writes the log now; Back + Start quits.
 // Debugging: Back + X cycles the canvas group modes (D3D9Renderer::
-// set_group_debug), Back + Y turns the gamma ramp off and on.
+// set_group_debug), Back + Y cycles the display ramp's presets.
 #include <xtl.h>
 
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "../../engine/core/pack.h"
 #include "../../engine/audio/game_audio.h"
@@ -26,6 +27,7 @@
 #include "../../engine/game/logic_link.h"
 #include "../../engine/gfx/d3d9_renderer.h"
 #include "../../engine/scene/canvas.h"
+#include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
@@ -85,9 +87,12 @@ static std::string ini_word(const std::string& s) {
  *                  and draw cost the most per frame, the time in the draw
  *                  calls, and the GPU's time for a frame with and without
  *                  each kind of draw (gpu_probe)
+ *   gamma=N        the display ramp's preset to start with (GAMMA_PRESETS;
+ *                  Back + Y cycles them)
  * The first two reach the logic as its environment (logic/Spire.Logic/
  * DebugOptions.cs). No file: all off. */
 static bool g_trace_loads = false, g_profile = false;
+static int g_gamma = 0;
 static void read_ini(const char* path, std::vector<std::string>& env) {
     FILE* f = fopen(path, "rb");
     if (!f) return;
@@ -108,6 +113,10 @@ static void read_ini(const char* path, std::vector<std::string>& env) {
             g_trace_loads = on;
         } else if (key == "profile") {
             g_profile = on;
+        } else if (key == "gamma") {
+            g_gamma = atoi(val.c_str());
+            logf("spire360.ini: gamma %d", g_gamma);
+            continue;
         } else {
             logf("spire360.ini: unknown option '%s'", key.c_str());
             continue;
@@ -259,14 +268,27 @@ static unsigned pad_bits(const XINPUT_GAMEPAD& g) {
     return b;
 }
 
-/* The console's TV output shows the frame darker than a PC monitor (the
- * Xenia screenshots measure about 2.5 / 2.2 in gamma against the game's
- * colours), so the display ramp lifts it back: out = in^(2.2 / 2.5). */
-static void set_gamma(IDirect3DDevice9* dev, bool on) {
+/* The display ramp: out = in^exponent, squeezed into 16-235 for a display
+ * that expands that range itself. The frame as drawn is right (Back + RB's
+ * screenshots match the PC), yet on the user's display the dark fight
+ * backgrounds come out far darker than on PC: the presets to find the
+ * output that matches. 0 is the earlier one (the Xenia screenshots measured
+ * about 2.5 / 2.2 in gamma against the game's colours). */
+static const struct {
+    double exponent;
+    bool limited;
+    const char* name;
+} GAMMA_PRESETS[] = { { 2.2 / 2.5, false, "0 (in^0.88)" },  { 1.0, false, "1 (none)" },
+                      { 0.75, false, "2 (in^0.75)" },     { 0.62, false, "3 (in^0.62)" },
+                      { 2.2 / 2.5, true, "4 (in^0.88 in 16-235)" } };
+static const int GAMMA_COUNT = (int)(sizeof(GAMMA_PRESETS) / sizeof(GAMMA_PRESETS[0]));
+
+static void set_gamma(IDirect3DDevice9* dev, int preset) {
+    if (preset < 0 || preset >= GAMMA_COUNT) preset = 0;
     D3DGAMMARAMP ramp;
     for (int i = 0; i < 256; ++i) {
-        double v = i / 255.0;
-        if (on) v = pow(v, 2.2 / 2.5);
+        double v = pow(i / 255.0, GAMMA_PRESETS[preset].exponent);
+        if (GAMMA_PRESETS[preset].limited) v = (16.0 + v * 219.0) / 255.0;
         WORD w = (WORD)(v * 65535.0 + 0.5);
         ramp.red[i] = ramp.green[i] = ramp.blue[i] = w;
     }
@@ -292,8 +314,7 @@ void __cdecl main() {
         flush_log();
         return;
     }
-    bool gamma = true;
-    set_gamma(dev, gamma);
+    set_gamma(dev, 0);
     D3D9Renderer renderer;
     std::string err;
     if (!renderer.init(dev, &err)) {
@@ -312,6 +333,9 @@ void __cdecl main() {
     log_memory("at start");
     std::vector<std::string> debug_env;
     read_ini("game:\\spire360.ini", debug_env);
+    if (g_gamma < 0 || g_gamma >= GAMMA_COUNT) g_gamma = 0;
+    set_gamma(dev, g_gamma);
+    logf("gamma ramp %s (Back + Y: the next)", GAMMA_PRESETS[g_gamma].name);
     std::vector<const char*> debug_ptrs;
     for (size_t i = 0; i < debug_env.size(); ++i) debug_ptrs.push_back(debug_env[i].c_str());
     double t0 = now_ms();
@@ -324,7 +348,13 @@ void __cdecl main() {
     logf("logic: started in %.1f ms", now_ms() - t0);
     log_memory("with the logic");
     if (g_trace_loads) set_load_trace(now_ms);
-    if (g_profile) SceneTree::set_profile(now_ms);
+    if (g_profile) {
+        SceneTree::set_profile(now_ms);
+        bool fast = false;
+        double us = Particles2D::turbulence_cost_us(now_ms, &fast);
+        logf("particles: turbulence %.1f us per particle step (floor %s float-to-int conversions)", us,
+             fast ? "without" : "with");
+    }
     double d0 = now_ms();
     Loc::init("game:\\spire\\data");
     install_game_scripts();
@@ -381,9 +411,9 @@ void __cdecl main() {
             pad.pressed &= ~PadState::X;
         }
         if ((held & PadState::BACK) && (pad.pressed & PadState::Y)) {
-            gamma = !gamma;
-            set_gamma(dev, gamma);
-            logf("gamma ramp %s", gamma ? "on" : "off");
+            g_gamma = (g_gamma + 1) % GAMMA_COUNT;
+            set_gamma(dev, g_gamma);
+            logf("gamma ramp %s", GAMMA_PRESETS[g_gamma].name);
             pad.pressed &= ~PadState::Y;
         }
         /* Back + RB: the next frame's draws into the log, and a screenshot */
@@ -454,7 +484,7 @@ void __cdecl main() {
             _snprintf(path, sizeof(path), "game:\\spire360_shot_%02d.bmp", ++shots);
             path[sizeof(path) - 1] = 0;
             logf("screenshot %s: %s (gamma ramp %s)", path, renderer.save_screenshot(path) ? "saved" : "failed",
-                 gamma ? "on" : "off");
+                 GAMMA_PRESETS[g_gamma].name);
         }
         g_trace_phase = "present";
         dev->Present(NULL, NULL, NULL, NULL);

@@ -568,6 +568,7 @@ private:
     int sel_focus_;
     Control* sel_box_;
     Control* sel_confirm_;
+    Control* sel_confirm_placed_; /* the button whose corner is worked out (once: it is moved after) */
     float sel_confirm_x_, sel_confirm_y_;
     bool sel_confirm_shown_;
 };
