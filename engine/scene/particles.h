@@ -169,7 +169,7 @@ private:
     void step(double dt);
     void step_gpu(double dt);
     int preprocess_skip(int steps, double frame_time) const;
-    void skip_time(double t);
+    void skip_steps(int n, double frame_time);
     /* an emission from the parent system (emit_subparticle): its
      * transform, and its velocity if kept */
     struct Emission {

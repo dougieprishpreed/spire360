@@ -362,6 +362,13 @@
       "optional": true
     },
     {
+      "id": "map.find_matching_segments",
+      "action": "redirect",
+      "type": "MegaCrit.Sts2.Core.Map.MapPathPruning",
+      "method": "FindMatchingSegments",
+      "note": "The act's map generation keys every segment of every path through a StringBuilder and a SortedDictionary of strings: 8 s on the console's translated code at each act change. Spire.Logic's MapPruning gives the same segments, lists and order (a compact key in a hash dictionary; the game's key text once per distinct key, for the order)."
+    },
+    {
       "id": "vfx.on_creature",
       "action": "call_after",
       "type": "MegaCrit.Sts2.Core.Commands.VfxCmd",

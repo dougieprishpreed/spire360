@@ -9,7 +9,101 @@ data reached it as zip "bundles") to a local desktop session on the user's
 PC, with the game installed. Updated 2026-10-19 (profiles checkpoint below)
 and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
-top (the newest: the second hardware run, 2026-10-26).
+top (the newest first).
+
+## The fourth run's three open items (2026-10-28): the act change, preprocess, the sandpit, the Decimillipede
+
+The user asked for the three items left open after the fourth hardware run
+(below): the Decimillipede's junction dots, the sandpit's sand, the black
+screens at fight and act loads. No new console run; all from work/rp96 (the
+fourth run's logs, screenshots and session_start saves, copied locally:
+the user ejects the USB, so copy first).
+
+- The act change (Act 1 to 2: 8 s of black on the console): sampled with
+  call stacks on the native host (work/stack_logic.py: dbghelp
+  StackWalk64 on the suspended logic thread; work/relink_map.cmd links
+  out/logic/native-map with a map; work/wasm_names.py names w2c2's f<N>
+  from the wasm link map, Spire.Logic.linkmap). 99% of the command is the
+  next act's map generation: MapPathPruning.FindMatchingSegments (from
+  PruneAndRepair, up to 3 x (1 + prunes) calls) keys every segment of
+  every start-to-boss path with a StringBuilder (formatted ints,
+  string.Join over a LINQ select) into a SortedDictionary of strings.
+  Patch map.find_matching_segments redirects it to Spire.Logic's
+  MapPruning: a short key string of the coordinates and types (equal
+  exactly when the game's are) in a hash dictionary, the game's key text
+  once per distinct key for the SortedDictionary's order; same segments,
+  same lists, same order, so PrunePaths' shuffles draw the same. Checked
+  against the game's own private methods (by reflection, a temporary
+  build): 113 calls over the seeded runs and 11 in the user's act change,
+  all identical; seeded traces differences 0. The native host (the
+  console's translated logic on PC): that select_map_node 2,195 -> 181
+  ms (the JIT 356), the same 57 KB answer; on the console 8 s -> well
+  under a second, expected.
+- select_profile (2.9 s native, the console's 11-16 s boot): 92% is
+  ModelIdSerializationCache.Init's reflection (CachePropertiesForType:
+  GetProperties, custom attributes) over every model type, for the
+  multiplayer net ids and their hash. Boot only; not changed (it would
+  need the properties precomputed at build time).
+- The PC native host is built /O1 (no /Oi): w2c2's loads and stores are
+  real memcpy calls there, a third of its samples. The console's Release
+  is /Ox (/Oi), and _byteswap_ulong is an XDK intrinsic, so its loads are
+  inline: PC native times overstate the console's other costs.
+- The fight-start black screens: the console's 3 s watchdog names, apart
+  from the screenshots, only particle preprocesses: the hive's bugs1 (7
+  fights, 7-8 s each: the stalled noise, fixed in 543d8cf, untested on
+  hardware), twinkle_star_specks, the sandpit's top_sand. The preprocess
+  now keeps one cycle (was two): each looping particle restarts once a
+  cycle, so the last cycle sets the state; the skipped steps move the
+  clocks exactly as stepping does (skip_steps, sum by sum), so the result
+  is bit-identical: hive, glory, test subject, sandpit and underdocks
+  backgrounds rendered against the full preprocess (work/pre97.sh: full,
+  one2), 0 pixels differ (the one-sum skip_time differed in 101 sandpit
+  pixels: a cycle of whole steps wraps one step apart). bugs1 is 150 steps
+  at fight start instead of 301.
+  Still to see on the console: some combat turns spend 1-3 s in the
+  client's update (first-use effect scenes); trace_loads=1 names them.
+- The sandpit (The Insatiable): our render (work/rp96/sand97) against a
+  retail frame (a guide's screenshot, 3 players): same haze, falls, dunes,
+  colour within ~6%; the pillars differ by the random background variants
+  (BackgroundAssets: bg_01 a/b, bg_02 a/b/c, fg a/b). The yellow flecks
+  are its sand: dot.png particles at 0.01-0.04 tinted (0.88, 0.85, 0.47),
+  ~21,000 alive (nine falls of ~1,950, 1,500 ground sand, 400 clouds). Its
+  cost is the problem: the console ran that fight at ~7 FPS (GPU 90 ms a
+  frame, 60 of it particles; particle draw 55 ms and process 37 ms of
+  CPU); 1.9 M particle steps of preprocess. For the frame-rate work.
+- The Decimillipede's dots (console shot u3, decision 110): replayed
+  exactly (work/replay96.sh: the session's commands, its saves); the PC
+  draws the same slots with the same vertex counts but the two clipped
+  bodies (segment 3 and segment 1 shriveled vary with the clip), and no
+  dots, nor with an 80 s hold on that screen (work/deci97.sh, godmode, a
+  Spine triangle-stretch check). The dots cover the dead middle segment's
+  front stump (scar_2_shriveled_front: a 57x147 trim of a 1587x773 image,
+  so its mesh's UVs span a big part of the atlas; squashed, it samples
+  scattered texels). The console's pack is byte-identical to pack-80; the
+  D3D9 batch (2,046 vertices, 64 KB) is within DrawPrimitiveUP's limit
+  (a quarter of the 2 MB ring: XDK docs). Not found. The draw dump now
+  logs each triangle draw's screen and texture bounds: a Back + RB while
+  the dots show names the draw and its UVs.
+
+Tools: spire_play --dump-draws-shot N (the draws of --frames-after's shot
+N), --script-tail N (frames after the last command); work/replay96.sh
+(the fourth run replayed), deci97.sh, sand97.sh, pre97.sh,
+sample_logic.py (flat), stack_logic.py (stacks).
+
+Checks: PC build 0 warnings; seeded traces against base6 differences 0
+(traces/new97, --data-dir work/play-data); scenarios 30 ok (work/scen97);
+content coverage 829 ok (work/cov97; its 11 act runs reach Hive and Glory,
+3 victories: every act's map through the new pruning); spire_check over
+new97, scen97 and split97: 2294 responses, 0 failures, audio 21805
+voices, 7 absent (the known casts), 0 decoder failures; the console's logic
+rebuilt (out/logic/c): native runs 15 of 15, strict_compare 14 of 15
+identical to the JIT (the unseeded skin, as before), scenarios 30 ok, no
+trap or error.
+
+Next build: logic and engine changed: xdk\build.cmd spire360 (logic_lib
+compiles again). Copy default.xex; set trace_loads=1 next to profile=1.
+In a dark fight cycle Back + Y and note which preset matches the PC; if
+the Decimillipede's dots show, Back + RB on them.
 
 ## Fourth hardware run (2026-10-27): the noise's real stall, the display, and the user's findings
 
@@ -91,10 +185,10 @@ new96, scen96 and split96: 2475 responses, 0 failures, audio 22870 voices,
 7 absent, 0 decoder failures; the console's logic rebuilt (out/logic/c):
 strict_compare 14 of 15 identical to the JIT (the unseeded skin),
 scenarios 30 ok, no trap; the Smith's preview opened three times keeps
-its buttons (work/rp95/rest7). Two random pad sessions were still running
-at the pause (work/monkey90/g96*).
+its buttons (work/rp95/rest7); two random pad sessions (native and JIT
+logic, work/monkey90/g96*) 0 reports, no logic errors.
 
-Next build: logic and engine changed: xdkuild.cmd spire360 (logic_lib
+Next build: logic and engine changed: xdk\build.cmd spire360 (logic_lib
 compiles again). Copy default.xex; in a dark fight cycle Back + Y and note
 which preset matches the PC.
 

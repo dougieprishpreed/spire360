@@ -507,7 +507,7 @@ void Particles2D::process(double dt) {
             int steps = 0;
             for (double todo = preprocess; preprocess > 0 && todo >= 0; todo -= frame_time) ++steps;
             int skip = preprocess_skip(steps, frame_time);
-            skip_time(skip * frame_time);
+            skip_steps(skip, frame_time);
             for (int i = skip; i < steps; ++i) step_gpu(frame_time);
         }
         double time_scale = speed_scale > 0 ? speed_scale : 0;
@@ -529,7 +529,7 @@ void Particles2D::process(double dt) {
         int steps = 0;
         for (double todo = preprocess; todo > 0; todo -= frame_time) ++steps;
         int skip = preprocess_skip(steps, frame_time);
-        skip_time(skip * frame_time);
+        skip_steps(skip, frame_time);
         double sp = speed_scale;
         speed_scale = 1.0;
         for (int i = skip; i < steps; ++i) step(frame_time);
@@ -549,25 +549,30 @@ void Particles2D::process(double dt) {
 }
 
 /* The preprocess's first steps that need not be simulated: a looping
- * system's particles each restart once a cycle (lifetime), so what the
- * steps leave is set by the last cycles; the ones before only move the
- * clocks. The console simulates particles on its CPU, and the game's
- * backgrounds ask for up to 600 s. Kept: two cycles and a trail. */
+ * system's particles each restart once a cycle (lifetime), at their own
+ * phase of it, so what the steps leave is set by the last cycle; the ones
+ * before only move the clocks. The console simulates particles on its CPU,
+ * and the game's backgrounds ask for up to 600 s (the hive's bugs: 10 s
+ * of 150 with turbulence at each fight's start). Kept: a cycle and a
+ * trail. */
 int Particles2D::preprocess_skip(int steps, double frame_time) const {
     if (one_shot || sub_mode_ || lifetime <= 0 || frame_time <= 0) return 0;
-    double keep = 2.0 * lifetime + (trail_enabled ? trail_lifetime : 0.0);
+    double keep = lifetime + (trail_enabled ? trail_lifetime : 0.0);
     int keep_steps = (int)ceil(keep / frame_time) + 2;
     return steps > keep_steps ? steps - keep_steps : 0;
 }
 
-/* The clocks moved on t seconds without stepping the particles. */
-void Particles2D::skip_time(double t) {
-    if (t <= 0) return;
-    time_ += t;
-    if (gpu) clock_ += t; /* as step_gpu */
-    if (time_ > lifetime) {
-        cycle_ += (u32)(time_ / lifetime);
-        time_ = fmod(time_, lifetime);
+/* The clocks moved on as n steps of frame_time move them (step and
+ * step_gpu, sum by sum: a cycle of whole steps wraps where they would), the
+ * particles left alone. */
+void Particles2D::skip_steps(int n, double frame_time) {
+    for (int i = 0; i < n; ++i) {
+        time_ += frame_time;
+        if (gpu) clock_ += frame_time;
+        if (time_ > lifetime) {
+            time_ = fmod(time_, lifetime);
+            ++cycle_;
+        }
     }
 }
 

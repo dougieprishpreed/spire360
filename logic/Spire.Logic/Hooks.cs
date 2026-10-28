@@ -80,6 +80,10 @@ internal static partial class Hooks
         // LocTable.GetLocStringsWithPrefix(string prefix): empty list.
         Bridge.Register("loc.get_loc_strings_with_prefix", _ => new List<LocString>());
 
+        // MapPathPruning.FindMatchingSegments(start): the same segments, faster
+        // (the act change's map generation; MapPruning.cs).
+        Bridge.Register("map.find_matching_segments", a => MapPruning.FindMatchingSegments((MapPoint)a[0]!));
+
         // CardSelectCmd's entry points: which screen the pending card_select
         // stands for, and its prompt.
         foreach (var kind in new[] { "choose_a_card", "simple_grid", "combat_pile", "upgrade", "transform", "enchant",

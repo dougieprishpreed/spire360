@@ -44,6 +44,7 @@
  * lines, or a console logic log's "[CMD] " lines): those before the first
  * action start it (select_profile, set_setting, start_game_run with its
  * seed...), then auto play answers each screen with the next one.
+ * --script-tail N: frames played after the last command's answer (600).
  *
  * --pad-after N: auto play up to screen N (the number printed for it),
  * then the --pad presses on it.
@@ -58,7 +59,8 @@
  * console (whose GPU draws).
  *
  * --dump-draws-at N (with --load-trace): frame N's draws logged one by one
- * (the console's Back + RB).
+ * (the console's Back + RB). --dump-draws-shot N: those of --frames-after's
+ * shot N (its _fNNN.png).
  *
  * --skip-draws MASK: every frame drawn without those kinds of draw
  * (SceneTree::SKIP_*: 1 text, 2 particles, 4 spine, 8 the fight's
@@ -461,6 +463,8 @@ int main(int argc, char** argv) {
     const char* commands_path = NULL;
     bool load_trace = false, console_textures = false;
     long dump_draws_at = -1;
+    int dump_draws_shot = -1; /* --frames-after's shot whose draws are listed */
+    int script_tail = 600; /* --commands: frames played after the last answer */
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
     int hp = 0;
@@ -517,6 +521,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--profile-cpu") == 0) g_profile_cpu = true;
         else if (strcmp(argv[i], "--skip-draws") == 0 && i + 1 < argc) SceneTree::set_draw_skip(atoi(argv[++i]));
         else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
+        else if (strcmp(argv[i], "--dump-draws-shot") == 0 && i + 1 < argc) dump_draws_shot = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--script-tail") == 0 && i + 1 < argc) script_tail = atoi(argv[++i]);
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
@@ -903,7 +909,7 @@ int main(int argc, char** argv) {
     int shown = 0, idle = 0, frame_n = 0, waited = 0, after_script = 0;
     while (shown < steps) {
         /* --commands: the session's last command answered and played out */
-        if (commands_path && game.script_left() == 0 && ++after_script > 600) break;
+        if (commands_path && game.script_left() == 0 && ++after_script > script_tail) break;
         PadState pad;
         if (pad_at < pad_script.size() && !game.busy() &&
             (pad_after == 0 ? game.decision_count() > 0 : shown > pad_after)) {
@@ -945,6 +951,7 @@ int main(int argc, char** argv) {
                 if (load_trace) trace_frame(tree, sw, canvas, scale, f == 0 ? update_ms : 0, f0);
                 if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
                     /* the steps after that screen as they play */
+                    if (frame_n == dump_draws_shot) canvas.dump_next_frame();
                     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
                     tree.render(canvas);
                     sw.end();
@@ -987,6 +994,7 @@ int main(int argc, char** argv) {
             if (load_trace) trace_frame(tree, sw, canvas, scale, update_ms, f0);
             if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
                 /* the steps after that screen as they play */
+                if (frame_n == dump_draws_shot) canvas.dump_next_frame();
                 sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
                 tree.render(canvas);
                 sw.end();

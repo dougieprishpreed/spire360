@@ -476,7 +476,7 @@ void Canvas::draw_colored_triangles(const std::vector<Vec2>& v, const std::vecto
 void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, const std::vector<Vec2>& uv,
                             const std::vector<Color>& colors, const std::vector<int>& idx, int flags) {
     Texture* tex = img ? gpu_texture(img) : NULL;
-    if (dumping_ && !count_only_)
+    if (dumping_ && !count_only_ && (idx.empty() || (img && !tex)))
         log_info("draw %u: triangles %s %dx%d f%d, %d vertices%s", ++dump_draws_, img ? img->path.c_str() : "(colour)",
                  tex ? tex->width : 0, tex ? tex->height : 0, tex ? tex->format : 0, (int)idx.size(),
                  img && !tex ? " (no texture)" : "");
@@ -486,6 +486,20 @@ void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, co
     for (size_t i = 0; i < idx.size(); ++i) {
         int k = idx[i];
         verts_[i] = Vertex(xform_.xform(sway(v[k], uv[k])), uv[k], modulate_ * (colors.empty() ? Color() : colors[k]));
+    }
+    if (dumping_ && !count_only_) {
+        /* where on the screen, and from where in the texture */
+        Vec2 p0 = verts_[0].pos, p1 = p0, t0 = verts_[0].uv, t1 = t0;
+        for (size_t i = 1; i < verts_.size(); ++i) {
+            const Vertex& w = verts_[i];
+            p0 = Vec2(minf(p0.x, w.pos.x), minf(p0.y, w.pos.y));
+            p1 = Vec2(maxf(p1.x, w.pos.x), maxf(p1.y, w.pos.y));
+            t0 = Vec2(minf(t0.x, w.uv.x), minf(t0.y, w.uv.y));
+            t1 = Vec2(maxf(t1.x, w.uv.x), maxf(t1.y, w.uv.y));
+        }
+        log_info("draw %u: triangles %s %dx%d f%d, %d vertices, (%.0f, %.0f) (%.0f, %.0f), uv (%.3f, %.3f) (%.3f, %.3f)",
+                 ++dump_draws_, img ? img->path.c_str() : "(colour)", tex ? tex->width : 0, tex ? tex->height : 0,
+                 tex ? tex->format : 0, (int)idx.size(), p0.x, p0.y, p1.x, p1.y, t0.x, t0.y, t1.x, t1.y);
     }
     if (!count_only_) r_->draw_triangles(tex, &verts_[0], (int)verts_.size(), blend_, tex_flags_ | flags);
     ++calls_;
