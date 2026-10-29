@@ -121,6 +121,15 @@ internal static class StandIns
     private static object? Special(Creature c, string path, string typeName)
     {
         if (!SpecialClasses.TryGetValue(typeName, out var make)) return null;
+        var o = Named(c, path, make);
+        if (o is Godot.Marker2D marker) marker.GlobalPosition = NodePlace(c, path);
+        return o;
+    }
+
+    /// <summary>A creature's stand-in named "<who>#<path>" (the calls on it
+    /// reach the client with that name), made once.</summary>
+    private static object Named(Creature c, string path, Func<object> make)
+    {
         var key = Steps.Who(c) + "#" + path;
         if (!Specials.TryGetValue(key, out var o))
         {
@@ -128,7 +137,6 @@ internal static class StandIns
             Specials[key] = o;
             SpecialNames.AddOrUpdate(o, key);
         }
-        if (o is Godot.Marker2D marker) marker.GlobalPosition = NodePlace(c, path);
         return o;
     }
 
@@ -222,9 +230,12 @@ internal static class StandIns
             }
             // Effects the game waits for or sounds only when they exist (null
             // headless skips it): Hyperbeam's and Sweeping Beam's 0.5 s, End of
-            // Days' missile (its WaitTime), Fiend Fire's attack_fire per hit.
-            // The calls themselves are cues already; a stand-in lets the code
-            // after its null check run.
+            // Days' missile (its WaitTime), Fiend Fire's attack_fire per hit,
+            // Grand Finale's anticipation (NGrandFinaleVfx.totalAnticipationDuration,
+            // 1.625 s: the client's spotlight played out under the damage). The
+            // calls themselves are cues already; a stand-in lets the code after
+            // its null check run. The missiles' WaitTime is 0.2 s (Comet's and
+            // Guiding Star's small ones waited 0 on the null).
             if (InCombat)
                 switch (id[(id.LastIndexOf('.', sep) + 1)..])
                 {
@@ -232,7 +243,17 @@ internal static class StandIns
                     case "NSweepingBeamVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSweepingBeamVfx>();
                     case "NLargeMagicMissileVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NLargeMagicMissileVfx>();
                     case "NLargeMagicMissileVfx::get_WaitTime": return 0.2f;
+                    case "NSmallMagicMissileVfx::get_WaitTime": return 0.2f;
+                    case "NGrandFinaleVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NGrandFinaleVfx>();
                     case "NGroundFireVfx::Create": return Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NGroundFireVfx>();
+                    // NSleepingVfx.Create(%SleepVfxPos) (the Lagavulin Matriarch's and
+                    // the Slumbering Beetle's ZZZ): a stand-in named "<who>#sleeping",
+                    // so their SleepingVfx?.Stop() (the first damage, the wake, each
+                    // move, the death) reaches the client; null, the ZZZ never stopped.
+                    case "NSleepingVfx::Create":
+                        return a.Length > 0 && a[0] is Godot.Vector2 at && TryPlaced(at, out var sleeper)
+                            ? Named(sleeper, "sleeping", () => Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSleepingVfx>())
+                            : Blank<MegaCrit.Sts2.Core.Nodes.Vfx.NSleepingVfx>();
                 }
             // NEventRoom.Instance / VfxContainer outside combat: the events' own
             // effects (Dense Vegetation's slashes, Jungle Maze's hits) are made
@@ -433,6 +454,17 @@ internal static class StandIns
         SpineOf.AddOrUpdate(s, cr);
         return s;
     });
+
+    /// <summary>The creature an encoded position is about (Describe's slot).</summary>
+    public static bool TryPlaced(Godot.Vector2 v, out Creature creature)
+    {
+        creature = null!;
+        if (v.X < Base - Slack || v.Y > -Base + Slack) return false;
+        int slot = (int)Math.Round((v.X - Base) / Step);
+        if (slot < 0 || slot >= Slots.Count) return false;
+        creature = Slots[slot];
+        return true;
+    }
 
     /// <summary>"e1@bottom" (and "+dx,dy" when the game moved it) for an
     /// encoded position; null for any other.</summary>

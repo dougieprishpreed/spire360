@@ -228,6 +228,8 @@ private:
     void show_card_text(Holder& h, const std::string& text);
     Node* make_background(const Json& bg);
     bool make_creature(const std::string& visuals_id, bool player, Creature& out);
+    /* the creatures summoned and killed within a response's steps */
+    void add_summoned(const Json& steps, Node* container);
     void update_bounds(Creature& c);
     /* CreatureAnimator.BoundsUpdated (a "bounds" op among the animator's):
      * NCreature.UpdateBounds moves the intents to that container's IntentPos */
@@ -264,6 +266,7 @@ private:
     void track_play();
     void refresh_counters();
     void layout_hand(bool snap = false);
+    void restack_hand();
     void select_reticle(Creature& c, bool on);
     void show_nameplate(Creature& c, bool on);
     Node2D* make_arrow();

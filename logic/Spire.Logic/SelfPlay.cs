@@ -146,6 +146,10 @@ internal static class SelfPlay
                 }
                 return ("end_turn", null);
             }
+            case "event_choice" when Equals(Get(s, "finished"), true):
+                // a finished event's last page: its PROCEED, without a draw
+                // (the runs before the page are the same runs)
+                return ("choose_option", A(("option_index", 0)));
             case "event_choice":
             case "rest_site":
             {

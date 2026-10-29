@@ -36,6 +36,9 @@ public:
     /* Before build: the portrait an earlier page of the event put in place
      * (an event_portrait cue: Trial's accused), null for the event's own. */
     void set_room_portrait(const Json& cue) { room_portrait_ = cue; }
+    /* The same event's next page (NEventRoom.RefreshEventState keeps the
+     * layout): an ancient's banner as it settled, not its entrance. */
+    void set_continued(bool on) { continued_ = on; }
     /* Transfer the visual-only room across event pages or into the fight. */
     CombatScreen* take_combat();
     /* What a choice did to the event's room, before the screen after it;
@@ -62,6 +65,7 @@ private:
     void focus(int i);
     void show_line(int i);
     void place_content(float h);
+    void settle_banner(bool animate);
 
     SceneLibrary* lib_;
     CombatScreen* combat_;
@@ -76,6 +80,9 @@ private:
      * left one mirrored), one exchange each 2.6 s. */
     bool sparring_;
     float spar_at_;
+    /* a combat layout's options, hidden while the room plays the event's
+     * steps (The Architect's attacks and pauses): NULL when none wait */
+    CanvasItem* steps_options_;
     TweenSet tweens_;
     /* the focused option's tips: left of it, right of it in a combat
      * layout (NEventOptionButton.OnFocus) */
@@ -88,6 +95,7 @@ private:
     std::vector<Control*> lines_;
     int line_;
     bool laid_out_; /* a layout pass has measured the content */
+    bool continued_;
     Control* content_container_;
     Control* content_;
     Control* options_box_;

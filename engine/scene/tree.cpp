@@ -442,6 +442,11 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
             continue;
         }
         if (!d.ci) continue;
+        /* BackBufferCopy: Godot copies the screen again where it comes in the
+         * order, for the screen-reading items after it; the frame's first
+         * copy read instead, the scream's distortion (vfx_scream) showed the
+         * Sandpit as drawn before the player, who vanished under it. */
+        if (d.ci->type == "BackBufferCopy") canvas.renderer()->screen_barrier();
         if (g_draw_skip > 0 && d.group == GROUP_NONE && skip_draw(d, g_draw_skip)) continue;
         if (d.group == GROUP_MASK) {
             if (&d != group_mask) continue;

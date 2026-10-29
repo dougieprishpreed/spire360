@@ -308,7 +308,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 }
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
-    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), target_(-1), last_target_(-1), script_at_(0), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
+    : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), hand_focus_floor_(-1), target_(-1), last_target_(-1), script_at_(0), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
       rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), shop_auto_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
@@ -839,6 +839,24 @@ static bool has_cue(const Json& d, const char* type) {
 
 void GameClient::show(const Json& d) {
     errors_ = 0; /* the retries after an error count per decision */
+    /* A fight whose first decision is a selection from the hand (an Imbued
+     * card played at its start: Nightmare's pick; Gambling Chip): the fight
+     * as its first turn shows it (the draws, the card played, from the
+     * room's entry), then the selection on the hand once they have played,
+     * as one later in the fight. It came up at once on the grid's screen,
+     * over the fight as it stood after its start. */
+    const std::string& select = d["kind"].str();
+    const std::string& room = d["context"]["room_type"].str();
+    if (d["decision"].str() == "card_select" && (select == "hand" || select == "hand_upgrade") &&
+        (room == "Monster" || room == "Elite" || room == "Boss") && !combat_ && !room_ && d["fight"].is_object() &&
+        d["steps"].size() > 0 && decision_["decision"].str() != "combat_play") {
+        Json fight = d["fight"];
+        fight.set("steps", d["steps"]);
+        show(fight);
+        --decisions_; /* not a decision of the logic's */
+        finishing_ = d;
+        return;
+    }
     CueLedger::seen(d["steps"]);
     /* the client's own purchases flew as it made them (ShopScreen::
      * purchased); a used card removal shows in the rebuilt shop */
@@ -877,6 +895,7 @@ void GameClient::show(const Json& d) {
             piles_button_ = 0;
         }
     std::string prev_kind = decision_["decision"].str();
+    std::string prev_event = decision_["event_id"].str();
     std::string prev_stage = decision_["stage"].str();
     Json prev_player = decision_["player"];
     const std::string& kind = d["decision"].str();
@@ -1093,6 +1112,7 @@ void GameClient::show(const Json& d) {
         last_event_ = d;
         EventScreen* event = new EventScreen(lib_);
         event->set_room_portrait(event_portrait_);
+        event->set_continued(prev_kind == "event_choice" && !prev_event.empty() && prev_event == d["event_id"].str());
         if (event_room) { event->set_combat(room_); room_ = NULL; }
         ported_ = event;
         screen_ = ported_->build(d, &err);
@@ -1183,12 +1203,23 @@ void GameClient::show(const Json& d) {
     if (kind == "combat_play") {
         bool continuing = room_ != NULL;
         if (prev_kind != "combat_play" && !continuing) enemy_places_.clear(); /* a new fight */
+        /* NPlayerHand, its _lastFocusedHolderIdx with it, is the fight's: a
+         * new fight's first hand focuses the first card drawn
+         * (NCombatRoom.DefaultFocusedControl is the empty hand's
+         * CardHolderContainer, and AddCardHolder gives the first holder added
+         * to it the focus). The last fight's index, kept, put it anywhere. */
+        int floor = d["context"]["total_floor"].i(-1);
+        if (floor != hand_focus_floor_) {
+            hand_focus_floor_ = floor;
+            hand_focus_ = 0;
+        }
         Json before = prev_kind == "combat_play" ? last_combat_ : Json();
         last_combat_ = d;
         if (continuing) {
             combat_ = room_;
             room_ = NULL;
             screen_ = combat_->root_node();
+            combat_->set_hand_focus(hand_focus_);
             combat_->update_decision(d);
             if (event_room) combat_->show_start_banner();
         } else {

@@ -115,6 +115,9 @@ def act(rng, state):
                 args["target_index"] = rng.randrange(len(state["enemies"]))
             return a("play_card", **args)
         return a("end_turn")
+    if d == "event_choice" and state.get("finished"):
+        # a finished event's last page: its PROCEED, without a draw
+        return a("choose_option", option_index=0)
     if d == "event_choice":
         opts = [o for o in state.get("options", []) if not o.get("is_locked")]
         return a("choose_option", option_index=rng.choice(opts)["index"]) if opts else a("leave_room")

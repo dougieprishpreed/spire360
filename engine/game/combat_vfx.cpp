@@ -863,7 +863,11 @@ private:
 class Sleeping : public Effect {
 public:
     Sleeping() : right_(true), stop_at_(-1) {}
-    void setup(bool right) { right_ = right; }
+    void setup(bool right, const std::string& who) {
+        right_ = right;
+        who_ = who;
+    }
+    const std::string& who() const { return who_; }
     void stop() {
         if (stop_at_ < 0) stop_at_ = t_;
     }
@@ -888,6 +892,7 @@ public:
 private:
     bool right_;
     double stop_at_;
+    std::string who_; /* the sleeper */
 };
 
 /* NHyperbeamVfx: from the Defect's eye toward the target: anticipation
@@ -3136,10 +3141,19 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
         return true;
     }
     if (call == "NSleepingVfx.Stop") {
-        /* the monster's own effect: every one still sleeping wakes */
+        /* the monster's own effect (the logic's stand-in "<who>#sleeping"),
+         * else every one still sleeping */
+        std::string who;
+        for (size_t i = 0; i < a.words.size(); ++i) {
+            size_t hash = a.words[i].find('#');
+            if (hash != std::string::npos && a.words[i].compare(hash, std::string::npos, "#sleeping") == 0)
+                who = a.words[i].substr(0, hash);
+        }
         for (size_t i = 0; i < box->children.size(); ++i) {
             Node* fx = box->children[i];
-            if (fx->script == "res://src/Core/Nodes/Vfx/NSleepingVfx.cs" && fx->behavior) ((Sleeping*)fx->behavior)->stop();
+            if (fx->script != "res://src/Core/Nodes/Vfx/NSleepingVfx.cs" || !fx->behavior) continue;
+            Sleeping* sleeping = (Sleeping*)fx->behavior;
+            if (who.empty() || sleeping->who() == who) sleeping->stop();
         }
         return true;
     }
@@ -3164,7 +3178,7 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
             if (!fx) return false;
             set_global(fx, at[0]);
             if (fx->behavior) {
-                ((Sleeping*)fx->behavior)->setup(a.bools.empty() || a.bools[0]);
+                ((Sleeping*)fx->behavior)->setup(a.bools.empty() || a.bools[0], a.places[0].who);
                 ((Effect*)fx->behavior)->start(fx);
             }
         } else {

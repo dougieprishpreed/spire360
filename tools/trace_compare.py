@@ -8,8 +8,8 @@ presentation adds: the regression check after a logic change.
 
 Both folders are normalised the same way before the comparison:
 - decisions the self-play agent answers differently from the older traces
-  (rewards, treasure, a finished rest site) are dropped with the command
-  after them;
+  (rewards, treasure, a finished rest site, a finished event's last page)
+  are dropped with the command after them;
 - presentation-only keys (DROP below) are ignored at every depth.
 
 Prints the first differing line per file and "differences: N" (0 = same
@@ -26,6 +26,7 @@ DROP = {
     "instance_id",
     "audio",  # NRunMusicController's presentation selection and parameters
     "combat_visuals",  # visual-only encounter behind a combat event's options
+    "finished",  # an event's last page (the page itself is dropped, see normalise)
     "steps", "tips", "player_tips", "background", "colorless", "card_removal_used", "orb_slots", "orbs", "score_lines", "score",
     "death_quote", "victory_text", "jitter", "room", "look", "max_potions", "ascension", "at_second_boss",
     "ancient", "point_type", "at_boss", "total_floor", "second_boss", "description_by_target",
@@ -76,7 +77,8 @@ def normalise(path):
             d = None
         if isinstance(d, dict):
             kind = d.get("decision")
-            if kind in ("rewards", "treasure") or (kind == "rest_site" and d.get("done")):
+            if kind in ("rewards", "treasure") or (kind == "rest_site" and d.get("done")) or (
+                    kind == "event_choice" and d.get("finished")):
                 skip = True
                 continue
             if kind == "rest_site":

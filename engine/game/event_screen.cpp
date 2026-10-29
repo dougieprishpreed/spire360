@@ -49,7 +49,8 @@ static std::string option_text(const Json& o) {
 
 EventScreen::EventScreen(SceneLibrary* lib)
     : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), sparring_(false), spar_at_(0),
-      root_(NULL), combat_layout_(false), ancient_(false), line_(0), laid_out_(false),
+      steps_options_(NULL), root_(NULL), combat_layout_(false), ancient_(false), line_(0), laid_out_(false),
+      continued_(false),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
 
@@ -166,6 +167,13 @@ Node* EventScreen::build_combat(const Json& d) {
     for (size_t i = 0; i < os.size(); ++i) add_option(options, os[i], (int)i, false);
     if (!options_.empty()) focus(0);
     enabled_ = true; enable_at_ = SETUP_WAIT;
+    /* The event's code made its options once those steps were done (The
+     * Architect's SetEventState after PlayCurrentLine's attacks and waits):
+     * shown with the steps, a press skipped the rest of them. */
+    if (d["steps"].size() > 0 && !sparring_ && options && options->is_canvas_item()) {
+        steps_options_ = (CanvasItem*)options;
+        steps_options_->modulate.a = 0;
+    }
     return lay;
 }
 
@@ -454,7 +462,10 @@ void EventScreen::show_line(int i) {
         set_visible(next_button_, false);
         container_h_ = 720.0f;
         content_container_->offset[SIDE_BOTTOM] = content_container_->offset[SIDE_TOP] + container_h_;
-        num += options_box_->size.y + 10.0f;
+        /* without lines the options are all there is: up to their bottom
+         * (the content is taller, they sit at its end) */
+        num = lines_.empty() ? options_box_->position.y + options_box_->size.y + 10.0f
+                             : num + options_box_->size.y + 10.0f;
         /* The options take the focus 0.8 s in. */
         enable_at_ = time_ + 0.8f;
         enabled_ = true;
@@ -477,7 +488,7 @@ std::string EventScreen::input(const PadState& pad) {
         }
         return std::string();
     }
-    if (!enabled_ || time_ < enable_at_ || options_.empty()) return std::string();
+    if (!enabled_ || time_ < enable_at_ || options_.empty() || steps_options_) return std::string();
     int n = (int)options_.size();
     /* NEventOptionButton plays NButton's sounds. */
     int was = focus_;
@@ -524,6 +535,11 @@ void EventScreen::frame(double dt) {
         combat_->play_steps(steps);
         spar_at_ += 2.6f;
     }
+    if (steps_options_ && !room_playing()) {
+        tweens_.tween(&steps_options_->modulate.a, 1, 0.25f);
+        enable_at_ = time_ + 0.25f;
+        steps_options_ = NULL;
+    }
     for (size_t i = 0; i < options_.size(); ++i) {
         Option& op = options_[i];
         /* The slide moves the button's contents (its own place is the
@@ -541,8 +557,10 @@ void EventScreen::frame(double dt) {
         if (op.image) op.image->shader_params["v"] = op.v;
     }
     if (!ancient_) return;
-    /* The first line once a layout pass has measured the lines. */
-    if (!laid_out_ && content_->size.y > 0 && (lines_.empty() || lines_[0]->size.y > 0)) {
+    /* The first line once a layout pass has measured the lines (and the
+     * options, which a page without lines rises by alone). */
+    if (!laid_out_ && content_->size.y > 0 && (lines_.empty() || lines_[0]->size.y > 0) &&
+        (!lines_.empty() || options_.empty() || options_box_->size.y > 0)) {
         laid_out_ = true;
         if (lines_.empty()) {
             container_h_ = 720.0f;
@@ -552,13 +570,15 @@ void EventScreen::frame(double dt) {
         show_line(0);
     }
     place_content(container_h_);
-    if (enabled_ && focus_ < 0 && time_ >= enable_at_ && !options_.empty()) focus(0);
+    if (enabled_ && focus_ < 0 && time_ >= enable_at_ && !options_.empty() && !steps_options_) focus(0);
 
     /* The name banner's timeline (AnimateVfx), simplified: the glyph
      * spacing effect is a fade in. */
     if (banner_) {
         Control* ep = banner_epithet_ && banner_epithet_->is_control() ? (Control*)banner_epithet_ : NULL;
-        if (before == 0) {
+        if (before == 0 && continued_) {
+            settle_banner(false);
+        } else if (before == 0) {
             banner_->offset[SIDE_TOP] = banner_->offset[SIDE_BOTTOM] = -200;
             tweens_.tween(&banner_->offset[SIDE_TOP], -100, 4.0f, TRANS_CIRC, EASE_OUT);
             tweens_.tween(&banner_->offset[SIDE_BOTTOM], -100, 4.0f, TRANS_CIRC, EASE_OUT);
@@ -570,7 +590,7 @@ void EventScreen::frame(double dt) {
                 tweens_.tween(&ep->offset[SIDE_BOTTOM], 42, 2.0f, TRANS_CUBIC, EASE_OUT, 1.0f);
                 tweens_.tween(&ep->modulate.a, 1, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 1.5f);
             }
-        } else if (before < 4.5f && time_ >= 4.5f) {
+        } else if (!continued_ && before < 4.5f && time_ >= 4.5f) {
             /* Red, then gone (one tween per property: these start now). */
             CanvasItem* both[2] = { banner_title_, banner_epithet_ };
             for (int k = 0; k < 2; ++k) {
@@ -579,46 +599,57 @@ void EventScreen::frame(double dt) {
                 tweens_.tween(&both[k]->modulate.b, 0, 1.0f, TRANS_EXPO, EASE_OUT);
                 tweens_.tween(&both[k]->modulate.a, 0, 1.0f, TRANS_CUBIC, EASE_OUT);
             }
-        } else if (before < 5.5f && time_ >= 5.5f) {
-            /* Settled: small, cream, at the bottom left. */
-            CanvasItem* both[2] = { banner_title_, banner_epithet_ };
-            for (int k = 0; k < 2; ++k) {
-                if (!both[k]) continue;
-                tweens_.kill(&both[k]->modulate.r);
-                tweens_.kill(&both[k]->modulate.g);
-                tweens_.kill(&both[k]->modulate.b);
-                tweens_.kill(&both[k]->modulate.a);
-            }
-            tweens_.kill(&banner_->offset[SIDE_TOP]);
-            tweens_.kill(&banner_->offset[SIDE_BOTTOM]);
-            banner_->offset[SIDE_TOP] = banner_->offset[SIDE_BOTTOM] = -80;
-            banner_->offset[SIDE_LEFT] = banner_->offset[SIDE_RIGHT] = 0;
-            tweens_.tween(&banner_->offset[SIDE_LEFT], 48, 2.0f, TRANS_CIRC, EASE_OUT);
-            tweens_.tween(&banner_->offset[SIDE_RIGHT], 48, 2.0f, TRANS_CIRC, EASE_OUT);
-            if (banner_title_ && banner_title_->type == "RichTextLabel") {
-                RichTextLabel* t = (RichTextLabel*)banner_title_;
-                t->modulate = Color(1, 1, 1, 1);
-                t->h_align = 0;
-                t->v_align = 2;
-                t->offset[SIDE_TOP] = t->offset[SIDE_BOTTOM] = 0;
-                t->add_theme_font_size_override("normal_font_size", 54);
-                t->add_theme_color_override("font_outline_color", Color(0, 0, 0, 0));
-                t->add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0));
-                t->add_theme_color_override("default_color", hex(CREAM));
-                t->invalidate();
-            }
-            if (ep && ep->type == "Label") {
-                Label* l = (Label*)ep;
-                l->modulate = Color(1, 1, 1, 0);
-                l->h_align = 0;
-                l->v_align = 2;
-                l->add_theme_font_size_override("font_size", 18);
-                l->add_theme_color_override("font_outline_color", Color(0, 0, 0, 0));
-                l->add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0));
-                l->add_theme_color_override("font_color", hex(CREAM));
-                tweens_.tween(&l->modulate.a, 0.5f, 2.0f, TRANS_CIRC, EASE_OUT);
-            }
+        } else if (!continued_ && before < 5.5f && time_ >= 5.5f) {
+            settle_banner(true);
         }
+    }
+}
+
+/* The name banner settled: small, cream, at the bottom left. */
+void EventScreen::settle_banner(bool animate) {
+    if (!banner_) return;
+    Control* ep = banner_epithet_ && banner_epithet_->is_control() ? (Control*)banner_epithet_ : NULL;
+    CanvasItem* both[2] = { banner_title_, banner_epithet_ };
+    for (int k = 0; k < 2; ++k) {
+        if (!both[k]) continue;
+        tweens_.kill(&both[k]->modulate.r);
+        tweens_.kill(&both[k]->modulate.g);
+        tweens_.kill(&both[k]->modulate.b);
+        tweens_.kill(&both[k]->modulate.a);
+    }
+    tweens_.kill(&banner_->offset[SIDE_TOP]);
+    tweens_.kill(&banner_->offset[SIDE_BOTTOM]);
+    banner_->offset[SIDE_TOP] = banner_->offset[SIDE_BOTTOM] = -80;
+    banner_->offset[SIDE_LEFT] = banner_->offset[SIDE_RIGHT] = 0;
+    if (animate) {
+        tweens_.tween(&banner_->offset[SIDE_LEFT], 48, 2.0f, TRANS_CIRC, EASE_OUT);
+        tweens_.tween(&banner_->offset[SIDE_RIGHT], 48, 2.0f, TRANS_CIRC, EASE_OUT);
+    } else {
+        banner_->offset[SIDE_LEFT] = banner_->offset[SIDE_RIGHT] = 48;
+    }
+    if (banner_title_ && banner_title_->type == "RichTextLabel") {
+        RichTextLabel* t = (RichTextLabel*)banner_title_;
+        t->modulate = Color(1, 1, 1, 1);
+        t->h_align = 0;
+        t->v_align = 2;
+        t->offset[SIDE_TOP] = t->offset[SIDE_BOTTOM] = 0;
+        t->add_theme_font_size_override("normal_font_size", 54);
+        t->add_theme_color_override("font_outline_color", Color(0, 0, 0, 0));
+        t->add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0));
+        t->add_theme_color_override("default_color", hex(CREAM));
+        t->invalidate();
+    }
+    if (ep && ep->type == "Label") {
+        Label* l = (Label*)ep;
+        l->modulate = Color(1, 1, 1, 0);
+        l->h_align = 0;
+        l->v_align = 2;
+        l->add_theme_font_size_override("font_size", 18);
+        l->add_theme_color_override("font_outline_color", Color(0, 0, 0, 0));
+        l->add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0));
+        l->add_theme_color_override("font_color", hex(CREAM));
+        if (animate) tweens_.tween(&l->modulate.a, 0.5f, 2.0f, TRANS_CIRC, EASE_OUT);
+        else l->modulate.a = 0.5f;
     }
 }
 

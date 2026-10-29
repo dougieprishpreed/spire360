@@ -81,6 +81,10 @@ static void combat_event_case(SceneLibrary& lib, const Json& decision) {
     }
     if (portrait) fprintf(stderr, "combat event %s: a Portrait at %s\n", decision["event_id"].str().c_str(), portrait->path().c_str());
     check(portrait == NULL, "combat event used the portrait layout");
+    /* the options come once the room has played the event's steps (The
+     * Architect's attacks), faded in over 0.25 s */
+    for (int i = 0; i < 400 && screen.room_playing(); ++i) tree.process(0.05);
+    for (int i = 0; i < 10; ++i) tree.process(0.05);
     PadState pad; pad.pressed = PadState::A;
     std::string command = screen.input(pad);
     Json response = Json::parse(command.c_str(), command.size(), &error);

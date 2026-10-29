@@ -2072,7 +2072,11 @@ public partial class RunDriver
         }
         else
         {
-            // Starting point — pick from starting row
+            // Nothing visited in the act: NMapScreen.RecalculateTravelability
+            // makes the starting point alone travelable (the next act's
+            // Ancient, or the first act's monster room begun without Neow),
+            // so its room comes first; its children were offered too, which
+            // let an act start skip the Ancient.
             var startPoint = map.StartingMapPoint;
             choices = new List<Dictionary<string, object?>>
             {
@@ -2083,19 +2087,6 @@ public partial class RunDriver
                     ["type"] = startPoint.PointType.ToString(),
                 }
             };
-            // Add all children of start point as well since we can travel to them
-            if (startPoint.Children != null)
-            {
-                foreach (var child in startPoint.Children)
-                {
-                    choices.Add(new Dictionary<string, object?>
-                    {
-                        ["col"] = (int)child.coord.col,
-                        ["row"] = (int)child.coord.row,
-                        ["type"] = child.PointType.ToString(),
-                    });
-                }
-            }
         }
 
         return new Dictionary<string, object?>
@@ -2798,6 +2789,20 @@ public partial class RunDriver
         if (_rewardList == null && !_rewardsProcessed)
         {
             _goldBeforeCombat = player.Gold;
+            // NCombatUi.OnCombatWon: an encounter that gives none
+            // (EncounterModel.ShouldGiveRewards: the Battleworn Dummy's) goes on
+            // without the rewards screen (ProceedWithoutRewards: 1 s, then
+            // ProceedFromTerminalRewardsScreen, which resumes its event: its
+            // victory page and its own reward; a card reward was offered here).
+            if (combatRoom.Encounter != null && !combatRoom.Encounter.ShouldGiveRewards)
+            {
+                _rewardsProcessed = true;
+                Steps.Wait(1000, "cmd");
+                Sched.Run(() => RunManager.Instance.ProceedFromTerminalRewardsScreen());
+                Sched.Pump();
+                WaitForActionExecutor();
+                return DetectDecisionPoint();
+            }
             try
             {
                 var rewardsSet = new RewardsSet(player).WithRewardsFromRoom(combatRoom);
@@ -2812,9 +2817,11 @@ public partial class RunDriver
                 Sched.Pump();
                 ClearRewards();
                 _rewardList = rewardsSet.Rewards.ToList();
-                if (_rewardList.Count > 0)
-                    return RewardsState();
-                ClearRewards();
+                // RewardsSet.Offer shows a combat room's screen even with
+                // nothing on it (the last act's boss gives none: its Proceed
+                // starts the act change once the death has played out; skipped,
+                // the Queen's death gave way to The Architect at once).
+                return RewardsState();
             }
             catch (Exception ex) { Log($"Generate rewards: {ex.Message}"); }
         }
@@ -2870,6 +2877,9 @@ public partial class RunDriver
     // first page only).
     private readonly HashSet<EventRoom> _ancientDialogueShown = new HashSet<EventRoom>();
 
+    // The finished event whose last page (its PROCEED) has been shown.
+    private EventModel? _finishedPage;
+
     private Dictionary<string, object?> EventChoiceState(EventRoom eventRoom)
     {
         var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
@@ -2889,8 +2899,19 @@ public partial class RunDriver
             !fakeMerchant.StartedFight)
             return FakeMerchantState(fakeMerchant, _runState!.Players[0]);
 
+        // NEventRoom.SetOptions: a finished event's room keeps its last page
+        // (the description it finished with) with one option, PROCEED
+        // (NEventRoom.Proceed: on to the map). The headless driver this began
+        // from went straight on to the map: no event's ending was shown.
+        IReadOnlyList<EventOption>? finishedPage = null;
+        if (localEvent != null && localEvent.IsFinished && !ReferenceEquals(_finishedPage, localEvent))
+        {
+            _finishedPage = localEvent;
+            finishedPage = new[] { new EventOption(localEvent, () => Task.CompletedTask, "PROCEED", false, true) };
+        }
+
         // If event is finished, proceed to map
-        if (localEvent == null || localEvent.IsFinished)
+        if (finishedPage == null && (localEvent == null || localEvent.IsFinished))
         {
             Log($"Event {localEvent?.GetType().Name ?? "null"} finished, proceeding");
             try
@@ -2908,7 +2929,7 @@ public partial class RunDriver
             return _runState?.CurrentRoom is MapRoom ? MapSelectState() : DetectDecisionPoint();
         }
 
-        var currentOptions = localEvent.CurrentOptions;
+        var currentOptions = finishedPage ?? localEvent!.CurrentOptions;
         if (currentOptions == null || currentOptions.Count == 0)
         {
             Log($"Event {localEvent.GetType().Name} has no options, auto-skipping");
@@ -3178,6 +3199,7 @@ public partial class RunDriver
             ["description_bbcode"] = descBbcode,
             ["ancient"] = ancient,
             ["combat_visuals"] = combatVisuals,
+            ["finished"] = finishedPage != null,
         };
     }
 

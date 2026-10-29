@@ -228,7 +228,8 @@ private:
     bool shop_open_;       /* the shop's inventory open, and its focused slot */
     std::string shop_kind_;
     int shop_index_;
-    int hand_focus_;       /* kept across decisions, as the game's _lastFocusedHolderIdx */
+    int hand_focus_;       /* kept across a fight's decisions, as the game's _lastFocusedHolderIdx */
+    int hand_focus_floor_; /* the floor of the fight hand_focus_ is for */
     int target_;           /* combat targeting: enemy index, -1 when not targeting */
     int last_target_;      /* the enemy last aimed at (combat_id; NCombatRoom.LastTargetedCreature) */
     Json decision_;

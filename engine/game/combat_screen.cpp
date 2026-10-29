@@ -1145,7 +1145,28 @@ int CombatScreen::focused_holder() const {
     return last;
 }
 
+/* NPlayerHand.AddCardHolder puts a holder in at its card's index
+ * (MoveChildSafely), so each card draws over the one on its left. Ours went
+ * in at the end: a card back from a hand selection (Nightmare's pick) drew
+ * over the cards on its right. The hand's holders take their places among
+ * the container's children in the hand's order; the rest stay put. */
+void CombatScreen::restack_hand() {
+    if (!hand_box_) return;
+    std::vector<Node*>& children = hand_box_->children;
+    std::vector<size_t> slots;
+    for (size_t i = 0; i < children.size(); ++i)
+        for (size_t j = 0; j < holders_.size(); ++j)
+            if (children[i] == holders_[j].node) {
+                slots.push_back(i);
+                break;
+            }
+    size_t k = 0;
+    for (size_t j = 0; j < holders_.size() && k < slots.size(); ++j)
+        if (holders_[j].node && holders_[j].node->parent == hand_box_) children[slots[k++]] = holders_[j].node;
+}
+
 void CombatScreen::layout_hand(bool snap) {
+    restack_hand();
     refresh_hand_indices();
     /* NPlayerHand.RefreshLayout: the visible holders (ActiveHolders) */
     std::vector<int> act;
@@ -2443,6 +2464,41 @@ void CombatScreen::refresh_counters() {
 
 /* Keep the background, Spine tracks, particles and surviving holders alive.
  * Only new combatants are instanced; absent enemies remain through death. */
+/* A creature summoned and killed within these steps (not among the
+ * decision's living): from its spawn's view, hidden until the spawn shows
+ * it, gone with its death as the others. The fight's last steps too: the
+ * Gremlin Merc's gremlins, killed by what was left of the hits that killed
+ * it (SurprisePower), never showed. */
+void CombatScreen::add_summoned(const Json& steps, Node* container) {
+    for (size_t s = 0; container && s < steps.size(); ++s)
+        for (size_t k = 0; k < steps[s].size(); ++k) {
+            const Json& ch = steps[s][k];
+            if (ch["t"].str() != "spawn" || !ch["view"].is_object()) continue;
+            const std::string& id = ch["who"].str();
+            if (std::find(enemy_who_.begin(), enemy_who_.end(), id) != enemy_who_.end() || creature_for(id)) continue;
+            const Json& v = ch["view"];
+            Ghost g;
+            if (!make_creature(v["id"].str(), false, g.c)) continue;
+            g.c.node->name = format("CombatEnemy_%d", v["combat_id"].i(-1));
+            container->add_child(g.c.node);
+            g.c.hp_bar_reduction = v["hp_bar_reduction"].f();
+            g.c.data = v;
+            g.c.powers = v["powers"];
+            update_bounds(g.c);
+            refresh_state(g.c, false);
+            set_nameplate_text(g.c.nameplate, v["name"].str());
+            Vec2 slot;
+            if (slot_position(v, &slot)) g.c.node->set_position(slot);
+            else if (places_ && places_->find(v["combat_id"].i()) != places_->end()) g.c.node->set_position((*places_)[v["combat_id"].i()]);
+            else g.c.node->set_position(Vec2(250.0f + (float)(enemies_.size() + ghosts_.size()) * 220.0f, 200));
+            play_idle(g.c.node);
+            setup_creature_spine(g.c.visuals, g.c.data);
+            g.c.node->visible = false;
+            g.who = id;
+            ghosts_.push_back(g);
+        }
+}
+
 void CombatScreen::update_decision(const Json& d, bool finishing) {
     unfocus_creatures(); /* the creatures may change */
     if (visual_only_ && !finishing) {
@@ -2514,39 +2570,9 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
             g.who = enemy_who_[j];
             ghosts_.push_back(g);
         }
-        /* A creature summoned and killed within these steps (not among the
-         * decision's living): from its spawn's view, hidden until the spawn
-         * shows it, gone with its death as the others. */
-        const Json& steps = d["steps"];
-        for (size_t s = 0; container && s < steps.size(); ++s)
-            for (size_t k = 0; k < steps[s].size(); ++k) {
-                const Json& ch = steps[s][k];
-                if (ch["t"].str() != "spawn" || !ch["view"].is_object()) continue;
-                const std::string& id = ch["who"].str();
-                if (std::find(who.begin(), who.end(), id) != who.end() || creature_for(id)) continue;
-                const Json& v = ch["view"];
-                Ghost g;
-                if (!make_creature(v["id"].str(), false, g.c)) continue;
-                g.c.node->name = format("CombatEnemy_%d", v["combat_id"].i(-1));
-                container->add_child(g.c.node);
-                g.c.hp_bar_reduction = v["hp_bar_reduction"].f();
-                g.c.data = v;
-                g.c.powers = v["powers"];
-                update_bounds(g.c);
-                refresh_state(g.c, false);
-                set_nameplate_text(g.c.nameplate, v["name"].str());
-                Vec2 slot;
-                if (slot_position(v, &slot)) g.c.node->set_position(slot);
-                else if (places_ && places_->find(v["combat_id"].i()) != places_->end()) g.c.node->set_position((*places_)[v["combat_id"].i()]);
-                else g.c.node->set_position(Vec2(250.0f + (float)(next.size() + ghosts_.size()) * 220.0f, 200));
-                play_idle(g.c.node);
-                setup_creature_spine(g.c.visuals, g.c.data);
-                g.c.node->visible = false;
-                g.who = id;
-                ghosts_.push_back(g);
-            }
         enemies_ = next;
         enemy_who_ = who;
+        add_summoned(d["steps"], container);
         /* A pet that joined during the fight (Byrdpip hatched mid-combat,
          * Pael's Legion): beside the player, revealed by its spawn. */
         const Json& ps = d["pets"];
@@ -2576,6 +2602,8 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
                 osty_.node->visible = false;
             }
         }
+    } else {
+        add_summoned(d["steps"], root_->find_unique("EnemyContainer"));
     }
     play_steps(d["steps"], d, finishing);
     if (!finishing) refresh_tips();
