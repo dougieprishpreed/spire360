@@ -45,9 +45,11 @@ make -C "$XSDK" -j"$JOBS" TOOLCHAIN="$TC" build/libxsdk.a build/host/libxsc.so
 make -C "$VULKAN4XENON" -j"$JOBS" XSDK="$XSDK" TOOLCHAIN="$TC" build/libvulkan4xenon.a
 bash "$ROOT/tools/xsdk/shaders.sh" "$OUT/shaders"
 
-# The log's first line names the commit ("+": local changes).
+# The log's first line names the commit ("+": local changes; a Windows
+# checkout's CRLF copies of LF files are no change).
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || true)"
-if [ -n "$COMMIT" ] && [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+if [ -n "$COMMIT" ] &&
+  [ -n "$(git -C "$ROOT" -c core.autocrlf=input status --porcelain --untracked-files=no 2>/dev/null)" ]; then
   COMMIT="$COMMIT+"
 fi
 DATE="$(git -C "$ROOT" log -1 --format=%cI 2>/dev/null || true)"
