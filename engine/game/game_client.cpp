@@ -39,6 +39,7 @@
 #include "crystal_sphere_screen.h"
 #include "logic_link.h"
 #include "loc.h"
+#include "ui_util.h"
 
 #include <algorithm>
 #include <stdio.h>
@@ -124,7 +125,8 @@ public:
  * over 0.8 s; it stays black until the run's first room fades in. */
 class EmbarkWipe : public Control {
 public:
-    EmbarkWipe(SceneLibrary* lib, const std::string& character) : elapsed(0), wipe_(NULL), simple_(NULL) {
+    EmbarkWipe(SceneLibrary* lib, const std::string& character)
+        : elapsed(0), wipe_(NULL), simple_(NULL), loading_(NULL) {
         flags |= NF_PROCESS;
         name = "EmbarkWipe";
         z_index = 4096;
@@ -143,6 +145,15 @@ public:
         place(this);
         /* Instant would skip it; without a material only the fade shows */
         if (!wipe_->material) wipe_->visible = false;
+        /* NLoadingOverlay (the profile screen's and the multiplayer
+         * menus'): its "Loading..." in the corner once the black lasts,
+         * while the console makes the run and reads its first screen */
+        loading_ = instance(lib, "scenes/screens/main_menu/loading_overlay.tscn");
+        if (loading_) {
+            set_label(ctl(loading_, "Label"), Loc::get("main_menu_ui", "LOADING_OVERLAY.label"));
+            hide(loading_);
+            add_child(loading_);
+        }
     }
     double elapsed;
     bool done() const { return elapsed >= 0.8; }
@@ -151,6 +162,7 @@ public:
         float k = clampf((float)(elapsed / 0.8), 0, 1);
         wipe_->shader_params["threshold"] = k;
         simple_->modulate.a = tween_interpolate(TRANS_QUAD, EASE_IN, k, 0, 1, 1);
+        if (loading_ && elapsed >= LOADING_AFTER) set_visible(loading_, true);
     }
 
 private:
@@ -161,7 +173,26 @@ private:
     }
     ColorRect* wipe_;
     ColorRect* simple_;
+    Node* loading_;
+    /* the wipe's 0.8 s, then a second of black */
+    static const double LOADING_AFTER;
 };
+
+const double EmbarkWipe::LOADING_AFTER = 1.8;
+
+/* A new run opens on Neow (the first act's ancient): its layout, its room
+ * and its dialogue's italic font, read while the logic makes the run (once
+ * the wipe is black: a texture's read would stop it). The console read
+ * them after the run was made: 1.2 s, neow.png alone 12.5 MB. */
+static const char* const RUN_START_FILES[] = { "scenes/events/background_scenes/neow.tscn",
+                                               "scenes/events/ancient_event_layout.tscn",
+                                               "scenes/events/ancient_dialogue_line.tscn",
+                                               "scenes/events/ancient_event_option_button.tscn",
+                                               "scenes/ui/ancient_name_banner.tscn",
+                                               "fonts/bitter_medium_italic.ttf#page0",
+                                               "fonts/bitter_medium_italic.ttf#page1",
+                                               "fonts/bitter_medium_italic.ttf#page2",
+                                               "fonts/bitter_medium_italic.ttf#page3" };
 
 static std::string quoted(const std::string& s) {
     std::string out = "\"";
@@ -432,6 +463,11 @@ void GameClient::embark_wipe(const std::string& character) {
     if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/wipe_" + (id == "defect" || id == "necrobinder" ? std::string("ironclad") : id));
     wipe_ = new EmbarkWipe(lib_, character);
     tree_->root()->add_child(wipe_);
+}
+
+void GameClient::warm_run_start() {
+    lib_->warm_first(std::vector<std::string>(RUN_START_FILES,
+                                              RUN_START_FILES + sizeof(RUN_START_FILES) / sizeof(RUN_START_FILES[0])));
 }
 
 bool GameClient::embark_wiping() const { return wipe_ && !wipe_->done(); }

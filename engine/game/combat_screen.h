@@ -110,6 +110,7 @@ public:
     void think(const std::string& text, double seconds);
     bool set_play_target(int enemy);
     void end_play();
+    void hide_targeting();
     bool playing() const { return play_card_ >= 0; }
     /* The card being played was sent to the logic (NCardPlay.TryPlayCard):
      * where it flies when its play starts; while the last response still

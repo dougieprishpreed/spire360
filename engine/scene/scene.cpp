@@ -3,6 +3,7 @@
 #include "line_2d.h"
 #include "animation.h"
 
+#include "../core/heap.h"
 #include "../core/pack.h"
 #include "canvas.h"
 #include "controls.h"
@@ -66,7 +67,8 @@ SceneLibrary* SceneLibrary::current() { return g_library; }
 
 SceneLibrary::SceneLibrary(const Pack* pack)
     : pack_(pack), audio_(NULL), warm_enabled_(true), warm_clock_(NULL), warm_share_(0), warm_spent_(0), warm_files_(0),
-      warm_textures_(0), warm_frames_(0), default_theme_(NULL), default_font_(NULL) {
+      warm_textures_(0), warm_frames_(0), scene_bytes_(0), skeleton_bytes_(0), skeleton_budget_(12u << 20),
+      skeletons_evicted_(0), default_theme_(NULL), default_font_(NULL) {
     g_library = this;
     default_font_ = new FontRes("FontFile");
     default_font_->file = DEFAULT_FONT_NAME;
@@ -126,10 +128,13 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
     std::vector<u8> data;
     if (e && e->type == PACK_SCENE && pack_->read(e, data)) {
         std::string err;
+        size_t heap_before = heap_in_use();
         f = new SceneFile();
         f->name = name;
         /* swapped in: assigning copied the whole parsed tree */
         Json::parse(data.empty() ? "" : (const char*)&data[0], data.size(), &err).swap(f->doc);
+        size_t heap_after = heap_in_use();
+        if (heap_after > heap_before) scene_bytes_ += heap_after - heap_before;
         if (!err.empty()) {
             log_warn("%s: %s", name.c_str(), err.c_str());
             delete f;
@@ -477,18 +482,65 @@ void SceneLibrary::warm(const Json& paths) {
     }
 }
 
+SceneLibrary::MemoryStats SceneLibrary::memory_stats() const {
+    MemoryStats m;
+    m.scene_bytes = scene_bytes_;
+    m.skeleton_bytes = skeleton_bytes_;
+    m.scene_files = 0;
+    for (std::map<std::string, SceneFile*>::const_iterator it = files_.begin(); it != files_.end(); ++it)
+        if (it->second) ++m.scene_files;
+    m.skeletons = (unsigned)skeletons_.size();
+    m.skeletons_used = 0;
+    for (size_t i = 0; i < skeletons_.size(); ++i)
+        if (skeletons_[i]->users() > 0) ++m.skeletons_used;
+    m.skeletons_evicted = skeletons_evicted_;
+    return m;
+}
+
+void SceneLibrary::skeleton_loaded(SpineDataRes* r) {
+    skeletons_.push_back(r);
+    skeleton_bytes_ += r->bytes();
+}
+
+void SceneLibrary::trim_skeletons() {
+    while (skeleton_bytes_ > skeleton_budget_) {
+        /* the unused one whose last user went first (never used: 0) */
+        size_t pick = skeletons_.size();
+        for (size_t i = 0; i < skeletons_.size(); ++i)
+            if (skeletons_[i]->users() == 0 &&
+                (pick == skeletons_.size() || skeletons_[i]->released() < skeletons_[pick]->released()))
+                pick = i;
+        if (pick == skeletons_.size()) return; /* all in use */
+        SpineDataRes* r = skeletons_[pick];
+        skeleton_bytes_ -= r->bytes() < skeleton_bytes_ ? r->bytes() : skeleton_bytes_;
+        r->evict();
+        skeletons_.erase(skeletons_.begin() + pick);
+        ++skeletons_evicted_;
+    }
+}
+
+void SceneLibrary::warm_first(const std::vector<std::string>& paths) {
+    if (!warm_enabled_) return;
+    /* what an earlier run warmed may have been evicted since */
+    warmed_.clear();
+    for (size_t i = 0; i < paths.size(); ++i) warm_first_.push_back(paths[i]);
+}
+
 void SceneLibrary::warm_step(Canvas& canvas) {
-    if (warm_queue_.empty()) return;
+    if (skeleton_bytes_ > skeleton_budget_) trim_skeletons();
+    if (warm_queue_.empty() && warm_first_.empty()) return;
     /* a frame's share: a time with a clock (the console reads a texture in
      * tens of ms), else 24 files and 4 textures */
     int files = 0, textures = 0;
     double start = warm_clock_ ? warm_clock_() : 0;
     ++warm_frames_;
-    while (!warm_queue_.empty()) {
+    while (!warm_queue_.empty() || !warm_first_.empty()) {
         if (warm_clock_ ? (files + textures > 0 && warm_clock_() - start >= warm_share_) : (files >= 24 || textures >= 4))
             break;
-        std::string p = warm_queue_.front();
-        warm_queue_.pop_front();
+        /* the first ones' references go with them */
+        std::deque<std::string>& queue = warm_first_.empty() ? warm_queue_ : warm_first_;
+        std::string p = queue.front();
+        queue.pop_front();
         if (!warmed_.insert(p).second) continue;
         const PackEntry* e = pack_ ? pack_->find(p.c_str()) : NULL;
         if (!e) continue;
@@ -498,21 +550,22 @@ void SceneLibrary::warm_step(Canvas& canvas) {
             const SceneFile* f = file(p);
             ++files;
             if (!f) continue;
-            ext_refs(f->doc, warm_queue_);
+            ext_refs(f->doc, queue);
             /* a Spine skeleton: its atlas and skeleton read now and its
-             * pages queued (a sprite's first draw reads them otherwise) */
-            if (f->doc["type"].str() == "SpineSkeletonDataResource") {
+             * pages queued (a sprite's first draw reads them otherwise);
+             * not past the skeletons' budget, which would let it go again */
+            if (f->doc["type"].str() == "SpineSkeletonDataResource" && skeleton_bytes_ < skeleton_budget_) {
                 Resource* r = ext(p);
                 SpineDataRes* sd = r && r->kind == Resource::RES_SPINE_DATA ? (SpineDataRes*)r : NULL;
                 if (sd && sd->data(this))
-                    for (int i = 0; sd->page(i); ++i) warm_queue_.push_back(sd->page(i)->path);
+                    for (int i = 0; sd->page(i); ++i) queue.push_back(sd->page(i)->path);
             }
         }
     }
     warm_files_ += files;
     warm_textures_ += textures;
     if (warm_clock_) warm_spent_ += warm_clock_() - start;
-    if (warm_queue_.empty()) {
+    if (warm_queue_.empty() && warm_first_.empty()) {
         if (warm_clock_)
             log_info("warm: %d files, %d textures in %.0f ms over %d frames", warm_files_, warm_textures_, warm_spent_,
                      warm_frames_);

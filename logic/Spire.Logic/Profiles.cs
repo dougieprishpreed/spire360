@@ -111,6 +111,7 @@ public partial class RunDriver
     public Dictionary<string, object?> Profiles()
     {
         EnsureModelDbInitialized();
+        Deferred.RunAll(); // the files as the queued saves leave them
         var list = new List<Dictionary<string, object?>>();
         var current = _profileId > 0 ? _profileId : -1;
         for (int id = 1; id <= 3; id++)

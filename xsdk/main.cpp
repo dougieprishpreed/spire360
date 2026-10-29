@@ -24,6 +24,7 @@
 
 #include <xsdk/kernel.h>
 
+#include "../engine/core/heap.h"
 #include "../engine/core/pack.h"
 #include "../engine/audio/game_audio.h"
 #include "../engine/game/game.h"
@@ -203,9 +204,19 @@ static double now_ms() {
 /* A frame that stops (an endless loop, a lock, the GPU): every 10 s while
  * it lasts, the log says where the main thread is (the frame loop's phase,
  * the client's step, the node being processed or drawn) and the audio
- * thread. */
+ * thread. Its lines go to a file of their own, opened at start with a
+ * buffer of its own, and are formatted from integers: the shop's freeze
+ * left no line at all, and the log's lock or malloc's (newlib's float
+ * conversion allocates) held by a stuck thread would have stopped it. */
 static volatile unsigned g_frame = 0;
 static volatile bool g_quitting = false;
+static FILE* g_watch_file = NULL;
+static char g_watch_buffer[1024];
+
+static void watchdog_open() {
+    g_watch_file = fopen("game:/spire360_watchdog.txt", "wb");
+    if (g_watch_file) setvbuf(g_watch_file, g_watch_buffer, _IOFBF, sizeof(g_watch_buffer));
+}
 
 static void watchdog_main(void*) {
     unsigned seen = g_frame;
@@ -223,9 +234,15 @@ static void watchdog_main(void*) {
         if (stuck < 3000 || (reported > 0 && now_ms() - reported < 10000)) continue;
         reported = now_ms();
         const Node* n = (const Node*)g_trace_node;
-        logf("watchdog: frame %u stopped %.0f s ago: %s, %s; node %s (%s %s); audio thread %s", f, stuck / 1000,
-             g_trace_phase, g_trace_step, n ? n->name.c_str() : "-", n ? n->type.c_str() : "", n ? n->script.c_str() : "",
-             g_trace_audio);
+        char line[512];
+        snprintf(line, sizeof(line), "watchdog: frame %u stopped %u s ago: %s, %s; node %s (%s %s); audio thread %s
+",
+                 f, (unsigned)(stuck / 1000), g_trace_phase, g_trace_step, n ? n->name.c_str() : "-",
+                 n ? n->type.c_str() : "", n ? n->script.c_str() : "", g_trace_audio);
+        if (g_watch_file) {
+            fputs(line, g_watch_file);
+            fflush(g_watch_file);
+        }
     }
 }
 
@@ -423,6 +440,7 @@ int main() {
      * the logic core 1 */
     else if (!audio.start_thread(4)) logf("audio: no audio thread (mixed in the frame loop)");
     Thread watchdog;
+    watchdog_open();
     watchdog.start(watchdog_main, NULL, 5);
     /* The particles' simulation on the hardware threads the frame loop
      * (0), the logic (2) and the mix (4) leave: the other thread of each
@@ -495,8 +513,8 @@ int main() {
             if (!was_starting && flow->starting()) wait_start = now_ms();
             if (game->decision_count() != shown) {
                 shown = game->decision_count();
-                logf("decision %d: %s (response + presentation %.0f ms)", shown, game->decision()["decision"].str().c_str(),
-                     now_ms() - wait_start);
+                logf("decision %d: %s (response + presentation %.0f ms), %u MB free", shown,
+                     game->decision()["decision"].str().c_str(), now_ms() - wait_start, free_memory_mb());
                 tree->layout();
             }
             if (!was_busy && game->busy()) wait_start = now_ms();
@@ -604,6 +622,11 @@ int main() {
                  (unsigned)canvas->texture_count(), canvas->texture_bytes() / 1048576.0, ts.peak_bytes / 1048576.0,
                  ts.created, ts.evicted, ts.over_frames, ts.starved);
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
+            SceneLibrary::MemoryStats ms = lib->memory_stats();
+            logf("heap: %.1f MB in use of %.1f MB held; parsed scenes %.1f MB (%u files), skeletons %.1f MB (%u, %u "
+                 "in use, %u let go)",
+                 heap_in_use() / 1048576.0, heap_held() / 1048576.0, ms.scene_bytes / 1048576.0, ms.scene_files,
+                 ms.skeleton_bytes / 1048576.0, ms.skeletons, ms.skeletons_used, ms.skeletons_evicted);
             double state_ms, submit_ms;
             renderer->take_draw_times(&state_ms, &submit_ms);
             if (g_profile) {
@@ -652,6 +675,7 @@ int main() {
     }
     g_quitting = true;
     watchdog.join();
+    if (g_watch_file) fclose(g_watch_file);
     delete flow;
     delete game;
     delete tree;

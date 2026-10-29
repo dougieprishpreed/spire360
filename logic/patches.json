@@ -865,6 +865,22 @@
       "note": "VfxCmd.PlayNonCombatVfx(container, position, path): an event's effect at a position in its room (Dense Vegetation, Jungle Maze); null in TestMode, which Dense Vegetation then sets a rotation on. Recorded as a ui cue (the path and the position); a stand-in Node2D comes back."
     },
     {
+      "id": "save.defer.progress",
+      "action": "defer",
+      "type": "MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager",
+      "method": "SaveProgress",
+      "params": [],
+      "note": "The progress file (236 KB on a played profile: ToSerializable, ToJson, the write) made after the command's response, before the next command is read (Spire.Logic Deferred): a fight's last blow saved it before its response, the console's pause on that card. Any read, delete or rename of a save makes the queued ones first."
+    },
+    {
+      "id": "save.defer.run",
+      "action": "defer",
+      "type": "MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager",
+      "method": "SaveRun",
+      "params": ["MegaCrit.Sts2.Core.Saves.SerializableRun", "System.Boolean"],
+      "note": "The run save's serialization and write (each room's entry, a fight's end) made after the response, as save.defer.progress; the game awaits it (SerializeAsync) and the snapshot (RunManager.ToSave) is taken at the call. Ahead of save.indicator, whose cue then still comes with the call."
+    },
+    {
       "id": "save.indicator",
       "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager",

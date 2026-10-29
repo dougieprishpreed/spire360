@@ -85,6 +85,10 @@ private:
      * the embark wipe only: a continued run has none, so it does not wait
      * with the title still up) */
     int embark_wait_;
+    /* the warm-up's share per frame before the embark's black raised it */
+    double embark_share_;
+    enum { EMBARK_WAIT_FRAMES = 30 };
+    static const double EMBARK_WARM_MS;
     bool embarking_;
     bool starting_, in_run_, quit_, leaving_run_;
     /* NGame.LaunchMainMenu reads the profile before the menu shows: the

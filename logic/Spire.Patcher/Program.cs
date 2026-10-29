@@ -15,6 +15,9 @@
 //   redirect               body = return (T)Hooks.Invoke(id, new object[] { this?, args... })
 //   call_before            on entry: Hooks.Before(id, new object[] { this?, args... })
 //   call_after             before every ret: Hooks.After(id, new object[] { this?, args... }, result)
+//   defer                  on entry: if (Hooks.Defer(id, new object[] { this?, args... })) return
+//                          (void, or a completed Task): the handler queues the call and
+//                          makes it later, when it lets the method through
 //   replace_calls          every call to the target method anywhere in the assembly
 //                          becomes (T)Hooks.Invoke(id, new object[] { this?, args... })
 //   strip_bodies           every non-constructor method of Godot-derived types in
@@ -205,6 +208,7 @@ internal sealed class Patcher
     private readonly FieldReference _standIn;
     private readonly MethodReference _after;
     private readonly MethodReference _before;
+    private readonly MethodReference _defer;
 
     public Patcher(ModuleDefinition module, ModuleDefinition bridge)
     {
@@ -215,6 +219,7 @@ internal sealed class Patcher
         _standIn = module.ImportReference(hooks.Fields.Single(f => f.Name == "StandIn"));
         _after = module.ImportReference(hooks.Methods.Single(m => m.Name == "After"));
         _before = module.ImportReference(hooks.Methods.Single(m => m.Name == "Before"));
+        _defer = module.ImportReference(hooks.Methods.Single(m => m.Name == "Defer"));
     }
 
     public PatchResult Apply(PatchSpec spec)
@@ -256,6 +261,7 @@ internal sealed class Patcher
                     case "redirect": ReplaceBody(m, il => EmitRedirect(il, m, spec.Id)); break;
                     case "call_before": InsertCallBefore(m, spec.Id); break;
                     case "call_after": InsertCallAfter(m, spec.Id); break;
+                    case "defer": InsertDefer(m, spec.Id); break;
                     default: throw new InvalidOperationException($"unknown action '{spec.Action}'");
                 }
                 result.Targets.Add(m.FullName);
@@ -509,6 +515,30 @@ internal sealed class Patcher
         EmitArgsArray(tmpIl, m);
         tmpIl.Emit(OpCodes.Call, _before);
         var first = body.Instructions[0];
+        foreach (var ins in tmp.Instructions.ToList())
+            il.InsertBefore(first, ins);
+        body.OptimizeMacros();
+    }
+
+    private void InsertDefer(MethodDefinition m, string id)
+    {
+        // ldstr id; args[]; call Defer; brfalse <the original body>; return
+        // at once. The handler makes the call again later and lets it through.
+        var ret = m.ReturnType.Namespace + "." + m.ReturnType.Name;
+        if (m.ReturnType.MetadataType != MetadataType.Void && ret != "System.Threading.Tasks.Task")
+            throw new InvalidOperationException($"{m.FullName}: defer takes void or Task methods");
+        var body = m.Body;
+        body.SimplifyMacros();
+        var il = body.GetILProcessor();
+        var first = body.Instructions[0];
+        var tmp = new MethodBody(m);
+        var tmpIl = tmp.GetILProcessor();
+        tmpIl.Emit(OpCodes.Ldstr, id);
+        EmitArgsArray(tmpIl, m);
+        tmpIl.Emit(OpCodes.Call, _defer);
+        tmpIl.Emit(OpCodes.Brfalse, first);
+        if (m.ReturnType.MetadataType != MetadataType.Void) EmitCompletedTask(tmpIl, m.ReturnType);
+        tmpIl.Emit(OpCodes.Ret);
         foreach (var ins in tmp.Instructions.ToList())
             il.InsertBefore(first, ins);
         body.OptimizeMacros();

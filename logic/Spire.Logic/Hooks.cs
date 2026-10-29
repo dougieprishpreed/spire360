@@ -190,9 +190,19 @@ internal static partial class Hooks
                 });
             return new Godot.Node2D();
         });
-        // RunSaveManager.SaveRun (its Saved): NSaveIndicator.SavedGame
+        // RunSaveManager.SaveRun (its Saved): NSaveIndicator.SavedGame. A
+        // deferred save made later does not show it again.
         Spire.HookBridge.Hooks.RegisterBefore("save.indicator", a =>
-            Steps.Cue(new Dictionary<string, object?> { ["t"] = "saved" }));
+        {
+            if (!Deferred.Running) Steps.Cue(new Dictionary<string, object?> { ["t"] = "saved" });
+        });
+        // The saves after the response (Deferred): the progress file, then
+        // the run's snapshot as the call took it
+        Spire.HookBridge.Hooks.RegisterDefer("save.defer.progress", a =>
+            a[0] is MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager m && Deferred.Offer("progress", m.SaveProgress));
+        Spire.HookBridge.Hooks.RegisterDefer("save.defer.run", a =>
+            a[0] is MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager m && a[1] is MegaCrit.Sts2.Core.Saves.SerializableRun save &&
+            a[2] is bool mp && Deferred.Offer(mp ? "run.multiplayer" : "run", () => Deferred.Finish(m.SaveRun(save, mp), "run save")));
         // ForgeCmd.PreviewSovereignBlade: the blades in the hand hammered
         // where they are, the others shown and sent back to their piles
         Spire.HookBridge.Hooks.RegisterBefore("forge.preview", a =>

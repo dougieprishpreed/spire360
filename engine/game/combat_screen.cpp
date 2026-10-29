@@ -1062,7 +1062,17 @@ void CombatScreen::commit_play(bool queued) {
     /* played: to the play pile when the logic moves it there */
     played_[h.id] = play_pile_pos();
     play_cards_[h.id] = h.data;
-    if (!queued) return;
+    if (!queued) {
+        /* CardPileCmd.AddDuringManualCardPlay, the play's first step: the
+         * game sends the card to the play pile (upright, at 0.8) as it is
+         * played; here it went there with the logic's answer, and a
+         * fight's last blow kept it waiting centred */
+        h.to_pos = play_pile_pos();
+        h.to_angle = 0;
+        h.to_scale = 0.8f;
+        hide_targeting();
+        return;
+    }
     h.queued = true;
     queue_.push_back(h.id);
     end_play();
@@ -1336,8 +1346,8 @@ bool CombatScreen::set_play_target(int enemy) {
     return true;
 }
 
-void CombatScreen::end_play() {
-    if (play_card_ < 0 && !aiming_) return;
+/* The aim's arrow, reticles and nameplate go (the card played) */
+void CombatScreen::hide_targeting() {
     for (size_t i = 0; i < enemies_.size(); ++i)
         if (enemies_[i].reticle && enemies_[i].reticle->modulate.a > 0) select_reticle(enemies_[i], false);
     if (player_.reticle && player_.reticle->modulate.a > 0) select_reticle(player_, false);
@@ -1346,6 +1356,11 @@ void CombatScreen::end_play() {
         tweens_.kill(&arrow_head_->scale);
         arrow_->visible = false;
     }
+}
+
+void CombatScreen::end_play() {
+    if (play_card_ < 0 && !aiming_) return;
+    hide_targeting();
     if (play_card_ >= 0) show_card_text(holders_[play_card_], holders_[play_card_].text);
     aiming_ = false;
     play_card_ = -1;

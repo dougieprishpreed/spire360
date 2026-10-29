@@ -12,7 +12,10 @@
  * the Vulkan renderer, offscreen, in place of the software one; --vk-trace
  * then draws it again with the GPU trace on (the log's "gpu trace" lines).
  * --scale 1 renders at the design size (1920x1080) for diffs against a
- * reference; the console uses 2/3 (1280x720). */
+ * reference; the console uses 2/3 (1280x720).
+ *
+ * --workers N: the particles' simulation on N worker threads, as the
+ * console's (a turbulent system's steps shared out among them). */
 #include "../../engine/core/pack.h"
 #include "../../engine/game/combat_screen.h"
 #include "../../engine/game/card_select_screen.h"
@@ -39,8 +42,10 @@
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
 #include "../../engine/gfx/sw_renderer.h"
+#include "../../engine/core/thread.h"
 #include "../../engine/scene/canvas.h"
 #include "../../engine/scene/controls.h"
+#include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
 #include "../../engine/scene/script.h"
 #include "../../engine/scene/spine_sprite.h"
@@ -91,7 +96,7 @@ static void play_everywhere(Node* n, const char* anim) {
 
 int main(int argc, char** argv) {
     if (argc < 4) {
-        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y] [--hand-focus I] [--pad A,RIGHT,...]\n");
+        fprintf(stderr, "usage: spire_view <pack.s3p> <scene> <out.png> [--scale S] [--no-scripts] [--time T] [--spine-anim NAME] [--origin X Y] [--hand-focus I] [--pad A,RIGHT,...] [--workers N]\n");
         return 2;
     }
     float scale = 1.0f;
@@ -112,6 +117,10 @@ int main(int argc, char** argv) {
             has_origin = true;
         }
         else if (strcmp(argv[i], "--time") == 0 && i + 1 < argc) frames = (int)(atof(argv[++i]) * 60.0 + 0.5);
+        else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) {
+            static Workers workers;
+            if (workers.start(atoi(argv[++i]), NULL)) Particles2D::set_workers(&workers);
+        }
         else if (strcmp(argv[i], "--pad") == 0 && i + 1 < argc) {
             static const struct {
                 const char* name;

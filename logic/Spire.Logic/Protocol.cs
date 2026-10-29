@@ -31,6 +31,8 @@ public sealed class Protocol
     /// <summary>Next non-empty command, or null at end of input.</summary>
     public JsonElement? ReadCommand()
     {
+        // the last response is out: its saves while the client plays it
+        Deferred.RunAll();
         string? line;
         while ((line = _in.ReadLine()) != null)
         {

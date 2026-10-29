@@ -97,6 +97,7 @@
  * out_dir gets NNNN_<decision>.png and NNNN_<decision>.json (the decision's
  * line) per screen, and logic.log (the logic's stderr). The logic's working
  * directory is ours: give it SPIRE_DATA in the environment for localization. */
+#include "../../engine/core/heap.h"
 #include "../../engine/core/pack.h"
 #include "../../engine/audio/game_audio.h"
 #include "../../engine/game/game.h"
@@ -1029,8 +1030,12 @@ int main(int argc, char** argv) {
             if (shown % mem_every == 0) {
                 std::vector<std::string> scenes;
                 lib.loaded_scenes(scenes);
-                printf("memory: %ld MB resident, %lu MB of textures, %u scene files cached\n", resident_mb(),
-                       (unsigned long)(canvas.texture_bytes() >> 20), (unsigned)scenes.size());
+                SceneLibrary::MemoryStats ms = lib.memory_stats();
+                printf("memory: %ld MB resident, %lu MB of textures, %u scene files cached; heap %.1f MB, parsed "
+                       "scenes %.1f MB, skeletons %.1f MB (%u, %u in use, %u let go)\n",
+                       resident_mb(), (unsigned long)(canvas.texture_bytes() >> 20), (unsigned)scenes.size(),
+                       heap_in_use() / 1048576.0, ms.scene_bytes / 1048576.0, ms.skeleton_bytes / 1048576.0,
+                       ms.skeletons, ms.skeletons_used, ms.skeletons_evicted);
             }
             /* the screen before the pad's: auto play answers it, not the next */
             if (pad_after > 0 && shown == pad_after - 1 && !pad_script.empty())

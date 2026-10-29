@@ -1,5 +1,6 @@
 #include "spine_sprite.h"
 
+#include "../core/heap.h"
 #include "../core/pack.h"
 #include "canvas.h"
 #include "scene.h"
@@ -12,6 +13,22 @@
 namespace spire {
 
 SpineDataRes::~SpineDataRes() { delete data_; }
+
+static unsigned g_releases = 0;
+
+void SpineDataRes::release() {
+    if (users_ > 0 && --users_ == 0) released_ = ++g_releases;
+}
+
+void SpineDataRes::evict() {
+    if (users_ > 0) return;
+    delete data_;
+    data_ = NULL;
+    atlas_ = SpAtlas();
+    pages_.clear();
+    tried_ = false;
+    bytes_ = 0;
+}
 
 /* The material properties a SpineSprite or SpineSlotNode has, per blend
  * mode: true when key is one of them (out[i] set, NULL unless a material). */
@@ -44,6 +61,7 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
     tried_ = true;
     if (!lib) return NULL;
     double started = load_trace_start();
+    size_t heap_before = heap_in_use();
     std::string err;
     Json atlas_doc;
     if (!read_json(lib->pack(), atlas_path, atlas_doc, &err) || !atlas_.load(atlas_doc, &err)) {
@@ -70,6 +88,9 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
         pages_.push_back(r && r->kind == RES_IMAGE_TEXTURE ? (ImageTextureRes*)r : NULL);
     }
     data_ = d;
+    size_t heap_after = heap_in_use();
+    bytes_ = heap_after > heap_before ? heap_after - heap_before : 0;
+    lib->skeleton_loaded(this);
     load_traced("spine", skeleton_path, started);
     return data_;
 }
@@ -80,6 +101,7 @@ SpineSprite::SpineSprite() : data_res(NULL), time_scale(1), lib_(NULL), skel_(NU
 }
 
 SpineSprite::~SpineSprite() {
+    if (skel_ && data_res) data_res->release();
     delete skel_;
     delete custom_skin_;
 }
@@ -111,6 +133,7 @@ bool SpineSprite::ensure() {
         return false;
     }
     skel_ = new SpSkeleton(d); /* y-down, like spine-godot */
+    data_res->acquire();
     skel_->update_world_transform(SP_PHYSICS_RESET);
     return true;
 }
@@ -133,8 +156,12 @@ void SpineSprite::set_track_fraction(int track, float fraction) {
 }
 
 void SpineSprite::set_data(SceneLibrary* lib, SpineDataRes* res) {
+    if (skel_ && data_res) data_res->release();
     delete skel_;
     skel_ = NULL;
+    /* the old data's attachments */
+    delete custom_skin_;
+    custom_skin_ = NULL;
     failed_ = false;
     state_ = SpAnimationState();
     data_res = res;

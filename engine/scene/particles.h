@@ -136,8 +136,10 @@ public:
      * begin_frame and end_frame each system's process() queues its steps
      * (the sub-emitters' parents and children run at once: one writes the
      * other's emissions), and end_frame runs the queue on the workers and
-     * the calling thread, heaviest first. Each system steps only its own
-     * particles, so the result is the same in any order. Godot simulates
+     * the calling thread, heaviest first; a turbulent system's steps go
+     * one at a time, their particles shared out over the workers. Each
+     * system and particle steps only its own state, so the result is the
+     * same in any order. Godot simulates
      * after the frame's scripts too (its GPU). workers NULL: the calling
      * thread alone. */
     static void set_workers(Workers* workers);
@@ -183,6 +185,11 @@ private:
     static void run_queued(void* queue, int index);
     void step(double dt);
     void step_gpu(double dt);
+    /* step_gpu's particles [begin, end): each steps on its own, so a heavy
+     * system's step can be shared out over the workers (split_) */
+    void step_gpu_particles(int begin, int end, double delta, double prev_phase, double phase, Particles2D* sub);
+    static void run_chunk(void* job, int index);
+    bool split_worth() const;
     int preprocess_skip(int steps, double frame_time) const;
     void skip_steps(int n, double frame_time);
     /* an emission from the parent system (emit_subparticle): its
@@ -218,6 +225,7 @@ private:
     bool sub_mode_;
     std::vector<Emission> pending_;
     int queued_; /* the system's place in the frame's queue, -1 none */
+    bool split_; /* end_frame: its steps' particles over the workers */
     /* draw's quads, reused frame to frame */
     std::vector<Vec2> draw_v_, draw_uv_;
     std::vector<Color> draw_col_;

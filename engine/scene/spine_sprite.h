@@ -18,17 +18,32 @@ class SceneLibrary;
  * one per resource path, shared by every sprite that uses it. */
 class SpineDataRes : public Resource {
 public:
-    SpineDataRes() : Resource(RES_SPINE_DATA, "SpineSkeletonDataResource"), tried_(false), data_(NULL) {}
+    SpineDataRes()
+        : Resource(RES_SPINE_DATA, "SpineSkeletonDataResource"), tried_(false), data_(NULL), users_(0), bytes_(0),
+          released_(0) {}
     virtual ~SpineDataRes();
     std::string atlas_path, skeleton_path;
     const SpSkeletonData* data(SceneLibrary* lib);
     ImageTextureRes* page(int i) const { return i >= 0 && (size_t)i < pages_.size() ? pages_[i] : NULL; }
+    /* The sprites whose skeletons use the parsed data. Unused, it can be
+     * let go (evict: the next use reads it again): a run met every
+     * monster's skeleton and kept them all (SceneLibrary::trim_skeletons). */
+    void acquire() { ++users_; }
+    void release();
+    int users() const { return users_; }
+    bool loaded() const { return data_ != NULL; }
+    size_t bytes() const { return bytes_; } /* the heap its parse took */
+    unsigned released() const { return released_; }
+    void evict();
 
 private:
     bool tried_;
     SpAtlas atlas_;
     SpSkeletonData* data_;
     std::vector<ImageTextureRes*> pages_;
+    int users_;
+    size_t bytes_;
+    unsigned released_; /* when its last user went (a count of releases) */
 };
 
 class SpineFollowNode;

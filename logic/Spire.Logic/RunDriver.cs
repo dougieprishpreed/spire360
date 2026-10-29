@@ -3855,6 +3855,7 @@ public partial class RunDriver
     /// <summary>A folder's files copied over another's (made new).</summary>
     private static void CopyTree(string from, string to)
     {
+        Deferred.RunAll();
         try
         {
             if (Directory.Exists(to)) Directory.Delete(to, recursive: true);

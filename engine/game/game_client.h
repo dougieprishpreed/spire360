@@ -84,6 +84,9 @@ public:
     void embark_wipe(const std::string& character);
     bool embark_wiping() const;
     void end_embark_wipe();
+    /* The new run's first screen (Neow) read ahead, behind the wipe's
+     * black while the logic makes the run (SceneLibrary::warm_first). */
+    void warm_run_start();
     /* The run's assets still being read ahead (SceneLibrary::warm): the
      * menus keep the screen as it is (PreloadManager's WaitForCompletion) */
     bool warming() const;

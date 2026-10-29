@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <math.h>
 #include <string.h>
+#if defined(_XBOX)
+#include <ppcintrinsics.h> /* __fsel */
+#endif
 
 namespace spire {
 
@@ -290,7 +293,7 @@ Particles2D::Particles2D(bool is_gpu)
       spread(45), emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0),
       collision_base_size(1), collision_use_scale(false), use_fixed_seed(false), trail_enabled(false),
       trail_lifetime(0.3f), trail_sections(8), trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0),
-      started_(false), has_last_origin_(false), clock_(0), sub_mode_(false), queued_(-1) {
+      started_(false), has_last_origin_(false), clock_(0), sub_mode_(false), queued_(-1), split_(false) {
     flags |= NF_PROCESS;
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
@@ -303,10 +306,17 @@ namespace {
 struct Queued {
     Particles2D* system;
     double dt;
-    double weight; /* end_frame's order: the heaviest first */
-    Queued(Particles2D* p, double t) : system(p), dt(t), weight(0) {}
+    double weight; /* end_frame's order: the split ones, then the heaviest first */
+    bool split;
+    Queued(Particles2D* p, double t) : system(p), dt(t), weight(0), split(false) {}
 };
-bool by_weight(const Queued& a, const Queued& b) { return a.weight > b.weight; }
+bool by_weight(const Queued& a, const Queued& b) { return a.split != b.split ? a.split : a.weight > b.weight; }
+/* a split step: its particles in chunks of size */
+struct ChunkJob {
+    Particles2D* system;
+    double delta, prev_phase, phase;
+    int total, size;
+};
 std::vector<Queued> g_queue;
 bool g_queue_open = false;
 Workers* g_workers = NULL;
@@ -342,8 +352,21 @@ void Particles2D::end_frame() {
         /* the particles, the steps (a first preprocess's many), the noise */
         double steps = p.started_ ? 1.0 : 1.0 + p.preprocess * 30.0;
         q.weight = (double)p.particles_.size() * steps * (p.mat.turbulence ? 8.0 : 1.0);
+        q.split = g_workers && p.split_worth();
     }
     std::sort(g_queue.begin(), g_queue.end(), by_weight);
+    /* One system was the frame's floor: the hive's bugs (150 with
+     * turbulence) took 18 ms a frame on one worker, the fight at 30 fps.
+     * The turbulent ones step here one at a time, each step's particles
+     * over the workers; then the rest side by side. */
+    for (size_t i = 0; i < g_queue.size() && g_queue[i].split; ++i) {
+        Particles2D* p = g_queue[i].system;
+        p->split_ = true;
+        p->simulate(g_queue[i].dt);
+        p->split_ = false;
+        p->queued_ = -1;
+        g_queue[i].system = NULL;
+    }
     if (g_workers) g_workers->run(run_queued, &g_queue, (int)g_queue.size());
     else for (size_t i = 0; i < g_queue.size(); ++i) run_queued(&g_queue, (int)i);
     for (size_t i = 0; i < g_queue.size(); ++i)
@@ -841,13 +864,35 @@ static float magic_floor(float x) {
     return r > x ? r - 1.0f : r;
 }
 
+/* a >= 0 ? b : c. On the console the FPU's select: magic_floor's compare
+ * and branch went the noise's data-dependent way, a mispredict each time
+ * (~1,500 floors a particle step). */
+#if defined(__XSDK__)
+static inline float select_ge0(float a, float b, float c) {
+    float r;
+    __asm__("fsel %0,%1,%2,%3" : "=f"(r) : "f"(a), "f"(b), "f"(c));
+    return r;
+}
+#elif defined(_XBOX)
+static inline float select_ge0(float a, float b, float c) { return (float)__fsel(a, b, c); }
+#else
+static inline float select_ge0(float a, float b, float c) { return a >= 0.0f ? b : c; }
+#endif
+
+/* magic_floor with the select: the same sums, the same result */
+static inline float sel_floor(float x) {
+    float t = x + 12582912.0f;
+    float r = t - 12582912.0f;
+    return select_ge0(x - r, r, r - 1.0f);
+}
+
 /* Whether this build's float arithmetic rounds as magic_floor needs (a
  * compiler that kept the sums wider would make it x) */
 static bool magic_floor_works() {
     volatile float probe[6] = { 2.5f, -2.5f, 3.75f, -0.25f, 1234.5f, -4194303.5f };
     for (int i = 0; i < 6; ++i) {
         float x = probe[i];
-        if (magic_floor(x) != int_floor(x)) return false;
+        if (magic_floor(x) != int_floor(x) || sel_floor(x) != int_floor(x)) return false;
     }
     return true;
 }
@@ -859,7 +904,6 @@ static float fast_floor(float x) {
     return int_floor(x);
 }
 
-static float fractf(float x) { return x - fast_floor(x); }
 
 /* The noise is written with scalar arguments and locals only: on the
  * console's core a value stored and read straight back stalls it (a
@@ -868,24 +912,41 @@ static float fractf(float x) { return x - fast_floor(x); }
  * per noise. The arithmetic and its order are the shader's (and the
  * earlier port's): the results are the same. */
 
+/* The corners inline in the noise, the floors inline in the corners: the
+ * console's compiler made each a call, with its registers saved and
+ * restored, and its schedule could not overlap the 16 corners' chains. */
+#if defined(__GNUC__)
+#define NOISE_INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define NOISE_INLINE __forceinline
+#else
+#define NOISE_INLINE inline
+#endif
+
+/* The floor the noise takes: fast_floor, or sel_floor where every value
+ * the noise floors is known to be in its range (Sel). */
+template <bool Sel> static NOISE_INLINE float noise_floor(float x) { return Sel ? sel_floor(x) : fast_floor(x); }
+template <bool Sel> static NOISE_INLINE float noise_fract(float x) { return x - noise_floor<Sel>(x); }
+
 /* noise_grad at the corner (x, y, z, w), dotted with the offset (dx .. dw) */
-static float corner(float x, float y, float z, float w, float dx, float dy, float dz, float dw) {
-    float p0 = fractf(0.143081f * x + 0.001724f * y + 0.280166f * z + 0.262771f * w);
-    float p1 = fractf(0.645401f * x + -0.047791f * y + -0.146698f * z + 0.595016f * w);
-    float p2 = fractf(-0.499665f * x + -0.095734f * y + 0.425674f * z + -0.207367f * w);
-    float p3 = fractf(-0.013596f * x + -0.848588f * y + 0.423736f * z + 0.17044f * w);
-    float g0 = fractf(p0 * p1 * 2365.952041f) * 2.0f - 1.0f;
-    float g1 = fractf(p1 * p2 * 2365.952041f) * 2.0f - 1.0f;
-    float g2 = fractf(p2 * p3 * 2365.952041f) * 2.0f - 1.0f;
-    float g3 = fractf(p3 * p0 * 2365.952041f) * 2.0f - 1.0f;
+template <bool Sel>
+static NOISE_INLINE float corner(float x, float y, float z, float w, float dx, float dy, float dz, float dw) {
+    float p0 = noise_fract<Sel>(0.143081f * x + 0.001724f * y + 0.280166f * z + 0.262771f * w);
+    float p1 = noise_fract<Sel>(0.645401f * x + -0.047791f * y + -0.146698f * z + 0.595016f * w);
+    float p2 = noise_fract<Sel>(-0.499665f * x + -0.095734f * y + 0.425674f * z + -0.207367f * w);
+    float p3 = noise_fract<Sel>(-0.013596f * x + -0.848588f * y + 0.423736f * z + 0.17044f * w);
+    float g0 = noise_fract<Sel>(p0 * p1 * 2365.952041f) * 2.0f - 1.0f;
+    float g1 = noise_fract<Sel>(p1 * p2 * 2365.952041f) * 2.0f - 1.0f;
+    float g2 = noise_fract<Sel>(p2 * p3 * 2365.952041f) * 2.0f - 1.0f;
+    float g3 = noise_fract<Sel>(p3 * p0 * 2365.952041f) * 2.0f - 1.0f;
     return dx * g0 + dy * g1 + dz * g2 + dw * g3;
 }
 
-static float noise4(float ix, float iy, float iz, float iw) {
+template <bool Sel> static float noise4(float ix, float iy, float iz, float iw) {
     /* domain rotation */
     float d = (ix + iy + iz) * -0.1666667f + iw * -0.5f;
     float cx = ix + d, cy = iy + d, cz = iz + d, cw = (ix + iy + iz + iw) * 0.5f;
-    float bx = fast_floor(cx), by = fast_floor(cy), bz = fast_floor(cz), bw = fast_floor(cw);
+    float bx = noise_floor<Sel>(cx), by = noise_floor<Sel>(cy), bz = noise_floor<Sel>(cz), bw = noise_floor<Sel>(cw);
     float dx = cx - bx, dy = cy - by, dz = cz - bz, dw = cw - bw;
     float fx = dx * dx * dx * (10.0f + dx * (-15.0f + dx * 6.0f));
     float fy = dy * dy * dy * (10.0f + dy * (-15.0f + dy * 6.0f));
@@ -894,14 +955,15 @@ static float noise4(float ix, float iy, float iz, float iw) {
     float bx1 = bx + 1.0f, by1 = by + 1.0f, bz1 = bz + 1.0f, bw1 = bw + 1.0f;
     float dx1 = dx - 1.0f, dy1 = dy - 1.0f, dz1 = dz - 1.0f, dw1 = dw - 1.0f;
     /* the 16 corners (bit 0 x .. bit 3 w) */
-    float r0 = corner(bx, by, bz, bw, dx, dy, dz, dw), r1 = corner(bx1, by, bz, bw, dx1, dy, dz, dw);
-    float r2 = corner(bx, by1, bz, bw, dx, dy1, dz, dw), r3 = corner(bx1, by1, bz, bw, dx1, dy1, dz, dw);
-    float r4 = corner(bx, by, bz1, bw, dx, dy, dz1, dw), r5 = corner(bx1, by, bz1, bw, dx1, dy, dz1, dw);
-    float r6 = corner(bx, by1, bz1, bw, dx, dy1, dz1, dw), r7 = corner(bx1, by1, bz1, bw, dx1, dy1, dz1, dw);
-    float r8 = corner(bx, by, bz, bw1, dx, dy, dz, dw1), r9 = corner(bx1, by, bz, bw1, dx1, dy, dz, dw1);
-    float r10 = corner(bx, by1, bz, bw1, dx, dy1, dz, dw1), r11 = corner(bx1, by1, bz, bw1, dx1, dy1, dz, dw1);
-    float r12 = corner(bx, by, bz1, bw1, dx, dy, dz1, dw1), r13 = corner(bx1, by, bz1, bw1, dx1, dy, dz1, dw1);
-    float r14 = corner(bx, by1, bz1, bw1, dx, dy1, dz1, dw1), r15 = corner(bx1, by1, bz1, bw1, dx1, dy1, dz1, dw1);
+    float r0 = corner<Sel>(bx, by, bz, bw, dx, dy, dz, dw), r1 = corner<Sel>(bx1, by, bz, bw, dx1, dy, dz, dw);
+    float r2 = corner<Sel>(bx, by1, bz, bw, dx, dy1, dz, dw), r3 = corner<Sel>(bx1, by1, bz, bw, dx1, dy1, dz, dw);
+    float r4 = corner<Sel>(bx, by, bz1, bw, dx, dy, dz1, dw), r5 = corner<Sel>(bx1, by, bz1, bw, dx1, dy, dz1, dw);
+    float r6 = corner<Sel>(bx, by1, bz1, bw, dx, dy1, dz1, dw), r7 = corner<Sel>(bx1, by1, bz1, bw, dx1, dy1, dz1, dw);
+    float r8 = corner<Sel>(bx, by, bz, bw1, dx, dy, dz, dw1), r9 = corner<Sel>(bx1, by, bz, bw1, dx1, dy, dz, dw1);
+    float r10 = corner<Sel>(bx, by1, bz, bw1, dx, dy1, dz, dw1), r11 = corner<Sel>(bx1, by1, bz, bw1, dx1, dy1, dz, dw1);
+    float r12 = corner<Sel>(bx, by, bz1, bw1, dx, dy, dz1, dw1), r13 = corner<Sel>(bx1, by, bz1, bw1, dx1, dy, dz1, dw1);
+    float r14 = corner<Sel>(bx, by1, bz1, bw1, dx, dy1, dz1, dw1);
+    float r15 = corner<Sel>(bx1, by1, bz1, bw1, dx1, dy1, dz1, dw1);
     float wz0 = lerpf(lerpf(r0, r8, fw), lerpf(r4, r12, fw), fz);
     float wz1 = lerpf(lerpf(r1, r9, fw), lerpf(r5, r13, fw), fz);
     float wz2 = lerpf(lerpf(r2, r10, fw), lerpf(r6, r14, fw), fz);
@@ -911,18 +973,17 @@ static float noise4(float ix, float iy, float iz, float iw) {
 
 /* The shader's curl_3d of noise_3x (the noise at w, w + W and w - W): of
  * its 18 noises the curl reads 12 (each axis two of the three). */
-static void curl_3d(float px, float py, float pz, float pw, float c, float* ox, float* oy, float* oz) {
+template <bool Sel> static void curl_3d_with(float px, float py, float pz, float pw, float e, float* ox, float* oy, float* oz) {
     const float W = 1.7320508f * 2048.333333f;
-    float e = 0.001f + c;
     /* axis x: the w + W and w - W noises */
-    float x_a1 = noise4(px + e, py, pz, pw + W), x_b1 = noise4(px - e, py, pz, pw + W);
-    float x_a2 = noise4(px + e, py, pz, pw - W), x_b2 = noise4(px - e, py, pz, pw - W);
+    float x_a1 = noise4<Sel>(px + e, py, pz, pw + W), x_b1 = noise4<Sel>(px - e, py, pz, pw + W);
+    float x_a2 = noise4<Sel>(px + e, py, pz, pw - W), x_b2 = noise4<Sel>(px - e, py, pz, pw - W);
     /* axis y: w and w - W */
-    float y_a0 = noise4(px, py + e, pz, pw), y_b0 = noise4(px, py - e, pz, pw);
-    float y_a2 = noise4(px, py + e, pz, pw - W), y_b2 = noise4(px, py - e, pz, pw - W);
+    float y_a0 = noise4<Sel>(px, py + e, pz, pw), y_b0 = noise4<Sel>(px, py - e, pz, pw);
+    float y_a2 = noise4<Sel>(px, py + e, pz, pw - W), y_b2 = noise4<Sel>(px, py - e, pz, pw - W);
     /* axis z: w and w + W */
-    float z_a0 = noise4(px, py, pz + e, pw), z_b0 = noise4(px, py, pz - e, pw);
-    float z_a1 = noise4(px, py, pz + e, pw + W), z_b1 = noise4(px, py, pz - e, pw + W);
+    float z_a0 = noise4<Sel>(px, py, pz + e, pw), z_b0 = noise4<Sel>(px, py, pz - e, pw);
+    float z_a1 = noise4<Sel>(px, py, pz + e, pw + W), z_b1 = noise4<Sel>(px, py, pz - e, pw + W);
     float x = (y_a2 - y_b2) - (z_a1 - z_b1);
     float y = (z_a0 - z_b0) - (x_a2 - x_b2);
     float z = (x_a1 - x_b1) - (y_a0 - y_b0);
@@ -931,6 +992,15 @@ static void curl_3d(float px, float py, float pz, float pw, float c, float* ox, 
     *ox = x * k;
     *oy = y * k;
     *oz = z * k;
+}
+
+/* sel_floor (no range check) when every value floored stays under 2^22:
+ * the inputs under 2^21, the corners' sums then under 1.3 times that. */
+static void curl_3d(float px, float py, float pz, float pw, float c, float* ox, float* oy, float* oz) {
+    float e = 0.001f + c;
+    float m = maxf(maxf(fabsf(px), fabsf(py)), maxf(fabsf(pz), fabsf(pw))) + e + 3600.0f;
+    if (g_magic_floor && m < 2097152.0f) curl_3d_with<true>(px, py, pz, pw, e, ox, oy, oz);
+    else curl_3d_with<false>(px, py, pz, pw, e, ox, oy, oz);
 }
 
 /* get_noise_direction (TIME: the shaders' time) */
@@ -1348,7 +1418,42 @@ void Particles2D::step_gpu(double delta) {
     }
     double phase = time_ / lifetime;
     Particles2D* sub = sub_target();
-    for (int i = 0; i < total; ++i) {
+    if (split_ && g_workers && !sub && !sub_mode_) {
+        /* a few chunks a thread, for the chunks' uneven costs */
+        ChunkJob job;
+        job.system = this;
+        job.delta = delta;
+        job.prev_phase = prev_phase;
+        job.phase = phase;
+        job.total = total;
+        int chunks = 2 * (g_workers->count() + 1);
+        job.size = (total + chunks - 1) / chunks;
+        g_workers->run(run_chunk, &job, (total + job.size - 1) / job.size);
+    } else {
+        step_gpu_particles(0, total, delta, prev_phase, phase, sub);
+    }
+    /* what no free slot took is dropped with the frame's buffer */
+    pending_.clear();
+}
+
+/* A turbulent system with enough particles to share out (the noise: 12 4D
+ * noises a particle step). Not a sub-emitter's parent or child: those
+ * write each other's emissions. */
+bool Particles2D::split_worth() const {
+    return gpu && mat.turbulence && particles_.size() >= 32 && !sub_mode_ && sub_emitter.empty();
+}
+
+void Particles2D::run_chunk(void* job, int index) {
+    const ChunkJob& j = *(const ChunkJob*)job;
+    int begin = index * j.size;
+    int end = begin + j.size < j.total ? begin + j.size : j.total;
+    j.system->step_gpu_particles(begin, end, j.delta, j.prev_phase, j.phase, NULL);
+}
+
+void Particles2D::step_gpu_particles(int begin, int end, double delta, double prev_phase, double phase,
+                                     Particles2D* sub) {
+    int total = (int)particles_.size();
+    for (int i = begin; i < end; ++i) {
         Particle& p = particles_[i];
         double local_delta = delta;
         bool restart = false;
@@ -1403,8 +1508,6 @@ void Particles2D::step_gpu(double delta) {
             while (p.trail.size() > 2 && p.trail[1].first <= clock_ - trail_lifetime) p.trail.erase(p.trail.begin());
         }
     }
-    /* what no free slot took is dropped with the frame's buffer */
-    pending_.clear();
 }
 
 /* particles.glsl's 2D SDF collision: the canvas SDF of the

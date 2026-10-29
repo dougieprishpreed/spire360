@@ -19,10 +19,13 @@
 
 namespace spire {
 
+/* the warm-up's share of each frame behind the embark's black (ms) */
+const double MenuFlow::EMBARK_WARM_MS = 40.0;
+
 MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
     : lib_(lib), tree_(tree), game_(game), version_(version), logo_(NULL), logo_node_(NULL), title_(new TitleScreen(lib)), title_node_(NULL),
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
-      screen_(TITLE), chars_version_(0), decisions_seen_(0), embark_wait_(0), embarking_(false), starting_(false), in_run_(false),
+      screen_(TITLE), chars_version_(0), decisions_seen_(0), embark_wait_(0), embark_share_(-1), embarking_(false), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false), menu_ready_(false), title_waiting_(false) {
     tutorials_ = NULL;
     tutorials_node_ = NULL;
@@ -240,6 +243,8 @@ void MenuFlow::handle_answer(const Json& a) {
         if (starting_) {
             /* The run could not start (a bad save): back to the menu. */
             starting_ = false;
+            if (embark_share_ >= 0) lib_->set_warm_share(embark_share_);
+            embark_share_ = -1;
             if (screen_ == CHARACTERS) close_screen();
             title_->set_covered(false);
             game_->request("{\"cmd\":\"main_menu\"}");
@@ -499,16 +504,27 @@ bool MenuFlow::update(const PadState& in) {
     }
 
     game_->update(PadState());
+    /* Behind the embark's black nothing moves: the warm-up reads more each
+     * frame (the run's first screen first, while the logic makes the
+     * run; GameClient::embark_wipe) */
+    if (starting_ && embarking_ && !game_->embark_wiping() && embark_share_ < 0) {
+        embark_share_ = lib_->warm_share();
+        lib_->set_warm_share(EMBARK_WARM_MS);
+        if (game_->decision_count() == decisions_seen_) game_->warm_run_start();
+    }
     if (starting_ && embarking_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() &&
-        game_->warming() && ++embark_wait_ < 120)
+        game_->warming() && ++embark_wait_ < EMBARK_WAIT_FRAMES)
         return !quit_;
     if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
         /* The run's first screen (once the embark wipe is black and the
          * run's assets are read: NCharacterSelectScreen awaits
          * PreloadManager.LoadRunAssets): the menus go, the room fades in.
-         * Two seconds of it at most: the console reads them for half a
-         * minute, so the rest is read in the background meanwhile. */
+         * A short wait at most: the console's black lasted seconds (the
+         * logic's run, the first screen's reads, then this wait), so the
+         * rest is read in the background meanwhile. */
         embark_wait_ = 0;
+        if (embark_share_ >= 0) lib_->set_warm_share(embark_share_);
+        embark_share_ = -1;
         game_->end_embark_wipe();
         close_screen();
         if (title_node_) {
