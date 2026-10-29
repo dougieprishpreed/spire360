@@ -11,6 +11,94 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The third run's logic reports (2026-10-29): each checked against the game, the same causes elsewhere
+
+The user asked for the saved logic items before the next console build,
+each checked against the game (some may be how it plays), the code combed
+for the same causes. The checks and what changed:
+
+- Neow's Dowsing Rod (shot 01): its tips all left of the option. The
+  game's NHoverTipSet.SetAlignment puts the text tips on one side and the
+  cards on the other (Left: text left of the owner, cards from its right
+  edge; Right: text right, cards left), then its overflow corrections.
+  TipFollower laid every set out as one row on one side: show_left (event
+  options outside combat, NRewardButton), show_for_control (by
+  GetHoverTipAlignment: collections, run history), show_below (NPotionHolder:
+  Center, the cards under the text), the merchant slots (SetAlignment, then
+  half the slot) and the inspect screens (SetAlignment(HoverTipRect,
+  Right): an inspected card's cards left of it, its text right) all go
+  through place_tips_beside now; show_right for an event in a combat
+  layout (always Right, not by place). Rendered: Neow's option, Unplayable
+  left, Dowsing and Abundance right of it (work/rp100/neow100b).
+- The Defect's orbs at the turn's end, the enemy turns rushed: the game's
+  waits, as the logic records them: OrbModel.TriggerPassive's
+  CustomScaledWait(0.1, 0.25) a passive (Fast 0.1 s), the hand's flush (its
+  NCardFlyVfx: no wait), NEnemyTurnBanner's (0.5, 0.8), PerformIntent's
+  (0.25, 0.4), TriggerAnim's (min(w/2, 0.25), w). Fast mode is that quick in
+  the game; not changed. (The lightning passive plays its evoke sound: the
+  game's ApplyLightningDamage does.)
+- The shop's card removal: the game's tips are drawn over the removed
+  card's preview too (NGame's HoverTipsContainer after the run's
+  CardPreviewContainer), NMerchantInventory.OnPurchaseCompleted focusing
+  the visible slot nearest the one used. The client focused the first slot
+  (top left) whenever the bought one was gone; now the nearest, once the
+  layout placed them (ShopScreen gone_, focus_near_gone_).
+- The Waterfall Giant (shot 02): knocked out, no health bar, no intent, no
+  Steam Eruption. The logic was right (its death kept, HP 999999999,
+  InfiniteWithoutNumbers, a revive, Stun then DeathBlow); the client: the
+  death's AnimDisableUi fade waits 0.5 s, enable_ui saw the bar still shown
+  and did nothing (Godot runs both tweens, the later wins: the bar stays);
+  the Dead cue hid the intents for any death (the game: AnimHideIntent only
+  for a removed creature; StartDeathAnim(false) freezes them); the revive
+  stood the body up (play_idle: the game plays a Revive trigger where the
+  animator has one, AnimTempRevive for the player, else nothing). Now the
+  logic attaches the Revive trigger's ops to NCreature.StartReviveAnim
+  (Animators.Revive: Osty's revive, a Decimillipede segment's regenerate),
+  the client plays them or keeps the pose. The same for the segments (their
+  intents gone after reattaching). Scenario waterfall_giant: the bar
+  infinite, Stun, then DeathBlow 18 (work/wg100f).
+- Darv (shot 03): the event's options reacted to each A under its loot. An
+  event under an overlay (rewards, a card choice) is rebuilt with each of
+  the overlay's decisions: the options slid in and took the focus (tips)
+  again. EventScreen::set_behind (GameClient::overlay_background): the page
+  as it stands (entrance over, an ancient's last line, the banner settled,
+  a combat layout's steps not played again), no focus, no tips.
+- Floor 20 (shot 04): the Bowlbug Rock's "bang" (the console's Back + RB
+  draw list: bowlbug.png at the region "bang") up for the rest of the
+  fight. Spine 4's AnimationState: an entry mixing out never sets its
+  attachments (attachmentThreshold 0) and its slots go back to the setup
+  attachment at the end of apply (unkeyedState); its other properties that
+  the next entry does not key go back to the setup pose over the mix
+  (timeline mode First, MixBlend.setup); the old entry is applied at least
+  once even with no crossfade, and when a track empties. Our
+  SpAnimationState applied the old entry at full weight during a mix and
+  not at all without one: an attack's attachments, and any bone or colour
+  only it keyed, stayed. Now sp_apply_entry / sp_apply_mixing_out
+  (SpSlot.attachment_state, SpAnimation.props). Scenario bowlbugs: the bang
+  gone, the poses as before (work/bb100).
+
+The shop's freeze, again: the whole session replayed under the checking
+heap (tools/viewer/debug_heap.cpp, now locked for the particles' workers;
+spire_play checks it each frame in --commands mode too, work/dbg100.sh):
+through the shop and on, no write after a delete, no double delete, no
+overrun. vulkan4xenon logs a failed allocation (none in default.log). Not
+yet tried: the session with the console's audio thread (dbg100b.sh); the
+renderer's Vulkan path on the host (spire_play has no --vk, records traces
+only in --menu mode).
+
+Checks: seeded traces (traces/new100c against base6) 0 differences; 32
+scenarios ok (bowlbugs and waterfall_giant new); spire_check 2343
+responses, 0 failures, audio 22070 voices, 0 decoder failures
+(work/check100c.sh); PC build without warnings. Console logic
+(work/aot100b.log): the native host's 15 runs without a trap, 32
+scenarios ok, strict_compare 14 of 15 identical (the Cubex Construct's
+random skin).
+
+XEX: 94,871,552 bytes from 5cec63d (1a115b5's performance work with these),
+on the USB as E:\Games\spire360\default.xex; the user tests performance and
+these items on it.
+
+
 ## The third xSDK hardware run (2026-10-29): performance first, the shop's freeze
 
 The user's run of 362e2c9 (work/rp100: the logs, the four shots, the
