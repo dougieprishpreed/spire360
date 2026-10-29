@@ -1,6 +1,9 @@
 #include "pack.h"
 
 #include <string.h>
+#if defined(__XSDK__)
+#include <unistd.h>
+#endif
 
 namespace spire {
 
@@ -36,6 +39,32 @@ static bool seek64(FILE* f, u64 off) {
 #endif
 }
 
+/* n bytes at off. On xsdk the C library's stdio reads through a 1 KB
+ * buffer (newlib's BUFSIZ, as xsdk's fstat gives no block size), each
+ * refill a request of the USB drive: the console read the pack at 3.9 MB/s
+ * whatever the entry, the Neow room's 12 MB background in 3.2 s. read()
+ * asks the kernel for all of it at once. */
+static bool read_at(FILE* f, u64 off, void* buf, size_t n) {
+#if defined(__XSDK__)
+    int fd = fileno(f);
+    if (lseek(fd, (off_t)off, SEEK_SET) != (off_t)off) return false;
+    u8* p = (u8*)buf;
+    while (n) {
+        ssize_t got = read(fd, p, n);
+        if (got <= 0) return false;
+        p += got;
+        n -= (size_t)got;
+    }
+    return true;
+#else
+    return seek64(f, off) && (n == 0 || fread(buf, 1, n, f) == n);
+#endif
+}
+
+/* An audio stream's stdio buffer: its reads are small (stb_vorbis takes a
+ * byte at a time), each refill of xsdk's 1 KB one a request of the drive. */
+enum { STREAM_BUFFER = 32 * 1024 };
+
 bool Pack::open(const char* path, std::string* error) {
     close();
     f_ = fopen(path, "rb");
@@ -45,7 +74,7 @@ bool Pack::open(const char* path, std::string* error) {
     }
     path_ = path;
     u8 h[64];
-    if (fread(h, 1, 64, f_) != 64 || memcmp(h, "S3P1", 4) != 0 || be32(h + 4) != 1) {
+    if (!read_at(f_, 0, h, 64) || memcmp(h, "S3P1", 4) != 0 || be32(h + 4) != 1) {
         if (error) *error = "not a Spire360 pack (S3P1 v1)";
         close();
         return false;
@@ -60,8 +89,8 @@ bool Pack::open(const char* path, std::string* error) {
     game_version_.assign((const char*)h + 40, gv);
     std::vector<u8> dir((size_t)count * 32);
     names_.resize(names_size + 1);
-    if (!seek64(f_, dir_off) || (count && fread(&dir[0], 1, dir.size(), f_) != dir.size()) ||
-        !seek64(f_, names_off) || (names_size && fread(&names_[0], 1, names_size, f_) != names_size)) {
+    if ((count && !read_at(f_, dir_off, &dir[0], dir.size())) ||
+        (names_size && !read_at(f_, names_off, &names_[0], names_size))) {
         if (error) *error = "truncated pack directory";
         close();
         return false;
@@ -102,8 +131,7 @@ bool Pack::read(const PackEntry* e, std::vector<u8>& out) const {
     if (!e || !f_) return false;
     ScopedLock lock(lock_);
     out.resize(e->size);
-    if (!seek64(f_, e->offset)) return false;
-    return e->size == 0 || fread(&out[0], 1, e->size, f_) == e->size;
+    return e->size == 0 || read_at(f_, e->offset, &out[0], e->size);
 }
 
 bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
@@ -111,13 +139,13 @@ bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
     ScopedLock lock(lock_);
     if (len > e->size) len = e->size;
     out.resize(len);
-    if (!seek64(f_, e->offset)) return false;
-    return len == 0 || fread(&out[0], 1, len, f_) == len;
+    return len == 0 || read_at(f_, e->offset, &out[0], len);
 }
 
 FILE* Pack::open_stream(const PackEntry* e) const {
     if (!f_ || !e) return NULL;
     FILE* stream = fopen(path_.c_str(), "rb");
+    if (stream) setvbuf(stream, NULL, _IOFBF, STREAM_BUFFER);
     if (stream && !seek64(stream, e->offset)) { fclose(stream); stream = NULL; }
     return stream;
 }

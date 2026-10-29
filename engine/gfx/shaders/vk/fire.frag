@@ -1,36 +1,40 @@
 #version 450
 // canvas.hlsl's stepped fire branch: the game's stepped fire shaders
-// (shaders/vfx/vfx_stepped_shader_fire_*), or the doom bar's noise.
+// (shaders/vfx/vfx_stepped_shader_fire_*), the doom bar's noise in
+// doom_bar.frag. vk_renderer.cpp folds the parameters (fire_params) so that
+// xost makes few instructions of it: it runs every instruction of both
+// sides of a branch, and moves a constant into a register to swizzle it or
+// to use two in one instruction. The Underdocks' water reflections draw a
+// third of the screen six times over with it.
+//   c7, c8: noise 1's and noise 2's coordinates, scale and offset;
+//   c9, c10: the noise mask's (its 0.04 shift in the offset) and
+//            distortion 1's; c11, c12: distortion 2's and the distortion
+//            mask's;
+//   c13: noise 1 times noise 2's strength, the mask's scale and add (the
+//        inverted mask 1 - m);
+//   c14: distortion 1's strength (xy) and distortion 2's (zw);
+//   c15: the colour's and the alpha's smoothsteps as v * xy + zw (the
+//        dark variant's of 1 - v);
+//   c16, c17: the colour, c16 + c17 times its smoothstep.
 #include "common.glsl"
 
 void main() {
-    vec4 result;
-    if (g_fstr.w > 1.5) {
-        // the doom bar: the scene's noise texture, sampled in screen space
-        float tm = g_fstr.x;
-        float scroll = textureLod(g_fn1, v_screen * 0.1 + tm * 0.0005 + 0.24, 0.0).r;
-        float n1 = textureLod(g_fn1, v_screen + tm * 0.0005 + scroll, 0.0).r;
-        float n2 = textureLod(g_fn1, v_screen - tm * 0.0007 + scroll, 0.0).r;
-        float value = smoothstep(0.4, 0.6, n1 * 0.75 + n2 * 0.35);
-        vec3 rgb = textureLod(g_lut, vec2(value, 0.0), 0.0).rgb;
-        float alpha = texture(g_tex, v_uv).a * v_color.a;
-        result = vec4(rgb * alpha, alpha);
-    } else {
-        vec2 uv = v_uv;
-        float n2 = g_fstr.y * textureLod(g_fn2, uv * g_fn2p.xy + g_fn2p.zw, 0.0).b;
-        float n1 = g_fstr.x * textureLod(g_fn1, uv * g_fn1p.xy + g_fn1p.zw, 0.0).b;
-        float m = textureLod(g_fmask, (uv - vec2(0.0, 0.04)) * g_fmaskp.xy + vec2(0.0, 0.04) + g_fmaskp.zw, 0.0).b;
-        m = mix(m, 1.0 - m, g_fstr.z);
-        float a = n1 * n2 + m;
-        vec2 d = textureLod(g_fd2, uv * g_fd2p.xy + g_fd2p.zw, 0.0).xy * g_fdstr.y +
-                 textureLod(g_fd1, uv * g_fd1p.xy + g_fd1p.zw, 0.0).xy * g_fdstr.x;
-        vec2 dm = textureLod(g_fdmask, uv * g_fdmaskp.xy + g_fdmaskp.zw, 0.0).xy;
-        float v = a * textureLod(g_tex, uv + d * dm, 0.0).b;
-        vec3 dark = g_fouter.rgb * (smoothstep(g_fsteps.x, g_fsteps.y, 1.0 - v) + g_finner.rgb);
-        vec3 bright = g_fouter.rgb + smoothstep(g_fsteps.x, g_fsteps.y, v) * g_finner.rgb;
-        vec3 rgb = g_fstr.w > 0.5 ? dark : bright;
-        float fa = saturate(smoothstep(g_fsteps.z, g_fsteps.w, v)) * v_color.a;
-        result = vec4(rgb * fa, fa);
-    }
-    o_color = result;
+    vec4 uv = v_uv.xyxy;
+    vec4 noise_uv = uv * P.c[7] + P.c[8];
+    vec4 mask_uv = uv * P.c[9] + P.c[10];
+    vec4 dist_uv = uv * P.c[11] + P.c[12];
+    float n1 = textureLod(g_fn1, noise_uv.xy, 0.0).b;
+    float n2 = textureLod(g_fn2, noise_uv.zw, 0.0).b;
+    float m = textureLod(g_fmask, mask_uv.xy, 0.0).b;
+    vec2 d1 = textureLod(g_fd1, mask_uv.zw, 0.0).xy;
+    vec2 d2 = textureLod(g_fd2, dist_uv.xy, 0.0).xy;
+    vec2 dm = textureLod(g_fdmask, dist_uv.zw, 0.0).xy;
+    vec4 k = P.c[13];
+    float a = n1 * n2 * k.x + (m * k.y + k.z);
+    vec2 d = (d1 * P.c[14].xy + d2 * P.c[14].zw) * dm;
+    float v = a * textureLod(g_tex, v_uv + d, 0.0).b;
+    vec2 t = saturate(v * P.c[15].xy + P.c[15].zw);
+    vec2 s = t * t * (3.0 - 2.0 * t);
+    float fa = s.y * v_color.a;
+    o_color = vec4((P.c[16].rgb + P.c[17].rgb * s.x) * fa, fa);
 }

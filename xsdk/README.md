@@ -21,6 +21,17 @@ What differs from the XDK build:
   `cos` and `length`. xost's select is `f + (t - f) * c`, so a division by 0 on the side not
   taken still makes NaN: divisions by a texel's alpha go through `spire_div`. The build compiles
   them all through xost, so a shader it refuses stops the build rather than the console.
+- **A mode a shader**: xost runs every instruction of both sides of a branch or select, and moves
+  a constant into a register to swizzle it, so each of `main.frag`'s modes alone has a shader of
+  its own (`group`, `color_matrix`, `gradient_map`, `ripple`; 4 to 28 instructions to its 171),
+  the doom bar and the polar erosion are apart from the fire and the erosion, and the renderer
+  folds the fire's parameters (27 instructions, 143 before). A fetch whose coordinate the ALU has
+  just made waits for the ALU: the fire's six reads wait once, but xost puts each coordinate of an
+  unrolled loop just before its read, so the screen copy's level pass (49 reads) waits 44 times.
+- **Canvas groups' passes begin fresh**, their area cleared in the pass: begun with a clear, a
+  group's pass had vulkan4xenon resolve the scene with that clear and draw it back after the group,
+  two copies of the screen a group. `tools/xsdk/edram_model.py` models vulkan4xenon's eDRAM
+  placement for a frame's passes (it reproduces the console's counts).
 - **The platform calls are xsdk's**: its POSIX layer (threads, files, `nanosleep`) with
   `xsdk_thread_move` for the hardware threads, its audio feeder (`engine/audio/output.cpp`), the
   kernel's reserve and commit for the logic's memory (`runtime/src/srt_plat_posix.c`), and

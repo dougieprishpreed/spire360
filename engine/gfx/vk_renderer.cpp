@@ -78,10 +78,14 @@ bool vk_ok(VkResult r, const char* what) {
 }
 
 /* The pixel shader variants: canvas.hlsl's ps_main by its branches, the
- * level pass, the copy and present passes, then effect id at V_EFFECT + id. */
+ * level pass, the copy and present passes, main.frag's modes one at a time,
+ * then effect id at V_EFFECT + id. xost runs every instruction of both sides
+ * of a branch or select, so a mode in a shader of its own costs a draw only
+ * its own instructions. */
 enum Variant {
     V_PLAIN, V_TEXT, V_MAIN, V_FIRE, V_VFX, V_SCREEN_DARK, V_SCREEN_NOISE, V_SCREEN_LEVEL, V_SCREEN_RADIAL,
-    V_SCREEN_GLASS, V_SCREEN_DOOM, V_SCREEN_DISTORT, V_SCREEN_CHROMA, V_SCREEN_AT_UV, V_COPY, V_PRESENT, V_EFFECT,
+    V_SCREEN_GLASS, V_SCREEN_DOOM, V_SCREEN_DISTORT, V_SCREEN_CHROMA, V_SCREEN_AT_UV, V_COPY, V_PRESENT,
+    V_DOOM_BAR, V_VFX_POLAR, V_GROUP, V_COLOR_MATRIX, V_GRADIENT_MAP, V_RIPPLE, V_EFFECT,
     V_COUNT = V_EFFECT + EFFECT_COUNT
 };
 
@@ -90,7 +94,9 @@ const char* const VARIANT_FILES[V_EFFECT] = { "plain.frag",          "text.frag"
                                               "screen_noise.frag",   "screen_level.frag",  "screen_radial.frag",
                                               "screen_glass.frag",   "screen_doom.frag",   "screen_distort.frag",
                                               "screen_chroma.frag",  "screen_at_uv.frag",  "copy.frag",
-                                              "present.frag" };
+                                              "present.frag",        "doom_bar.frag",      "vfx_polar.frag",
+                                              "group.frag",          "color_matrix.frag",  "gradient_map.frag",
+                                              "ripple.frag" };
 
 /* Blend states: the D3D9 renderer's (one set of factors for colour and
  * alpha), and none (the passes that replace what they draw over). */
@@ -237,7 +243,7 @@ private:
     void submit(bool wait);
     void flush_and_wait();
     /* ---- passes ---- */
-    void open_pass(VkTexture* t, bool clear, const float* clear_color, const VkRect2D* area);
+    void open_pass(VkTexture* t, bool clear, const float* clear_color, const VkRect2D* area, bool fresh = false);
     void ensure_pass();
     void end_pass();
     void barrier(VkTexture* t, VkImageLayout to);
@@ -1200,13 +1206,13 @@ void Impl::flush_and_wait() {
 
 /* ---- passes ---- */
 
-/* A render pass over t (clear: to clear_color, else what t holds), its
- * area the whole target unless given. */
-void Impl::open_pass(VkTexture* t, bool clear, const float* clear_color, const VkRect2D* area) {
+/* A render pass over t (clear: to clear_color; fresh: whatever; else what
+ * t holds), its area the whole target unless given. */
+void Impl::open_pass(VkTexture* t, bool clear, const float* clear_color, const VkRect2D* area, bool fresh) {
     begin_frame();
     VkAttachmentLoadOp load = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR
-                              : t->layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
-                                                                       : VK_ATTACHMENT_LOAD_OP_LOAD;
+                              : fresh || t->layout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                                                                                : VK_ATTACHMENT_LOAD_OP_LOAD;
     VkImageLayout final = t->swapchain ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkRenderPass rp = render_pass(load, t->layout, final);
     if (trace_on())
@@ -1256,11 +1262,33 @@ void Impl::ensure_pass() {
     if (pass_open_ && pass_tex_ == target_) return;
     end_pass();
     static const float transparent[4] = { 0, 0, 0, 0 };
+    const VkRect2D* area = target_area_.extent.width ? &target_area_ : NULL;
     if (target_ == scene_) {
         open_pass(scene_, scene_clear_, clear_, NULL);
         scene_clear_ = false;
+    } else if (target_ == group_ && target_clear_) {
+        /* A group's pass begins with whatever eDRAM holds there, cleared in
+         * the pass. Begun with a clear, a pass of the scene's size has
+         * vulkan4xenon resolve the scene with that clear as the scene's pass
+         * ends and put the group over the scene's tiles, the scene drawn
+         * back into eDRAM after it: two copies of the screen a group, 11 a
+         * frame in the Underdocks (tools/xsdk/edram_model.py). So the
+         * scene's resolve waits in eDRAM beside the group. */
+        open_pass(group_, false, NULL, area, true);
+        VkClearAttachment ca;
+        memset(&ca, 0, sizeof(ca));
+        ca.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        VkClearRect cr;
+        cr.rect.offset.x = cr.rect.offset.y = 0;
+        cr.rect.extent.width = (u32)group_->width;
+        cr.rect.extent.height = (u32)group_->height;
+        if (area) cr.rect = *area;
+        cr.baseArrayLayer = 0;
+        cr.layerCount = 1;
+        vkCmdClearAttachments(frames_[frame_].cmd, 1, &ca, 1, &cr);
+        target_clear_ = false;
     } else {
-        open_pass(target_, target_clear_, transparent, target_area_.extent.width ? &target_area_ : NULL);
+        open_pass(target_, target_clear_, transparent, area);
         target_clear_ = false;
     }
     memset(&target_area_, 0, sizeof(target_area_));
@@ -2243,11 +2271,64 @@ int Impl::variant() const {
         default: return V_SCREEN_NOISE;
         }
     }
-    if (fire_on_) return V_FIRE;
-    if (vfx_on_) return V_VFX;
+    if (fire_on_) return fire_.strength[3] > 1.5f ? V_DOOM_BAR : V_FIRE;
+    if (vfx_on_) return vfx_.polar > 0.5f ? V_VFX_POLAR : V_VFX;
     bool group = (flags_ & DRAW_GROUP) && group_ && !in_group_ && !cap_w_;
-    if (cm_on_ || ripple_on_ || gm_ || group) return V_MAIN;
-    return (flags_ & DRAW_MSDF) ? V_TEXT : V_PLAIN;
+    bool msdf = (flags_ & DRAW_MSDF) != 0;
+    /* main.frag's modes: the group's (which leaves the MSDF, the colour
+     * matrix and the ripple out, the gradient map's alpha not) or one other
+     * alone in its own shader, main.frag for more */
+    if (group) return gm_ ? V_MAIN : V_GROUP;
+    int modes = (cm_on_ ? 1 : 0) + (ripple_on_ ? 1 : 0) + (gm_ ? 1 : 0);
+    if (!modes) return msdf ? V_TEXT : V_PLAIN;
+    if (modes > 1 || msdf) return V_MAIN;
+    return cm_on_ ? V_COLOR_MATRIX : ripple_on_ ? V_RIPPLE : V_GRADIENT_MAP;
+}
+
+/* 1 / (e1 - e0), kept off infinity: smoothstep's scale. */
+static float smooth_scale(float e0, float e1) {
+    float span = e1 - e0;
+    if (fabsf(span) < 1e-6f) span = span < 0 ? -1e-6f : 1e-6f;
+    return 1.0f / span;
+}
+
+/* fire.frag's parameters, c7 to c17, folded as the shader says: the six
+ * textures' coordinates two to a vector, the mask's inversion and the
+ * strengths as factors, both smoothsteps as v * k + c, the dark variant's
+ * colour as the bright one's form; doom_bar.frag's time at c14.x. */
+static void fire_params(const FireParams& f, float* c) {
+    if (f.strength[3] > 1.5f) {
+        c[56] = f.strength[0];
+        return;
+    }
+    const float* uv[6] = { f.noise1_uv, f.noise2_uv, f.mask_uv, f.dist1_uv, f.dist2_uv, f.dist_mask_uv };
+    for (int k = 0; k < 6; k += 2) {
+        float* scale = c + (7 + k) * 4;
+        float* offset = scale + 4;
+        for (int j = 0; j < 2; ++j) {
+            scale[j] = uv[k][j];
+            scale[2 + j] = uv[k + 1][j];
+            offset[j] = uv[k][2 + j];
+            offset[2 + j] = uv[k + 1][2 + j];
+        }
+    }
+    /* the mask's v is moved by 0.04 about its scale */
+    c[41] += 0.04f * (1.0f - f.mask_uv[1]);
+    c[52] = f.strength[0] * f.strength[1];
+    c[53] = 1.0f - 2.0f * f.strength[2];
+    c[54] = f.strength[2];
+    c[56] = c[57] = f.dist_strength[0];
+    c[58] = c[59] = f.dist_strength[1];
+    bool dark = f.strength[3] > 0.5f;
+    float ki = smooth_scale(f.steps[0], f.steps[1]), ka = smooth_scale(f.steps[2], f.steps[3]);
+    c[60] = dark ? -ki : ki;
+    c[61] = ka;
+    c[62] = dark ? (1.0f - f.steps[0]) * ki : -f.steps[0] * ki;
+    c[63] = -f.steps[2] * ka;
+    for (int j = 0; j < 3; ++j) {
+        c[64 + j] = dark ? f.outer[j] * f.inner[j] : f.outer[j];
+        c[68 + j] = dark ? f.outer[j] : f.inner[j];
+    }
 }
 
 /* The state of the batch: the pipeline, the parameters (written into the
@@ -2280,13 +2361,8 @@ void Impl::apply_state() {
                        cm_[4], cm_[5], cm_[6], cm_[7], cm_[8], cm_[9], cm_[10], cm_[11], ripple_[0], ripple_[1],
                        ripple_[2], ripple_[3], gm_ ? 1.0f : 0.0f, gm_red_ ? 1.0f : 0.0f, 0.0f, 0.0f };
     memcpy(c, head, sizeof(head));
-    /* c7..c18: the stepped fire */
-    c[28] = fire_on_ ? 1.0f : 0.0f;
-    const float* fv[11] = { fire_.noise1_uv, fire_.noise2_uv, fire_.mask_uv, fire_.dist1_uv, fire_.dist2_uv,
-                            fire_.dist_mask_uv, fire_.strength, fire_.dist_strength, fire_.steps, fire_.inner,
-                            fire_.outer };
-    for (int k = 0; k < 11; ++k)
-        for (int j = 0; j < 4; ++j) c[32 + k * 4 + j] = fire_on_ ? fv[k][j] : 0.0f;
+    /* c7..c17: the stepped fire */
+    if (fire_on_) fire_params(fire_, c);
     /* c19..c21: the erosion particle shaders */
     c[76] = vfx_on_ ? 1.0f : 0.0f;
     c[77] = vfx_on_ ? vfx_.polar : 0.0f;
@@ -2396,7 +2472,7 @@ void Impl::apply_state() {
     int sampler = ((flags_ & DRAW_REPEAT) ? 1 : 0) | ((flags_ & DRAW_NEAREST) ? 2 : 0);
     VkDescriptorSet ts = texture_set(tex_, sampler);
     /* the extra samplers' set only for the variants that read them */
-    bool extras = v != V_PLAIN && v != V_TEXT;
+    bool extras = v != V_PLAIN && v != V_TEXT && v != V_COLOR_MATRIX && v != V_RIPPLE;
     VkDescriptorSet es = extras ? extra_set(x, xs) : bound_extra_set_;
     if (fresh || !bound_tex_set_ || (extras && es != bound_extra_set_)) {
         VkDescriptorSet sets[3] = { ts, uniform_set_, es };
