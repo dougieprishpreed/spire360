@@ -11,6 +11,97 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The first xSDK hardware run (2026-10-29): what it showed, and the changes
+
+The user's run of d6c8ebc (logs in work/rp98, profile=1): it boots, and runs
+faster than any build before; a run to the Architect, a save and quit, and a
+new run into the Underdocks. Their findings, performance first by far:
+
+- Effects slow it most, two or three at once (an exhausted card, a shuffle).
+- First looks are slow, again ones instant (the character select's
+  portraits; they asked about a shader cache), and a long black screen
+  before Neow on a new run.
+- The Underdocks isn't dark after all (the presets showed it): the gamma
+  switch can go, the default kept. But its mist shows big square shapes
+  moving (spire360_shot_03.bmp).
+- Logic, left until performance is done: the Sandpit worm's scream hides
+  the player while it plays; after the Act 2 boss the map opens at Act 3's
+  start where the Ancient's room (Tanx) should open first; Nightmare's copy
+  sits behind its neighbours in the hand (shot_01), its imbued autoplay at a
+  fight's start goes abruptly into the pick, and with Throwing Axe the second
+  pick is a different hand-select menu than the first; the Queen (Act 3
+  boss) has no death animation and the Architect's scene runs rushed. Shot 02
+  (poison behind the HP text) is as the game draws it.
+
+What the log said:
+- Fights: the CPU 15-30 ms a frame (draw 9-17, process 4-12), paced at 30
+  fps; the GPU probe 17-43 ms with the recording (images and shader materials
+  the most). The new numbers below split those.
+- Long frames at decisions and screens are loads from the USB drive (draw
+  0.3-2.4 s). Under the 80 MB budget the canvas still let a texture go after
+  120 idle frames (2 s): 24-56 textures were made and let go every 10 s of a
+  fight, and a replay of the session (work/replay98.sh, spire_play
+  --profile-cpu --load-trace) read the card atlases 6-7 times each in 100
+  decisions. The character select's art is one 6 MB texture each (Regent's
+  3751x1623), read on first look: no shaders are compiled on the console
+  (they're in the build's bundle; the log now counts vulkan4xenon's).
+- Process stalls of 0.5-4 s, 15 frames running at the end of a fight
+  (decision 101, the Slimed Berserker's death) and elsewhere, the watchdog
+  each time with the audio thread mixing; the PC replay (no audio thread)
+  has none there. The mix held the audio lock for every chunk the output
+  wanted, each voice reading from the pack on the USB drive, and the frame
+  loop waited in a cue.
+- xost's select is f + (t - f) * c (xsdk src/xsc_lower.c): a division by 0
+  on the side not taken still puts out NaN. On xost's simulator plain, main
+  and screen_dark did, for every alpha-0 texel (the straight colour's
+  division by the alpha).
+- The mist's squares: edges on 32-pixel lines (32, 96, 256, 832, 864), the
+  canvas groups' render areas (every Underdocks layer is a clip_children
+  group, its fog and lights the children); darker inside by about a third.
+  Not found: vulkan4xenon's eDRAM placement and xsdk's partial resolves (the
+  texture cache invalidated over the whole texture) look right on reading.
+  Back + X now cycles a third mode, each group's pass over its whole target,
+  to tell on the console whether the render areas are the cause.
+
+Changes (engine; xsdk/main.cpp):
+- GPU timing with profile=1 (vk_renderer.cpp): time stamps around each frame
+  (its GPU time by the GPU's clock, read once its fence passes), the CPU's
+  waits (fence, acquire, pacing), passes, groups, captures, screen copies,
+  uploads; vulkan4xenon's shader and eDRAM counts. A GPU trace of one frame,
+  a bottom-of-pipe time stamp after each draw and pass begin/end, charged to
+  the scene item (Renderer::trace_label from SceneTree::draw_items), shader
+  and pass: in the probe (every third 600 frames now, the probe a hitch) and
+  after a frame over 36 ms on the GPU (one in 20 s). Slow frames (40-250 ms
+  of work) get their phases and the GPU's time; long frames the loads they
+  made (set_load_trace's hold, Spine skeletons traced too).
+- Textures stay a minute idle within the budget (Canvas
+  TEXTURE_IDLE_FRAMES 3600), spire_check's cache case to match.
+- The audio thread gives its lock up between 256-frame chunks while the game
+  waits (GameLock); sounds up to 512 KB are read once and kept (12 MB of
+  them), voices decoding from memory: a sound starting reads nothing from
+  the drive.
+- Glyphs of one text pass go out a font page at a time (Canvas begin_glyphs
+  / end_glyphs from Label and RichTextLabel): the main menu's text 198 draws
+  to 98 on the host trace.
+- The parameters' block keeps c1 (MSDF range, texture size) fixed for the
+  variants that don't read it, and a texture change alone binds set 0 alone.
+- spire_div in common.glsl for the alpha divisions; ripple's fmod and MSDF's
+  fwidth kept off 0; check_shaders.py flags NaN/inf for transparent texels
+  with random and zero parameters (78 shaders, 0 problems).
+- The gamma presets and Back + Y gone: in^0.88 always.
+
+Checks: host build clean, the 11 comparison scenes as before (software vs
+Vulkan, Khronos validation on: only the tool's own teardown order), xost's
+simulator 0 problems; spire_check 2294 responses, its one failure the old
+120-frame expectation of the texture cache case (updated: 0 failures), the
+audio replay 21806 voices, 0 decoder failures; a 5-minute native pad
+session with the audio thread (work/monkey90/g98c) 0 reports, no logic
+errors. Commit 616c638 (pushed); the XEX 94,625,792 bytes from it.
+
+Next: the user's console run of this build, then the GPU traces of their
+slow fights and effects to work from; the mist's mode test; then the logic
+items above.
+
 ## The xSDK branch (2026-10-28): the port to xsdk and vulkan4xenon
 
 The fifth hardware run (05b3371, work/rp97, profile=1) was "a bit more
