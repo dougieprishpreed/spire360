@@ -1,11 +1,15 @@
 /*
  * srt_plat_posix.c - POSIX backend for srt_plat.h (Linux, macOS; also used
- * for big-endian test runs under qemu-ppc).
+ * for big-endian test runs under qemu-ppc, and on the xSDK console build,
+ * whose newlib and POSIX layer take the same calls: there the kernel's
+ * reserve and commit hold the linear memory, and threads are placed on
+ * their hardware threads).
  */
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
 #endif
-#if !defined(_POSIX_C_SOURCE)
+/* (newlib's defaults show xsdk's getentropy, which POSIX 2008 hides) */
+#if !defined(_POSIX_C_SOURCE) && !defined(__XSDK__)
 #define _POSIX_C_SOURCE 200809L
 #endif
 
@@ -23,6 +27,11 @@
 #include <unistd.h>
 
 #include "srt_plat.h"
+
+#if defined(__XSDK__)
+#include <xsdk/kernel.h> /* NtAllocateVirtualMemory */
+#include <xsdk/thread.h> /* xsdk_thread_move */
+#endif
 
 struct srt_file {
     int fd;
@@ -168,7 +177,12 @@ int srt_plat_mkdir(const char* path) {
 }
 
 int srt_plat_rmdir(const char* path) {
+#if defined(__XSDK__)
+    /* xsdk has no rmdir: its unlink removes an empty folder */
+    return unlink(path) == 0 ? 0 : srt_errno(errno);
+#else
     return rmdir(path) == 0 ? 0 : srt_errno(errno);
+#endif
 }
 
 int srt_plat_unlink(const char* path) {
@@ -247,12 +261,23 @@ void srt_plat_sleep_ns(srt_u64 ns) {
 }
 
 void srt_plat_random(void* buf, size_t len) {
-    FILE* f = fopen("/dev/urandom", "rb");
     size_t got = 0;
+#if defined(__XSDK__)
+    /* no /dev/urandom; getentropy takes 256 bytes a call */
+    while (got < len) {
+        size_t n = len - got > 256 ? 256 : len - got;
+        if (getentropy((unsigned char*)buf + got, n) != 0) {
+            break;
+        }
+        got += n;
+    }
+#else
+    FILE* f = fopen("/dev/urandom", "rb");
     if (f != NULL) {
         got = fread(buf, 1, len, f);
         fclose(f);
     }
+#endif
     if (got < len) {
         size_t i;
         unsigned char* p = (unsigned char*)buf;
@@ -302,6 +327,7 @@ struct srt_thread {
     pthread_t t;
     srt_thread_fn fn;
     void* arg;
+    int hw_thread;
 };
 
 srt_mutex* srt_mutex_create(void) {
@@ -348,6 +374,12 @@ void srt_cond_broadcast(srt_cond* c) {
 
 static void* srt_thread_main(void* p) {
     srt_thread* t = (srt_thread*)p;
+#if defined(__XSDK__)
+    /* xsdk starts a thread on its creator's hardware thread */
+    if (t->hw_thread >= 0 && t->hw_thread < 6) {
+        xsdk_thread_move((uint32_t)t->hw_thread);
+    }
+#endif
     t->fn(t->arg);
     return NULL;
 }
@@ -355,12 +387,12 @@ static void* srt_thread_main(void* p) {
 srt_thread* srt_thread_start(srt_thread_fn fn, void* arg, size_t stack_bytes, int hw_thread) {
     pthread_attr_t attr;
     srt_thread* t = (srt_thread*)malloc(sizeof(*t));
-    (void)hw_thread;
     if (t == NULL) {
         return NULL;
     }
     t->fn = fn;
     t->arg = arg;
+    t->hw_thread = hw_thread;
     pthread_attr_init(&attr);
     if (stack_bytes != 0) {
         pthread_attr_setstacksize(&attr, stack_bytes);
@@ -379,6 +411,54 @@ void srt_thread_join(srt_thread* t) {
     free(t);
 }
 
+#if defined(__XSDK__)
+/* The console has no paging: every committed page is physical memory, so
+ * the linear memory is reserved whole and committed as it grows, as the
+ * XDK build's VirtualAlloc did. Committed pages come zeroed. xsdk's heap
+ * reserves the title's free memory at its first growth, so the address
+ * space left may hold less than asked: 64 MB less a try, down to 128 MB
+ * (the logic uses about 70). */
+void* srt_plat_reserve(srt_u64 bytes, srt_u64* got) {
+    srt_u64 want = bytes;
+    *got = 0;
+    if (bytes > (srt_u64)0xFFFFFFFFu) {
+        return NULL;
+    }
+    for (;;) {
+        void* p = NULL;
+        uint32_t size = (uint32_t)want;
+        if (NT_SUCCESS(NtAllocateVirtualMemory(&p, &size, MEM_RESERVE, PAGE_READWRITE, 0))) {
+            *got = want;
+            return p;
+        }
+        if (want <= (srt_u64)192 * 1024 * 1024) {
+            return NULL;
+        }
+        want -= (srt_u64)64 * 1024 * 1024;
+    }
+}
+
+int srt_plat_commit(void* base, srt_u64 from, srt_u64 to) {
+    void* p;
+    uint32_t size;
+    if (to <= from) {
+        return 0;
+    }
+    p = (char*)base + (size_t)from;
+    size = (uint32_t)(to - from);
+    if (!NT_SUCCESS(NtAllocateVirtualMemory(&p, &size, MEM_COMMIT, PAGE_READWRITE, 0))) {
+        return SRT_ENOMEM;
+    }
+    return 0;
+}
+
+void srt_plat_release(void* p) {
+    uint32_t size = 0;
+    if (p != NULL) {
+        NtFreeVirtualMemory(&p, &size, MEM_RELEASE, 0);
+    }
+}
+#else
 void* srt_plat_reserve(srt_u64 bytes, srt_u64* got) {
     void* p;
     if (bytes > (srt_u64)(size_t)-1) {
@@ -401,3 +481,4 @@ int srt_plat_commit(void* base, srt_u64 from, srt_u64 to) {
 void srt_plat_release(void* p) {
     free(p);
 }
+#endif

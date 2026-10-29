@@ -1,6 +1,6 @@
 #include "logic_link.h"
 
-#if !defined(_XBOX) && !defined(_WIN32)
+#if !defined(_XBOX) && !defined(__XSDK__) && !defined(_WIN32)
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -51,7 +51,7 @@ bool SrtLink::finished() { return true; }
 
 /* ---- PipeLink ---- */
 
-#if !defined(_XBOX) && !defined(_WIN32)
+#if !defined(_XBOX) && !defined(__XSDK__) && !defined(_WIN32)
 PipeLink::PipeLink() : pid_(-1), to_child_(-1), from_child_(-1), eof_(false) {}
 
 PipeLink::~PipeLink() {

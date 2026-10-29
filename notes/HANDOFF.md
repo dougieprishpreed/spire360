@@ -11,6 +11,95 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The xSDK branch (2026-10-28): the port to xsdk and vulkan4xenon
+
+The fifth hardware run (05b3371, work/rp97, profile=1) was "a bit more
+tolerable"; the user saw it drop hardest with two or three effects on
+screen at once (an exhausted card, a deck shuffle and another), and new
+logic bugs they want left until performance is done. Next step, theirs:
+the xSDK branch, booting in Vulkan and drawing on the console as the XDK
+build does; then performance, the gamma, the logic bugs. The XDK build is
+no longer worked on.
+
+What the fifth run's log said: a fight with 52-64 GPUParticles2D systems
+(the sandpit's kind) GPU-bound at ~54 ms a frame (16.5 without the fight's
+background: its sand clouds' fill), the CPU at ~50 ms drawing (particles'
+draw 33.8 ms, down from 54.8; DrawPrimitiveUP 1.6 ms) and 15 ms in the
+particles' steps on the workers (down from 37); paced at 30 throughout. The
+event and map screens: 32 ms a frame drawing, 28 of it inside
+DrawPrimitiveUP with the GPU at 7 ms (~400 small draws). Long frames of
+0.6-1.6 s at decisions (the update: response and presentation). No crash.
+
+Branch `xsdk` (from 05b3371). Toolchain and checkouts: the user's WSL
+distro CTR360-XSDK, /opt/ctr360-xsdk (shared with ctr360 and Balatro360:
+build from them, don't change them); Spire360's own build output in
+/opt/spire360-xsdk. xsdk 8c58c7a, vulkan4xenon df25dc5, glslang-xenon
+d2f0018: origin's heads on 2026-10-28 (Spire360 follows the latest; build.sh
+says when origin moves on).
+
+- xsdk/main.cpp: the XDK main on xsdk's calls (XamInputGetState,
+  MmQueryStatistics, clock_gettime), VkRenderer for D3D9. xsdk/CMakeLists.txt,
+  tools/xsdk/build.sh (README: xsdk/README.md). Title ID 0x53333630 ('S360').
+- engine/gfx/vk_renderer.cpp: the D3D9 renderer's design in Vulkan: the
+  canvas draws into an offscreen scene, present() draws it to the
+  swapchain through the display ramp (the gamma presets as a 256x1 lut);
+  groups, captures (the drawn image swapped into the texture returned) and
+  the screen copy's levels as render passes of their own; uniforms the
+  D3D9 pixel constants as one std140 block, rewritten only when they change.
+- Shaders: engine/gfx/shaders/vk (canvas.vert, plain/text/main/fire/vfx.frag,
+  screen.frag's modes) and effects.hlsl's 61 converted at build time by
+  tools/xsdk/vk_shaders.py; all 78 pass glslang and xost. xost's limits met:
+  no FUnordNotEqual/INotEqual/IEqual (!= written !(==); effect 40's centre
+  test made a float one in effects.hlsl), no integer abs, and a ?: that
+  glslang makes a branch after a long chain (atan2's) exceeds xost's
+  recursion limit (512): every ?: is written spire_sel (mix with a bool,
+  OpSelect).
+- Platform: threads placed with xsdk_thread_move (engine/core/thread.cpp,
+  runtime/src/srt_plat_posix.c), the audio through xsdk's feeder
+  (engine/audio/output.cpp), the logic's memory reserved and committed by
+  NtAllocateVirtualMemory (stepping down from 384 MB: xsdk's heap reserves
+  the title's free memory), getentropy for its random bytes. PipeLink
+  (fork, pipes) out of the console build.
+- Host check (PC, WSL): tools/xsdk/host_check.sh builds spire_view with the
+  Vulkan renderer (--vk) on lavapipe. 11 scenes (Spine creatures, card,
+  menus, five particle-heavy backgrounds) and 118 of 119 VFX scenes (one,
+  vfx_item_throw, crashes the software renderer too) match the software
+  renderer: mean difference under 0.4 of 255, the rest a few pixels on
+  edges and in the polar distortions (the atan2 fit). A first version lost
+  the scene's clear when a canvas group came first (mirror_vfx, the doom
+  overlay, the card afflictions black): the scene keeps its own pending
+  clear now. SPIRE_VK_TRACE=1 logs passes and draws, SPIRE_VK_VALIDATE=1
+  the validation layer.
+
+The first console build (tools/xsdk/build.sh in CTR360-XSDK): 0 warnings,
+default.xex 94.6 MB (the XDK's 105.6), staged in out/xsdk. The logic's ~75
+files took most of an hour; ninja keeps them in
+/opt/spire360-xsdk/output/cmake, so a build after engine changes takes
+about a minute. The user's rules since: always build locally, two
+compilers (JOBS=2, build.sh's default), no GitHub Actions (the XEX holds
+the translated logic, the player's game code). xsdk links no rmdir (its
+unlink removes an empty folder: srt_plat_rmdir) and no times, which
+newlib's clock() calls (chaotic_rand seeds from the monotonic clock there).
+
+Checks: all 78 shaders through glslang and xost, and on xost's simulator
+(tools/xsdk/check_shaders.py: optimised and plain agree; canvas.vert's
+position exact, its varyings in exports 0-2, plain.frag's colour as it
+should be); the PC tools (MSYS, 0 warnings: run build.sh with
+MSYSTEM=MSYS, as a MINGW64 login skips -lole32); spire_check 2294
+responses, 0 failures, audio 21805 voices, 7 absent, 0 decoder failures;
+a native pad session (g99a, 5 min) 0 reports, no logic errors.
+
+Console test: not run yet. Copy out/xsdk/default.xex over the XDK one
+beside game:\spire\ (keep the XDK's to go back); the ini and the pack
+stay. xsdk's own log is default.log beside it (stdout and stderr: the
+logic's messages go there too).
+
+Not done yet: GitHub Actions (the XEX holds translated game code, built
+from the user's copy, so CI can't build it); the gpu probe's numbers are the
+CPU's waits for the GPU (no time stamps); textures each take whole 64 KB
+pages in vulkan4xenon (xsdk_gpu_alloc), ~13 MB more than the XDK build's
+~400 textures if it matters (sub-allocate from blocks then).
+
 ## Console frame costs before the last XDK test (2026-10-28): the vertex path, threads, allocations, pacing
 
 The user asked for the sandpit's frame rate and the console build's speed

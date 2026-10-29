@@ -25,7 +25,7 @@ if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$CXX $FLAGS" ]; then
 fi
 objs=""
 for f in engine/*/*.cpp tools/viewer/spire_view.cpp tools/viewer/spire_play.cpp tools/viewer/spire_check.cpp tools/viewer/spire_audio_check.cpp tools/viewer/spire_gaps.cpp; do
-    case "$f" in *d3d9_renderer.cpp) continue ;; esac  # Windows / XDK only
+    case "$f" in *d3d9_renderer.cpp|*vk_renderer.cpp) continue ;; esac  # the consoles' renderers
     o=out/engine/$(basename "$f" .cpp).o
     objs="$objs $o"
     # Keep the verifier to one compiler process at a time.

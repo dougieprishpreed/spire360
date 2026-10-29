@@ -402,7 +402,17 @@ float smooth_damp(float current, float target, float* velocity, float smooth_tim
 
 unsigned chaotic_rand() {
     static unsigned state = 0;
-    if (!state) state = ((unsigned)time(NULL) * 2654435761u) ^ (unsigned)clock() ^ 0x9E3779B9u;
+    if (!state) {
+#if defined(__XSDK__)
+        /* xsdk has no clock(): its monotonic clock's nanoseconds */
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        unsigned tick = (unsigned)ts.tv_nsec;
+#else
+        unsigned tick = (unsigned)clock();
+#endif
+        state = ((unsigned)time(NULL) * 2654435761u) ^ tick ^ 0x9E3779B9u;
+    }
     state ^= state << 13;
     state ^= state >> 17;
     state ^= state << 5;

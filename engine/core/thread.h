@@ -1,6 +1,6 @@
-/* Threads and locks (the audio thread): the Windows API on the console
- * (XSetThreadProcessor picks the hardware thread) and on Windows, POSIX
- * threads elsewhere. */
+/* Threads and locks (the audio thread): the Windows API on the XDK console
+ * build (XSetThreadProcessor picks the hardware thread) and on Windows, POSIX
+ * threads elsewhere (the xSDK console build: xsdk_thread_move picks it). */
 #ifndef SPIRE_THREAD_H
 #define SPIRE_THREAD_H
 

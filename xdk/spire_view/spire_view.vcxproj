@@ -58,7 +58,7 @@ if errorlevel 1 exit /b 1
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="$(SpireRoot)engine\core\*.cpp" />
-    <ClCompile Include="$(SpireRoot)engine\gfx\*.cpp" />
+    <ClCompile Include="$(SpireRoot)engine\gfx\*.cpp" Exclude="$(SpireRoot)engine\gfx\vk_renderer.cpp" />
     <ClCompile Include="$(SpireRoot)engine\scene\*.cpp" />
     <ClCompile Include="$(SpireRoot)engine\text\*.cpp" />
     <ClCompile Include="$(SpireRoot)engine\game\*.cpp" />

@@ -39,7 +39,7 @@ private:
     std::vector<char> buf_;
 };
 
-#if !defined(_XBOX) && !defined(_WIN32)
+#if !defined(_XBOX) && !defined(__XSDK__) && !defined(_WIN32)
 class PipeLink : public LogicLink {
 public:
     PipeLink();

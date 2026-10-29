@@ -8,6 +8,8 @@
  * creature is drawn upward from 0, 0).
  *   spire_view <pack.s3p> <text> <out.png> --text <font> <size>
  *
+ * --vk (a Linux build with SPIRE_VK, tools/xsdk/host_check.sh) draws through
+ * the Vulkan renderer, offscreen, in place of the software one.
  * --scale 1 renders at the design size (1920x1080) for diffs against a
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
@@ -44,6 +46,9 @@
 #include "../../engine/scene/text_nodes.h"
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
+#if defined(SPIRE_VK)
+#include "../../engine/gfx/vk_renderer.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,6 +100,7 @@ int main(int argc, char** argv) {
     float origin_x = 0, origin_y = 0;
     int hand_focus = -1;
     bool has_origin = false;
+    bool use_vk = false;
     for (int i = 4; i < argc; ++i) {
         if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--spine-anim") == 0 && i + 1 < argc) spine_anim = argv[++i];
@@ -128,6 +134,7 @@ int main(int argc, char** argv) {
             }
         }
         else if (strcmp(argv[i], "--no-scripts") == 0) set_scripts_enabled(false); /* as Godot's render, without the game's C# */
+        else if (strcmp(argv[i], "--vk") == 0) use_vk = true;
     }
     install_game_scripts();
     Pack pack;
@@ -345,6 +352,41 @@ int main(int argc, char** argv) {
             tree.process(1.0 / 60.0);
             tree.layout(1);
         }
+    }
+    if (use_vk) {
+#if defined(SPIRE_VK)
+        int w = (int)(design.x * scale + 0.5f), h = (int)(design.y * scale + 0.5f);
+        VkRenderer* vk = VkRenderer::create();
+        if (!vk->init(w, h, false, &err)) {
+            fprintf(stderr, "vk: %s\n", err.c_str());
+            return 1;
+        }
+        Image img;
+        long calls = 0;
+        {
+            Canvas canvas(vk, &pack);
+            vk->begin(w, h, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+            tree.render(canvas);
+            vk->end();
+            img.resize(w, h);
+            if (!vk->read_frame(img.px)) {
+                fprintf(stderr, "vk: the frame not read back\n");
+                return 1;
+            }
+            calls = canvas.draw_calls();
+        }
+        int failed = vk->failed_shaders();
+        delete vk;
+        if (!write_png(argv[3], img)) {
+            fprintf(stderr, "cannot write %s\n", argv[3]);
+            return 1;
+        }
+        printf("%s: %d items, %ld draw calls (Vulkan), %d shaders failed\n", argv[3], tree.items_drawn, calls, failed);
+        return 0;
+#else
+        fprintf(stderr, "--vk: a build without SPIRE_VK\n");
+        return 2;
+#endif
     }
     SwRenderer sw;
     Canvas canvas(&sw, &pack);

@@ -7,9 +7,9 @@ namespace spire {
 
 /* SPIRE_CUE_TRACE in the environment (a diagnostic, off by default): each
  * cue played, dropped or taken back, on stderr as it happens. The console
- * has no environment (its Release CRT has no getenv). */
+ * has no environment (the XDK's Release CRT has no getenv). */
 static bool trace_on() {
-#if defined(_XBOX)
+#if defined(_XBOX) || defined(__XSDK__)
     return false;
 #else
     static int on = -1;

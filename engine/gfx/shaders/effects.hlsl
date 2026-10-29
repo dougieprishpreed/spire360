@@ -507,7 +507,9 @@ float4 ps_e40(VsOut i) : COLOR {
     float border = 0.0;
     [unroll] for (int dx = -1; dx <= 1; ++dx) {
         [unroll] for (int dy = -1; dy <= 1; ++dy) {
-            if (dx != 0 || dy != 0) {
+            // (the eight cells around, as floats: xost, the xSDK build's
+            // compiler, takes no integer comparison)
+            if (abs(float(dx)) + abs(float(dy)) > 0.5) {
                 float2 n = f + float2(dx, dy);
                 float inside = (n.x >= 0.0 && n.y >= 0.0 && n.x < g && n.y < g) ? 1.0 : 0.0;
                 float an = tex2Dlod(g_e2, float4((n + 0.5) / g, 0.0, 0.0)).r;

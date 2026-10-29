@@ -19,7 +19,7 @@ if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$CXX $FLAGS" ]; then
 fi
 objs=""
 for f in engine/*/*.cpp tools/viewer/spire_play.cpp tools/viewer/debug_heap.cpp; do
-    case "$f" in *d3d9_renderer.cpp) continue ;; esac
+    case "$f" in *d3d9_renderer.cpp|*vk_renderer.cpp) continue ;; esac
     o=out/engine-dbg/$(basename "$f" .cpp).o
     objs="$objs $o"
     if $PYTHON tools/viewer/needs_rebuild.py "$o" "$f" "$stamp" "$o.d"; then

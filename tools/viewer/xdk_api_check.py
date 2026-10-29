@@ -143,7 +143,9 @@ def main(root):
     # of the logic a build puts under xdk/spire360/Release)
     files = sorted(root.glob("engine/*/*")) + [p for d in ("xdk/spire360", "runtime/src", "runtime/include")
                                                  for p in sorted((root / d).glob("*"))]
-    files = [p for p in files if p.suffix in (".cpp", ".c", ".h") and "posix" not in p.name]
+    # (the Vulkan renderer is the xSDK build's: the XDK's projects leave it out)
+    files = [p for p in files if p.suffix in (".cpp", ".c", ".h") and "posix" not in p.name and
+             not p.name.startswith("vk_renderer.")]
     found = 0
     for path in files:
         for number, line in compiled_lines(strip(path.read_text(encoding="utf-8", errors="replace"))):

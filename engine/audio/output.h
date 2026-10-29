@@ -1,4 +1,5 @@
-/* XAudio2 output on Xbox 360 and Windows. Eight bounded buffers are reused
+/* XAudio2 output on Xbox 360 (XDK) and Windows, xsdk's audio feeder on the
+ * xSDK console build. Eight bounded buffers are reused
  * only after consumption; the producer never waits on the audio thread. */
 #ifndef SPIRE_AUDIO_OUTPUT_H
 #define SPIRE_AUDIO_OUTPUT_H

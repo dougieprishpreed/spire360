@@ -9,6 +9,9 @@
 #include <windows.h>
 #include <xaudio2.h>
 #define SPIRE_XAUDIO_OUTPUT 1
+#elif defined(__XSDK__)
+#include <xsdk/audio.h>
+#define SPIRE_XSDK_OUTPUT 1
 #endif
 
 #include "output.h"
@@ -42,6 +45,16 @@ struct AudioOutput::Impl {
         if (com_initialized) CoUninitialize();
 #endif
     }
+};
+#elif defined(SPIRE_XSDK_OUTPUT)
+/* The xSDK console build: xsdk's feeder (audio.h), frames of 256 samples of
+ * six channels at 48 kHz, eight queued ahead (43 ms); the stereo mix goes
+ * to the front left and right, the other channels silent. */
+struct AudioOutput::Impl {
+    float* frame; /* the free slot demand() found, until submit() queues it */
+    bool silent;
+    Impl() : frame(NULL), silent(false) {}
+    ~Impl() { xsdk_audio_close(); }
 };
 #else
 struct AudioOutput::Impl {};
@@ -88,6 +101,11 @@ bool AudioOutput::open(u32 rate, bool silent) {
     if (FAILED(result) || FAILED(p->source->Start(0, 0))) { delete p; return false; }
     impl_ = p;
     return true;
+#elif defined(SPIRE_XSDK_OUTPUT)
+    if (rate != XSDK_AUDIO_RATE_HZ || xsdk_audio_open(XSDK_AUDIO_FRAMES_AHEAD_DEFAULT) != 0) return false;
+    impl_ = new Impl;
+    impl_->silent = silent;
+    return true;
 #else
     (void)rate; (void)silent;
     return false;
@@ -99,6 +117,11 @@ int AudioOutput::demand() const {
     XAUDIO2_VOICE_STATE state;
     impl_->source->GetState(&state, 0);
     return state.BuffersQueued < impl_->queue ? 256 : 0;
+#elif defined(SPIRE_XSDK_OUTPUT)
+    if (!impl_) return 0;
+    /* a free slot, without waiting for one */
+    if (!impl_->frame && xsdk_audio_next_frame(0, &impl_->frame) != 0) impl_->frame = NULL;
+    return impl_->frame ? 256 : 0;
 #else
     return 0;
 #endif
@@ -114,6 +137,22 @@ bool AudioOutput::submit(const float* data, int frames) {
     packet.pAudioData = (const BYTE*)buffer;
     if (FAILED(impl_->source->SubmitSourceBuffer(&packet, NULL))) return false;
     ++impl_->cursor;
+    return true;
+#elif defined(SPIRE_XSDK_OUTPUT)
+    if (!data || frames != XSDK_AUDIO_FRAME_SAMPLES || !demand()) return false;
+    float* out = impl_->frame;
+    /* every channel each time: the slots are reused */
+    memset(out, 0, XSDK_AUDIO_FRAME_FLOATS * sizeof(float));
+    if (!impl_->silent) {
+        float* left = out + XSDK_AUDIO_FRONT_LEFT * XSDK_AUDIO_FRAME_SAMPLES;
+        float* right = out + XSDK_AUDIO_FRONT_RIGHT * XSDK_AUDIO_FRAME_SAMPLES;
+        for (int i = 0; i < XSDK_AUDIO_FRAME_SAMPLES; ++i) {
+            left[i] = data[i * 2];
+            right[i] = data[i * 2 + 1];
+        }
+    }
+    xsdk_audio_queue_frame();
+    impl_->frame = NULL;
     return true;
 #else
     (void)data; (void)frames;
@@ -133,6 +172,11 @@ u64 AudioOutput::played_frames() const {
     XAUDIO2_VOICE_STATE state;
     impl_->source->GetState(&state, 0);
     return state.SamplesPlayed;
+#elif defined(SPIRE_XSDK_OUTPUT)
+    if (!impl_) return 0;
+    XsdkAudioStats st;
+    xsdk_audio_stats(&st);
+    return (u64)st.played * XSDK_AUDIO_FRAME_SAMPLES;
 #else
     return 0;
 #endif

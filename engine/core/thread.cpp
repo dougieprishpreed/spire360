@@ -12,7 +12,10 @@
 #define SPIRE_WIN_THREADS 1
 #else
 #include <pthread.h>
-#include <unistd.h>
+#include <time.h>
+#if defined(__XSDK__)
+#include <xsdk/thread.h> /* xsdk_thread_move */
+#endif
 #endif
 
 namespace spire {
@@ -190,23 +193,33 @@ namespace {
 struct Start {
     Thread::Function fn;
     void* arg;
+    int hw_thread;
     pthread_t thread;
 };
 
 void* thread_main(void* p) {
     Start* s = (Start*)p;
+#if defined(__XSDK__)
+    /* xsdk starts a thread on its creator's hardware thread */
+    if (s->hw_thread >= 0 && s->hw_thread < 6) xsdk_thread_move((uint32_t)s->hw_thread);
+#endif
     s->fn(s->arg);
     return 0;
 }
 } /* namespace */
 
 bool Thread::start(Function fn, void* arg, int hw_thread) {
-    (void)hw_thread;
     if (impl_) return false;
     Start* s = new Start;
     s->fn = fn;
     s->arg = arg;
-    if (pthread_create(&s->thread, 0, thread_main, s) != 0) {
+    s->hw_thread = hw_thread;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 256 * 1024);
+    int failed = pthread_create(&s->thread, &attr, thread_main, s);
+    pthread_attr_destroy(&attr);
+    if (failed != 0) {
         delete s;
         return false;
     }
@@ -222,7 +235,12 @@ void Thread::join() {
     impl_ = 0;
 }
 
-void sleep_ms(int ms) { usleep((useconds_t)ms * 1000); }
+void sleep_ms(int ms) {
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, 0);
+}
 
 /* Workers: a generation count under one mutex wakes them; the last to
  * finish signals the caller. */
@@ -240,7 +258,6 @@ struct WorkerSync {
 } /* namespace */
 
 bool Workers::start(int count, const int* hw_threads) {
-    (void)hw_threads;
     if (count_ || count <= 0) return false;
     if (count > MAX) count = MAX;
     WorkerSync* s = new WorkerSync;
@@ -252,7 +269,7 @@ bool Workers::start(int count, const int* hw_threads) {
     for (int i = 0; i < count; ++i) {
         s->arg[i].w = this;
         s->arg[i].index = i;
-        if (!threads_[i].start(worker_main, &s->arg[i], -1)) break;
+        if (!threads_[i].start(worker_main, &s->arg[i], hw_threads ? hw_threads[i] : -1)) break;
         ++count_;
     }
     return count_ > 0;
