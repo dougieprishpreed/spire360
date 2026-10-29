@@ -328,6 +328,18 @@ void SceneTree::collect(Node* n, const Xform2D& parent_xf, const Color& parent_m
     }
 }
 
+/* A GPU trace's name for an item: its type, name and parent, and its
+ * shader's file. */
+static std::string trace_name(const SceneTree::DrawItem& d) {
+    std::string s = d.ci->type + " " + d.ci->name;
+    if (d.ci->parent) s += " < " + d.ci->parent->name;
+    if (d.material && d.material->kind == Resource::RES_SHADER_MATERIAL) {
+        size_t slash = d.material->shader.find_last_of('/');
+        s += " [" + (slash == std::string::npos ? d.material->shader : d.material->shader.substr(slash + 1)) + "]";
+    }
+    return s;
+}
+
 /* The screen area a group's mask covers. */
 static Rect2 group_bounds(const SceneTree::DrawItem& d) {
     Rect2 r = d.ci->item_rect();
@@ -453,6 +465,7 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
         canvas.set_item(d.xf, d.modulate, blend, d.ci->effective_texture_flags() | extra_flags);
         canvas.set_clip(d.has_clip ? &d.clip : NULL);
         g_trace_node = d.ci;
+        if (canvas.renderer()->traced()) canvas.renderer()->trace_label(trace_name(d).c_str());
         if (g_profile_clock) {
             double t0 = g_profile_clock();
             d.ci->draw(canvas);

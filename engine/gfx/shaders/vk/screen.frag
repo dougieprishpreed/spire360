@@ -51,7 +51,7 @@ void main() {
     // alpha the mask's, toward the corner colour by the mask's green
     vec4 m = textureLod(g_scrMask, v_uv, 0.0);
     vec4 sc = mix(textureLod(g_scrA, v_screen, 0.0), textureLod(g_scrB, v_screen, 0.0), g_scr.y);
-    vec3 rgb = (sc.a > 0.0 ? sc.rgb / sc.a : vec3(0.0)) + g_scr.w;
+    vec3 rgb = (sc.a > 0.0 ? spire_div(sc.rgb, sc.a) : vec3(0.0)) + g_scr.w;
     vec4 f = mix(vec4(rgb, m.a), g_scr2, m.g * g_scr.z) * v_color;
     float a = saturate(f.a * texture(g_tex, v_uv).a * m.a);
     o_color = vec4(saturate(f.rgb) * a, a);
@@ -61,7 +61,7 @@ void main() {
     vec2 dir = v_screen - g_scr2.xy;
     vec3 acc = vec3(0.0);
     for (int r = 0; r < P.count; r += 1) acc += textureLod(g_scrA, v_screen - g_scr.z * dir * float(r), 0.0).rgb;
-    o_color = vec4(acc / g_scr.y, 1.0);
+    o_color = vec4(acc / max(g_scr.y, 1.0), 1.0);
 #elif defined(MODE_LEVEL)
     // a level of the screen copy: the 7-tap Gaussian across and down of
     // the bilinear reads of the level above (Godot's back buffer mipmaps)
@@ -77,7 +77,7 @@ void main() {
     // opaque black on the straight colour
     vec4 c = mix(textureLod(g_scrA, v_screen, 0.0), textureLod(g_scrB, v_screen, 0.0), g_scr.y);
     float na = c.a * (1.0 - g_scr.z) + g_scr.z;
-    float ka = c.a > 0.0 ? (1.0 - g_scr.z) * na / c.a : 0.0;
+    float ka = c.a > 0.0 ? spire_div((1.0 - g_scr.z) * na, c.a) : 0.0;
     o_color = vec4(c.rgb * ka, na);
 #elif defined(MODE_NOISE)
     // vfx_water_reflection_post, the_insatiable_sand_fall_2: the screen

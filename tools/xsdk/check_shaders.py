@@ -6,7 +6,10 @@ runs them, to find what lavapipe on the PC can't show:
   random parameter block: the two must agree (the optimiser has dropped a second length() before);
 - canvas.vert's position against the screen-to-clip mapping, and which export carries each varying;
 - plain.frag's colour against the texel times the vertex colour, premultiplied, which settles that the pixel
-  shader reads each varying where the vertex shader writes it.
+  shader reads each varying where the vertex shader writes it;
+- every pixel shader with transparent texels (alpha 0, black and coloured), as most of a sprite's are: no NaN or
+  infinity may come out. xost makes a select f + (t - f) * c, so a NaN or infinity on the side not taken (a division
+  by the alpha) comes through, where fxc's select left it behind (xsdk:src/xsc_lower.c, OpSelect).
 
     XSDK=... GLSLANG=... tools/xsdk/check_shaders.py <shaders folder> [--count N]
 
@@ -119,6 +122,25 @@ def check_fragment(b, path, rng, count, problems):
                 c = [t[j] * lanes[i][0][j] for j in range(4)]
                 want = [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]]
                 plain_bad += differ(outs[0][:4], want) > 1e-3
+    # transparent texels, for the optimised build: nothing that isn't a number; with the parameters random, then
+    # all 0 (an effect's unused ones) over a quad of one texture coordinate (fwidth 0)
+    zero = b.build(spv, True, bytearray(PARAM_FLOATS * 4 + 16), b"")
+    for label, (c, k, lp), flat in (("random parameters", builds[0], False), ("parameters 0", zero, True)):
+        bad_values = 0
+        for texel in ([0.0, 0.0, 0.0, 0.0], [0.6, 0.3, 0.2, 0.0], [0.6, 0.3, 0.2, 1.0]):
+            for _ in range(max(1, count // 16)):
+                lanes = quad(rng)
+                if flat:
+                    for lane in lanes:
+                        lane[1] = list(lanes[0][1])
+                r = b.simulate.run_group(c, lanes, constants=k, loops=lp,
+                                         texture_fetch=lambda slot, coords, t=texel: list(t), quads=True)
+                for i in range(4):
+                    out = r[i].exports.get(0, [0.0] * 4)
+                    bad_values += not r[i].killed and not all(math.isfinite(v) for v in out)
+        if bad_values:
+            problems.append("%s: NaN or infinity out for %d pixels (%s, a texel's alpha 0 or 1)"
+                            % (path.name, bad_values, label))
     n = 4 * max(1, count // 4)
     if mismatches > n // 100:
         problems.append("%s: optimised and plain builds differ for %d of %d pixels (by up to %.3g)"

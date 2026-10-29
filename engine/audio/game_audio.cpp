@@ -11,7 +11,8 @@ bool is_audio_call(const std::string& call) {
 }
 }
 GameAudio::GameAudio(const Pack* pack) : pack_(pack), events_(pack), music_id_(0), ambience_id_(0), rng_(0x39ba1u),
-    floor_(-1), context_progress_(-1), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), stopping_(false), dry_(false) {
+    floor_(-1), context_progress_(-1), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
+    stopping_(false), dry_(false) {
     /* The banks every screen uses, parsed before the first sound (sfx.bank
      * alone is a long parse, a hitch at the first attack otherwise). */
     if (events_.available()) {
@@ -28,6 +29,25 @@ void wave_header(FILE* file, u32 frames) {
     le_word(file, 4, 2); le_word(file, 16, 2); fwrite("data", 1, 4, file); le_word(file, frames * 4, 4);
 }
 }
+/* lock_ on the game's thread: counted while it waits, so the mix, which
+ * held it for every chunk the output wanted (on the console, seconds at a
+ * time while many voices read from the USB drive: the frame loop stood
+ * still in a cue), lets it in after the chunk it is rendering. */
+class GameLock {
+public:
+    explicit GameLock(GameAudio* a) : a_(a) {
+        ++a_->waiting_;
+        a_->lock_.lock();
+        --a_->waiting_;
+    }
+    ~GameLock() { a_->lock_.unlock(); }
+
+private:
+    GameLock(const GameLock&);
+    GameLock& operator=(const GameLock&);
+    GameAudio* a_;
+};
+
 GameAudio::~GameAudio() {
     stopping_ = true;
     thread_.join();
@@ -46,14 +66,19 @@ void GameAudio::thread_main(void* self) {
         {
             ScopedLock lock(a->lock_);
             g_trace_audio = "mixing";
-            while (a->output_.demand()) { a->render(samples, 256); if (!a->output_.submit(samples, 256)) break; }
+            while (a->output_.demand()) {
+                a->render(samples, 256);
+                if (!a->output_.submit(samples, 256)) break;
+                /* the game's thread waits for the lock: its turn, the rest after the sleep */
+                if (a->waiting_) break;
+            }
         }
         g_trace_audio = "sleeping";
         sleep_ms(2);
     }
 }
 bool GameAudio::record(const char* path) {
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     if (recording_) { wave_header(recording_, recorded_frames_); fclose(recording_); }
     recording_ = fopen(path, "wb"); recorded_frames_ = 0;
     if (recording_) wave_header(recording_, 0);
@@ -65,7 +90,7 @@ std::string GameAudio::stream(const std::string& path) {
     if (path.compare(0, 6, "event:") == 0 || path.compare(0, 6, "res://") == 0 || path.find('/') != std::string::npos) return path;
     return "debug_audio/" + path;
 }
-void GameAudio::ui(const std::string& path, float volume) { ScopedLock lock(lock_); events_.play(stream(path), volume); }
+void GameAudio::ui(const std::string& path, float volume) { GameLock lock(this); events_.play(stream(path), volume); }
 void GameAudio::music(const std::string& path) {
     if (track_ == path && events_.playing(music_id_)) return;
     events_.stop(music_id_, 0.4); track_ = path; music_id_ = path.empty() ? 0 : events_.play(path);
@@ -75,25 +100,25 @@ void GameAudio::ambience(const std::string& path) {
     events_.stop(ambience_id_, 0.5); ambience_ = path; ambience_id_ = path.empty() ? 0 : events_.play(path);
 }
 void GameAudio::menu() {
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     stop_room_loops(); pending_.clear(); floor_ = -1; context_progress_ = -1; act_track_.clear();
     ambience(""); events_.global_parameter("Progress", 0);
     music("event:/music/menu_update");
 }
 void GameAudio::merchant_map(bool open) {
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     context_progress_ = open ? 9 : 2;
     events_.global_parameter("Progress", (float)context_progress_);
 }
 void GameAudio::stop_room_loops(const std::string& owner) {
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     for (std::map<std::string, Loop>::iterator i = loops_.begin(); i != loops_.end();) {
         if (owner.empty() || i->second.owner == owner) { events_.stop(i->second.id, 0.1); loops_.erase(i++); }
         else ++i;
     }
 }
 void GameAudio::cue(const Json& cue) {
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     const std::string& kind = cue["t"].str();
     if (kind == "death" || kind == "despawn") { stop_room_loops(cue["who"].str()); return; }
     if (kind == "ui" || kind == "sfx") CueLedger::used(cue);
@@ -184,7 +209,7 @@ void GameAudio::cue(const Json& cue) {
     }
 }
 void GameAudio::steps(const Json& steps) {
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     double delay = 0;
     for (size_t i = 0; i < steps.size(); ++i) for (size_t k = 0; k < steps[i].size(); ++k) {
         const Json& c = steps[i][k];
@@ -207,7 +232,7 @@ void GameAudio::decision(const Json& d) {
     events_.preload(bank);
     events_.preload_for(a["custom"].str().empty() ? a["track"].str() : a["custom"].str());
     events_.preload_for(a["ambience"].str());
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     int floor = d["context"]["total_floor"].i();
     if (floor_ != floor) { stop_room_loops(); floor_ = floor; }
     act_track_ = a["track"].str();
@@ -246,7 +271,7 @@ void GameAudio::render(float* out, int count) {
 }
 void GameAudio::update(double dt) {
     if (thread_.started()) return;
-    ScopedLock lock(lock_);
+    GameLock lock(this);
     float samples[512];
     if (output_.active()) {
         while (output_.demand()) { render(samples, 256); if (!output_.submit(samples, 256)) break; }

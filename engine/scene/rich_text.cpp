@@ -719,6 +719,7 @@ void RichTextLabel::draw(Canvas& c) {
                 }
                 Vec2 pen = off;
                 int k = line_processed;
+                c.begin_glyphs(); /* a draw a font page */
                 for (size_t g = 0; g < l.st.glyphs.size(); ++g, ++k) {
                     const ShapedGlyph& gl = l.st.glyphs[g];
                     if (k >= visible_glyphs) break;
@@ -763,12 +764,16 @@ void RichTextLabel::draw(Canvas& c) {
                                 Color uc = font_color;
                                 uc.a *= (run.st.underline ? theme_constant("underline_alpha")
                                                           : theme_constant("strikethrough_alpha")) / 100.0f;
+                                /* over the glyphs drawn so far */
+                                c.end_glyphs();
                                 c.draw_rect(Rect2(ofs.x + pen.x, ofs.y + pen.y + y - th / 2, gl.advance, th), uc);
+                                c.begin_glyphs();
                             }
                         }
                     }
                     pen.x += gl.advance;
                 }
+                c.end_glyphs();
                 if (step == 3) processed = k;
             }
             off.y += l.st.descent;

@@ -223,6 +223,11 @@ public:
         return NULL;
     }
     virtual void end() = 0;
+    /* A GPU trace (VkRenderer::trace_next_frame): while traced() is true,
+     * the scene names what draws next, each draw charged to the last name
+     * given. */
+    virtual bool traced() const { return false; }
+    virtual void trace_label(const char* label) { (void)label; }
 
 protected:
     Renderer() : scratch_tex_(NULL), scratch_blend_(BLEND_MIX), scratch_flags_(0) {}

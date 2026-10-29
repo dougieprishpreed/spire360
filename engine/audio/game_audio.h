@@ -54,6 +54,10 @@ private:
     u32 recorded_frames_;
     /* cues from the game's thread, the mix on the audio thread */
     Mutex lock_;
+    /* the game's thread waiting for lock_ (GameLock): the mix gives it up
+     * between chunks */
+    volatile int waiting_;
+    friend class GameLock;
     Thread thread_;
     volatile bool stopping_;
     bool dry_;

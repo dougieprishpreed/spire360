@@ -46,6 +46,13 @@ vec3 spire_sel(bool c, vec3 a, vec3 b) { return mix(b, a, bvec3(c)); }
 vec4 spire_sel(bool c, vec4 a, vec4 b) { return mix(b, a, bvec4(c)); }
 int spire_sel(bool c, int a, int b) { return mix(b, a, c); }
 
+// x / y for a y of 0 or more, y kept off 0: xost's select is f + (t - f) * c
+// (xsdk:src/xsc_lower.c), so a division by 0 on the side not taken (the
+// texel's alpha for a straight colour) made NaN come out on the side taken
+// (tools/xsdk/check_shaders.py checks every shader for it).
+float spire_div(float x, float y) { return x / max(y, 1.0e-4); }
+vec3 spire_div(vec3 x, float y) { return x / max(y, 1.0e-4); }
+
 #define sin spire_sin
 #define cos spire_cos
 #define atan2 spire_atan2

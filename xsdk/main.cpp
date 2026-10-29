@@ -11,9 +11,10 @@
 //
 // Pad: on the title screen A starts a run. In a run: D-pad picks, A
 // confirms, Y ends the turn. Back writes the log now; Back + Start quits.
-// Debugging: Back + X turns the canvas groups off and on, Back + Y cycles
-// the display ramp's presets, Back + RB logs the next frame's draws and
-// saves a screenshot.
+// Debugging: Back + X cycles the canvas groups' debug modes (off, whole
+// passes, normal), Back + RB logs the next frame's draws and saves a
+// screenshot.
+#include <algorithm>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -89,12 +90,13 @@ static std::string ini_word(const std::string& s) {
  *                  Regen 999999999 on the player at each fight
  *   trace_loads=1  every scene file, texture and audio bank read from the
  *                  pack logged with the ms it took, and frames over 8 ms
- *   profile=1      every 10 s, the node types (and scripts) whose process
- *                  and draw cost the most per frame, the time in the draw
- *                  calls, and the GPU's time for a frame with and without
- *                  each kind of draw (gpu_probe)
- *   gamma=N        the display ramp's preset to start with (GAMMA_PRESETS;
- *                  Back + Y cycles them)
+ *   profile=1      every 600 frames, the node types (and scripts) whose
+ *                  process and draw cost the most per frame, the time in
+ *                  the draw calls, the frames' GPU time; every third, the
+ *                  GPU's time for a frame with and without each kind of
+ *                  draw and draw by draw (gpu_probe); a frame slow on the
+ *                  GPU traced draw by draw (every 20 s at most), and frames
+ *                  slow on the CPU logged
  *   workers=N      worker threads for the particles' simulation (0-3, 3 by
  *                  default; 0 runs it on the frame loop's thread)
  *   fps=N          60 or 30: that frame rate always; 0 (the default) 60
@@ -102,7 +104,7 @@ static std::string ini_word(const std::string& s) {
  * The first two reach the logic as its environment (logic/Spire.Logic/
  * DebugOptions.cs). No file: all off. */
 static bool g_trace_loads = false, g_profile = false;
-static int g_gamma = 0, g_workers = 3, g_fps = 0;
+static int g_workers = 3, g_fps = 0;
 static void read_ini(const char* path, std::vector<std::string>& env) {
     FILE* f = fopen(path, "rb");
     if (!f) return;
@@ -123,10 +125,6 @@ static void read_ini(const char* path, std::vector<std::string>& env) {
             g_trace_loads = on;
         } else if (key == "profile") {
             g_profile = on;
-        } else if (key == "gamma") {
-            g_gamma = atoi(val.c_str());
-            logf("spire360.ini: gamma %d", g_gamma);
-            continue;
         } else if (key == "workers") {
             g_workers = atoi(val.c_str());
             logf("spire360.ini: workers %d", g_workers);
@@ -289,6 +287,29 @@ static void gpu_probe(VkRenderer* renderer, SceneTree* tree, Canvas& canvas, con
         line += part;
     }
     logf("%s", line.c_str());
+    /* and the same frame draw by draw */
+    renderer->wait_idle();
+    renderer->trace_next_frame("the profile's frame");
+    renderer->begin(1280, 720, clear);
+    tree->render(canvas);
+    renderer->end();
+    renderer->finish();
+}
+
+/* A long frame's loads: how many, their time, and the slowest by kind
+ * and name. */
+static bool slower(const HeldLoad& a, const HeldLoad& b) { return a.ms > b.ms; }
+
+static void log_loads(std::vector<HeldLoad>& loads) {
+    double total = 0;
+    for (size_t i = 0; i < loads.size(); ++i) total += loads[i].ms;
+    std::sort(loads.begin(), loads.end(), slower);
+    std::string line =
+        format("  its loads: %u, %.0f ms (nested ones counted in their parents too);", (unsigned)loads.size(), total);
+    for (size_t i = 0; i < loads.size() && i < 6; ++i)
+        line += format(" %s %s %.0f ms%s", loads[i].kind.c_str(), loads[i].name.c_str(), loads[i].ms,
+                       i + 1 < 6 && i + 1 < loads.size() ? "," : "");
+    logf("%s", line.c_str());
 }
 
 /* The controller -> the engine's pad bits. Triggers count as pressed past
@@ -327,26 +348,17 @@ static unsigned pad_bits(const INPUT_GAMEPAD& g) {
     return b;
 }
 
-/* The display ramp: out = in^exponent, squeezed into 16-235 for a display
- * that expands that range itself (the XDK build's D3D gamma ramp presets,
- * here the Vulkan renderer's last pass). 0 is the earlier one (the Xenia
- * screenshots measured about 2.5 / 2.2 in gamma against the game's
- * colours). */
-static const struct {
-    double exponent;
-    bool limited;
-    const char* name;
-} GAMMA_PRESETS[] = { { 2.2 / 2.5, false, "0 (in^0.88)" },
-                      { 1.0, false, "1 (none)" },
-                      { 0.75, false, "2 (in^0.75)" },
-                      { 0.62, false, "3 (in^0.62)" },
-                      { 2.2 / 2.5, true, "4 (in^0.88 in 16-235)" } };
-static const int GAMMA_COUNT = (int)(sizeof(GAMMA_PRESETS) / sizeof(GAMMA_PRESETS[0]));
+/* The display ramp, the Vulkan renderer's last pass: out = in^(2.2 / 2.5),
+ * the XDK build's D3D gamma ramp (the Xenia screenshots measured about
+ * 2.5 / 2.2 in gamma against the game's colours). Hardware runs through
+ * the other presets (Back + Y, since removed) found the Underdocks as dark
+ * as the game draws it at this one. */
+static const double DISPLAY_GAMMA = 2.2 / 2.5;
 
-static void set_gamma(VkRenderer* renderer, int preset) {
-    if (preset < 0 || preset >= GAMMA_COUNT) preset = 0;
-    renderer->set_gamma(GAMMA_PRESETS[preset].exponent, GAMMA_PRESETS[preset].limited);
-}
+/* GPU traces of frames slow on the GPU: one every 20 s at most. Frames
+ * slow on the CPU (over 40 ms of work, under the long frames' 250):
+ * their phases, one a second at most. */
+static const double TRACE_GPU_MS = 36, TRACE_EVERY_MS = 20000, SLOW_CPU_MS = 40;
 
 int main() {
     set_log_sink(engine_log);
@@ -374,9 +386,8 @@ int main() {
     log_memory("at start");
     std::vector<std::string> debug_env;
     read_ini("game:/spire360.ini", debug_env);
-    if (g_gamma < 0 || g_gamma >= GAMMA_COUNT) g_gamma = 0;
-    set_gamma(renderer, g_gamma);
-    logf("gamma ramp %s (Back + Y: the next)", GAMMA_PRESETS[g_gamma].name);
+    renderer->set_gamma(DISPLAY_GAMMA, false);
+    renderer->set_timing(g_profile);
     std::vector<const char*> debug_ptrs;
     for (size_t i = 0; i < debug_env.size(); ++i) debug_ptrs.push_back(debug_env[i].c_str());
     double t0 = now_ms();
@@ -388,7 +399,10 @@ int main() {
     }
     logf("logic: started in %.1f ms", now_ms() - t0);
     log_memory("with the logic");
+    /* trace_loads logs each load; profile keeps them for the long frames'
+     * lines */
     if (g_trace_loads) set_load_trace(now_ms);
+    else if (g_profile) set_load_trace(now_ms, true);
     if (g_profile) {
         SceneTree::set_profile(now_ms);
         bool fast = false;
@@ -440,6 +454,8 @@ int main() {
     double acc_process = 0, acc_layout = 0;
     int frames = 0, shown = 0, slow = 0, paced30 = 0;
     unsigned least_free = free_memory_mb();
+    VkRenderer::LayerCounts was = renderer->layer_counts(); /* at the 600 frames' start */
+    std::vector<HeldLoad> frame_loads;
     bool low_logged = false, logic_ended = false;
     for (;;) {
         /* Any controller plays: on a console the pad can be signed in to
@@ -459,12 +475,6 @@ int main() {
         if ((held & PadState::BACK) && (pad.pressed & PadState::X)) {
             renderer->set_group_debug((renderer->group_debug() + 1) % VkRenderer::GROUP_DEBUG_MODES);
             pad.pressed &= ~PadState::X;
-        }
-        if ((held & PadState::BACK) && (pad.pressed & PadState::Y)) {
-            g_gamma = (g_gamma + 1) % GAMMA_COUNT;
-            set_gamma(renderer, g_gamma);
-            logf("gamma ramp %s", GAMMA_PRESETS[g_gamma].name);
-            pad.pressed &= ~PadState::Y;
         }
         /* Back + RB: the next frame's draws into the log, and a screenshot */
         bool dumped = false;
@@ -533,8 +543,8 @@ int main() {
             static int shots = 0;
             char path[64];
             snprintf(path, sizeof(path), "game:/spire360_shot_%02d.bmp", ++shots);
-            logf("screenshot %s: %s (gamma ramp %s)", path, renderer->save_screenshot(path) ? "saved" : "failed",
-                 GAMMA_PRESETS[g_gamma].name);
+            logf("screenshot %s: %s (canvas group mode %d)", path, renderer->save_screenshot(path) ? "saved" : "failed",
+                 renderer->group_debug());
         }
         g_trace_phase = "present";
         /* the frame's work before the present (a frame over 16.7 ms misses
@@ -552,10 +562,34 @@ int main() {
         if (g_trace_loads && work > 8)
             logf("frame %u: %.1f ms (update %.1f, process + layout %.1f, draw %.1f)", g_frame, work, update_ms, f1 - f0,
                  f2 - f1);
-        /* a frame long enough to see: where its time went */
-        if (work > 250)
+        /* a frame long enough to see: where its time went, and with
+         * profile=1 what it loaded */
+        if (g_profile && !g_trace_loads) take_held_loads(frame_loads);
+        if (work > 250) {
             logf("long frame %u: %.0f ms (update %.0f, process + layout %.0f, draw %.0f), decision %d", g_frame, work,
                  update_ms, f1 - f0, f2 - f1, game->decision_count());
+            if (!frame_loads.empty()) log_loads(frame_loads);
+        }
+        if (g_profile) {
+            /* the frames an effect slows: the CPU's phases and the GPU's
+             * time of the latest frame it finished; a GPU trace of one */
+            static double slow_logged = -1e9, traced = -1e9;
+            double now = now_ms();
+            if (work > SLOW_CPU_MS && work <= 250 && now - slow_logged > 1000) {
+                logf("slow frame %u: %.1f ms (update %.1f, process %.1f, layout %.1f, draw %.1f), %ld draw calls, "
+                     "GPU %.1f ms, decision %d",
+                     g_frame, work, update_ms, fp - f0, f1 - fa, f2 - f1, renderer->draw_calls(),
+                     renderer->last_frame_gpu_ms(), game->decision_count());
+                slow_logged = now;
+            }
+            if (renderer->last_frame_gpu_ms() > TRACE_GPU_MS && now - traced > TRACE_EVERY_MS) {
+                char why[64];
+                snprintf(why, sizeof(why), "after a frame of %.1f ms on the GPU, frame %u", renderer->last_frame_gpu_ms(),
+                         g_frame + 1);
+                renderer->trace_next_frame(why);
+                traced = now;
+            }
+        }
         if (work > 16.7) ++slow;
         if (++frames == 600) {
             unsigned free_mb = free_memory_mb();
@@ -572,14 +606,41 @@ int main() {
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
             double state_ms, submit_ms;
             renderer->take_draw_times(&state_ms, &submit_ms);
-            if (g_profile)
+            if (g_profile) {
                 logf("draw calls: %.2f ms setting their state, %.2f ms recording them per frame", state_ms / frames,
                      submit_ms / frames);
-            SceneTree::log_profile(frames);
-            if (g_profile) {
-                gpu_probe(renderer, tree, *canvas, clear);
-                renderer->take_draw_times(&state_ms, &submit_ms);
+                VkRenderer::FrameStats fs;
+                renderer->take_frame_stats(&fs);
+                if (fs.frames > 0)
+                    logf("gpu: %.1f ms a frame by its clock (worst %.1f); waits a frame: %.1f ms for the GPU, %.1f ms "
+                         "for a display buffer, %.1f ms pacing",
+                         fs.gpu_ms / fs.frames, fs.gpu_worst, fs.fence_ms / frames, fs.acquire_ms / frames,
+                         fs.pace_ms / frames);
+                logf("passes a frame: %.1f (groups %.1f, captures %.1f, screen copies %.2f and their blur levels "
+                     "%.2f); %.2f texture uploads (%.2f MB), %.2f waits for the GPU mid-frame",
+                     (double)fs.passes / frames, (double)fs.groups / frames, (double)fs.captures / frames,
+                     (double)fs.screen_copies / frames, (double)fs.screen_levels / frames, (double)fs.uploads / frames,
+                     fs.upload_mb / frames, (double)fs.waits / frames);
+                VkRenderer::LayerCounts lc = renderer->layer_counts();
+                logf("vulkan4xenon: %u shaders compiled on the console, %u read from its cache (since start); a "
+                     "frame: %.2f images drawn back into eDRAM, %.2f clear resolves, %.2f resolves put off (%.2f "
+                     "made later)",
+                     lc.compiled, lc.read, (double)(lc.drawn_back - was.drawn_back) / frames,
+                     (double)(lc.clear_resolves - was.clear_resolves) / frames,
+                     (double)(lc.put_off - was.put_off) / frames, (double)(lc.late_resolves - was.late_resolves) / frames);
             }
+            SceneTree::log_profile(frames);
+            /* the probe re-draws the frame 8 times, a hitch: each third
+             * 600 frames */
+            static int blocks = 0;
+            if (g_profile && blocks++ % 3 == 0) {
+                gpu_probe(renderer, tree, *canvas, clear);
+                /* the next 600 frames' counts without the probe's frames */
+                renderer->take_draw_times(&state_ms, &submit_ms);
+                VkRenderer::FrameStats probe;
+                renderer->take_frame_stats(&probe);
+            }
+            was = renderer->layer_counts();
             if (free_mb < 24 && !low_logged) {
                 log_memory("low");
                 low_logged = true;

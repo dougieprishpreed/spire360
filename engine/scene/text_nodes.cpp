@@ -284,10 +284,12 @@ void Label::draw(Canvas& c) {
                     col = font_color;
                 }
                 float x = lx;
+                c.begin_glyphs(); /* a draw a font page */
                 for (size_t g = 0; g < l.glyphs.size(); ++g) {
                     draw_glyph(c, l.glyphs[g], Vec2(x, ofs.y) + off, col, outline);
                     x += l.glyphs[g].advance;
                 }
+                c.end_glyphs();
             }
             ofs.y += (float)dsc + lsp;
         }

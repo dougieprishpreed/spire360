@@ -378,8 +378,12 @@ static void texture_cache_cases(const Pack& pack) {
         canvas.end_frame();
         check(canvas.cached_texture("test:a") == a && !canvas.cached_texture("test:b"), "texture cache did not evict the least recently used texture");
         check(canvas.texture_bytes() <= 2 * 16 * 16 * 4 && canvas.texture_count() == 2, "texture budget was exceeded after the frame");
-        /* idle 120 frames, and the look for them once a second */
+        /* idle 3 s: kept (an effect's texture, read from the console's drive
+         * again each time it played when 120 frames idle let it go) */
         for (int i = 0; i < 182; ++i) { canvas.begin_frame(); canvas.end_frame(); }
+        check(canvas.texture_count() == 2, "an idle texture within the budget went after 3 s");
+        /* idle a minute (3600 frames), and the look for them once a second */
+        for (int i = 182; i < 3662; ++i) { canvas.begin_frame(); canvas.end_frame(); }
         check(canvas.texture_count() == 0, "unused screen textures were retained indefinitely");
         canvas.cache_texture("test:final", td);
     }

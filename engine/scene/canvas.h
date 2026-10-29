@@ -84,6 +84,14 @@ public:
      * canvas_item_add_msdf_texture_rect_region); uv in page pixels. */
     void draw_msdf(ImageTextureRes* page, const Rect2& dst, const Rect2& uv, const Color& color, float px_range,
                    float outline);
+    /* The glyphs drawn between these go out at end_glyphs a page of their
+     * font at a time, in their order on each page: one draw a page instead
+     * of one at each change of page (a font's glyphs lie on several 512 x
+     * 512 pages, and neighbours in a word often on different ones). For
+     * glyphs of one pass (shadow, outline or fill), which may overlap only
+     * in their own colour, where the order makes no difference. */
+    void begin_glyphs();
+    void end_glyphs();
     /* Untextured indexed triangles with per-vertex colours. */
     void draw_colored_triangles(const std::vector<Vec2>& v, const std::vector<int>& idx,
                                 const std::vector<Color>& colors);
@@ -129,6 +137,15 @@ private:
     int decoded_w_, decoded_h_;
     void emit_quad(Texture* tex, const Vec2& p0, const Vec2& p1, const Vec2& uv0, const Vec2& uv1, const Color& c,
                    int flags);
+    struct HeldGlyph {
+        Texture* page;
+        Rect2 dst;
+        Vec2 uv0, uv1;
+        Color color;
+        float px_range, outline;
+    };
+    bool glyphs_held_;
+    std::vector<HeldGlyph> glyphs_;
 
     Renderer* r_;
     const Pack* pack_;

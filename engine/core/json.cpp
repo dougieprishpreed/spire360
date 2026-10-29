@@ -1,5 +1,6 @@
 #include "json.h"
 #include "base.h"
+#include "thread.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -288,13 +289,52 @@ void log_warn(const char* fmt, ...) {
 }
 
 static LoadClock g_load_clock = NULL;
+static bool g_hold = false;
+/* held loads (set_load_trace's hold): made with the first call, before
+ * any other thread loads */
+static Mutex* g_held_lock = NULL;
+static std::vector<HeldLoad>* g_held = NULL;
 
-void set_load_trace(LoadClock clock) { g_load_clock = clock; }
+void set_load_trace(LoadClock clock, bool hold) {
+    if (hold && !g_held_lock) {
+        g_held_lock = new Mutex();
+        g_held = new std::vector<HeldLoad>();
+    }
+    g_load_clock = NULL;
+    if (g_held_lock) {
+        g_held_lock->lock();
+        g_held->clear();
+        g_held_lock->unlock();
+    }
+    g_hold = hold && g_held_lock;
+    g_load_clock = clock;
+}
 
 double load_trace_start() { return g_load_clock ? g_load_clock() : -1.0; }
 
 void load_traced(const char* kind, const std::string& name, double started) {
-    if (g_load_clock && started >= 0) log_info("load %s %.2f ms %s", kind, g_load_clock() - started, name.c_str());
+    if (!g_load_clock || started < 0) return;
+    double ms = g_load_clock() - started;
+    if (!g_hold) {
+        log_info("load %s %.2f ms %s", kind, ms, name.c_str());
+        return;
+    }
+    HeldLoad h;
+    h.kind = kind;
+    h.name = name;
+    h.ms = ms;
+    g_held_lock->lock();
+    /* a frame's worth: a long load screen's thousands need not all stay */
+    if (g_held->size() < 4096) g_held->push_back(h);
+    g_held_lock->unlock();
+}
+
+void take_held_loads(std::vector<HeldLoad>& out) {
+    out.clear();
+    if (!g_held_lock) return;
+    g_held_lock->lock();
+    out.swap(*g_held);
+    g_held_lock->unlock();
 }
 
 } /* namespace spire */

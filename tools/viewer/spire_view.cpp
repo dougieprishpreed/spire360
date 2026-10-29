@@ -9,7 +9,8 @@
  *   spire_view <pack.s3p> <text> <out.png> --text <font> <size>
  *
  * --vk (a Linux build with SPIRE_VK, tools/xsdk/host_check.sh) draws through
- * the Vulkan renderer, offscreen, in place of the software one.
+ * the Vulkan renderer, offscreen, in place of the software one; --vk-trace
+ * then draws it again with the GPU trace on (the log's "gpu trace" lines).
  * --scale 1 renders at the design size (1920x1080) for diffs against a
  * reference; the console uses 2/3 (1280x720). */
 #include "../../engine/core/pack.h"
@@ -100,7 +101,7 @@ int main(int argc, char** argv) {
     float origin_x = 0, origin_y = 0;
     int hand_focus = -1;
     bool has_origin = false;
-    bool use_vk = false;
+    bool use_vk = false, vk_trace = false;
     for (int i = 4; i < argc; ++i) {
         if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) scale = (float)atof(argv[++i]);
         else if (strcmp(argv[i], "--spine-anim") == 0 && i + 1 < argc) spine_anim = argv[++i];
@@ -135,6 +136,7 @@ int main(int argc, char** argv) {
         }
         else if (strcmp(argv[i], "--no-scripts") == 0) set_scripts_enabled(false); /* as Godot's render, without the game's C# */
         else if (strcmp(argv[i], "--vk") == 0) use_vk = true;
+        else if (strcmp(argv[i], "--vk-trace") == 0) use_vk = vk_trace = true;
     }
     install_game_scripts();
     Pack pack;
@@ -374,6 +376,15 @@ int main(int argc, char** argv) {
                 return 1;
             }
             calls = canvas.draw_calls();
+            if (vk_trace) {
+                /* the frame again, draw by draw on the GPU (the console's
+                 * profile=1 trace) */
+                vk->trace_next_frame("spire_view");
+                vk->begin(w, h, Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
+                tree.render(canvas);
+                vk->end();
+                vk->finish();
+            }
         }
         int failed = vk->failed_shaders();
         delete vk;

@@ -43,6 +43,7 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
     if (tried_) return data_;
     tried_ = true;
     if (!lib) return NULL;
+    double started = load_trace_start();
     std::string err;
     Json atlas_doc;
     if (!read_json(lib->pack(), atlas_path, atlas_doc, &err) || !atlas_.load(atlas_doc, &err)) {
@@ -69,6 +70,7 @@ const SpSkeletonData* SpineDataRes::data(SceneLibrary* lib) {
         pages_.push_back(r && r->kind == RES_IMAGE_TEXTURE ? (ImageTextureRes*)r : NULL);
     }
     data_ = d;
+    load_traced("spine", skeleton_path, started);
     return data_;
 }
 

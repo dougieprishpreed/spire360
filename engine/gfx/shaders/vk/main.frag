@@ -7,7 +7,7 @@
 
 void main() {
     vec4 t = texture(g_tex, v_uv);
-    vec3 straight = t.a > 0.0 ? t.rgb / t.a : vec3(0.0);
+    vec3 straight = t.a > 0.0 ? spire_div(t.rgb, t.a) : vec3(0.0);
     t.rgb = g_premul.x > 0.5 ? straight : t.rgb;
     // the game's grayscale / flipbook VFX shaders: the red through the
     // gradient, the alpha from the red or the texel
@@ -18,7 +18,7 @@ void main() {
     if (g_mode.z > 0.5) {
         result = texture(g_group, v_screen) * (t.a * v_color.a);
     } else {
-        vec2 dest = 1.0 / fwidth(v_uv);
+        vec2 dest = 1.0 / max(fwidth(v_uv), vec2(1.0e-6));
         float px_size = max(0.5 * dot(g_msdf.xx / g_msdf.zw, dest), 1.0);
         float d = max(min(t.r, t.g), min(max(t.r, t.g), t.b));
         float cr = clamp(g_msdf.y, 0.0, g_msdf.x / 2.0 - 1.0) / g_msdf.x;
@@ -31,7 +31,7 @@ void main() {
         t.rgb = g_mode.x > 0.5 ? m : t.rgb;
         vec4 c = t * v_color;
         // Godot's card_ripple.gdshader: the alpha as a distance field
-        float sdf = fmod(g_ripple.x + c.a, g_ripple.y);
+        float sdf = fmod(g_ripple.x + c.a, max(g_ripple.y, 1.0e-4));
         float b = c.a - sdf + smoothstep(0.0, g_ripple.z, sdf) * g_ripple.y;
         c.a = g_mode.w > 0.5 ? smoothstep(1.0 - g_ripple.w, 1.0, b) : c.a;
         result = vec4(c.rgb * c.a, c.a);

@@ -55,12 +55,44 @@ public:
     /* Time in the draw calls since the last take (ms): setting their state,
      * and recording the draw (copying its vertices). */
     virtual void take_draw_times(double* state_ms, double* submit_ms) = 0;
-    /* 1: canvas groups off (their children drawn unmasked), 0 normal. */
-    enum { GROUP_DEBUG_MODES = 2 };
+    /* 1: canvas groups off (their children drawn unmasked); 2: each group's
+     * pass over its whole target, not its bounds' area; 0 normal. */
+    enum { GROUP_DEBUG_MODES = 3 };
     virtual void set_group_debug(int mode) = 0;
     virtual int group_debug() const = 0;
     /* Shaders whose module or pipeline failed (each logged once). */
     virtual int failed_shaders() const = 0;
+    /* GPU timing (profile=1). Each frame's GPU time by the GPU's clock, from
+     * its first command to its last (time stamps, read once its fence has
+     * passed), and where the CPU waited: for a frame in flight to finish
+     * (the GPU), for a display buffer, and for the 30 fps pacing. */
+    struct FrameStats {
+        int frames;               /* frames timed */
+        double gpu_ms, gpu_worst; /* their GPU time: the sum, the worst */
+        double fence_ms, acquire_ms, pace_ms;
+        /* render passes, by what they draw into; texture uploads */
+        int passes, groups, captures, screen_copies, screen_levels, uploads, waits;
+        double upload_mb;
+    };
+    virtual void set_timing(bool on) = 0;
+    /* Since the last take; resets them. */
+    virtual void take_frame_stats(FrameStats* s) = 0;
+    /* The GPU time of the latest frame timed (0 before one is). */
+    virtual double last_frame_gpu_ms() const = 0;
+    /* The next frame (begin to present or finish) timed draw by draw: a time
+     * stamp after each draw and each pass's begin and end, the GPU idle
+     * before each, so each one's time is its own. Its costs by item (the
+     * scene's trace_label), by shader and by pass go to the log once the
+     * frame is done, under why. */
+    virtual void trace_next_frame(const char* why) = 0;
+    /* vulkan4xenon's counts since start (none on a host): shaders it
+     * compiled on the console (not in the build's bundle) and read from
+     * its cache; images drawn back into eDRAM for a pass's load, resolves
+     * made to clear, resolves put off, and of those made later anyway. */
+    struct LayerCounts {
+        unsigned compiled, read, drawn_back, clear_resolves, put_off, late_resolves;
+    };
+    virtual LayerCounts layer_counts() const = 0;
 };
 
 } /* namespace spire */

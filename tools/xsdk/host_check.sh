@@ -41,5 +41,5 @@ INCLUDES="-I$OUT/shaders -isystem $VULKAN4XENON/include -isystem $VULKAN4XENON/t
   echo "build $OUT/obj/spire_shaders.o: cc $OUT/shaders/spire_shaders.c"
   echo "build $OUT/spire_view: link$objs $OUT/obj/spire_shaders.o"
 } > "$OUT/build.ninja"
-ninja -C "$OUT" -j "${JOBS:-$(nproc)}"
+ninja -C "$OUT" -j "${JOBS:-2}"
 echo "Built $OUT/spire_view"

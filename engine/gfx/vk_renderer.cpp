@@ -15,6 +15,7 @@
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
 #include <map>
 
 /* In C++98 on 64-bit hosts VK_NULL_HANDLE is ((void*)0), which C++ won't
@@ -96,6 +97,15 @@ const char* const VARIANT_FILES[V_EFFECT] = { "plain.frag",          "text.frag"
 enum { BLEND_NONE = 5, BLEND_KINDS = 6 };
 /* the extra samplers' sets a frame's pool holds */
 enum { EXTRA_SETS = 1024 };
+/* Time stamps: two a frame in flight (its first command and its last), then
+ * a traced frame's, one after each draw, pass begin and pass end. */
+enum { TRACE_BASE = 2 * FRAMES, TRACE_MAX = 4000 };
+/* What a traced frame's time stamp follows */
+enum { MARK_START, MARK_DRAW, MARK_QUAD, MARK_BEGIN, MARK_END, MARK_UPLOAD, MARK_RESUME };
+/* the targets a pass draws into, for the trace and the counts */
+enum { TARGET_SCENE, TARGET_GROUP, TARGET_CAPTURE, TARGET_SCREEN, TARGET_DISPLAY, TARGET_KINDS };
+const char* const TARGET_NAMES[TARGET_KINDS] = { "scene", "group", "capture", "screen copy", "display" };
+const char* const LOAD_NAMES[3] = { "clear", "load", "fresh" };
 
 struct Buffer {
     VkBuffer buf;
@@ -127,8 +137,19 @@ struct Frame {
     VkDescriptorPool pool; /* the extra samplers' sets, reset with the frame */
     std::vector<VkTexture*> dead;
     std::vector<Buffer> spare; /* big uploads' staging, freed with the frame */
+    bool timed;                /* its two time stamps written */
     Frame() : cmd(VK_NULL_HANDLE), fence(VK_NULL_HANDLE), acquired(VK_NULL_HANDLE), rendered(VK_NULL_HANDLE),
-              pool(VK_NULL_HANDLE) {}
+              pool(VK_NULL_HANDLE), timed(false) {}
+};
+
+/* A traced frame's time stamp: what it follows */
+struct Mark {
+    int kind;    /* MARK_* */
+    int variant; /* a draw's shader; a pass's target (TARGET_*) */
+    int blend;   /* a draw's blend; a pass begin's load (LOAD_NAMES) */
+    int label;   /* the item drawing (an index into the labels), -1 none */
+    int vertices;
+    int w, h;    /* the texture's size */
 };
 
 class Impl : public VkRenderer {
@@ -176,6 +197,20 @@ public:
     }
     virtual int group_debug() const { return group_debug_; }
     virtual int failed_shaders() const { return failed_; }
+    virtual void set_timing(bool on) { timing_ = on && queries_; }
+    virtual void take_frame_stats(FrameStats* s) {
+        *s = stats_;
+        memset(&stats_, 0, sizeof(stats_));
+    }
+    virtual double last_frame_gpu_ms() const { return last_gpu_ms_; }
+    virtual void trace_next_frame(const char* why) {
+        if (!queries_) return;
+        trace_pending_ = true;
+        trace_why_ = why;
+    }
+    virtual LayerCounts layer_counts() const;
+    virtual bool traced() const { return tracing_; }
+    virtual void trace_label(const char* label);
 
 private:
     /* ---- set-up ---- */
@@ -221,6 +256,10 @@ private:
     bool screen_pass(int level);
     void level_size(int level, int* w, int* h) const;
     void release_screen();
+    /* ---- timing ---- */
+    int target_kind(const VkTexture* t) const;
+    void mark(int kind, int variant, int blend, int vertices, const VkTexture* tex);
+    void trace_report();
 
     /* Vulkan */
     VkInstance instance_;
@@ -316,6 +355,18 @@ private:
     long draws_;
     double state_ms_, submit_ms_;
     bool frame_ended_;
+    /* GPU timing (set_timing) and the traced frame (trace_next_frame) */
+    VkQueryPool queries_;
+    double tick_ns_;
+    bool timing_;
+    FrameStats stats_;
+    double last_gpu_ms_;
+    bool trace_pending_, tracing_;
+    std::string trace_why_;
+    std::vector<Mark> marks_;
+    std::vector<std::string> labels_;
+    int label_;
+    LayerCounts trace_counts_; /* vulkan4xenon's when the traced frame began */
 };
 
 } /* namespace */
@@ -336,7 +387,11 @@ Impl::Impl()
       blend_(BLEND_MIX), flags_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false),
       vfx_on_(false), clip_on_(false), dirty_(true), screen_on_(false), screen_levels_(0), screen_failed_(false),
       effect_on_(false), in_group_(false), group_failed_(false), cap_w_(0), cap_h_(0), group_debug_(0), width_(0),
-      height_(0), interval_(1), last_vblank_(0), draws_(0), state_ms_(0), submit_ms_(0), frame_ended_(false) {
+      height_(0), interval_(1), last_vblank_(0), draws_(0), state_ms_(0), submit_ms_(0), frame_ended_(false),
+      queries_(VK_NULL_HANDLE), tick_ns_(1), timing_(false), last_gpu_ms_(0), trace_pending_(false), tracing_(false),
+      label_(-1) {
+    memset(&stats_, 0, sizeof(stats_));
+    memset(&trace_counts_, 0, sizeof(trace_counts_));
     for (int i = 0; i < 3; ++i) layouts_[i] = VK_NULL_HANDLE;
     for (int i = 0; i < 4; ++i) samplers_[i] = VK_NULL_HANDLE;
     for (int v = 0; v < V_COUNT; ++v) {
@@ -393,6 +448,7 @@ Impl::~Impl() {
             if (frames_[f].acquired) vkDestroySemaphore(dev_, frames_[f].acquired, NULL);
             if (frames_[f].rendered) vkDestroySemaphore(dev_, frames_[f].rendered, NULL);
         }
+        if (queries_) vkDestroyQueryPool(dev_, queries_, NULL);
         if (tex_pool_) vkDestroyDescriptorPool(dev_, tex_pool_, NULL);
         if (pipe_layout_) vkDestroyPipelineLayout(dev_, pipe_layout_, NULL);
         for (int i = 0; i < 3; ++i)
@@ -501,6 +557,8 @@ bool Impl::pick_device() {
     for (u32 i = 0; i < qn; ++i)
         if (qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             queue_family_ = i;
+            /* 0: no time stamps (no GPU timing) */
+            tick_ns_ = qf[i].timestampValidBits ? props.limits.timestampPeriod : 0;
             return true;
         }
     log_warn("vk: no graphics queue");
@@ -592,6 +650,15 @@ bool Impl::create_common() {
     pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pci.queueFamilyIndex = queue_family_;
     if (!vk_ok(vkCreateCommandPool(dev_, &pci, NULL, &cmd_pool_), "vkCreateCommandPool")) return false;
+    if (tick_ns_ > 0) {
+        VkQueryPoolCreateInfo qi;
+        memset(&qi, 0, sizeof(qi));
+        qi.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qi.queryCount = TRACE_BASE + TRACE_MAX;
+        /* without it, no GPU timing */
+        if (vkCreateQueryPool(dev_, &qi, NULL, &queries_) != VK_SUCCESS) queries_ = VK_NULL_HANDLE;
+    }
 
     /* set 0: the draw's texture; set 1: the parameters (dynamic offset);
      * set 2: the extra samplers */
@@ -1047,12 +1114,31 @@ VkPipeline Impl::pipeline(int v, int blend) {
 void Impl::begin_frame() {
     if (frame_started_) return;
     Frame& f = frames_[frame_];
+    double w0 = now_ms();
     vkWaitForFences(dev_, 1, &f.fence, VK_TRUE, ~(u64)0);
+    stats_.fence_ms += now_ms() - w0;
     vkResetFences(dev_, 1, &f.fence);
+    if (f.timed) {
+        /* the frame this slot held last: its first command to its last */
+        u64 t[2];
+        if (vkGetQueryPoolResults(dev_, queries_, (u32)frame_ * 2, 2, sizeof(t), t, sizeof(u64),
+                                  VK_QUERY_RESULT_64_BIT) == VK_SUCCESS &&
+            t[1] >= t[0]) {
+            last_gpu_ms_ = (double)(t[1] - t[0]) * tick_ns_ / 1e6;
+            ++stats_.frames;
+            stats_.gpu_ms += last_gpu_ms_;
+            if (last_gpu_ms_ > stats_.gpu_worst) stats_.gpu_worst = last_gpu_ms_;
+        }
+        f.timed = false;
+    }
     release_garbage(f);
     vertex_used_ = uniform_used_ = staging_used_ = 0;
     begin_commands();
     frame_started_ = true;
+    if (timing_) {
+        vkCmdResetQueryPool(f.cmd, queries_, (u32)frame_ * 2, 2);
+        vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queries_, (u32)frame_ * 2);
+    }
 }
 
 void Impl::begin_commands() {
@@ -1093,11 +1179,14 @@ void Impl::submit(bool wait) {
     si.pCommandBuffers = &f.cmd;
     vk_ok(vkQueueSubmit(queue_, 1, &si, f.fence), "vkQueueSubmit");
     if (!wait) return;
+    ++stats_.waits;
     vkWaitForFences(dev_, 1, &f.fence, VK_TRUE, ~(u64)0);
     vkResetFences(dev_, 1, &f.fence);
     release_garbage(f);
     vertex_used_ = uniform_used_ = staging_used_ = 0;
     begin_commands();
+    /* the GPU idle meanwhile */
+    mark(MARK_RESUME, 0, 0, 0, NULL);
 }
 
 void Impl::flush_and_wait() {
@@ -1156,6 +1245,10 @@ void Impl::open_pass(VkTexture* t, bool clear, const float* clear_color, const V
     bound_pipe_ = VK_NULL_HANDLE;
     bound_tex_set_ = bound_extra_set_ = VK_NULL_HANDLE;
     dirty_ = true;
+    ++stats_.passes;
+    /* its begin's clear or draw-back */
+    mark(MARK_BEGIN, target_kind(t), load == VK_ATTACHMENT_LOAD_OP_CLEAR ? 0 : load == VK_ATTACHMENT_LOAD_OP_LOAD ? 1 : 2,
+         0, t);
 }
 
 /* The pass of the target the draws go to, begun if it isn't */
@@ -1176,8 +1269,146 @@ void Impl::ensure_pass() {
 void Impl::end_pass() {
     if (!pass_open_) return;
     vkCmdEndRenderPass(frames_[frame_].cmd);
+    /* its resolve */
+    mark(MARK_END, target_kind(pass_tex_), 0, 0, NULL);
     pass_open_ = false;
     pass_tex_ = NULL;
+}
+
+int Impl::target_kind(const VkTexture* t) const {
+    if (t == scene_) return TARGET_SCENE;
+    if (t == group_) return TARGET_GROUP;
+    if (t && t->swapchain) return TARGET_DISPLAY;
+    for (int i = 0; i < SCREEN_LEVELS; ++i)
+        if (t == screen_lv_[i]) return TARGET_SCREEN;
+    return TARGET_CAPTURE;
+}
+
+/* A traced frame's time stamp, once the GPU is idle: what it took since
+ * the last is what's recorded between them. */
+void Impl::mark(int kind, int variant, int blend, int vertices, const VkTexture* tex) {
+    if (!tracing_ || marks_.size() >= (size_t)TRACE_MAX) return;
+    vkCmdWriteTimestamp(frames_[frame_].cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries_,
+                        (u32)(TRACE_BASE + marks_.size()));
+    Mark m;
+    m.kind = kind;
+    m.variant = variant;
+    m.blend = blend;
+    m.label = label_;
+    m.vertices = vertices;
+    m.w = tex ? tex->width : 0;
+    m.h = tex ? tex->height : 0;
+    marks_.push_back(m);
+}
+
+void Impl::trace_label(const char* label) {
+    if (!tracing_ || (label_ >= 0 && labels_[label_] == label)) return;
+    /* the last item's batch is its own */
+    flush();
+    labels_.push_back(label);
+    label_ = (int)labels_.size() - 1;
+}
+
+Impl::LayerCounts Impl::layer_counts() const {
+    LayerCounts c;
+    memset(&c, 0, sizeof(c));
+#if defined(__XSDK__)
+    V4xShaderCounts s = v4x_shader_counts();
+    V4xEdramCounts e = v4x_edram_counts();
+    c.compiled = s.compiled;
+    c.read = s.read;
+    c.drawn_back = e.drawn_back;
+    c.clear_resolves = e.clear_resolves;
+    c.put_off = e.resolves_put_off;
+    c.late_resolves = e.late_resolves;
+#endif
+    return c;
+}
+
+namespace {
+struct Cost {
+    double ms;
+    int count;
+    Cost() : ms(0), count(0) {}
+};
+
+bool by_cost(const std::pair<double, std::string>& a, const std::pair<double, std::string>& b) {
+    return a.first > b.first;
+}
+}
+
+/* The traced frame's costs, once its fence has passed: each time stamp's
+ * time since the one before charged to what it follows. */
+void Impl::trace_report() {
+    tracing_ = false;
+    size_t n = marks_.size();
+    if (n < 2) return;
+    std::vector<u64> t(n);
+    if (vkGetQueryPoolResults(dev_, queries_, TRACE_BASE, (u32)n, n * sizeof(u64), &t[0], sizeof(u64),
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS) {
+        log_warn("vk: the GPU trace's time stamps could not be read");
+        return;
+    }
+    LayerCounts lc = layer_counts();
+    std::map<std::string, Cost> items, shaders, passes;
+    std::vector<std::pair<double, std::string> > draws;
+    double total = 0;
+    for (size_t i = 1; i < n; ++i) {
+        double ms = t[i] >= t[i - 1] ? (double)(t[i] - t[i - 1]) * tick_ns_ / 1e6 : 0;
+        total += ms;
+        const Mark& m = marks_[i];
+        std::string what;
+        if (m.kind == MARK_DRAW || m.kind == MARK_QUAD) {
+            std::string shader = m.variant >= V_EFFECT ? format("effect %d", m.variant - V_EFFECT)
+                                 : m.variant >= 0 && m.variant < V_EFFECT ? std::string(VARIANT_FILES[m.variant])
+                                                                          : std::string("?");
+            if (shader.size() > 5 && shader.compare(shader.size() - 5, 5, ".frag") == 0) shader.erase(shader.size() - 5);
+            shader += format(" blend %d", m.blend);
+            Cost& s = shaders[shader];
+            s.ms += ms;
+            ++s.count;
+            std::string item = m.kind == MARK_QUAD ? "(a pass's quad: " + shader + ")"
+                               : m.label >= 0      ? labels_[m.label]
+                                                   : std::string("(no item)");
+            Cost& c = items[item];
+            c.ms += ms;
+            ++c.count;
+            draws.push_back(std::make_pair(ms, format("%s, %d vertices, texture %dx%d: ", shader.c_str(), m.vertices,
+                                                      m.w, m.h) + item));
+            continue;
+        }
+        if (m.kind == MARK_BEGIN)
+            what = format("%s begin (%s)", TARGET_NAMES[m.variant], LOAD_NAMES[m.blend]);
+        else if (m.kind == MARK_END)
+            what = format("%s end", TARGET_NAMES[m.variant]);
+        else if (m.kind == MARK_UPLOAD)
+            what = "texture uploads";
+        else
+            what = "idle while the CPU waited";
+        Cost& p = passes[what];
+        p.ms += ms;
+        ++p.count;
+    }
+    log_info("gpu trace (%s): %.1f ms over %u time stamps, each after the GPU finished what came before; "
+             "eDRAM: %u drawn back, %u clear resolves, %u resolves put off (%u later)",
+             trace_why_.c_str(), total, (unsigned)n, lc.drawn_back - trace_counts_.drawn_back,
+             lc.clear_resolves - trace_counts_.clear_resolves, lc.put_off - trace_counts_.put_off,
+             lc.late_resolves - trace_counts_.late_resolves);
+    std::map<std::string, Cost>* groups[3] = { &items, &shaders, &passes };
+    const char* heads[3] = { "item", "shader", "pass" };
+    const size_t shown[3] = { 12, 8, 8 };
+    for (int g = 0; g < 3; ++g) {
+        std::vector<std::pair<double, std::string> > order;
+        for (std::map<std::string, Cost>::const_iterator it = groups[g]->begin(); it != groups[g]->end(); ++it)
+            order.push_back(std::make_pair(it->second.ms, it->first));
+        std::sort(order.begin(), order.end(), by_cost);
+        for (size_t i = 0; i < order.size() && i < shown[g]; ++i)
+            log_info("gpu trace %s: %.2f ms (%d): %s", heads[g], order[i].first, (*groups[g])[order[i].second].count,
+                     order[i].second.c_str());
+    }
+    std::sort(draws.begin(), draws.end(), by_cost);
+    for (size_t i = 0; i < draws.size() && i < 5; ++i)
+        log_info("gpu trace draw: %.2f ms %s", draws[i].first, draws[i].second.c_str());
 }
 
 void Impl::barrier(VkTexture* t, VkImageLayout to) {
@@ -1253,6 +1484,7 @@ void Impl::draw_quad(VkTexture* tex, int variant, int blend, int sampler, int w,
     vkCmdDraw(cmd, 6, 1, first, 0);
     ++draws_;
     dirty_ = true;
+    mark(MARK_QUAD, variant, blend, 6, tex);
     if (trace_on()) log_info("vk trace: quad shader %d from a %dx%d texture", variant, tex ? tex->width : 0, tex ? tex->height : 0);
 }
 
@@ -1335,6 +1567,9 @@ bool Impl::upload(VkTexture* t, const u8* data, size_t bytes, int w, int h, VkFo
     region.imageExtent.depth = 1;
     vkCmdCopyBufferToImage(frames_[frame_].cmd, src, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
     barrier(t, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    mark(MARK_UPLOAD, 0, 0, 0, t);
+    ++stats_.uploads;
+    stats_.upload_mb += (double)bytes / 1048576.0;
     if (reopen) open_pass(open, false, NULL, NULL);
     return true;
 }
@@ -1428,6 +1663,18 @@ void Impl::begin(int width, int height, const Color& c) {
         log_warn("vk: begin %dx%d on a %dx%d renderer", width, height, width_, height_);
     }
     begin_frame();
+    if (trace_pending_) {
+        /* from here (a frame an upload began is traced from its begin) */
+        end_pass();
+        trace_pending_ = false;
+        tracing_ = true;
+        marks_.clear();
+        labels_.clear();
+        label_ = -1;
+        trace_counts_ = layer_counts();
+        vkCmdResetQueryPool(frames_[frame_].cmd, queries_, TRACE_BASE, TRACE_MAX);
+        mark(MARK_START, 0, 0, 0, NULL);
+    }
     screen_levels_ = 0;
     draws_ = 0;
     frame_ended_ = false;
@@ -1459,14 +1706,21 @@ void Impl::present() {
     Frame& f = frames_[frame_];
     if (!display_) {
         submit(false);
+        if (tracing_) {
+            vkWaitForFences(dev_, 1, &f.fence, VK_TRUE, ~(u64)0);
+            trace_report();
+        }
         frame_started_ = false;
         frame_ = (frame_ + 1) % FRAMES;
         return;
     }
+    double a0 = now_ms();
     VkResult r = vkAcquireNextImageKHR(dev_, swapchain_, ~(u64)0, f.acquired, VK_NULL_HANDLE, &image_index_);
+    stats_.acquire_ms += now_ms() - a0;
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
         vk_ok(r, "vkAcquireNextImageKHR");
         submit(false);
+        tracing_ = false;
         frame_started_ = false;
         frame_ = (frame_ + 1) % FRAMES;
         return;
@@ -1478,6 +1732,11 @@ void Impl::present() {
     memset(params_, 0, sizeof(params_));
     draw_quad(scene_, V_PRESENT, BLEND_NONE, 2, width_, height_);
     end_pass();
+    /* a traced frame's time isn't its own: the GPU idles at each stamp */
+    if (timing_ && !tracing_) {
+        vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries_, (u32)frame_ * 2 + 1);
+        f.timed = true;
+    }
     vkEndCommandBuffer(f.cmd);
     VkSubmitInfo si;
     memset(&si, 0, sizeof(si));
@@ -1503,6 +1762,7 @@ void Impl::present() {
             nanosleep(&ts, NULL);
             xsdk_present_stats(&st);
         }
+        stats_.pace_ms += now_ms() - start;
     }
     last_vblank_ = st.vblanks;
 #endif
@@ -1515,6 +1775,10 @@ void Impl::present() {
     pi.pSwapchains = &swapchain_;
     pi.pImageIndices = &image_index_;
     vk_ok(vkQueuePresentKHR(queue_, &pi), "vkQueuePresentKHR");
+    if (tracing_) {
+        vkWaitForFences(dev_, 1, &f.fence, VK_TRUE, ~(u64)0);
+        trace_report();
+    }
     frame_started_ = false;
     frame_ = (frame_ + 1) % FRAMES;
 }
@@ -1524,6 +1788,7 @@ void Impl::finish() {
     begin_frame();
     submit(false);
     vkWaitForFences(dev_, 1, &frames_[frame_].fence, VK_TRUE, ~(u64)0);
+    if (tracing_) trace_report();
     frame_started_ = false;
     frame_ = (frame_ + 1) % FRAMES;
 }
@@ -1597,8 +1862,11 @@ bool Impl::begin_group(const Rect2& b) {
     target_area_.offset.y = y0;
     target_area_.extent.width = (u32)(x1 - x0);
     target_area_.extent.height = (u32)(y1 - y0);
+    /* debug mode 2: the whole target, as a pass of the scene's */
+    if (group_debug_ == 2) memset(&target_area_, 0, sizeof(target_area_));
     in_group_ = true;
     dirty_ = true;
+    ++stats_.groups;
     return true;
 }
 
@@ -1639,6 +1907,7 @@ bool Impl::begin_capture(int w, int h) {
     cap_w_ = w;
     cap_h_ = h;
     dirty_ = true;
+    ++stats_.captures;
     return true;
 }
 
@@ -1742,6 +2011,7 @@ bool Impl::copy_screen() {
     draw_quad(scene_, V_COPY, BLEND_NONE, 2, width_, height_);
     end_pass();
     screen_levels_ = 1;
+    ++stats_.screen_copies;
     return true;
 }
 
@@ -1796,6 +2066,8 @@ bool Impl::screen_pass(int level) {
     vertex_used_ += sizeof(q);
     vkCmdDraw(cmd, 6, 1, first, 0);
     ++draws_;
+    mark(MARK_QUAD, V_SCREEN_LEVEL, BLEND_NONE, 6, screen_lv_[level - 1]);
+    ++stats_.screen_levels;
     end_pass();
     params_valid_ = false;
     bound_pipe_ = VK_NULL_HANDLE;
@@ -1997,8 +2269,14 @@ void Impl::apply_state() {
         tw = (float)tex_->width;
         th = (float)tex_->height;
     }
+    /* c1, the MSDF's range and the texture's size, which the text and main
+     * variants alone read: fixed for the rest, so a change of texture alone
+     * leaves their parameters' block as it was (its write, and the GPU's
+     * load of it) */
+    bool sized = v == V_TEXT || v == V_MAIN;
     float head[28] = { cm_on_ ? 1.0f : 0.0f, (flags_ & DRAW_MSDF) ? 1.0f : 0.0f, group ? 1.0f : 0.0f,
-                       ripple_on_ ? 1.0f : 0.0f, msdf_[0], msdf_[1], tw, th, cm_[0], cm_[1], cm_[2], cm_[3],
+                       ripple_on_ ? 1.0f : 0.0f, sized ? msdf_[0] : 0.0f, sized ? msdf_[1] : 0.0f,
+                       sized ? tw : 1.0f, sized ? th : 1.0f, cm_[0], cm_[1], cm_[2], cm_[3],
                        cm_[4], cm_[5], cm_[6], cm_[7], cm_[8], cm_[9], cm_[10], cm_[11], ripple_[0], ripple_[1],
                        ripple_[2], ripple_[3], gm_ ? 1.0f : 0.0f, gm_red_ ? 1.0f : 0.0f, 0.0f, 0.0f };
     memcpy(c, head, sizeof(head));
@@ -2106,27 +2384,31 @@ void Impl::apply_state() {
     }
     /* c28.x: the texture holds premultiplied colours (a capture) */
     c[112] = tex_ && tex_->premultiplied ? 1.0f : 0.0f;
-    if (!params_valid_ || memcmp(c, params_, PARAM_BYTES) != 0) {
+    bool fresh = !params_valid_ || memcmp(c, params_, PARAM_BYTES) != 0;
+    if (fresh) {
         uniform_used_ = align_up(uniform_used_, uniform_align_);
         params_offset_ = (u32)((VkDeviceSize)frame_ * UNIFORM_RING + uniform_used_);
         gpu_copy(uniform_ring_.map + params_offset_, c, PARAM_BYTES);
         memcpy(params_, c, PARAM_BYTES);
         uniform_used_ += PARAM_BYTES;
         params_valid_ = true;
-        bound_tex_set_ = VK_NULL_HANDLE; /* rebind with the new offset */
     }
     int sampler = ((flags_ & DRAW_REPEAT) ? 1 : 0) | ((flags_ & DRAW_NEAREST) ? 2 : 0);
     VkDescriptorSet ts = texture_set(tex_, sampler);
     /* the extra samplers' set only for the variants that read them */
     bool extras = v != V_PLAIN && v != V_TEXT;
     VkDescriptorSet es = extras ? extra_set(x, xs) : bound_extra_set_;
-    if (ts != bound_tex_set_ || (extras && es != bound_extra_set_)) {
+    if (fresh || !bound_tex_set_ || (extras && es != bound_extra_set_)) {
         VkDescriptorSet sets[3] = { ts, uniform_set_, es };
         u32 count = extras && es ? 3 : 2;
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, count, sets, 1,
                                 &params_offset_);
         bound_tex_set_ = ts;
         if (extras) bound_extra_set_ = es;
+    } else if (ts != bound_tex_set_) {
+        /* the texture alone: the parameters stay bound at their offset */
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout_, 0, 1, &ts, 0, NULL);
+        bound_tex_set_ = ts;
     }
     VkRect2D sc;
     int tw_px = target_w_, th_px = target_h_;
@@ -2168,6 +2450,7 @@ void Impl::flush() {
         gpu_copy(vertex_ring_.map + (VkDeviceSize)frame_ * VERTEX_RING + vertex_used_, batch_, (size_t)bytes);
         vertex_used_ += bytes;
         vkCmdDraw(frames_[frame_].cmd, (u32)batch_count_, 1, first, 0);
+        mark(MARK_DRAW, variant(), (int)blend_, batch_count_, tex_);
         if (trace_on())
             log_info("vk trace: draw shader %d, blend %d, %d vertices, texture %dx%d", variant(), (int)blend_, batch_count_,
                      tex_ ? tex_->width : 0, tex_ ? tex_->height : 0);

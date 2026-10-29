@@ -1,5 +1,7 @@
 /* Streaming decoders for the converter's Ogg samples and PCM16 WAVs.
- * Each decoder has its own pack handle; compressed music stays on disk. */
+ * Sounds up to 512 KB are read once and kept in memory (12 MB of them),
+ * each decoder reading its own way through them; the rest, music among
+ * them, stream from the pack through a handle of each decoder's own. */
 #ifndef SPIRE_AUDIO_DECODER_H
 #define SPIRE_AUDIO_DECODER_H
 
@@ -23,8 +25,12 @@ public:
 private:
     AudioDecoder(const AudioDecoder&);
     AudioDecoder& operator=(const AudioDecoder&);
+    bool open_kept(const std::vector<u8>& data);
     void* vorbis_;
     FILE* pcm_;
+    /* a kept sound: its bytes, and where a WAV's next frame is */
+    const u8* kept_;
+    u32 kept_size_, kept_pos_;
     u64 data_offset_;
     u32 frames_, position_, rate_;
     int channels_;
