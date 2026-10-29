@@ -57,6 +57,11 @@ spire_play --replay-run (frame captures) and spire_check replay.
             two bosses
   crystal_sphere_continue Save and Quit during the Crystal Sphere, then
             Continue: the event again, its rewards at the end
+  bowlbugs  the Bowlbugs' attacks: the rock's bang (an attachment its attack
+            keys) gone once it is back to idle
+  waterfall_giant the Waterfall Giant built up Steam Eruption, knocked out
+            (its HP bar infinite, a Stun intent, still standing in its
+            knockout pose), then its explosion the next turn
 
 Each writes OUT/scenario/<name>.jsonl and .log (content_coverage's Runner).
 """
@@ -226,6 +231,20 @@ def main():
         run.new_run(case, lg, character="Ironclad", seed="pandora")
         state = run.step(case, lg, {"cmd": "obtain", "relics": ["PANDORAS_BOX"]})
         run.play_until(case, lg, state, lambda s: s.get("decision") == "map_select", 30)
+        run.finish(case, lg)
+    if not only or "bowlbugs" in only:
+        case, lg, state = fight("bowlbugs", "BOWLBUGS_WEAK")
+        run.step(case, lg, {"cmd": "set_player", "max_hp": 999, "hp": 999})
+        end_turns(case, lg, run.step(case, lg, {"cmd": "get_state"}), 4)
+        run.finish(case, lg)
+    if not only or "waterfall_giant" in only:
+        case, lg, state = fight("waterfall_giant", "WATERFALL_GIANT_BOSS", "elite")
+        run.step(case, lg, {"cmd": "set_player", "max_hp": 9999, "hp": 9999})
+        state = end_turns(case, lg, run.step(case, lg, {"cmd": "get_state"}), 2)
+        run.step(case, lg, {"cmd": "set_player", "enemy_hp": 1})
+        state = play(case, lg, run.step(case, lg, {"cmd": "get_state"}), "STRIKE_IRONCLAD")
+        state = end_turns(case, lg, state, 3)
+        run.play_until(case, lg, state, lambda s: s.get("decision") in ("rewards", "map_select"), 20)
         run.finish(case, lg)
     if not only or "queen" in only:
         case, lg, state = fight("queen", "QUEEN_BOSS", "elite")

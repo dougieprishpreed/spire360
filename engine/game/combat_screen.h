@@ -401,7 +401,7 @@ private:
     double radial_off_at_; /* when the radial blur hides (life_t_), 0: off */
     void radial_blur(const std::string& position);
     /* NCreature's own calls the logic made on a creature's node. */
-    bool creature_call(const std::string& method, const Json& args);
+    bool creature_call(const std::string& method, const Json& args, const Json& cue);
     bool spine_call(const std::string& method, const Json& args);
     void anim_shake(const std::string& who);
     /* The game's combat events the logic records (UiEvents: "ui_event"):

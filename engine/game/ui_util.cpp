@@ -167,19 +167,25 @@ static void correct_overflow(Vec2& t, const Vec2& ts, Vec2& c, const Vec2& cs) {
     }
 }
 
-void place_tips_beside(Control* set, const Vec2& at, float width, bool left, float gap) {
+/* SetAlignment(node, Left / Right) and its overflow corrections: the text's
+ * and the cards' top-lefts */
+static void beside(Control* set, const Vec2& at, float width, bool left, float gap, Vec2* t, Vec2* c) {
     Control *text, *cards;
     tip_parts(set, &text, &cards);
     Vec2 ts = text ? text->size : Vec2(), cs = cards ? cards->size : Vec2();
-    Vec2 t, c;
     if (left) {
-        t = Vec2(at.x - ts.x - gap, at.y);
-        c = Vec2(at.x + width, at.y);
+        *t = Vec2(at.x - ts.x - gap, at.y);
+        *c = Vec2(at.x + width, at.y);
     } else {
-        c = Vec2(at.x - cs.x, at.y);
-        t = Vec2(at.x + width + gap, at.y);
+        *c = Vec2(at.x - cs.x, at.y);
+        *t = Vec2(at.x + width + gap, at.y);
     }
-    correct_overflow(t, ts, c, cs);
+    correct_overflow(*t, ts, *c, cs);
+}
+
+void place_tips_beside(Control* set, const Vec2& at, float width, bool left, float gap) {
+    Vec2 t, c;
+    beside(set, at, width, left, gap, &t, &c);
     place_tip_parts(set, t, c);
 }
 
@@ -212,14 +218,6 @@ static Vec2 row_size(Control* set) {
     return Vec2(ts.x + 4.0f + cs.x, maxf(ts.y, cs.y));
 }
 
-/* The set placed as a row at (x, y) */
-static void place_row(Control* set, float x, float y) {
-    Control *text, *cards;
-    tip_parts(set, &text, &cards);
-    float tw = text ? text->size.x : 0;
-    place_tip_parts(set, Vec2(x, y), Vec2(text ? x + tw + 4.0f : x, y));
-}
-
 void TipFollower::attach(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
     hide();
     if (!parent || !owner) return;
@@ -227,7 +225,8 @@ void TipFollower::attach(SceneLibrary* lib, Node* parent, Control* owner, const 
     if (!tips_) return;
     owner_ = owner;
     slot_ = NULL;
-    card_ = below_ = left_ = relic_ = false;
+    card_ = below_ = relic_ = false;
+    side_ = SIDE_BY_POSITION;
     merchant_ = 0;
     extra_ = 0;
     tips_->z_index = 10;
@@ -269,7 +268,12 @@ void TipFollower::show_for_relic(SceneLibrary* lib, Node* parent, Control* icon,
 
 void TipFollower::show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
     show_for_control(lib, parent, owner, tips);
-    left_ = tips_ != NULL;
+    side_ = tips_ ? SIDE_LEFT_OF : SIDE_BY_POSITION;
+}
+
+void TipFollower::show_right(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips) {
+    show_for_control(lib, parent, owner, tips);
+    side_ = tips_ ? SIDE_RIGHT_OF : SIDE_BY_POSITION;
 }
 
 void TipFollower::hide() {
@@ -308,49 +312,50 @@ void TipFollower::frame() {
         tips_->modulate.a = 1;
         return;
     }
+    /* SetAlignment(Left): the text left of the owner, the cards right of
+     * it; Right: the text right, the cards left (NHoverTipSet.SetAlignment,
+     * then its overflow corrections). These were rows of the text and the
+     * cards on one side: the cards went with the text (Neow's Dowsing Rod:
+     * Dowsing and Abundance left of the option, the game's right of it). */
     if (merchant_) {
         /* the slot's Size * 0.5 * Scale (its own scale: small or hovered) */
         float hx = owner_->size.x * owner_->scale.x * 0.5f, hy = owner_->size.y * owner_->scale.y * 0.5f;
-        float x, y = c.y;
+        float slot_w = owner_->size.x * owner_->scale.x;
+        Vec2 t, k;
         if (c.x > 1920.0f * 0.5f) {
-            x = c.x - w; /* SetAlignment(Left), then its overflow check */
-            if (y + h > 1080.0f) y = 1080.0f - h;
-            x -= hx;
+            beside(tips_, c, slot_w, true, 0, &t, &k); /* SetAlignment(Left) */
+            t = t - Vec2(hx, hy);
+            k = k - Vec2(hx, hy);
         } else if (merchant_ == 1) {
-            x = c.x + hx * 2.0f; /* SetAlignment(Right) */
-            if (y + h > 1080.0f) y = 1080.0f - h;
-            x += hx;
+            beside(tips_, c, slot_w, false, 0, &t, &k); /* SetAlignment(Right) */
+            t = t + Vec2(hx, -hy);
+            k = k + Vec2(hx, -hy);
         } else {
-            x = c.x + hx; /* the removal: no alignment, at the slot */
+            /* the removal: no alignment, at the slot (its tip is text) */
+            t = k = c + Vec2(hx, -hy);
         }
-        place_row(tips_, x, y - hy);
-        tips_->modulate.a = 1;
-        return;
-    }
-    if (left_) {
-        float x = c.x - w, y = c.y;
-        if (x < 0) x = 0;
-        if (y + h > 1080.0f) y = 1080.0f - h;
-        place_row(tips_, x, y);
+        place_tip_parts(tips_, t, k);
         tips_->modulate.a = 1;
         return;
     }
     if (below_) {
-        /* then CorrectHorizontalOverflow / CorrectVerticalOverflow */
-        float x = c.x, y = c.y + owner_->size.y * s * 1.5f;
-        if (x + w > 1920.0f) x = 1920.0f - w;
-        if (y + h > 1080.0f) y = 1080.0f - h;
-        place_row(tips_, x, y);
+        /* HoverTipAlignment.Center (NPotionHolder): the set 1.5 of the
+         * owner's height under it, the cards under the text; then
+         * CorrectVerticalOverflow / CorrectHorizontalOverflow */
+        Control *text, *cards;
+        tip_parts(tips_, &text, &cards);
+        Vec2 ts = text ? text->size : Vec2(), cs = cards ? cards->size : Vec2();
+        Vec2 t(c.x, c.y + owner_->size.y * s * 1.5f), k(t.x, t.y + ts.y);
+        correct_overflow(t, ts, k, cs);
+        place_tip_parts(tips_, t, k);
         tips_->modulate.a = 1;
         return;
     }
     if (!card_) {
-        /* SetAlignment, then CorrectVerticalOverflow */
-        float x = c.x > 1920.0f * 0.75f ? c.x - w : c.x + owner_->size.x * s;
-        float y = c.y;
-        if (y + h > 1080.0f) y = 1080.0f - h;
-        if (y < 0) y = 0;
-        place_row(tips_, x + extra_, y);
+        /* GetHoverTipAlignment (left past 3/4 of the screen) unless the
+         * owner gives the side; extra_: SetExtraFollowOffset */
+        bool left = side_ == SIDE_BY_POSITION ? c.x > 1920.0f * 0.75f : side_ == SIDE_LEFT_OF;
+        place_tips_beside(tips_, Vec2(c.x + extra_, c.y), owner_->size.x * s, left, 0);
         tips_->modulate.a = 1;
         return;
     }

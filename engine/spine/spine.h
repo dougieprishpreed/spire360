@@ -204,9 +204,14 @@ struct SpTimeline {
 };
 
 struct SpAnimation {
+    SpAnimation() : duration(0), props_ready(false) {}
     std::string name;
     float duration;
     std::vector<SpTimeline> timelines;
+    /* the properties its timelines key (spine's property ids, sorted),
+     * made on first use: what an animation mixing out to this one holds */
+    mutable std::vector<unsigned> props;
+    mutable bool props_ready;
 };
 
 class SpSkeletonData {
@@ -259,6 +264,8 @@ struct SpSlot {
     SpAttachment* attachment;
     std::vector<float> deform;
     int sequence_index; /* -1: the sequence's setup frame */
+    /* AnimationState's unkeyed state: who set the attachment this apply */
+    int attachment_state;
 };
 
 struct SpIk {
@@ -412,8 +419,10 @@ private:
         Track() : has_cur(false), has_from(false) {}
     };
     std::vector<Track> tracks_;
+    int unkeyed_; /* AnimationState.unkeyedState: + 1 setup, + 2 current */
     Track& track(int i);
     void start(Track& t, const Entry& e);
+    void let_go(Track& t);
 };
 
 /* Poses the skeleton from an animation at a time: alpha 1 replaces the
@@ -422,6 +431,19 @@ private:
  * time, for physics resets keyed in between. */
 void sp_apply_animation(const SpAnimation& anim, SpSkeleton& skel, float last_time, float time, bool loop,
                         float alpha);
+/* The same for an AnimationState entry (spine 4's attachment handling):
+ * the current entry sets the attachments its keys give; one mixing out
+ * (mixing_out) sets none (its attachmentThreshold, 0) and marks its slots,
+ * which SpAnimationState::apply then returns to their setup attachment
+ * unless a current entry set them. unkeyed: the state's count. */
+void sp_apply_entry(const SpAnimation& anim, SpSkeleton& skel, float last_time, float time, bool loop, float alpha,
+                    bool mixing_out, int unkeyed);
+/* An entry mixing out to another (to; NULL: the track let go), mix of the
+ * way (spine 4's timeline modes): a property both key is held (to mixes in
+ * over it); one only this entry keys goes from its value back to the setup
+ * pose (an attack's bone or colour keys no longer stay once idle plays). */
+void sp_apply_mixing_out(const SpAnimation& from, const SpAnimation* to, SpSkeleton& skel, float last_time, float time,
+                         bool loop, float mix, int unkeyed);
 
 /* Clipping (spine_clip.cpp): triangles of the slots after a clipping
  * attachment are cut to its polygon until its end slot. */

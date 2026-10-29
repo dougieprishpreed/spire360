@@ -46,7 +46,8 @@ ShopScreen::ShopScreen(SceneLibrary* lib)
     : fake_(false), again_(false), dialogue_(NULL), dialogue_box_(NULL), dialogue_bubble_(NULL), dialogue_text_(NULL),
       welcome_at_(-1), lib_(lib), root_(NULL), inspect_card_(NULL), inspect_relic_(NULL), inspect_node_(NULL),
       inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL), back_button_(NULL),
-      focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), slots_closed_top_(0),
+      focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), gone_(NULL),
+      focus_near_gone_(false), slots_closed_top_(0),
       slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0), auto_t_(0),
       auto_tail_(0) {}
 
@@ -225,6 +226,7 @@ static void set_cost(Node* slot, int cost, bool affordable, bool on_sale) {
  * UpdateVisual); a sold one hidden. */
 void ShopScreen::fill_slots(Node* inv, const Json& d) {
     slots_list_.clear();
+    gone_ = NULL;
     int gold = d["player"]["gold"].i();
     Node* rows[2] = { inv->find_unique("CharacterCards"), inv->find_unique("ColorlessCards") };
     int next[2] = { 0, 0 };
@@ -235,6 +237,7 @@ void ShopScreen::fill_slots(Node* inv, const Json& d) {
         if (!row || next[r] >= (int)row->children.size()) continue;
         Control* slot = as_control(row->children[(size_t)next[r]++]);
         if (!slot) continue;
+        if (start_kind_ == "card" && cards[i]["index"].i((int)i) == start_index_) gone_ = slot;
         bool stocked = cards[i]["is_stocked"].b(true);
         int cost = cards[i]["cost"].i();
         if (!stocked) {
@@ -267,6 +270,7 @@ void ShopScreen::fill_slots(Node* inv, const Json& d) {
         for (size_t i = 0; box && i < box->children.size(); ++i) {
             Control* slot = as_control(box->children[i]);
             if (!slot) continue;
+            if (start_kind_ == kinds[k].kind && i < items.size() && items[i]["index"].i((int)i) == start_index_) gone_ = slot;
             if (i >= items.size() || !items[i]["is_stocked"].b(true) || !items[i]["id"].is_string()) {
                 slot->visible = false;
                 continue;
@@ -291,6 +295,7 @@ void ShopScreen::fill_slots(Node* inv, const Json& d) {
     }
     /* NMerchantCardRemoval: once used, no price (and no focus). */
     Control* removal = ctl(inv, "MerchantCardRemoval");
+    if (removal && start_kind_ == "removal") gone_ = removal;
     if (removal) {
         if (d["card_removal_used"].b(d["card_removal_cost"].is_null())) {
             hide(removal->find_unique("CostLabel"));
@@ -396,11 +401,13 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
     open_ = false;
     if (start_open_ && inventory_) {
         open_inventory(false);
-        int f = 0;
+        int f = -1;
         for (size_t i = 0; i < slots_list_.size(); ++i)
             if (slots_list_[i].kind == start_kind_ && slots_list_[i].index == start_index_) f = (int)i;
-        /* The bought one is gone: the slot nearest to where it was. */
-        focus_slot(slots_list_.empty() ? -1 : f);
+        /* The bought one is gone: the slot nearest to where it was, once
+         * placed (it took the first slot, the top-left card) */
+        if (f < 0 && gone_ && !slots_list_.empty()) focus_near_gone_ = true;
+        else focus_slot(slots_list_.empty() ? -1 : f < 0 ? 0 : f);
     } else {
         proceed_.enable(start_open_);
         focus_merchant(true);
@@ -649,6 +656,21 @@ void ShopScreen::stop_hand(double linger) {
 }
 
 void ShopScreen::frame(double dt) {
+    if (focus_near_gone_) {
+        focus_near_gone_ = false;
+        Vec2 at = gone_->global_transform().xform(Vec2(0, 0));
+        int best = 0;
+        float best_d = 1e30f;
+        for (size_t i = 0; i < slots_list_.size(); ++i) {
+            Vec2 q = slot_centre(slots_list_[i]) - at;
+            float d = q.x * q.x + q.y * q.y;
+            if (d < best_d) {
+                best_d = d;
+                best = (int)i;
+            }
+        }
+        focus_slot(best);
+    }
     tweens_.update(dt);
     proceed_.frame(dt);
     slot_tips_.frame();

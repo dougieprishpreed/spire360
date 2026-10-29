@@ -154,4 +154,13 @@ internal static class Animators
         if (h.Bounds != null && h.Bounds != before) ops.Add(new() { ["op"] = "bounds", ["name"] = h.Bounds });
         return ops;
     }
+
+    /// <summary>NCreature.StartReviveAnim's animation: the Revive trigger where
+    /// the animator has one (Osty, the Decimillipede's segments); null where it
+    /// has none, and the body keeps its pose (the Waterfall Giant knocked out).</summary>
+    public static List<Dictionary<string, object?>>? Revive(Creature c)
+    {
+        var animator = Get(c).Animator;
+        return animator != null && animator.HasTrigger("Revive") ? Trigger(c, "Revive") : null;
+    }
 }

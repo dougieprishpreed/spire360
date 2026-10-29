@@ -129,6 +129,7 @@ void SpSkeleton::set_slots_to_setup_pose() {
         s.attachment = s.data->attachment.empty() ? NULL : attachment((int)i, s.data->attachment);
         s.deform.clear();
         s.sequence_index = -1;
+        s.attachment_state = 0;
     }
 }
 

@@ -773,6 +773,7 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     if (rt == "Event" && !last_event_.is_null()) {
         EventScreen* event = new EventScreen(lib_);
         event->set_room_portrait(event_portrait_);
+        event->set_behind();
         behind_ = event;
         Node* n = behind_->build(last_event_, &err);
         if (!n) {

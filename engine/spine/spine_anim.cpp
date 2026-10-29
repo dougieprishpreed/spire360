@@ -1,6 +1,8 @@
 /* Spine animation: timeline evaluation and the animation state. */
 #include "spine.h"
 
+#include <algorithm>
+
 #include <math.h>
 
 namespace spire {
@@ -135,6 +137,14 @@ static int sequence_index(int mode, int index, float elapsed, float delay, int c
     }
 }
 
+/* How an AnimationState applies attachment keys (sp_apply_entry); NULL:
+ * a plain pose (sp_apply_animation) */
+struct EntryApply {
+    bool mixing_out;
+    int unkeyed;
+};
+static const EntryApply* g_entry = NULL;
+
 static void apply_slot(const SpTimeline& tl, SpSkeleton& skel, float time, float alpha) {
     if (tl.target < 0 || tl.target >= (int)skel.slots.size()) return;
     SpSlot& s = skel.slots[tl.target];
@@ -142,6 +152,19 @@ static void apply_slot(const SpTimeline& tl, SpSkeleton& skel, float time, float
     int k = key_index(tl, time);
     switch (tl.type) {
     case SPT_ATTACHMENT:
+        if (g_entry) {
+            /* AnimationState.applyAttachmentTimeline: the current entry's
+             * keys set it; an entry mixing out leaves the slot to go back
+             * to its setup attachment (the Bowlbug's attack left its bang
+             * up for the rest of the fight: idle keys no such slot) */
+            if (!g_entry->mixing_out) {
+                set_attachment(skel, tl.target, k < 0 || k >= (int)tl.names.size() ? s.data->attachment : tl.names[k]);
+                s.attachment_state = g_entry->unkeyed + 2;
+            } else if (s.attachment_state <= g_entry->unkeyed) {
+                s.attachment_state = g_entry->unkeyed + 1;
+            }
+            return;
+        }
         if (alpha < 0.5f) return; /* attachments switch over at the middle of a crossfade */
         set_attachment(skel, tl.target, k < 0 || k >= (int)tl.names.size() ? s.data->attachment : tl.names[k]);
         return;
@@ -365,9 +388,119 @@ void sp_apply_animation(const SpAnimation& anim, SpSkeleton& skel, float last_ti
     for (size_t i = 0; i < anim.timelines.size(); ++i) apply_timeline(anim.timelines[i], skel, last_time, time, alpha);
 }
 
+/* Timeline.getPropertyIds: the properties a timeline keys, as spine
+ * splits them (x and y, rgb and alpha apart; a deform per attachment). */
+static unsigned prop(unsigned channel, int target, unsigned extra = 0) {
+    return (channel << 24) ^ ((unsigned)target & 0xFFFFu) ^ (extra << 16);
+}
+
+static unsigned name_hash(const std::string& s) {
+    unsigned h = 2166136261u;
+    for (size_t i = 0; i < s.size(); ++i) h = (h ^ (unsigned char)s[i]) * 16777619u;
+    return h & 0xFFu;
+}
+
+static void timeline_props(const SpTimeline& tl, std::vector<unsigned>& out) {
+    enum { ROT = 1, X, Y, SX, SY, SHX, SHY, INH, RGB, ALPHA, RGB2, DEFORM, SEQ, CONSTRAINT };
+    int t = tl.target;
+    switch (tl.type) {
+    case SPT_ROTATE: out.push_back(prop(ROT, t)); break;
+    case SPT_TRANSLATE: out.push_back(prop(X, t)); out.push_back(prop(Y, t)); break;
+    case SPT_TRANSLATE_X: out.push_back(prop(X, t)); break;
+    case SPT_TRANSLATE_Y: out.push_back(prop(Y, t)); break;
+    case SPT_SCALE: out.push_back(prop(SX, t)); out.push_back(prop(SY, t)); break;
+    case SPT_SCALE_X: out.push_back(prop(SX, t)); break;
+    case SPT_SCALE_Y: out.push_back(prop(SY, t)); break;
+    case SPT_SHEAR: out.push_back(prop(SHX, t)); out.push_back(prop(SHY, t)); break;
+    case SPT_SHEAR_X: out.push_back(prop(SHX, t)); break;
+    case SPT_SHEAR_Y: out.push_back(prop(SHY, t)); break;
+    case SPT_INHERIT: out.push_back(prop(INH, t)); break;
+    case SPT_RGBA: out.push_back(prop(RGB, t)); out.push_back(prop(ALPHA, t)); break;
+    case SPT_RGB: out.push_back(prop(RGB, t)); break;
+    case SPT_ALPHA: out.push_back(prop(ALPHA, t)); break;
+    case SPT_RGBA2:
+        out.push_back(prop(RGB, t));
+        out.push_back(prop(ALPHA, t));
+        out.push_back(prop(RGB2, t));
+        break;
+    case SPT_RGB2: out.push_back(prop(RGB, t)); out.push_back(prop(RGB2, t)); break;
+    case SPT_DEFORM: out.push_back(prop(DEFORM, t, name_hash(tl.attachment))); break;
+    case SPT_SEQUENCE: out.push_back(prop(SEQ, t, name_hash(tl.attachment))); break;
+    default:
+        if (tl.type >= SPT_IK) out.push_back(prop(CONSTRAINT + (unsigned)(tl.type - SPT_IK), t));
+        break;
+    }
+}
+
+static const std::vector<unsigned>& animation_props(const SpAnimation& a) {
+    if (!a.props_ready) {
+        a.props.clear();
+        for (size_t i = 0; i < a.timelines.size(); ++i) timeline_props(a.timelines[i], a.props);
+        std::sort(a.props.begin(), a.props.end());
+        a.props.erase(std::unique(a.props.begin(), a.props.end()), a.props.end());
+        a.props_ready = true;
+    }
+    return a.props;
+}
+
+/* Animation.hasTimeline(ids): whether to keys any of the timeline's */
+static bool keys_any(const SpAnimation* to, const SpTimeline& tl) {
+    if (!to) return false;
+    const std::vector<unsigned>& have = animation_props(*to);
+    std::vector<unsigned> ids;
+    timeline_props(tl, ids);
+    for (size_t i = 0; i < ids.size(); ++i)
+        if (std::binary_search(have.begin(), have.end(), ids[i])) return true;
+    return false;
+}
+
+void sp_apply_mixing_out(const SpAnimation& from, const SpAnimation* to, SpSkeleton& skel, float last_time, float time,
+                         bool loop, float mix, int unkeyed) {
+    if (loop && from.duration > 0) {
+        time = fmodf(time, from.duration);
+        if (time < 0) time += from.duration;
+        if (last_time >= 0) {
+            last_time = fmodf(last_time, from.duration);
+            if (last_time > time) last_time = -1;
+        }
+    } else if (time > from.duration) {
+        time = from.duration;
+    }
+    EntryApply e;
+    e.mixing_out = true;
+    e.unkeyed = unkeyed;
+    g_entry = &e;
+    for (size_t i = 0; i < from.timelines.size(); ++i) {
+        const SpTimeline& tl = from.timelines[i];
+        /* attachments mark their slots (above); the draw order and the
+         * events, physics resets as they were */
+        bool first = tl.type != SPT_ATTACHMENT && tl.type != SPT_DRAW_ORDER && tl.type != SPT_EVENT &&
+                     tl.type != SPT_PHYSICS_RESET && !keys_any(to, tl);
+        if (!first) {
+            apply_timeline(tl, skel, last_time, time, 1.0f);
+            continue;
+        }
+        /* MixBlend.setup: the setup value (before the first key), then
+         * this entry's mixed over it as it goes */
+        apply_timeline(tl, skel, -1.0f, -1.0f, 1.0f);
+        if (mix < 1.0f) apply_timeline(tl, skel, last_time, time, 1.0f - mix);
+    }
+    g_entry = NULL;
+}
+
+void sp_apply_entry(const SpAnimation& anim, SpSkeleton& skel, float last_time, float time, bool loop, float alpha,
+                    bool mixing_out, int unkeyed) {
+    EntryApply e;
+    e.mixing_out = mixing_out;
+    e.unkeyed = unkeyed;
+    g_entry = &e;
+    sp_apply_animation(anim, skel, last_time, time, loop, alpha);
+    g_entry = NULL;
+}
+
 /* ---- animation state ---- */
 
-SpAnimationState::SpAnimationState() : default_mix(0), time_scale(1) {}
+SpAnimationState::SpAnimationState() : default_mix(0), time_scale(1), unkeyed_(0) {}
 
 SpAnimationState::Track& SpAnimationState::track(int i) {
     if (i < 0) i = 0;
@@ -412,9 +545,13 @@ static void fire_events(std::vector<SpFired>& out, int track, const SpAnimation*
 }
 
 void SpAnimationState::start(Track& t, const Entry& e) {
-    if (t.has_cur && t.cur.anim && default_mix > 0) {
+    /* the entry before mixes out (spine 4: applied at least once even with
+     * no crossfade, its attachments then back to the setup pose) */
+    if (t.has_cur && t.cur.anim) {
         t.from = t.cur;
         t.has_from = true;
+    } else if (!t.has_cur) {
+        t.has_from = t.has_from && t.from.anim;
     } else {
         t.has_from = false;
     }
@@ -445,8 +582,20 @@ void SpAnimationState::set_animation(int ti, const SpAnimation* anim, bool loop)
 void SpAnimationState::set_empty_animation(int ti) {
     Track& t = track(ti);
     t.queue.clear();
+    let_go(t);
+}
+
+/* The track empties: its entry mixes out once more (its attachments back
+ * to the setup pose), then nothing. */
+void SpAnimationState::let_go(Track& t) {
+    if (t.has_cur && t.cur.anim) {
+        t.from = t.cur;
+        t.from.mix_duration = 0;
+        t.has_from = true;
+    } else {
+        t.has_from = false;
+    }
     t.has_cur = false;
-    t.has_from = false;
 }
 
 void SpAnimationState::add_animation(int ti, const SpAnimation* anim, bool loop, float delay) {
@@ -497,7 +646,8 @@ void SpAnimationState::update(float dt) {
         if (t.has_from) {
             t.from.time += d * t.from.time_scale;
             t.cur.mix_time += d;
-            if (t.cur.mix_time >= t.cur.mix_duration) t.has_from = false;
+            /* once the new entry has been applied (the old one with it) */
+            if (t.cur.mix_time >= t.cur.mix_duration && t.cur.last_time >= 0) t.has_from = false;
         }
         if (!t.queue.empty() && t.cur.time >= t.queue[0].delay) {
             Entry next = t.queue[0];
@@ -507,8 +657,7 @@ void SpAnimationState::update(float dt) {
             next.delay = 0;
             if (!next.anim) {
                 /* the empty animation: the track lets go */
-                t.has_cur = false;
-                t.has_from = false;
+                let_go(t);
                 continue;
             }
             start(t, next);
@@ -522,17 +671,33 @@ void SpAnimationState::update(float dt) {
 void SpAnimationState::apply(SpSkeleton& skel) {
     for (size_t i = 0; i < tracks_.size(); ++i) {
         Track& t = tracks_[i];
-        if (!t.has_cur || t.cur.delay > 0 || !t.cur.anim) continue;
-        if (t.has_from && t.from.anim && t.cur.mix_duration > 0) {
-            sp_apply_animation(*t.from.anim, skel, t.from.last_time, t.from.time, t.from.loop, 1.0f);
-            sp_apply_animation(*t.cur.anim, skel, t.cur.last_time, t.cur.time, t.cur.loop,
-                               t.cur.mix_time / t.cur.mix_duration);
+        if (!t.has_cur) {
+            /* let go: what it held mixes out this once */
+            if (t.has_from && t.from.anim)
+                sp_apply_mixing_out(*t.from.anim, NULL, skel, t.from.last_time, t.from.time, t.from.loop, 1.0f, unkeyed_);
+            t.has_from = false;
+            continue;
+        }
+        if (t.cur.delay > 0 || !t.cur.anim) continue;
+        if (t.has_from && t.from.anim) {
+            float mix = t.cur.mix_duration > 0 ? minf(t.cur.mix_time / t.cur.mix_duration, 1.0f) : 1.0f;
+            sp_apply_mixing_out(*t.from.anim, t.cur.anim, skel, t.from.last_time, t.from.time, t.from.loop, mix,
+                                unkeyed_);
+            sp_apply_entry(*t.cur.anim, skel, t.cur.last_time, t.cur.time, t.cur.loop, mix, false, unkeyed_);
             t.from.last_time = t.from.time;
         } else {
-            sp_apply_animation(*t.cur.anim, skel, t.cur.last_time, t.cur.time, t.cur.loop, 1.0f);
+            sp_apply_entry(*t.cur.anim, skel, t.cur.last_time, t.cur.time, t.cur.loop, 1.0f, false, unkeyed_);
         }
         t.cur.last_time = t.cur.time;
     }
+    /* AnimationState.apply's end: the slots only an entry mixing out keyed
+     * go back to their setup attachment */
+    int setup = unkeyed_ + 1;
+    for (size_t i = 0; i < skel.slots.size(); ++i) {
+        SpSlot& s = skel.slots[i];
+        if (s.attachment_state == setup) set_attachment(skel, (int)i, s.data->attachment);
+    }
+    unkeyed_ += 2;
 }
 
 const SpAnimation* SpAnimationState::current(int ti) const {

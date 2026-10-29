@@ -101,8 +101,8 @@ void setup_inspect_prompt(SceneLibrary* lib, Node* prompt);
 class TipFollower {
 public:
     TipFollower()
-        : tips_(NULL), owner_(NULL), slot_(NULL), card_(true), below_(false), left_(false), relic_(false), merchant_(0),
-          extra_(0) {}
+        : tips_(NULL), owner_(NULL), slot_(NULL), card_(true), below_(false), relic_(false), side_(SIDE_BY_POSITION),
+          merchant_(0), extra_(0) {}
     void show_for_card(SceneLibrary* lib, Node* parent, Control* holder, const Json& tips);
     /* NHoverTipSet.CreateAndShow(owner, tips, GetHoverTipAlignment(owner))
      * with SetFollowOwner: right of the owner, or left of it past 3/4 of
@@ -114,8 +114,13 @@ public:
     /* NRelicInventoryHolder.OnFocus: SetAlignmentForRelic, the owner the
      * relic's icon. */
     void show_for_relic(SceneLibrary* lib, Node* parent, Control* icon, const Json& tips);
-    /* HoverTipAlignment.Left: the tips' right edge at the owner's left. */
+    /* HoverTipAlignment.Left: the text tips left of the owner (their right
+     * edge at its left), the cards right of it (NEventOptionButton outside
+     * a combat layout, NRewardButton). */
     void show_left(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
+    /* HoverTipAlignment.Right: the text right of the owner, the cards left
+     * of it (NEventOptionButton in a combat layout). */
+    void show_right(SceneLibrary* lib, Node* parent, Control* owner, const Json& tips);
     /* NMerchantRelic / NMerchantPotion / NMerchantCardRemoval.CreateHoverTip:
      * past the screen's middle, the tips' right edge at the slot, then up
      * and left by half the slot; else right of it (the removal: from its
@@ -134,7 +139,10 @@ private:
     Control* tips_;
     Control* owner_;
     Control* slot_; /* show_for_merchant_card: the slot that picks the side */
-    bool card_, below_, left_, relic_;
+    bool card_, below_, relic_;
+    /* show_for_control's side: by the owner's place, or given */
+    enum Side { SIDE_BY_POSITION, SIDE_LEFT_OF, SIDE_RIGHT_OF };
+    Side side_;
     int merchant_; /* 0, 1: relic or potion, 2: card removal, 3: card */
     float extra_;
 };

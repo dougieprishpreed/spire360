@@ -50,7 +50,7 @@ static std::string option_text(const Json& o) {
 EventScreen::EventScreen(SceneLibrary* lib)
     : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), sparring_(false), spar_at_(0),
       steps_options_(NULL), root_(NULL), combat_layout_(false), ancient_(false), line_(0), laid_out_(false),
-      continued_(false),
+      continued_(false), behind_(false),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
 
@@ -149,7 +149,7 @@ Node* EventScreen::build_combat(const Json& d) {
     if (d["event_id"].str() == "punch_off") combat_->set_creature_flipped("e1", sparring_);
     /* what the event's own code did to its room (The Architect's attacks
      * and lines) */
-    if (d["steps"].size() > 0) combat_->play_steps(d["steps"]);
+    if (d["steps"].size() > 0 && !behind_) combat_->play_steps(d["steps"]);
     Node* desc = lay->find_unique("EventDescription");
     set_label(desc, d["description_bbcode"].is_string() ? d["description_bbcode"].str() : d["description"].str());
     if (desc && desc->type == "RichTextLabel") {
@@ -170,7 +170,7 @@ Node* EventScreen::build_combat(const Json& d) {
     /* The event's code made its options once those steps were done (The
      * Architect's SetEventState after PlayCurrentLine's attacks and waits):
      * shown with the steps, a press skipped the rest of them. */
-    if (d["steps"].size() > 0 && !sparring_ && options && options->is_canvas_item()) {
+    if (d["steps"].size() > 0 && !sparring_ && !behind_ && options && options->is_canvas_item()) {
         steps_options_ = (CanvasItem*)options;
         steps_options_->modulate.a = 0;
     }
@@ -302,6 +302,10 @@ void EventScreen::add_option(Node* box, const Json& o, int i, bool ancient) {
 
 /* OnFocus / OnUnfocus (locked options take no focus look). */
 void EventScreen::focus(int i) {
+    if (behind_) {
+        focus_ = -1;
+        return;
+    }
     if (focus_ >= 0 && focus_ < (int)options_.size() && focus_ != i) {
         Option& old = options_[(size_t)focus_];
         if (!old.locked) {
@@ -315,7 +319,7 @@ void EventScreen::focus(int i) {
     if (i < 0 || i >= (int)options_.size()) return;
     Option& op = options_[(size_t)i];
     if (op.locked) return;
-    if (combat_layout_) tips_.show_for_control(lib_, root_, op.node, op.tips);
+    if (combat_layout_) tips_.show_right(lib_, root_, op.node, op.tips);
     else tips_.show_left(lib_, root_, op.node, op.tips);
     op.node->pivot_offset = offset_size(op.node) * 0.5f;
     tweens_.tween(&op.node->scale, Vec2(HOVER_SCALE, HOVER_SCALE), 0.05f);
@@ -528,7 +532,8 @@ static Json spar_steps() {
 void EventScreen::frame(double dt) {
     float before = time_;
     time_ += (float)dt;
-    tweens_.update(dt);
+    /* behind an overlay: every entrance at its end at once */
+    tweens_.update(behind_ ? 600.0 : dt);
     tips_.frame();
     if (sparring_ && combat_ && time_ >= spar_at_) {
         static const Json steps = spar_steps();
@@ -567,7 +572,8 @@ void EventScreen::frame(double dt) {
             content_container_->offset[SIDE_BOTTOM] = content_container_->offset[SIDE_TOP] + container_h_;
             content_y_ = container_h_;
         }
-        show_line(0);
+        show_line(behind_ ? (lines_.empty() ? 0 : (int)lines_.size() - 1) : 0);
+        if (behind_) tweens_.update(600.0);
     }
     place_content(container_h_);
     if (enabled_ && focus_ < 0 && time_ >= enable_at_ && !options_.empty() && !steps_options_) focus(0);

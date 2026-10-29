@@ -39,6 +39,16 @@ public:
     /* The same event's next page (NEventRoom.RefreshEventState keeps the
      * layout): an ancient's banner as it settled, not its entrance. */
     void set_continued(bool on) { continued_ = on; }
+    /* Under an overlay (the rewards or the card choice an option gave): the
+     * page as it stands, its entrance over (an ancient's last line, its
+     * banner settled), its steps not played again, and no focus (the
+     * overlay has it: no tips, no presses). Rebuilt with each of the
+     * overlay's decisions, the options slid in and took the focus again at
+     * each reward taken (Darv's Calling Bell). */
+    void set_behind() {
+        behind_ = true;
+        continued_ = true;
+    }
     /* Transfer the visual-only room across event pages or into the fight. */
     CombatScreen* take_combat();
     /* What a choice did to the event's room, before the screen after it;
@@ -96,6 +106,7 @@ private:
     int line_;
     bool laid_out_; /* a layout pass has measured the content */
     bool continued_;
+    bool behind_;
     Control* content_container_;
     Control* content_;
     Control* options_box_;

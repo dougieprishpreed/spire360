@@ -35,6 +35,22 @@ struct Header {
     void* deleted_by[DELETERS];
 };
 
+/* The particles' workers allocate too (trails): the quarantine's
+ * bookkeeping under one lock. */
+CRITICAL_SECTION g_lock;
+bool g_lock_made = false;
+
+struct Locked {
+    Locked() {
+        if (!g_lock_made) {
+            InitializeCriticalSection(&g_lock);
+            g_lock_made = true;
+        }
+        EnterCriticalSection(&g_lock);
+    }
+    ~Locked() { LeaveCriticalSection(&g_lock); }
+};
+
 const size_t QUARANTINE_BYTES = (size_t)64 << 20;
 const size_t SLOTS = 1 << 16;
 Header* quarantine[SLOTS];
@@ -119,6 +135,7 @@ void release(void* p) {
     h->magic = FREED;
     chain(h->deleted_by, DELETERS);
     memset(p, 0xDD, h->size);
+    Locked lock;
     /* held back; the oldest goes back to malloc (checked first) */
     while (q_count > 0 && (q_bytes + h->size > QUARANTINE_BYTES || q_count == SLOTS)) {
         size_t tail = (q_head + SLOTS - q_count) % SLOTS;
@@ -139,6 +156,7 @@ void release(void* p) {
 /* The blocks freed lately (the newest first, up to `recent`), checked for
  * writes after their delete; stops at the first. */
 void debug_heap_check(size_t recent) {
+    Locked lock;
     for (size_t i = 0; i < q_count && i < recent; ++i) {
         Header* h = quarantine[(q_head + SLOTS - 1 - i) % SLOTS];
         if (written(h)) stop("found by debug_heap_check", h + 1);

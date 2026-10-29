@@ -453,6 +453,9 @@ static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
     audio.update(1.0 / 60.0);
     double t2 = now_ms();
     tree.layout(1);
+#ifdef SPIRE_DEBUG_HEAP
+    debug_heap_check(4096);
+#endif
     double t3 = now_ms();
     double part[3] = { t1 - t0, t2 - t1, t3 - t2 };
     for (int i = 0; i < 3; ++i) {

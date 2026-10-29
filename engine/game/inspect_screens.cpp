@@ -16,19 +16,29 @@ static void free_node(Node* n) {
     delete n;
 }
 
-/* A hover tip set at a rect's right edge (SetAlignment(rect, Right)). */
-static Control* tips_at(SceneLibrary* lib, Node* parent, Node* rect, const Json& tips) {
+/* A hover tip set for SetAlignment(HoverTipRect, GetHoverTipAlignment of
+ * the screen: Right), placed by place_tips once laid out. */
+static Control* tips_at(SceneLibrary* lib, Node* parent, const Json& tips) {
     if (!parent || !tips.size()) return NULL;
-    Control* t = make_tip_set(lib, tips);
-    Control* r = control_of(rect);
+    Control* t = make_tip_set(lib, tips, true);
     if (!t) return NULL;
     t->z_index = 10;
-    for (int k = 0; k < 4; ++k) t->anchor[k] = r ? r->anchor[k] : 0;
-    float x = r ? r->offset[SIDE_RIGHT] : 0, y = r ? r->offset[SIDE_TOP] : 0;
-    t->offset[SIDE_LEFT] = t->offset[SIDE_RIGHT] = x;
-    t->offset[SIDE_TOP] = t->offset[SIDE_BOTTOM] = y;
+    t->modulate.a = 0;
     parent->add_child(t);
     return t;
+}
+
+/* SetAlignment(rect, Right): the text right of the rect (the inspected
+ * card's), its cards left of it, then the overflow corrections. A row at
+ * the rect's right edge put an inspected card's cards beside the text. */
+static void place_tips(Control* tips, Node* rect) {
+    Control* r = control_of(rect);
+    if (!tips || !r || tips->modulate.a > 0) return;
+    Control *text, *cards;
+    tip_parts(tips, &text, &cards);
+    if ((text && text->size.x <= 0) || (cards && cards->size.x <= 0)) return;
+    place_tips_beside(tips, r->global_transform().origin, r->size.x, false, 0);
+    tips->modulate.a = 1;
 }
 
 /* NButton arrows: slide in from 100 px further in, after 0.1 s. */
@@ -122,7 +132,7 @@ void InspectCardScreen::show() {
     card_ = make_card(lib_, view);
     if (card_) holder_->add_child(card_);
     free_node(tips_);
-    tips_ = tips_at(lib_, screen_, screen_->get_node("HoverTipRect"), view["tips"]);
+    tips_ = tips_at(lib_, screen_, view["tips"]);
 }
 
 bool InspectCardScreen::input(const PadState& pad) {
@@ -140,7 +150,10 @@ bool InspectCardScreen::input(const PadState& pad) {
     return true;
 }
 
-void InspectCardScreen::frame(double dt) { tweens_.update(dt); }
+void InspectCardScreen::frame(double dt) {
+    tweens_.update(dt);
+    if (screen_) place_tips(tips_, screen_->get_node("HoverTipRect"));
+}
 
 /* ---- NInspectRelicScreen ---- */
 
@@ -241,7 +254,7 @@ void InspectRelicScreen::set_relic(int index, int slide) {
     }
     free_node(tips_);
     tips_ = NULL;
-    if (seen) tips_ = tips_at(lib_, screen_, screen_->get_node("HoverTipRect"), r["inspect_tips"]);
+    if (seen) tips_ = tips_at(lib_, screen_, r["inspect_tips"]);
     if (slide && popup_) {
         popup_->modulate = Color(1, 1, 1, 1);
         float l = popup_->offset[SIDE_LEFT], rr = popup_->offset[SIDE_RIGHT];
@@ -258,6 +271,9 @@ bool InspectRelicScreen::input(const PadState& pad) {
     return true;
 }
 
-void InspectRelicScreen::frame(double dt) { tweens_.update(dt); }
+void InspectRelicScreen::frame(double dt) {
+    tweens_.update(dt);
+    if (screen_) place_tips(tips_, screen_->get_node("HoverTipRect"));
+}
 
 } /* namespace spire */

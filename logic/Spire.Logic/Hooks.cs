@@ -665,6 +665,10 @@ internal static partial class Hooks
                 Steps.SetOnLastUi("hurt_offset", _doomHit.Monster?.HurtAnimationTrackOffsetForDoom ?? 0.1f);
                 _doomHit = null;
             }
+            // NCreature.StartReviveAnim: its Revive trigger's animation, if any
+            if (id.EndsWith("NCreature::StartReviveAnim", StringComparison.Ordinal) && a.Length > 0 &&
+                StandIns.TryCreature(a[0], out var revived) && Animators.Revive(revived) is { } reviveOps)
+                Steps.SetOnLastUi("play", reviveOps);
             Driver?.OnUiCall(id, a);
             var answer = StandIns.Answer(id, a);
             // NDebugAudioManager.Play's handle (Dense Vegetation stops its

@@ -3112,7 +3112,9 @@ bool CombatScreen::apply_state(const Json& ch) {
         tweens_.kill(&c->node->modulate.a);
         c->node->modulate.a = 1;
         enable_ui(*c);
-        play_idle(c->node);
+        /* a revive's animation is NCreature.StartReviveAnim's (none for a
+         * body without a Revive trigger: it stays as it fell) */
+        if (type == "spawn") play_idle(c->node);
     } else {
         return false;
     }
@@ -3438,7 +3440,7 @@ bool CombatScreen::spine_call(const std::string& method, const Json& args) {
     return true;
 }
 
-bool CombatScreen::creature_call(const std::string& method, const Json& args) {
+bool CombatScreen::creature_call(const std::string& method, const Json& args, const Json& cue) {
     Creature* c = args.size() > 0 ? creature_for(args[(size_t)0].str()) : NULL;
     if (!c || !c->node) return false;
     float a1 = args.size() > 1 ? (float)args[(size_t)1].num(0) : 0, a2 = args.size() > 2 ? (float)args[(size_t)2].num(0) : 0;
@@ -3455,18 +3457,21 @@ bool CombatScreen::creature_call(const std::string& method, const Json& args) {
         c->scale_osty = 1.0f + clampf(a1 / 150.0f, 0.0f, 1.0f);
         scale_visuals(*c, a2);
     } else if (method == "StartReviveAnim") {
-        /* the Revive trigger where the creature has one, else (the player)
-         * a blink back to idle; its UI comes back. */
+        /* the Revive trigger where the creature's animator has one (its ops
+         * from the logic: Osty's revive, a Decimillipede segment's
+         * regenerate), else the player's AnimTempRevive (a blink back to
+         * idle); any other body keeps its pose (the Waterfall Giant, knocked
+         * out, stays down: idle stood it up). Its UI comes back. */
         c->node->visible = true;
         tweens_.kill(&c->node->modulate.a);
         c->node->modulate.a = 1;
         enable_ui(*c);
         segment_phobia(lib_, c->visuals, c->data, false);
-        SpineSprite* s = first_spine(c->visuals);
-        if (!(s && s->set_animation("revive", false, 0))) play_idle(c->node);
-        else if (s->skeleton() && s->animation_state()) {
-            const SpAnimation* idle = s->skeleton()->data()->find_animation("idle_loop");
-            if (idle) s->animation_state()->add_animation(0, idle, true, 0);
+        if (cue["play"].is_array()) {
+            play_animator_ops(first_spine(c->visuals), cue["play"]);
+            apply_bounds(*c, cue["play"]);
+        } else if (c->player) {
+            play_idle(c->node);
         }
     } else if (method == "FadeIn") {
         /* OstyCmd.Summon: the new Osty's node from transparent to white */
@@ -3791,12 +3796,15 @@ void CombatScreen::radial_blur(const std::string& position) {
  * its DeathAnimLengthOverride without one), then fades through
  * NMonsterDeathVfx (ShouldFadeAfterDeath) or is gone. */
 /* AnimEnableUi: the state display back in 0.5 s after 0.5 s (a revive, or
- * a creature spawned where one died). */
+ * a creature spawned where one died). The death's AnimDisableUi may still
+ * be waiting its 0.5 s (a revive in the same steps: the Waterfall Giant
+ * knocked out): Godot runs both tweens, the later one last each frame, so
+ * the display stays; it was faded out after this one had seen it shown. */
 void CombatScreen::enable_ui(Creature& c) {
     Control* state = ctl(c.node, "HealthBar");
-    if (!state || state->modulate.a >= 1) return;
+    if (!state) return;
     tweens_.kill(&state->modulate.a);
-    tweens_.tween(&state->modulate.a, 1.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
+    if (state->modulate.a < 1) tweens_.tween(&state->modulate.a, 1.0f, 0.5f, TRANS_EXPO, EASE_OUT, 0.5f);
 }
 
 /* DecimillipedeSegment.ChangePhobiaModeTexture (AfterDeath / ReattachMove):
@@ -3935,7 +3943,10 @@ void CombatScreen::fire(const Cue& c) {
         if (dying) {
             cr->data.set("hp", Json::make_number(0));
             refresh_state(*cr, true);
-            hide(cr->node->find_unique("Intents"));
+            /* AnimDie: AnimHideIntent when the creature is removed; one that
+             * stays (StartDeathAnim(false): a knocked out Waterfall Giant, a
+             * Decimillipede segment) keeps them, frozen, for its revive */
+            if (!c.data["keep"].b()) hide(cr->node->find_unique("Intents"));
         }
         /* the creature's CreatureAnimator (the logic ran it) */
         if (c.data["play"].is_array()) {
@@ -4012,7 +4023,7 @@ void CombatScreen::fire(const Cue& c) {
         if (c.data["call"].str() == "NCreature.UpdateIntent") return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str().compare(0, 10, "NCreature.") == 0) {
-        if (!creature_call(c.data["call"].str().substr(10), c.data["args"])) CueLedger::retract(c.data);
+        if (!creature_call(c.data["call"].str().substr(10), c.data["args"], c.data)) CueLedger::retract(c.data);
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NMonsterDeathVfx.Create") {
@@ -4042,7 +4053,7 @@ void CombatScreen::fire(const Cue& c) {
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.SetCreatureIsInteractable") {
-        if (!creature_call("ToggleIsInteractable", c.data["args"])) CueLedger::retract(c.data);
+        if (!creature_call("ToggleIsInteractable", c.data["args"], c.data)) CueLedger::retract(c.data);
         return;
     }
     if (c.kind == CUE_SCRIPTED && c.data["call"].str() == "NCombatRoom.ShakeOstyIfDead") {

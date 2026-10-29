@@ -131,6 +131,11 @@ private:
     bool open_, start_open_, behind_;
     std::string start_kind_;
     int start_index_;
+    /* the slot set_state named, bought or used since (hidden, or the
+     * removal spent): the focus goes to the visible slot nearest it once
+     * the layout has placed them (NMerchantInventory.OnPurchaseCompleted) */
+    Control* gone_;
+    bool focus_near_gone_;
     float slots_closed_top_, slots_open_top_, slots_height_;
     TweenSet tweens_;
     class SpineSprite* hand_; /* %MerchantHand's parent, in the inventory */
