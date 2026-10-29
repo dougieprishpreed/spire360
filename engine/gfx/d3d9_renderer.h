@@ -51,6 +51,8 @@ public:
     virtual void begin(int width, int height, const Color& clear);
     virtual void set_clip(const Rect2* clip);
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags);
+    virtual Vertex* reserve(Texture* tex, int count, BlendMode blend, int flags);
+    virtual void commit() {}
     virtual void set_msdf(float px_range, float outline);
     virtual void set_color_matrix(const float* m);
     virtual void set_ripple(const float* p);
@@ -134,7 +136,13 @@ private:
     };
     std::vector<Retired> retired_;
     void release_retired(bool all);
-    std::vector<GpuVertex> batch_;
+    /* The vertices of the next DrawPrimitiveUP (the Vertex layout is the
+     * shader's: position, uv, colour). DrawPrimitiveUP copies a batch into
+     * the command ring buffer (on the console 2 MB in 32 segments of 64
+     * KB): at most a segment's worth of whole triangles. */
+    enum { BATCH_MAX = RESERVE_MAX };
+    Vertex* batch_;
+    int batch_count_;
     /* pending state (what the batch was recorded with) */
     D3D9Texture* tex_;
     BlendMode blend_;

@@ -26,6 +26,7 @@
 namespace spire {
 
 class Texture2DRes;
+class Workers;
 
 /* Godot's Curve (sample, not baked) and Gradient, read from resources. */
 struct CurveData {
@@ -71,6 +72,7 @@ public:
                  P_TANGENTIAL_ACCEL, P_DAMPING, P_ANGLE, P_SCALE, P_HUE_VARIATION, P_ANIM_SPEED, P_ANIM_OFFSET,
                  P_MAX };
     explicit Particles2D(bool gpu);
+    virtual ~Particles2D();
     bool gpu;
     bool emitting, one_shot, local_coords, fractional_delta, align_y, split_scale;
     bool interpolate; /* GPUParticles2D: drawn ahead by VELOCITY * the fixed-fps remainder */
@@ -130,6 +132,17 @@ public:
     virtual void draw(Canvas& c);
     void restart();
     size_t active_count() const;
+    /* The simulations of one process pass on worker threads: between
+     * begin_frame and end_frame each system's process() queues its steps
+     * (the sub-emitters' parents and children run at once: one writes the
+     * other's emissions), and end_frame runs the queue on the workers and
+     * the calling thread, heaviest first. Each system steps only its own
+     * particles, so the result is the same in any order. Godot simulates
+     * after the frame's scripts too (its GPU). workers NULL: the calling
+     * thread alone. */
+    static void set_workers(Workers* workers);
+    static void begin_frame();
+    static void end_frame();
     /* A diagnostic: the turbulence noise's time per particle step (us), and
      * whether its floor runs without float-to-int conversions. */
     static double turbulence_cost_us(LoadClock clock, bool* fast_floor);
@@ -166,6 +179,8 @@ private:
         std::vector<std::pair<double, Xform2D> > trail;
     };
     Xform2D trail_at(const Particle& p, double age) const;
+    void simulate(double dt);
+    static void run_queued(void* queue, int index);
     void step(double dt);
     void step_gpu(double dt);
     int preprocess_skip(int steps, double frame_time) const;
@@ -202,6 +217,11 @@ private:
     /* as a sub-emitter: emits only what its parent sends */
     bool sub_mode_;
     std::vector<Emission> pending_;
+    int queued_; /* the system's place in the frame's queue, -1 none */
+    /* draw's quads, reused frame to frame */
+    std::vector<Vec2> draw_v_, draw_uv_;
+    std::vector<Color> draw_col_;
+    std::vector<int> draw_idx_;
 };
 
 /* LightOccluder2D: no lights in the game, so it draws nothing; its polygon

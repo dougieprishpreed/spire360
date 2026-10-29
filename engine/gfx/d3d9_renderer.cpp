@@ -31,10 +31,13 @@ static const char* const EFFECTS_HLSL[] = {
 namespace spire {
 
 D3D9Renderer::D3D9Renderer()
-    : dev_(NULL), vs_(NULL), ps_(NULL), ps_plain_(NULL), ps_text_(NULL), decl_(NULL), white_(NULL), tex_(NULL), blend_(BLEND_MIX), flags_(0),
+    : dev_(NULL), vs_(NULL), ps_(NULL), ps_plain_(NULL), ps_text_(NULL), decl_(NULL), white_(NULL), batch_(new Vertex[BATCH_MAX]), batch_count_(0), tex_(NULL), blend_(BLEND_MIX), flags_(0),
       cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false), vfx_on_(false), clip_on_(false), dirty_(true), group_rt_(NULL), group_tex_(NULL), main_rt_(NULL),
       group_failed_(false), group_debug_(0), group_log_(0), screen_on_(false), screen_levels_(0),
       screen_failed_(false), width_(0), height_(0), draws_(0), state_ticks_(0), submit_ticks_(0) {
+    /* the batch is drawn with GpuVertex's declaration */
+    typedef char vertex_layout_matches[sizeof(Vertex) == sizeof(GpuVertex) ? 1 : -1];
+    (void)sizeof(vertex_layout_matches);
     memset(&screen_, 0, sizeof(screen_));
     memset(&effect_, 0, sizeof(effect_));
     effect_on_ = false;
@@ -57,7 +60,10 @@ D3D9Renderer::D3D9Renderer()
     memset(&group_rect_, 0, sizeof(group_rect_));
 }
 
-D3D9Renderer::~D3D9Renderer() { shutdown(); }
+D3D9Renderer::~D3D9Renderer() {
+    shutdown();
+    delete[] batch_;
+}
 
 #define RELEASE(p)          \
     do {                    \
@@ -372,7 +378,7 @@ void D3D9Renderer::begin(int width, int height, const Color& c) {
     clip_on_ = false;
     dirty_ = true;
     forget_state();
-    batch_.clear();
+    batch_count_ = 0;
 }
 
 void D3D9Renderer::end() {
@@ -866,23 +872,27 @@ void D3D9Renderer::draw_triangles(Texture* tex, const Vertex* v, int count, Blen
         flags_ = flags;
         dirty_ = true;
     }
-    /* DrawPrimitiveUP copies a batch into the command ring buffer (on the
-     * console 2 MB, sent in 32 segments of 64 KB: D3DRING_BUFFER_PARAMETERS'
-     * defaults): a draw holds at most a segment's worth of whole triangles. */
-    const size_t max_vertices = 65536 / sizeof(GpuVertex) / 3 * 3;
-    for (int i = 0; i < count; ++i) {
-        if (i % 3 == 0 && batch_.size() + 3 > max_vertices) flush();
-        GpuVertex g;
-        g.x = v[i].pos.x;
-        g.y = v[i].pos.y;
-        g.u = v[i].uv.x;
-        g.v = v[i].uv.y;
-        g.r = v[i].color.r;
-        g.g = v[i].color.g;
-        g.b = v[i].color.b;
-        g.a = v[i].color.a;
-        batch_.push_back(g);
+    while (count > 0) {
+        int n = count < BATCH_MAX ? count : BATCH_MAX;
+        memcpy(reserve(tex, n, blend, flags), v, (size_t)n * sizeof(Vertex));
+        v += n;
+        count -= n;
     }
+}
+
+Vertex* D3D9Renderer::reserve(Texture* tex, int count, BlendMode blend, int flags) {
+    D3D9Texture* t = (D3D9Texture*)tex;
+    if (t != tex_ || blend != blend_ || flags != flags_) {
+        flush();
+        tex_ = t;
+        blend_ = blend;
+        flags_ = flags;
+        dirty_ = true;
+    }
+    if (batch_count_ + count > BATCH_MAX) flush();
+    Vertex* v = batch_ + batch_count_;
+    batch_count_ += count;
+    return v;
 }
 
 /* ---- the device state cache ---- */
@@ -1178,17 +1188,17 @@ void D3D9Renderer::apply_state() {
 }
 
 void D3D9Renderer::flush() {
-    if (batch_.empty() || !dev_) return;
+    if (batch_count_ == 0 || !dev_) return;
     LARGE_INTEGER t0, t1, t2;
     QueryPerformanceCounter(&t0);
     if (dirty_) apply_state();
     QueryPerformanceCounter(&t1);
-    dev_->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(batch_.size() / 3), &batch_[0], sizeof(GpuVertex));
+    dev_->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)(batch_count_ / 3), batch_, sizeof(GpuVertex));
     QueryPerformanceCounter(&t2);
     state_ticks_ += t1.QuadPart - t0.QuadPart;
     submit_ticks_ += t2.QuadPart - t1.QuadPart;
     ++draws_;
-    batch_.clear();
+    batch_count_ = 0;
 }
 
 #if defined(_XBOX)

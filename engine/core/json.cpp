@@ -24,7 +24,7 @@ const Json& Json::operator[](size_t idx) const {
 
 const Json& Json::operator[](const char* key) const {
     if (type_ != OBJECT) return null_json();
-    std::map<std::string, Json>::const_iterator it = obj_.find(key);
+    std::map<JsonKey, Json>::const_iterator it = obj_.find(key);
     return it == obj_.end() ? null_json() : it->second;
 }
 
@@ -34,7 +34,7 @@ bool Json::has(const char* key) const {
 
 void Json::set(const std::string& key, const Json& value) {
     if (type_ != OBJECT) { *this = Json(); type_ = OBJECT; }
-    if (obj_.find(key) == obj_.end()) keys_.push_back(key);
+    if (obj_.find(key.c_str()) == obj_.end()) keys_.push_back(key);
     obj_[key] = value;
 }
 
@@ -180,10 +180,10 @@ private:
                 ws();
                 /* parsed into its place: assigning a parsed value copied
                  * its whole subtree, at every level of the tree */
-                std::map<std::string, Json>::iterator slot = o.obj_.find(key);
+                std::map<JsonKey, Json>::iterator slot = o.obj_.find(key.c_str());
                 if (slot == o.obj_.end()) {
                     o.keys_.push_back(key);
-                    slot = o.obj_.insert(std::make_pair(key, Json())).first;
+                    slot = o.obj_.insert(std::make_pair(JsonKey(key), Json())).first;
                 } else {
                     Json().swap(slot->second);
                 }

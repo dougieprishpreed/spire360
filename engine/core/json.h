@@ -4,9 +4,34 @@
 
 #include <map>
 #include <string>
+#include <string.h>
 #include <vector>
 
 namespace spire {
+
+/* A Json object's key: compared with a C string as it is, so a lookup
+ * makes no std::string (C++03's map::find takes only its key type, and the
+ * string made for each lookup was an allocation past 15 characters: the
+ * audio's ids, the materials' property names, every frame). A key kept in
+ * the map owns its text; one made from a char* for a lookup points at it. */
+class JsonKey {
+public:
+    JsonKey(const char* text) : ref_(text) {}
+    JsonKey(const std::string& text) : own_(text), ref_(NULL) {}
+    JsonKey(const JsonKey& o) : own_(o.ref_ ? std::string(o.ref_) : o.own_), ref_(NULL) {}
+    JsonKey& operator=(const JsonKey& o) {
+        own_ = o.ref_ ? std::string(o.ref_) : o.own_;
+        ref_ = NULL;
+        return *this;
+    }
+    const char* c_str() const { return ref_ ? ref_ : own_.c_str(); }
+    bool operator<(const JsonKey& o) const { return strcmp(c_str(), o.c_str()) < 0; }
+    bool operator==(const JsonKey& o) const { return strcmp(c_str(), o.c_str()) == 0; }
+
+private:
+    std::string own_;
+    const char* ref_;
+};
 
 class Json {
 public:
@@ -58,7 +83,7 @@ private:
     std::string str_;
     std::vector<Json> arr_;
     std::vector<std::string> keys_;
-    std::map<std::string, Json> obj_;
+    std::map<JsonKey, Json> obj_;
 };
 
 } /* namespace spire */

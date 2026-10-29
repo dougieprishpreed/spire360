@@ -19,13 +19,28 @@ double g_shader_time = 0.0;
 
 static const CanvasItem* g_item = NULL; /* the item being drawn */
 
+/* "shader_parameter/<name>", a material's key for a parameter, made on the
+ * stack: a std::string made for each lookup (each draw) was an allocation. */
+struct ParamKey {
+    char text[128];
+    explicit ParamKey(const char* name) {
+        static const char prefix[] = "shader_parameter/";
+        size_t p = sizeof(prefix) - 1, n = strlen(name);
+        if (n > sizeof(text) - 1 - p) n = sizeof(text) - 1 - p;
+        memcpy(text, prefix, p);
+        memcpy(text + p, name, n);
+        text[p + n] = 0;
+    }
+    const char* c_str() const { return text; }
+};
+
 static float param(const MaterialRes* m, const char* name, float fallback) {
     if (g_item) {
         std::map<std::string, float>::const_iterator it = g_item->shader_params.find(name);
         if (it != g_item->shader_params.end()) return it->second;
     }
     if (!m->props) return fallback;
-    std::string k = std::string("shader_parameter/") + name;
+    ParamKey k(name);
     return m->props->has(k.c_str()) ? jv_float((*m->props)[k.c_str()], fallback) : fallback;
 }
 
@@ -34,7 +49,7 @@ static float param(const MaterialRes* m, const char* name, float fallback) {
 static Color param_color(const MaterialRes* m, const char* name, const Color& fallback) {
     Color c = fallback;
     if (m->props) {
-        std::string k = std::string("shader_parameter/") + name;
+        ParamKey k(name);
         if (m->props->has(k.c_str())) jv_color((*m->props)[k.c_str()], c);
     }
     std::string n = name;
@@ -61,7 +76,7 @@ static Resource* visual_shader_node_texture(const MaterialRes* m, const char* na
 
 Resource* shader_param_resource(const MaterialRes* m, const char* name) {
     if (!m || !m->props) return NULL;
-    std::string k = std::string("shader_parameter/") + name;
+    ParamKey k(name);
     SceneLibrary* lib = SceneLibrary::current();
     if (!lib) return NULL;
     if (!m->props->has(k.c_str())) return visual_shader_node_texture(m, name, lib);
@@ -78,7 +93,7 @@ Vec2 shader_param_vec2(const MaterialRes* m, const char* name, const Vec2& fallb
         if (x != g_item->shader_params.end() && y != g_item->shader_params.end()) return Vec2(x->second, y->second);
     }
     if (!m || !m->props) return fallback;
-    std::string k = std::string("shader_parameter/") + name;
+    ParamKey k(name);
     if (!m->props->has(k.c_str())) return fallback;
     const Json& v = (*m->props)[k.c_str()]["v"];
     return v.size() >= 2 ? Vec2((float)v[(size_t)0].num(), (float)v[(size_t)1].num()) : fallback;
@@ -131,7 +146,7 @@ static Texture* param_texture(Canvas& c, const MaterialRes* m, const char* name)
 static void param_vec4(const MaterialRes* m, const char* name, const float fallback[4], float out[4]) {
     for (int i = 0; i < 4; ++i) out[i] = fallback[i];
     if (!m || !m->props) return;
-    std::string k = std::string("shader_parameter/") + name;
+    ParamKey k(name);
     if (!m->props->has(k.c_str())) return;
     const Json& v = (*m->props)[k.c_str()]["v"];
     for (size_t i = 0; i < 4 && i < v.size(); ++i) out[i] = (float)v[i].num();

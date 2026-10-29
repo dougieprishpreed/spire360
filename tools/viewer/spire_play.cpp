@@ -45,6 +45,8 @@
  * action start it (select_profile, set_setting, start_game_run with its
  * seed...), then auto play answers each screen with the next one.
  * --script-tail N: frames played after the last command's answer (600).
+ * --workers N: worker threads for the particles' simulation (3, as the
+ * console; 0 none).
  *
  * --pad-after N: auto play up to screen N (the number printed for it),
  * then the --pad presses on it.
@@ -102,12 +104,15 @@
 #include "../../engine/game/game_client.h"
 #include "../../engine/game/menu_flow.h"
 #include "../../engine/game/logic_link.h"
+#include "../../engine/core/thread.h"
 #include "../../engine/gfx/sw_renderer.h"
 #include "../../engine/scene/canvas.h"
+#include "../../engine/scene/particles.h"
 #include "../../engine/scene/scene.h"
 #include "../../engine/scene/tree.h"
 #include "../../engine/text/font.h"
 
+#include <algorithm>
 #include <deque>
 #include <new>
 #include <fstream>
@@ -128,14 +133,59 @@ using namespace spire;
 #endif
 static unsigned long g_allocs = 0;
 
+/* --alloc-sites: every 32nd allocation's call stack (six frames) counted,
+ * the commonest listed with the profile (addresses: addr2line -f -C -e
+ * out/engine/spire_play.exe). */
+extern "C" __attribute__((dllimport)) unsigned short __stdcall RtlCaptureStackBackTrace(unsigned int skip,
+                                                                                         unsigned int count,
+                                                                                         void** frames,
+                                                                                         unsigned int* hash);
+static bool g_alloc_sites = false;
+struct AllocSite {
+    void* frames[6];
+    unsigned long count;
+};
+static AllocSite g_sites[4096];
+
+static void note_alloc_site() {
+    void* f[6] = { 0, 0, 0, 0, 0, 0 };
+    RtlCaptureStackBackTrace(2, 6, f, 0);
+    unsigned long h = 0;
+    for (int i = 0; i < 6; ++i) h = h * 31 + (unsigned long)(size_t)f[i];
+    for (unsigned long k = 0; k < 4096; ++k) {
+        AllocSite& s = g_sites[(h + k) % 4096];
+        if (s.count && memcmp(s.frames, f, sizeof(f)) != 0) continue;
+        if (!s.count) memcpy(s.frames, f, sizeof(f));
+        ++s.count;
+        return;
+    }
+}
+
+static void log_alloc_sites() {
+    std::vector<std::pair<unsigned long, int> > order;
+    for (int i = 0; i < 4096; ++i)
+        if (g_sites[i].count) order.push_back(std::make_pair(g_sites[i].count, i));
+    std::sort(order.rbegin(), order.rend());
+    for (size_t i = 0; i < order.size() && i < 30; ++i) {
+        const AllocSite& s = g_sites[order[i].second];
+        log_info("alloc site %lu: %p %p %p %p %p %p", s.count * 32, s.frames[0], s.frames[1], s.frames[2], s.frames[3],
+                 s.frames[4], s.frames[5]);
+    }
+    memset(g_sites, 0, sizeof(g_sites));
+}
+
+/* the debug build's checking heap (debug_heap.cpp) has its own */
+#if !defined(SPIRE_DEBUG_HEAP)
 void* operator new(size_t n) throw(std::bad_alloc) {
     ++g_allocs;
+    if (g_alloc_sites && g_allocs % 32 == 0) note_alloc_site();
     void* p = malloc(n ? n : 1);
     if (!p) throw std::bad_alloc();
     return p;
 }
 
 void operator delete(void* p) throw() { free(p); }
+#endif
 
 /* The pipe link, keeping the last decision line (saved with its screen). */
 class RecordingLink : public LogicLink {
@@ -439,6 +489,7 @@ static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float s
         SceneTree::log_profile(600);
         log_info("allocations: %lu per frame", (g_allocs - allocs_from) / 600);
         allocs_from = g_allocs;
+        if (g_alloc_sites) log_alloc_sites();
     }
 }
 
@@ -465,6 +516,7 @@ int main(int argc, char** argv) {
     long dump_draws_at = -1;
     int dump_draws_shot = -1; /* --frames-after's shot whose draws are listed */
     int script_tail = 600; /* --commands: frames played after the last answer */
+    int worker_count = 3;
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
     int hp = 0;
@@ -523,6 +575,8 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
         else if (strcmp(argv[i], "--dump-draws-shot") == 0 && i + 1 < argc) dump_draws_shot = atoi(argv[++i]);
         else if (strcmp(argv[i], "--script-tail") == 0 && i + 1 < argc) script_tail = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) worker_count = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--alloc-sites") == 0) g_alloc_sites = true;
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
@@ -593,6 +647,8 @@ int main(int argc, char** argv) {
         link.sync = true;
         link.wait_answer(); /* the logic's "ready" */
     }
+    static Workers workers;
+    if (worker_count > 0 && workers.start(worker_count, NULL)) Particles2D::set_workers(&workers);
     SceneTree tree;
     tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
     GameClient game(&lib, &tree, replay ? (LogicLink*)&replayed : (LogicLink*)&link);

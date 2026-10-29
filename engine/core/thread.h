@@ -48,6 +48,37 @@ private:
     void* impl_;
 };
 
+/* Worker threads that share a batch of jobs with the calling thread: run()
+ * calls fn(ctx, i) for each i in [0, n), on the workers and the caller,
+ * and returns once all are done (the console's spare hardware threads
+ * take the particles' simulation). Without workers the caller runs them
+ * all. */
+class Workers {
+public:
+    typedef void (*Job)(void* ctx, int index);
+    Workers();
+    ~Workers(); /* stops and joins the workers */
+    /* count workers, worker i on hw_threads[i] (NULL: any) */
+    bool start(int count, const int* hw_threads);
+    int count() const { return count_; }
+    void run(Job fn, void* ctx, int n);
+
+private:
+    Workers(const Workers&);
+    Workers& operator=(const Workers&);
+    enum { MAX = 4 };
+    static void worker_main(void* arg);
+    void work();
+    Thread threads_[MAX];
+    int count_;
+    void* impl_;
+    Job fn_;
+    void* ctx_;
+    int n_;
+    volatile long next_, pending_;
+    volatile bool quit_;
+};
+
 void sleep_ms(int ms);
 
 /* Where the main thread is, for a watchdog on another thread (the console

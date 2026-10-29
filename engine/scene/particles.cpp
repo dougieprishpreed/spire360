@@ -1,11 +1,13 @@
 #include "particles.h"
 #include "shaders.h"
+#include "../core/thread.h"
 
 #include "canvas.h"
 #include "scene.h"
 #include "value.h"
 #include "viewport.h"
 
+#include <algorithm>
 #include <math.h>
 #include <string.h>
 
@@ -288,11 +290,65 @@ Particles2D::Particles2D(bool is_gpu)
       spread(45), emission_sphere_radius(1), collision_mode(0), collision_friction(0), collision_bounce(0),
       collision_base_size(1), collision_use_scale(false), use_fixed_seed(false), trail_enabled(false),
       trail_lifetime(0.3f), trail_sections(8), trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0),
-      started_(false), has_last_origin_(false), clock_(0), sub_mode_(false) {
+      started_(false), has_last_origin_(false), clock_(0), sub_mode_(false), queued_(-1) {
     flags |= NF_PROCESS;
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
     if (gpu) seed = next_seed();
+}
+
+/* ---- the frame's simulations on the workers ---- */
+
+namespace {
+struct Queued {
+    Particles2D* system;
+    double dt;
+    double weight; /* end_frame's order: the heaviest first */
+    Queued(Particles2D* p, double t) : system(p), dt(t), weight(0) {}
+};
+bool by_weight(const Queued& a, const Queued& b) { return a.weight > b.weight; }
+std::vector<Queued> g_queue;
+bool g_queue_open = false;
+Workers* g_workers = NULL;
+std::vector<Queued>& queue() { return g_queue; }
+bool queue_open() { return g_queue_open; }
+} /* namespace */
+
+Particles2D::~Particles2D() {
+    /* freed during the pass (on the main thread): out of the queue */
+    if (queued_ >= 0 && queued_ < (int)g_queue.size() && g_queue[(size_t)queued_].system == this)
+        g_queue[(size_t)queued_].system = NULL;
+}
+
+void Particles2D::set_workers(Workers* workers) { g_workers = workers; }
+
+void Particles2D::begin_frame() {
+    g_queue.clear();
+    g_queue_open = true;
+}
+
+void Particles2D::run_queued(void* queue, int index) {
+    Queued& q = (*(std::vector<Queued>*)queue)[(size_t)index];
+    if (q.system) q.system->simulate(q.dt);
+}
+
+void Particles2D::end_frame() {
+    g_queue_open = false;
+    if (g_queue.empty()) return;
+    for (size_t i = 0; i < g_queue.size(); ++i) {
+        Queued& q = g_queue[i];
+        if (!q.system) continue;
+        const Particles2D& p = *q.system;
+        /* the particles, the steps (a first preprocess's many), the noise */
+        double steps = p.started_ ? 1.0 : 1.0 + p.preprocess * 30.0;
+        q.weight = (double)p.particles_.size() * steps * (p.mat.turbulence ? 8.0 : 1.0);
+    }
+    std::sort(g_queue.begin(), g_queue.end(), by_weight);
+    if (g_workers) g_workers->run(run_queued, &g_queue, (int)g_queue.size());
+    else for (size_t i = 0; i < g_queue.size(); ++i) run_queued(&g_queue, (int)i);
+    for (size_t i = 0; i < g_queue.size(); ++i)
+        if (g_queue[i].system) g_queue[i].system->queued_ = -1;
+    g_queue.clear();
 }
 
 Particles2D::Material::Material()
@@ -498,6 +554,16 @@ void Particles2D::process(double dt) {
     /* Stopping emission does not stop the particles already alive. In a
      * one-shot system those particles must keep aging until they finish. */
     if (particles_.empty() || (!emitting && active_count() == 0 && pending_.empty())) return;
+    if (queue_open() && sub_emitter.empty() && !sub_mode_) {
+        queued_ = (int)queue().size();
+        queue().push_back(Queued(this, dt));
+        return;
+    }
+    simulate(dt);
+}
+
+/* The process's steps: the preprocess on the first, then the frame's. */
+void Particles2D::simulate(double dt) {
     double frame_time = fixed_fps > 0 ? 1.0 / fixed_fps : 1.0 / 30.0;
     if (gpu) {
         /* ParticlesStorage::update_particles: the preprocess at the speed
@@ -1449,9 +1515,19 @@ void Particles2D::draw(Canvas& c) {
     bool per_screen = shader_screen_particle(0, &screen);
     CurveData erosion;
     if (vfx && sm) CurveData::from(shader_param_resource(sm, "erosion_curve"), erosion);
-    std::vector<Vec2> v, uv;
-    std::vector<Color> col;
-    std::vector<int> idx;
+    /* the frame's quads, kept between frames (no allocation each draw);
+     * written by index, never through a temporary: the console's core
+     * stalls on a value read back just after it was stored */
+    std::vector<Vec2>& v = draw_v_;
+    std::vector<Vec2>& uv = draw_uv_;
+    std::vector<Color>& col = draw_col_;
+    std::vector<int>& idx = draw_idx_;
+    v.clear();
+    uv.clear();
+    col.clear();
+    idx.clear();
+    static const float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
+    static const int quad[6] = { 0, 1, 2, 2, 3, 0 };
     /* particles_copy: txform[3].xyz += VELOCITY * frame_remainder (the
      * time since the last fixed-fps step), before the canvas transform */
     float ahead = gpu && interpolate && fixed_fps > 0 ? (float)frame_remainder_ : 0.0f;
@@ -1493,12 +1569,10 @@ void Particles2D::draw(Canvas& c) {
             fu0 = fmodf(frame, fb_size.x) / fb_size.x;
             fv0 = floorf(frame / fb_size.x) / fb_size.y;
         }
-        Vec2 po(pivot.x * ts.x, pivot.y * ts.y);
-        Vec2 hg = h * grow;
-        Vec2 corners[4] = { Vec2(-hg.x, -hg.y) + po, Vec2(hg.x, -hg.y) + po, Vec2(hg.x, hg.y) + po, Vec2(-hg.x, hg.y) + po };
-        if (ray) /* vfx_ray_shader: VERTEX.x *= CUSTOM.z */
-            for (int k = 0; k < 4; ++k) corners[k].x *= p.custom[2];
-        float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
+        float pox = pivot.x * ts.x, poy = pivot.y * ts.y;
+        float hx = h.x * grow, hy = h.y * grow;
+        /* vfx_ray_shader: VERTEX.x *= CUSTOM.z */
+        float rx = ray ? p.custom[2] : 1.0f;
         int base = (int)v.size();
         if (trail_enabled) {
             /* GPUParticles2D's trail mesh: rows of two vertices at
@@ -1534,15 +1608,20 @@ void Particles2D::draw(Canvas& c) {
                 }
             }
         } else {
+            v.resize((size_t)base + 4);
+            uv.resize((size_t)base + 4);
+            col.resize((size_t)base + 4);
             for (int k = 0; k < 4; ++k) {
-                v.push_back(px.xform(corners[k]));
+                float cx = (cu[k] * 2.0f - 1.0f) * hx, cy = (cv[k] * 2.0f - 1.0f) * hy;
+                v[(size_t)(base + k)] = px.xform(Vec2((cx + pox) * rx, cy + poy));
                 float u = fu0 + cu[k] * fw, w = fv0 + cv[k] * fh;
-                uv.push_back(img ? Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + w * src.size.y) / is.y)
-                                 : Vec2(u, w));
-                col.push_back(p.color);
+                uv[(size_t)(base + k)] = img ? Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + w * src.size.y) / is.y)
+                                             : Vec2(u, w);
+                col[(size_t)(base + k)] = p.color;
             }
-            int q[6] = { 0, 1, 2, 2, 3, 0 };
-            for (int k = 0; k < 6; ++k) idx.push_back(base + q[k]);
+            size_t at = idx.size();
+            idx.resize(at + 6);
+            for (int k = 0; k < 6; ++k) idx[at + (size_t)k] = base + quad[k];
         }
         if (per_screen && img) {
             float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;

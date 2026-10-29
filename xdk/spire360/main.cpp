@@ -89,10 +89,14 @@ static std::string ini_word(const std::string& s) {
  *                  each kind of draw (gpu_probe)
  *   gamma=N        the display ramp's preset to start with (GAMMA_PRESETS;
  *                  Back + Y cycles them)
+ *   workers=N      worker threads for the particles' simulation (0-3, 3 by
+ *                  default; 0 runs it on the frame loop's thread)
+ *   fps=N          60 or 30: that frame rate always; 0 (the default) 60
+ *                  while the frames fit, else a steady 30 (pace_frame)
  * The first two reach the logic as its environment (logic/Spire.Logic/
  * DebugOptions.cs). No file: all off. */
 static bool g_trace_loads = false, g_profile = false;
-static int g_gamma = 0;
+static int g_gamma = 0, g_workers = 3, g_fps = 0;
 static void read_ini(const char* path, std::vector<std::string>& env) {
     FILE* f = fopen(path, "rb");
     if (!f) return;
@@ -117,6 +121,14 @@ static void read_ini(const char* path, std::vector<std::string>& env) {
             g_gamma = atoi(val.c_str());
             logf("spire360.ini: gamma %d", g_gamma);
             continue;
+        } else if (key == "workers") {
+            g_workers = atoi(val.c_str());
+            logf("spire360.ini: workers %d", g_workers);
+            continue;
+        } else if (key == "fps") {
+            g_fps = atoi(val.c_str());
+            logf("spire360.ini: fps %d", g_fps);
+            continue;
         } else {
             logf("spire360.ini: unknown option '%s'", key.c_str());
             continue;
@@ -124,6 +136,32 @@ static void read_ini(const char* path, std::vector<std::string>& env) {
         logf("spire360.ini: %s %s", key.c_str(), on ? "on" : "off");
     }
     fclose(f);
+}
+
+/* Frame pacing (D3DRS_PRESENTINTERVAL, which can change at any frame): 60
+ * Hz while the frames' work fits a vertical blank, else a steady 30 (two
+ * blanks a frame) instead of a rate that jumps between 60, 30 and 20, which
+ * looks worse than 30. To 30 when the work's running average passes 16
+ * ms; back to 60 after 2 s of frames under 13 ms (a load's long frame does
+ * not hold it at 30). fps=60 / fps=30 in the ini fix it. Returns the
+ * interval (1 or 2). */
+static int pace_frame(IDirect3DDevice9* dev, double work) {
+    static int interval = 0, fit = 0;
+    static double average = 0;
+    int want = g_fps == 30 ? 2 : g_fps == 60 ? 1 : interval ? interval : 1;
+    if (g_fps != 30 && g_fps != 60) {
+        double w = work > 50 ? 50 : work;
+        average = average * 0.9 + w * 0.1;
+        fit = work < 13 ? fit + 1 : 0;
+        if (interval == 1 && average > 16) want = 2;
+        else if (interval == 2 && fit >= 120) want = 1;
+    }
+    if (want != interval) {
+        dev->SetRenderState(D3DRS_PRESENTINTERVAL, want == 2 ? D3DPRESENT_INTERVAL_TWO : D3DPRESENT_INTERVAL_ONE);
+        interval = want;
+        fit = 0;
+    }
+    return interval;
 }
 
 /* Every allocation on the console is backed by physical memory (no paging):
@@ -369,6 +407,14 @@ void __cdecl main() {
     else if (!audio.start_thread(4)) logf("audio: no audio thread (mixed in the frame loop)");
     Thread watchdog;
     watchdog.start(watchdog_main, NULL, 5);
+    /* The particles' simulation on the hardware threads the frame loop
+     * (0), the logic (2) and the mix (4) leave: the other thread of each
+     * core (the watchdog on 5 sleeps). */
+    static Workers workers;
+    static const int worker_hw[3] = { 1, 3, 5 };
+    if (g_workers > 3) g_workers = 3;
+    if (g_workers > 0 && workers.start(g_workers, worker_hw)) Particles2D::set_workers(&workers);
+    logf("particles: %d worker threads", workers.count());
     /* the menu music starts with the main menu, after the logo (MenuFlow) */
     FontLibrary* fonts = new FontLibrary(&pack);
     FontLibrary::set_current(fonts);
@@ -388,7 +434,7 @@ void __cdecl main() {
     unsigned prev = 0;
     double last = now_ms(), acc_ms = 0, acc_draw = 0, acc_present = 0, acc_update = 0, worst = 0, wait_start = 0;
     double acc_process = 0, acc_layout = 0;
-    int frames = 0, shown = 0, slow = 0;
+    int frames = 0, shown = 0, slow = 0, paced30 = 0;
     unsigned least_free = free_memory_mb();
     bool low_logged = false, logic_ended = false;
     for (;;) {
@@ -487,6 +533,10 @@ void __cdecl main() {
                  GAMMA_PRESETS[g_gamma].name);
         }
         g_trace_phase = "present";
+        /* the frame's work before Present (a frame over 16.7 ms misses a
+         * vertical blank) */
+        double work = update_ms + (f2 - f0);
+        if (pace_frame(dev, work) == 2) ++paced30;
         dev->Present(NULL, NULL, NULL, NULL);
         double f3 = now_ms();
         if (dumped) flush_log();
@@ -494,9 +544,6 @@ void __cdecl main() {
         acc_draw += f2 - f1;
         acc_present += f3 - f2;
         acc_update += update_ms;
-        /* the frame's work before Present (a frame over 16.7 ms misses a
-         * vertical blank) */
-        double work = update_ms + (f2 - f0);
         if (work > worst) worst = work;
         if (g_trace_loads && work > 8)
             logf("frame %u: %.1f ms (update %.1f, process + layout %.1f, draw %.1f)", g_frame, work, update_ms, f1 - f0,
@@ -510,9 +557,9 @@ void __cdecl main() {
             unsigned free_mb = free_memory_mb();
             if (free_mb < least_free) least_free = free_mb;
             logf("per frame: %.2f ms update, %.2f ms process + layout, %.2f ms draw, %.2f ms present; %ld draw calls; "
-                 "worst %.1f ms, %d of %d over 16.7 ms; memory %u MB free, logic %u MB",
+                 "worst %.1f ms, %d of %d over 16.7 ms, %d paced at 30 fps; memory %u MB free, logic %u MB",
                  acc_update / frames, acc_ms / frames, acc_draw / frames, acc_present / frames, renderer.draw_calls(), worst,
-                 slow, frames, free_mb, spire_logic_memory_kb() / 1024);
+                 slow, frames, paced30, free_mb, spire_logic_memory_kb() / 1024);
             Canvas::TextureStats ts = canvas.take_texture_stats();
             logf("textures: %u held, %.1f MB (peak %.1f MB of 80), %u created, %u evicted, "
                  "%u frames over the budget (%u by their own)",
@@ -533,7 +580,7 @@ void __cdecl main() {
                 log_memory("low");
                 low_logged = true;
             }
-            frames = slow = 0;
+            frames = slow = paced30 = 0;
             acc_ms = acc_draw = acc_present = acc_update = worst = 0;
             acc_process = acc_layout = 0;
         }

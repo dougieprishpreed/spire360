@@ -79,7 +79,8 @@ struct DerivedImage {
 class ImageTextureRes : public Texture2DRes {
 public:
     ImageTextureRes()
-        : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D"), derived(NULL), render_target(false), rendered(NULL) {}
+        : Texture2DRes(RES_IMAGE_TEXTURE, "CompressedTexture2D"), derived(NULL), render_target(false), rendered(NULL),
+          gpu_canvas(0), gpu_entry(NULL), gpu_epoch(0) {}
     virtual Vec2 size() const { return size_; }
     virtual bool get_rect_region(const Rect2& dst, const Rect2& src, Rect2& out_dst, Rect2& out_src,
                                  ImageTextureRes** image);
@@ -89,6 +90,13 @@ public:
      * pack entry. */
     bool render_target;
     class Texture* rendered;
+    /* Canvas::gpu_texture's answer for it, while that canvas (its serial
+     * number: a later canvas may take a freed one's address) has evicted
+     * nothing since (gpu_epoch): no key built and looked up for each draw
+     * (each glyph) */
+    unsigned gpu_canvas;
+    void* gpu_entry;
+    unsigned gpu_epoch;
 };
 
 class AtlasTextureRes : public Texture2DRes {

@@ -1,5 +1,6 @@
 #include "tree.h"
 #include "node3d.h"
+#include "particles.h"
 
 #include "canvas.h"
 #include "controls.h"
@@ -98,10 +99,22 @@ static std::map<std::string, ProfileCost> g_profile;
 
 static ProfileCost& profile_of(const Node* n, bool behavior) {
     if (behavior) {
-        /* a behaviour from code (a screen's FrameDriver): by where it is */
-        if (n->script.empty()) return g_profile["code in " + (n->parent ? n->parent->name : n->name)];
-        size_t s = n->script.find_last_of('/');
-        return g_profile["script " + (s == std::string::npos ? n->script : n->script.substr(s + 1))];
+        /* a behaviour from code (a screen's FrameDriver): by where it is;
+         * the names made once (profile=1 runs on the console: no
+         * allocation in each node's timing) */
+        static std::map<std::string, std::string> code_keys, script_keys;
+        if (n->script.empty()) {
+            const std::string& where = n->parent ? n->parent->name : n->name;
+            std::map<std::string, std::string>::iterator it = code_keys.find(where);
+            if (it == code_keys.end()) it = code_keys.insert(std::make_pair(where, "code in " + where)).first;
+            return g_profile[it->second];
+        }
+        std::map<std::string, std::string>::iterator it = script_keys.find(n->script);
+        if (it == script_keys.end()) {
+            size_t s = n->script.find_last_of('/');
+            it = script_keys.insert(std::make_pair(n->script, "script " + (s == std::string::npos ? n->script : n->script.substr(s + 1)))).first;
+        }
+        return g_profile[it->second];
     }
     return g_profile[n->type];
 }
@@ -188,7 +201,17 @@ void SceneTree::hit_stop(float seconds, int trans) {
 void SceneTree::process(double dt) {
     double t = dt * time_scale_;
     g_shader_time += t;
+    /* the particles' steps queued by their process() and run together
+     * (on the worker threads when there are some), before frees */
+    Particles2D::begin_frame();
     process_node(&root_, t);
+    double p0 = g_profile_clock ? g_profile_clock() : 0;
+    Particles2D::end_frame();
+    if (g_profile_clock) {
+        ProfileCost& c = g_profile["particles' steps (workers)"];
+        c.process_ms += g_profile_clock() - p0;
+        ++c.processed;
+    }
     if (Node::frees_pending > 0) {
         Node::frees_pending = 0;
         flush_deleted(&root_);

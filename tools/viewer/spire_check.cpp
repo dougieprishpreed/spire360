@@ -378,7 +378,8 @@ static void texture_cache_cases(const Pack& pack) {
         canvas.end_frame();
         check(canvas.cached_texture("test:a") == a && !canvas.cached_texture("test:b"), "texture cache did not evict the least recently used texture");
         check(canvas.texture_bytes() <= 2 * 16 * 16 * 4 && canvas.texture_count() == 2, "texture budget was exceeded after the frame");
-        for (int i = 0; i < 122; ++i) { canvas.begin_frame(); canvas.end_frame(); }
+        /* idle 120 frames, and the look for them once a second */
+        for (int i = 0; i < 182; ++i) { canvas.begin_frame(); canvas.end_frame(); }
         check(canvas.texture_count() == 0, "unused screen textures were retained indefinitely");
         canvas.cache_texture("test:final", td);
     }

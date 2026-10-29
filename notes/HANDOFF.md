@@ -11,6 +11,96 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## Console frame costs before the last XDK test (2026-10-28): the vertex path, threads, allocations, pacing
+
+The user asked for the sandpit's frame rate and the console build's speed
+in general before what should be the last XDK test (then xSDK only: the
+toolchain is in the user's WSL2 instance, ctrport folder, shared with two
+other xSDK projects; Spire360 follows the latest xsdk and vulkan4xenon
+sources). No console run of these changes yet.
+
+What the fourth run's log said (work/rp96, profile=1): the sandpit fight at
+~7 fps (process 43 ms, draw 100 ms; GPUParticles2D 36.9 ms process and
+54.8 ms draw for ~21,000 particles); a Hive fight ~95 ms process (the
+noise, 543d8cf) and ~40 ms draw (Spine 10-12, Label 5, RichTextLabel 5-7,
+CPUParticles2D 4-5). PC (--profile-cpu) draws the same particles in 0.9 ms:
+60x, against ~8x for their simulation.
+
+- The vertex path: each vertex went through three or four copies, each a
+  store read straight back (Canvas::emit_quad's Vertex v[6] handed to the
+  renderer, D3D9's GpuVertex temporary push_back'd by reference, the
+  particles' push_back of temporaries into per-frame vectors): load-hit-
+  stores on Xenon, ~1,000+ cycles a vertex (the log's sand: ~1,400).
+  Renderer::reserve(tex, count, blend, flags) / commit(): the caller writes
+  each vertex once where the renderer keeps it (D3D9: its fixed batch,
+  BATCH_MAX = RESERVE_MAX = 2,046 vertices, drawn by DrawPrimitiveUP; other
+  renderers: a scratch list through draw_triangles). Canvas::emit_quad and
+  put_triangles (draw_triangles, draw_colored_triangles) write in place;
+  Particles2D::draw keeps its quads in members (no allocation), writes by
+  index, its constant tables static.
+- Canvas::gpu_texture made "pack:" + path and looked it up twice in a map
+  of ~400 keys for every image draw and every glyph: each image now keeps
+  its cache entry (ImageTextureRes::gpu_canvas / gpu_entry / gpu_epoch:
+  the canvas's serial number, its count of erasures). spire_check caught a
+  first version keyed on the canvas's address (a new canvas in a freed
+  one's place).
+- Json objects (std::map<JsonKey, Json>): a lookup by char* made a
+  std::string (C++03's find takes only the key type), an allocation past 15
+  characters: the audio's 36-character ids in every mix, materials'
+  property names every draw. JsonKey compares C strings and owns its text
+  only in the map. Shader parameters' "shader_parameter/<name>" keys on the
+  stack (ParamKey); the nine-patch's segment lists kept; the profile's
+  names made once. Allocations in a Hive fight frame (PC): ~2,400 -> 130-180
+  (spire_play --profile --alloc-sites: every 32nd allocation's stack).
+- Particles' simulation on worker threads: Workers (core/thread.h: workers
+  on the console's hardware threads 1, 3 and 5, the caller too; lwsync
+  before a worker's count goes down, Xenon's interlocked operations carry
+  no barrier). Between Particles2D::begin_frame and end_frame (SceneTree::
+  process) each system's process() queues its steps; end_frame runs them
+  heaviest first, before frees; sub-emitter parents and children step at
+  once (one writes the other's emissions); a system freed during the pass
+  leaves the queue. Each system steps only its own particles: the result is
+  the same in any order (Godot simulates after the scripts too). The
+  profile's "particles' steps (workers)" line times it. spire360.ini
+  workers=N (0-3; 3 by default); spire_play --workers N (3).
+- The preprocess (above, one cycle, exact) and the eviction walk: within
+  the texture budget the cache's tree is walked once a second (idle
+  textures go after 120 frames), not every frame.
+- Frame pacing: D3DRS_PRESENTINTERVAL per frame: 60 Hz while the frames'
+  work fits, a steady 30 when its running average passes 16 ms, back to 60
+  after 2 s under 13 ms (pace_frame); spire360.ini fps=60 / fps=30 fix it.
+  The 600-frame line counts the frames paced at 30.
+
+PC, the sandpit fight (--profile-cpu): particles' process 5.0 -> 1.5 ms,
+their draw 1.06 -> 0.59 ms, allocations ~7,500 -> ~2,700 a frame (before the
+Json keys). Renders unchanged: the five preprocess-heavy backgrounds and
+six Spine, card and menu scenes pixel-identical to the earlier code
+(work/vtx98, pre97; the main menu's render is not repeatable run to run).
+Not measurable here: the console's stalls; its next log (profile=1) shows
+them.
+
+Left for the frame rate: the sandpit's sand clouds (~400 of up to 1,000 x
+330 px at 720p, ~80 M blended pixels a frame) may hold that fight near 30
+on the GPU; Spine's per-slot work; text's per-line passes (each pass a
+batch).
+
+Checks: PC build 0 warnings; the D3D9 renderer's syntax for Windows and the
+workers' Win32 code clean (work/d3d9check.sh, g++ -D_WIN32); spire_check over
+new97, scen97 and split97: 2294 responses, 0 failures (its idle-texture case
+now waits 182 frames: 120 idle and the once-a-second look), audio 21805
+voices, 7 absent, 0 decoder failures; ten scenes rendered pixel-identical
+to the earlier code; random pad sessions: native logic (g98a), JIT (g98e)
+and the debug heap build (g98d) 0 reports, no heap or logic errors. g98b
+(seed 102) stalls in its first fight's tutorial pause (the pad stops while
+the game is busy, frames running): the same with workers=0 and with the
+previous engine (38e8da7), the monkey's known FTUE trap. build_debug.sh had
+failed to link since spire_play's allocation counter (two operator news):
+the counter is left out of SPIRE_DEBUG_HEAP builds. The logic is unchanged
+since 38e8da7.
+
+Next build: the engine and the console's main changed, and the logic
+(map pruning) since the user's last build: xdk\build.cmd spire360. Copy
+default.xex and spire360.ini (workers=3, fps=0 new; keep profile=1).
 ## The fourth run's three open items (2026-10-28): the act change, preprocess, the sandpit, the Decimillipede
 
 The user asked for the three items left open after the fourth hardware run

@@ -6,6 +6,8 @@
 #include "../core/base.h"
 #include "../core/pack.h"
 
+#include <vector>
+
 namespace spire {
 
 enum BlendMode { BLEND_MIX, BLEND_ADD, BLEND_SUB, BLEND_MUL, BLEND_PREMULT_ALPHA };
@@ -138,6 +140,25 @@ public:
     virtual void set_clip(const Rect2* clip) = 0;
     /* count is a multiple of 3. tex NULL = white. flags: DRAW_*. */
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags) = 0;
+    /* Room for count vertices of a triangle list (a multiple of 3, at most
+     * RESERVE_MAX), which the caller fills in place and then commit()s:
+     * each vertex written once, where the renderer keeps it (the console's
+     * core stalls on a value read back just after it was stored, and each
+     * copy through a temporary did that). The default: a scratch list
+     * given to draw_triangles. */
+    enum { RESERVE_MAX = 2046 };
+    virtual Vertex* reserve(Texture* tex, int count, BlendMode blend, int flags) {
+        scratch_.resize((size_t)count);
+        scratch_tex_ = tex;
+        scratch_blend_ = blend;
+        scratch_flags_ = flags;
+        return count > 0 ? &scratch_[0] : NULL;
+    }
+    virtual void commit() {
+        if (!scratch_.empty())
+            draw_triangles(scratch_tex_, &scratch_[0], (int)scratch_.size(), scratch_blend_, scratch_flags_);
+        scratch_.clear();
+    }
     /* Parameters of the next DRAW_MSDF draws (Godot's canvas shader: pixel
      * range of the glyph atlas, outline thickness; 0 = fill). */
     virtual void set_msdf(float px_range, float outline) = 0;
@@ -202,6 +223,15 @@ public:
         return NULL;
     }
     virtual void end() = 0;
+
+protected:
+    Renderer() : scratch_tex_(NULL), scratch_blend_(BLEND_MIX), scratch_flags_(0) {}
+
+private:
+    std::vector<Vertex> scratch_;
+    Texture* scratch_tex_;
+    BlendMode scratch_blend_;
+    int scratch_flags_;
 };
 
 } /* namespace spire */

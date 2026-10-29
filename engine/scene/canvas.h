@@ -112,6 +112,8 @@ private:
         CachedTexture() : texture(NULL), bytes(0), touched(0), frame(0), kept(false) {}
     };
     std::map<std::string, CachedTexture> textures_;
+    unsigned serial_; /* this canvas among all (ImageTextureRes::gpu_canvas) */
+    unsigned epoch_;  /* textures_' erasures: an image's remembered entry is stale */
     size_t texture_bytes_, texture_budget_;
     u64 texture_clock_, frame_;
     TextureStats stats_;
@@ -138,12 +140,14 @@ private:
     bool count_only_;
     bool wind_on_;
     float wind_, wind_height_;
+    Texture* load_gpu_texture(ImageTextureRes* img, const std::string& key);
+    void put_triangles(Texture* tex, const std::vector<Vec2>& v, const std::vector<Vec2>* uv,
+                       const std::vector<Color>* colors, const std::vector<int>& idx, int flags);
     Vec2 sway(const Vec2& p, const Vec2& uv) const {
         if (!wind_on_) return p;
         float k = 1.0f - uv.y - wind_height_;
         return k > 0 ? Vec2(p.x + wind_ * k, p.y) : p;
     }
-    std::vector<Vertex> verts_;
 };
 
 } /* namespace spire */
