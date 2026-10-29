@@ -11,6 +11,111 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The third xSDK hardware run (2026-10-29): performance first, the shop's freeze
+
+The user's run of 362e2c9 (work/rp100: the logs, the four shots, the
+session's saves; the commands in rp100/cmds.jsonl, cmds_run2b.jsonl the
+second run's without its set_setting lines, which spire_play --commands
+waits on forever). They asked for performance first, the logic items
+after (saved below). Their performance reports and what was found:
+
+- The hive's first fight crawled (the Festive Popper): every hive fight
+  ran at 30 fps, 600 of 600 frames over 16.7 ms, "particles' steps
+  (workers)" 18.7 ms a frame: bugs1 (150 particles, turbulence) was one
+  job on one worker, the frame's floor; its first frame 2.3 s (the
+  preprocess). The console's noise: fast_floor a call (not inlined) with a
+  data-dependent branch, 8 a corner, 192 corners a particle step, each
+  corner a call saving 11 FP registers (powerpc-xsdk-elf-objdump of
+  particles.cpp.obj). Now: sel_floor with the FPU's fsel (select_ge0: inline
+  asm under __XSDK__, __fsel on the XDK, the ternary elsewhere; the start's
+  self-check tries both), the corners and floors forced inline into noise4,
+  the range check once a curl (inputs under 2^21). A turbulent GPU system of
+  32 particles or more steps on the main thread, each step's particles in
+  chunks over the workers (split_worth, step_gpu_particles, run_chunk); the
+  rest side by side as before. hive, glory, test subject, sandpit and
+  underdocks backgrounds: 0 pixels differ against round 97's renders, with
+  0 workers and with 3 (spire_view --workers, work/pre100.sh).
+- The pause on every fight's last blow: its response took 300-1233 ms
+  (others ~118): CombatManager's end saves the run (76 KB) and the progress
+  file (236 KB on the user's profile) inside it, the client waiting. The
+  game saves asynchronously; now the "defer" patches (save.defer.progress
+  on ProgressSaveManager.SaveProgress, save.defer.run on
+  RunSaveManager.SaveRun(SerializableRun, bool); Spire.Patcher's new defer
+  action: if (Hooks.Defer(id, args)) return) queue them (Deferred.cs), made
+  before the next command is read (Protocol.ReadCommand), the client
+  playing the response meanwhile; FileStore's reads, deletes and renames,
+  Profiles() and CopyTree make the queued ones first. save.indicator's cue
+  stays with the call (applied after the defer, skipped while Deferred
+  runs). SPIRE_DEFER_SAVES=0 turns it off. JIT timings of the session
+  (work/time_cmds.py, rp100/time_off.tsv, time_on.tsv): the last blows
+  10.0 -> 4.7 ms and 14.7 -> 7.9, room entries 30-50% less. The client also
+  sends the played card to the play pile at once (CombatScreen::commit_play:
+  the play's first step, as the game; it waited centred for the answer).
+- Neow's black screen: the logic's run (0.85-2.15 s), then Neow's build
+  (1.2 s; neow.png 12.5 MB, 616 ms), then up to 120 frames waiting for the
+  run's warm-up (2-4 s at 30 fps). Now Neow's files (RUN_START_FILES: its
+  room, layout, dialogue, banner, the italic font's pages) are read while
+  the logic makes the run (SceneLibrary::warm_first, a queue ahead whose
+  references go with it), from the wipe's first black frame
+  (GameClient::warm_run_start; during the wipe a 600 ms read would stop
+  it); the warm-up reads 40 ms a frame behind the black (MenuFlow,
+  EMBARK_WARM_MS, the share restored after); the wait after the screen is
+  in: 30 frames. The game's NLoadingOverlay ("Loading...", the profile
+  screen's) shows in the wipe once the black lasts 1.8 s.
+- Event choices (median logic 331 ms, 90th 983), rest sites and shops
+  (230-330 + 300-400 client): the run's save on each room's entry and
+  event page is deferred too.
+
+The shop's freeze (after floor 20's ? room): the last line was the shop's
+decision (698 ms), then nothing: no watchdog, no 600-frame line, Back +
+Start dead; every earlier run ended "spire360 done". The PC replay of the
+whole session (work/replay100.sh) goes through the shop and on (spire_play
+auto-played after the commands ran out). Memory: free went from ~105 MB to
+44 at the shop with the textures alike (free + textures 162 -> 119 MB);
+rp98 and rp99 lost the same ~40 MB a run. The PC replay's heap (mallinfo,
+now SceneLibrary::memory_stats): parsed scene files 28 -> 49 MB (1,086
+files: resources point into their docs, kept), Spine skeletons unbounded
+(32 a run). The skeletons now count their sprites (SpineDataRes
+acquire/release) and the unused ones go past a 12 MB budget (oldest
+released first; evict, read again on use; the warm-up parses none past the
+budget); the replay held 15-16 MB with 19 let go (PC sizes). Not known: the
+freeze's cause. The watchdog now writes its own file
+(spire360_watchdog.txt, opened at start, its own buffer, integers only: a
+thread stuck in malloc or holding the log's lock stopped its line before);
+each decision line has the free memory; the 600-frame block a "heap:"
+line (in use, held, parsed scenes, skeletons).
+
+Saved for after performance (the user's logic reports, rp100):
+- Dowsing's tips and Abundance's (shot 01): the layout may be wrong.
+- The Defect's orbs at the turn's end seem too quick.
+- The shop's card removal: the removed card alone in the middle, a shop
+  item's tips drawn over it.
+- Enemy turns rushed: the turn ends into the enemies' at once, their turn
+  over before it is seen (Fast mode on, still too quick).
+- The Waterfall Giant (shot 02): no explode intent after it falls, the
+  growing damage numbers under its health bar missing.
+- Darv's relic choice (shot 03): each A on one relic animates the others.
+- Floor 20 (shot 04): a web texture stuck in front of the enemy.
+
+Checks: seeded traces (traces/new100 against base6) 0 differences; 30
+scenarios ok (the continue ones load the deferred saves); spire_check
+2342 responses, 0 failures, audio 22187 voices, 7 absent calls as
+before, 0 decoder failures (work/check100.sh, check100b.log); the whole
+session replayed twice with the skeleton budget (work/rp100/mem100c);
+PC build without warnings. Console logic (work/aot100.cmd): the native
+host's 15 runs without a trap, 30 scenarios ok, strict_compare 14 of 15
+identical (the Cubex Construct's random skin, as before). Native timings
+of the session's first 150 commands (rp100/ntime_off.tsv, ntime_on.tsv):
+the last blows barely move on a PC (its writes are cheap; 14 -> 11 ms),
+leaving the rewards 63 -> 6 ms: on the console the writes are the USB's
+1 KB requests, what the deferral takes out of the answer.
+
+XEX: 94,334,976 bytes from 81fb973 (1a115b5's, with the watchdog line's
+escape: a heredoc had made it a newline, and xsdk/main.cpp is built only
+for the console) in out/xsdk.
+
+Next: the user's console run of this build.
+
 ## The saved logic reports (2026-10-29): both xSDK runs' items, and the same causes elsewhere
 
 The user asked for the logic items the two xSDK runs left (notes below),
