@@ -81,10 +81,13 @@ The shop's freeze, again: the whole session replayed under the checking
 heap (tools/viewer/debug_heap.cpp, now locked for the particles' workers;
 spire_play checks it each frame in --commands mode too, work/dbg100.sh):
 through the shop and on, no write after a delete, no double delete, no
-overrun. vulkan4xenon logs a failed allocation (none in default.log). Not
-yet tried: the session with the console's audio thread (dbg100b.sh); the
-renderer's Vulkan path on the host (spire_play has no --vk, records traces
-only in --menu mode).
+overrun. vulkan4xenon logs a failed allocation (none in default.log). With
+the console's audio thread too (--audio-thread, the mix on its own thread)
+and the three particle workers, on 5cec63d (work/dbg100b.sh): 337 screens,
+the same, clean. Not tried: the renderer's Vulkan path on the host
+(spire_play has no --vk, records traces only in --menu mode). The next
+freeze: spire360_watchdog.txt (integer lines, its own file), the free
+memory on each decision line; the user waits 15 s before powering off.
 
 Checks: seeded traces (traces/new100c against base6) 0 differences; 32
 scenarios ok (bowlbugs and waterfall_giant new); spire_check 2343
