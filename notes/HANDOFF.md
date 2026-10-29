@@ -11,6 +11,80 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The second xSDK hardware run (2026-10-29): the Underdocks' fire, lean shaders, group passes, pack reads
+
+The user's run of 616c638 (logs in work/rp99, profile=1, no screenshots):
+Act 1 (the Underdocks) to the Lagavulin Matriarch and into Act 2's map.
+"Performance is almost acceptable now." New logic reports, left until
+performance is done (the order stands):
+
+- The card focused on the first hand draw is arbitrary (Dowsing focused
+  when drawn; another time the second card from the right).
+- Floor 9, the fight where gold is stolen: killing the first phase should
+  bring out two enemies, stunned, to finish; ours ended the fight there.
+- The Lagavulin Matriarch (Act 1 boss) kept its ZZZ after waking.
+- After it, Act 2 opened on the map with the first fight focused, where
+  the game goes to Darv's room (the Ancient) first. The same as Act 3's
+  start skipping Tanx's room (the first run's report): one cause, the act
+  start's Ancient room.
+
+What the log said:
+- Fights 60-80 ms a frame on the GPU (12-16 fps), the CPU 15-22 ms
+  (update 1-2, process + layout 4-7, draw 9-13) waiting 45-70 ms for a
+  display buffer: GPU-bound. Every heavy trace (47) was an Underdocks
+  fight: the stepped fire 48 ms a frame on average (19 draws: the
+  background layers' water_reflection Sprite2Ds, light.png scaled 8x3 under
+  vfx_stepped_shader_fire_add, 3-6 ms each), main.frag 6 (the layers'
+  group composites, the cards' hsv frames), the card ripple 2, passes 6-7
+  (11 groups: "scene end" and "scene begin (load)" each, 0.27 ms a time).
+- xost made fire.frag 143 instructions and 12 reads (the doom bar's branch
+  run too, every read before the branch), main.frag 171 for any of its
+  modes. The screen copy's level pass (7x7 reads) put a serialize before
+  each of 49 reads: 16 ms for 640x360 (only the Neow room's dark blur this
+  run; left as it is).
+- vulkan4xenon's counts: 11 images drawn back, 1 clear resolve, 0 resolves
+  put off a frame: a group's pass begun with a clear of the scene's size
+  has the scene's end resolve it with that clear (end_color_clear) and the
+  group placed on its tiles, the scene drawn back after.
+- Every texture load ran at 3.9 MB/s, 0.8 to 12.5 MB alike (neow.png 3.2 s,
+  the merchant's 2.6 s, card atlases 0.9 s): newlib's stdio (BUFSIZ 1024;
+  xsdk's fstat gives no st_blksize) refilled 1 KB a request of the drive.
+- No stalls in process this time (the audio lock); the texture cache at its
+  80 MB budget with little churn; 58 MB free at the least.
+
+Changes:
+- fire.frag folded by vk_renderer.cpp's fire_params (coordinates two to a
+  vector, factors for the strengths and the mask's inversion, smoothsteps
+  as v * k + c, the dark variant in the bright form): 27 instructions,
+  7 reads, 14 registers (24). doom_bar.frag apart.
+- main.frag's modes alone: group.frag (4), color_matrix.frag (13),
+  gradient_map.frag (14), ripple.frag (28); main.frag for two or more.
+  vfx.frag without the polar path (25; vfx_polar.frag 50).
+- Group passes begin fresh (DONT_CARE) with vkCmdClearAttachments over
+  their area: the scene's resolve put off, nothing drawn back.
+  tools/xsdk/edram_model.py models vulkan4xenon's placement (begin/end of
+  a pass, color_tile, forget/keep, end_color_clear, put_off) and gives 11
+  drawn back for the old passes, 0 for the new.
+- Pack::read_at: one read() for an entry on xsdk; audio streams 32 KB of
+  stdio buffer (stb_vorbis reads a byte at a time).
+
+Checks: host build clean; the comparison scenes plus the Underdocks layers,
+the queen's and the necrobinder's fires, the health bar, the hit spark, the
+dark orb and the card, software vs Vulkan as before and old vs new Vulkan
+identical but for the fire's rounding (4/255 at most, 2 scenes);
+validation clean but the tool's own teardown; xost's simulator 84 shaders,
+0 problems; PC build clean; spire_check 2294 responses, 0 failures, audio
+21806 voices, 0 decoder failures; music 19 events, 0 failures. Commit
+4b677d5; the XEX 94,646,272 bytes from it.
+
+Next: the user's run of this build. Expected: Underdocks fights ~25 ms on
+the GPU (the CPU then the limit), loads 5-8 times faster if the drive gives
+20-30 MB/s. Then, if performance holds: the mist's squares (ask whether the
+group change moved them), the level pass (coordinates from a vertex shader,
+two 7-tap passes), the logic's startup (15.8 s to its first response; .NET
+reads files 4 KB at a time through srt_plat_read, unmeasured), then the
+logic items above and the first run's.
+
 ## The first xSDK hardware run (2026-10-29): what it showed, and the changes
 
 The user's run of d6c8ebc (logs in work/rp98, profile=1): it boots, and runs
