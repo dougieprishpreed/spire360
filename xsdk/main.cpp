@@ -235,8 +235,7 @@ static void watchdog_main(void*) {
         reported = now_ms();
         const Node* n = (const Node*)g_trace_node;
         char line[512];
-        snprintf(line, sizeof(line), "watchdog: frame %u stopped %u s ago: %s, %s; node %s (%s %s); audio thread %s
-",
+        snprintf(line, sizeof(line), "watchdog: frame %u stopped %u s ago: %s, %s; node %s (%s %s); audio thread %s\n",
                  f, (unsigned)(stuck / 1000), g_trace_phase, g_trace_step, n ? n->name.c_str() : "-",
                  n ? n->type.c_str() : "", n ? n->script.c_str() : "", g_trace_audio);
         if (g_watch_file) {
