@@ -11,6 +11,86 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The saved logic reports (2026-10-29): both xSDK runs' items, and the same causes elsewhere
+
+The user asked for the logic items the two xSDK runs left (notes below),
+sweeping for the same causes; they test the performance build with this
+one. Each item replayed on the PC first: the logic fed the session's [CMD]
+lines (work/rp99/cmds.jsonl: rp99's start_game_run carries no seed, its
+"Seed:" log line does; rp98 continues a saved run), the client through
+spire_play --commands with --frames-after (work/gremlin99.sh, night99.sh).
+
+- Act start (Act 2's Darv, Act 3's Tanx): with nothing visited in the act,
+  RunDriver's map decision offered the starting point and its children;
+  NMapScreen.RecalculateTravelability makes the start alone travelable. An
+  act start could skip its Ancient, and the map focused the leftmost choice
+  (a fight). Now the start alone (an invincible run: both act starts).
+- The Lagavulin Matriarch's ZZZ: NSleepingVfx.Create was null headless, so
+  the game's SleepingVfx?.Stop() (the first damage, the wake, each move, the
+  death) never ran; the Slumbering Beetle's the same. StandIns gives a stand-
+  in named "<who>#sleeping" (Named; TryPlaced reads the sleeper off the
+  encoded position): the Stop cue names it, the client stops that one's.
+- The Queen's death cut short: the driver went past an empty rewards set.
+  RewardsSet.Offer shows a combat room's screen even empty (the last act's
+  boss gives none), after the deaths (NCombatUi.ShowRewards); its Proceed
+  is the act change. Now the empty rewards screen.
+- Same cause: EncounterModel.ShouldGiveRewards was ignored: the Battleworn
+  Dummy's fights gave a card reward and went to the map. Now
+  ProceedWithoutRewards (1 s, ProceedFromTerminalRewardsScreen: the event
+  resumes, its victory or defeat page, its own reward).
+- And every finished event went straight to the map (the headless driver
+  this began from): NEventRoom.SetOptions shows its last page with one
+  PROCEED. Now that page (event_choice "finished": true; random_runs.py and
+  SelfPlay answer it without a draw, trace_compare drops it, so seeded runs
+  compare as before). The client: an ancient's next page keeps its banner
+  settled (EventScreen::set_continued), a page without lines rises to its
+  options' bottom (Neow's PROCEED was below the screen).
+- The Gremlin Merc (floor 9): the logic was right, Stardust's remaining hits
+  killed the gremlins SurprisePower brought out. The client built creatures
+  summoned and killed within a response only while the fight went on, not
+  on its last response (to the rewards). CombatScreen::add_summoned on both.
+- The first hand's focus: GameClient kept hand_focus_ across fights; the
+  game's NPlayerHand is the fight's, and the first card drawn takes the
+  focus (NCombatRoom.DefaultFocusedControl is the empty CardHolderContainer;
+  AddCardHolder). Reset at each fight (by its floor), focus on the first.
+- The Sandpit worm's scream hid the player: vfx_scream's BackBufferCopy did
+  nothing, so its distortion read the frame's first copy (the Sandpit
+  background's screen-reading falls, made before the player was drawn). A
+  BackBufferCopy now resets the copy where it comes in the draw order (SceneTree::draw_items;
+  14 scenes have one: heavy blunt, Hyperbeam, the missiles, starry impact,
+  the glass orb...).
+- Nightmare's clone behind its neighbours: a card back from a hand selection
+  went in at the end of CardHolderContainer (drawn over the cards on its
+  right). restack_hand keeps the holders in the hand's order, as
+  NPlayerHand.AddCardHolder's MoveChildSafely.
+- Nightmare imbued at a fight's start (two picks with Throwing Axe): a hand
+  selection as the fight's first decision had no room yet, so the grid's
+  screen came at once over the fight as it stood after its start (no draw,
+  no autoplay seen); later picks were the hand's. Now the fight shows first
+  with those steps (its first turn's start), then the selection on the hand
+  (finishing_, as the auto shop does).
+- The Architect rushed: a combat event's options came with its steps (0.2 s
+  in), so a press skipped the attacks and pauses; the game makes the option
+  at PlayCurrentLine's end. They fade in once the room has played the steps.
+- Waits the game makes only when an effect exists (null headless): Grand
+  Finale's anticipation (1.625 s), Comet's and Guiding Star's missile
+  WaitTime (0.2 s).
+
+Checks: seeded traces (traces/new99c against base6) 0 differences;
+spire_check 2294 responses, 0 failures; audio 21806 voices, 0 decoder
+failures; music 19 events, 0 failures; 30 scenarios ok; PC build clean.
+Console logic (work/aot99.cmd: jit, smoke, wasm, c, native; the `aot`
+stage is the win-x64 AOT, not needed, and wants vswhere): the native
+host's 15 runs without a trap, 30 scenarios ok, strict_compare 14 of 15
+identical, the other the Cubex Construct's eye skin (a random pick in
+its skin setup, presentation only; the same in round 97).
+XEX: 94,588,928 bytes from 362e2c9 (work/xex98.sh, JOBS=2, 1278 s), on
+the USB as E:\Games\spire360\default.xex (spire360.ini kept).
+
+Next: the user's console run of this build (performance and these items).
+Still open from the reports: none of the saved logic items; the mist's
+squares (ask after the group-pass change) and the Neow blur's level pass.
+
 ## The second xSDK hardware run (2026-10-29): the Underdocks' fire, lean shaders, group passes, pack reads
 
 The user's run of 616c638 (logs in work/rp99, profile=1, no screenshots):
