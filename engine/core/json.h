@@ -33,11 +33,19 @@ private:
     const char* ref_;
 };
 
+/* A value. An array's or object's contents are shared by its copies and
+ * copied (one level: the children shared in turn) at the first write to
+ * one of them, so a copy costs one count: the client copied each fight
+ * decision's whole tree five times a card played, thousands of
+ * allocations each, the console's longest part of a decision. */
 class Json {
 public:
     enum Type { NUL, BOOL, NUMBER, STRING, ARRAY, OBJECT };
 
-    Json() : type_(NUL), num_(0), bool_(false) {}
+    Json() : type_(NUL), num_(0), bool_(false), body_(NULL) {}
+    Json(const Json& o);
+    Json& operator=(const Json& o);
+    ~Json();
     static Json parse(const char* text, size_t len, std::string* error);
 
     Type type() const { return type_; }
@@ -54,13 +62,13 @@ public:
     bool b(bool fallback = false) const { return type_ == BOOL ? bool_ : (type_ == NUMBER ? num_ != 0 : fallback); }
     const std::string& str() const { return str_; }
 
-    size_t size() const { return type_ == ARRAY ? arr_.size() : (type_ == OBJECT ? keys_.size() : 0); }
+    size_t size() const;
     const Json& operator[](size_t idx) const;
     const Json& operator[](const char* key) const;
     const Json& get(const std::string& key) const { return (*this)[key.c_str()]; }
     bool has(const char* key) const;
     /* Object keys in file order. */
-    const std::vector<std::string>& keys() const { return keys_; }
+    const std::vector<std::string>& keys() const;
 
     /* Building (for the protocol). */
     static Json make_string(const std::string& s) { Json j; j.type_ = STRING; j.str_ = s; return j; }
@@ -77,13 +85,28 @@ public:
 
 private:
     friend class JsonParser;
+    struct Body;
+    /* body_ for a write: made, or copied from the copies sharing it */
+    Body* own();
+    static void release(Body* b);
     Type type_;
     double num_;
     bool bool_;
     std::string str_;
-    std::vector<Json> arr_;
-    std::vector<std::string> keys_;
-    std::map<JsonKey, Json> obj_;
+    Body* body_; /* ARRAY, OBJECT: their elements (NULL: none yet) */
+};
+
+/* An array's elements; an object's keys in file order and its members. */
+struct Json::Body {
+    volatile long refs;
+    std::vector<Json> arr;
+    std::vector<std::string> keys;
+    std::map<JsonKey, Json> obj;
+    Body() : refs(1) {}
+    Body(const Body& o) : refs(1), arr(o.arr), keys(o.keys), obj(o.obj) {}
+
+private:
+    Body& operator=(const Body&);
 };
 
 } /* namespace spire */

@@ -295,6 +295,7 @@ Particles2D::Particles2D(bool is_gpu)
       trail_lifetime(0.3f), trail_sections(8), trail_subdivisions(4), time_(0), frame_remainder_(0), cycle_(0),
       started_(false), has_last_origin_(false), clock_(0), sub_mode_(false), queued_(-1), split_(false) {
     flags |= NF_PROCESS;
+    fresh_preprocess_ = false;
     for (int i = 0; i < P_MAX; ++i) pmin[i] = pmax[i] = 0;
     pmin[P_SCALE] = pmax[P_SCALE] = 1;
     if (gpu) seed = next_seed();
@@ -319,6 +320,7 @@ struct ChunkJob {
 };
 std::vector<Queued> g_queue;
 bool g_queue_open = false;
+unsigned long g_frames = 0; /* begin_frame's */
 Workers* g_workers = NULL;
 std::vector<Queued>& queue() { return g_queue; }
 bool queue_open() { return g_queue_open; }
@@ -335,6 +337,7 @@ void Particles2D::set_workers(Workers* workers) { g_workers = workers; }
 void Particles2D::begin_frame() {
     g_queue.clear();
     g_queue_open = true;
+    ++g_frames;
 }
 
 void Particles2D::run_queued(void* queue, int index) {
@@ -561,6 +564,13 @@ size_t Particles2D::active_count() const {
 }
 
 void Particles2D::process(double dt) {
+    /* the preprocess this system's place in its scene had before; one of
+     * its own just run, kept */
+    if (fresh_preprocess_) {
+        fresh_preprocess_ = false;
+        keep_in_cache();
+    }
+    if (!started_) start_from_cache();
     if ((int)particles_.size() != amount) {
         particles_.assign(amount > 0 ? amount : 0, Particle());
         for (size_t i = 0; i < particles_.size(); ++i) particles_[i].active = false;
@@ -585,6 +595,146 @@ void Particles2D::process(double dt) {
     simulate(dt);
 }
 
+Particles2D* Particles2D::take(Particles2D& from) {
+    Particles2D* h = new Particles2D(from.gpu);
+    h->amount = from.amount;
+    h->lifetime = from.lifetime;
+    h->fixed_fps = from.fixed_fps;
+    h->local_coords = from.local_coords;
+    h->trail_enabled = from.trail_enabled;
+    h->one_shot = from.one_shot;
+    h->sub_mode_ = from.sub_mode_;
+    h->adopt(from);
+    return h;
+}
+
+bool Particles2D::adopt(Particles2D& from) {
+    if (started_ || !from.started_ || from.gpu != gpu || from.amount != amount || from.lifetime != lifetime ||
+        from.fixed_fps != fixed_fps || from.local_coords != local_coords || from.trail_enabled != trail_enabled ||
+        from.one_shot != one_shot || from.sub_mode_ != sub_mode_)
+        return false;
+    particles_.swap(from.particles_);
+    pending_.swap(from.pending_);
+    time_ = from.time_;
+    frame_remainder_ = from.frame_remainder_;
+    cycle_ = from.cycle_;
+    clock_ = from.clock_;
+    seed = from.seed;
+    emission_ = from.emission_;
+    to_canvas_ = from.to_canvas_;
+    emitter_velocity_ = from.emitter_velocity_;
+    last_origin_ = from.last_origin_;
+    has_last_origin_ = from.has_last_origin_;
+    started_ = true;
+    from.started_ = false;
+    return true;
+}
+
+/* The preprocesses kept (source): a copy of each system as its preprocess
+ * left it, by its key; when it was last used. */
+namespace {
+struct KeptPreprocess {
+    Particles2D* state;
+    size_t bytes;
+    unsigned long used;
+    Xform2D at;          /* the system's global transform then */
+    unsigned long frame; /* the frame a system last started from it: two
+                          * made together (a pair of creatures' auras)
+                          * would move as one, the second simulates its
+                          * own */
+};
+std::map<std::string, KeptPreprocess> g_kept_preprocess;
+/* (the frame loop's alone: a worker that ran a system's preprocess leaves
+ * its result to the system's next process) */
+size_t g_kept_bytes = 0;
+unsigned long g_kept_clock = 0;
+const size_t KEPT_BUDGET = 3u << 20;
+}
+
+size_t Particles2D::preprocess_cache_bytes() { return g_kept_bytes; }
+
+std::string Particles2D::cache_key() const {
+    return format("%s|%d|%d|%g|%g|%d", source.c_str(), gpu ? 1 : 0, amount, lifetime, preprocess, fixed_fps);
+}
+
+void Particles2D::copy_state(const Particles2D& from) {
+    particles_ = from.particles_;
+    pending_ = from.pending_;
+    time_ = from.time_;
+    frame_remainder_ = from.frame_remainder_;
+    cycle_ = from.cycle_;
+    clock_ = from.clock_;
+    seed = from.seed;
+    emission_ = from.emission_;
+    to_canvas_ = from.to_canvas_;
+    emitter_velocity_ = from.emitter_velocity_;
+    last_origin_ = from.last_origin_;
+    has_last_origin_ = from.has_last_origin_;
+    started_ = true;
+}
+
+bool Particles2D::start_from_cache() {
+    if (source.empty() || sub_mode_ || one_shot || preprocess <= 0) return false;
+    std::map<std::string, KeptPreprocess>::iterator it = g_kept_preprocess.find(cache_key());
+    if (it == g_kept_preprocess.end() || it->second.frame == g_frames) return false;
+    const Particles2D& kept = *it->second.state;
+    if (kept.gpu != gpu || kept.amount != amount || kept.local_coords != local_coords ||
+        kept.trail_enabled != trail_enabled)
+        return false;
+    /* particles in the canvas' space go where this system is (a fight's
+     * background is scaled to its encounter: 0.8 in one, 1 in the next);
+     * a placement other than a scale and a move simulates its own */
+    Xform2D move = global_transform() * it->second.at.affine_inverse();
+    float k = move.x.x;
+    if (!local_coords && (k <= 0 || fabsf(move.x.y) > 1e-3f || fabsf(move.y.x) > 1e-3f || fabsf(move.y.y - k) > 1e-3f * k))
+        return false;
+    copy_state(kept);
+    if (!local_coords) {
+        for (size_t i = 0; i < particles_.size(); ++i) {
+            Particle& q = particles_[i];
+            q.xform = move * q.xform;
+            q.velocity = q.velocity * k;
+            q.vz *= k;
+            for (size_t t = 0; t < q.trail.size(); ++t) q.trail[t].second = move * q.trail[t].second;
+        }
+        for (size_t i = 0; i < pending_.size(); ++i) {
+            pending_[i].xform = move * pending_[i].xform;
+            pending_[i].velocity = pending_[i].velocity * k;
+            pending_[i].vz *= k;
+        }
+    }
+    /* its emitter's velocity from this one's own moves */
+    has_last_origin_ = false;
+    it->second.used = ++g_kept_clock;
+    it->second.frame = g_frames;
+    return true;
+}
+
+void Particles2D::keep_in_cache() {
+    if (source.empty() || sub_mode_ || one_shot || preprocess <= 0) return;
+    std::string key = cache_key();
+    if (g_kept_preprocess.count(key)) return;
+    size_t bytes = particles_.size() * sizeof(Particle) + pending_.size() * sizeof(Emission);
+    for (size_t i = 0; i < particles_.size(); ++i) bytes += particles_[i].trail.size() * sizeof(particles_[i].trail[0]);
+    if (bytes > KEPT_BUDGET / 4) return;
+    while (g_kept_bytes + bytes > KEPT_BUDGET && !g_kept_preprocess.empty()) {
+        std::map<std::string, KeptPreprocess>::iterator oldest = g_kept_preprocess.begin();
+        for (std::map<std::string, KeptPreprocess>::iterator i = g_kept_preprocess.begin(); i != g_kept_preprocess.end(); ++i)
+            if (i->second.used < oldest->second.used) oldest = i;
+        g_kept_bytes -= oldest->second.bytes;
+        delete oldest->second.state;
+        g_kept_preprocess.erase(oldest);
+    }
+    Particles2D* copy = new Particles2D(gpu);
+    copy->amount = amount;
+    copy->local_coords = local_coords;
+    copy->trail_enabled = trail_enabled;
+    copy->copy_state(*this);
+    KeptPreprocess k = { copy, bytes, ++g_kept_clock, global_transform(), g_frames };
+    g_kept_preprocess[key] = k;
+    g_kept_bytes += bytes;
+}
+
 /* The process's steps: the preprocess on the first, then the frame's. */
 void Particles2D::simulate(double dt) {
     double frame_time = fixed_fps > 0 ? 1.0 / fixed_fps : 1.0 / 30.0;
@@ -598,6 +748,7 @@ void Particles2D::simulate(double dt) {
             int skip = preprocess_skip(steps, frame_time);
             skip_steps(skip, frame_time);
             for (int i = skip; i < steps; ++i) step_gpu(frame_time);
+            fresh_preprocess_ = preprocess > 0;
         }
         double time_scale = speed_scale > 0 ? speed_scale : 0;
         if (fixed_fps > 0) {
@@ -623,6 +774,7 @@ void Particles2D::simulate(double dt) {
         speed_scale = 1.0;
         for (int i = skip; i < steps; ++i) step(frame_time);
         speed_scale = sp;
+        fresh_preprocess_ = preprocess > 0;
     }
     if (fixed_fps > 0) {
         double l = dt > 0.1 ? 0.1 : (dt <= 0 ? 0.001 : dt);

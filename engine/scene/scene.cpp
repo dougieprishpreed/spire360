@@ -671,6 +671,12 @@ Node* SceneLibrary::instantiate_file(const SceneFile* f, int depth, std::string*
             const Json& v = props[key.c_str()];
             if (!node->set(key, v, ctx)) node->extra[key] = &v;
         }
+        /* a particle system's place in the scenes (its preprocess's cache) */
+        if (node->type == "GPUParticles2D" || node->type == "CPUParticles2D") {
+            Particles2D* p = (Particles2D*)node;
+            if (!existing) p->source = f->name + ":" + nd["parent"].str() + "/" + name;
+            else if (props.size() > 0) p->source += "+" + f->name;
+        }
         if (!existing && !node->script.empty() && !node->behavior) {
             g_script_ctx = &ctx;
             node->behavior = create_script(node->script, node);

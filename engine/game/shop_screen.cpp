@@ -48,7 +48,7 @@ ShopScreen::ShopScreen(SceneLibrary* lib)
       inventory_(NULL), backstop_(NULL), slots_(NULL), merchant_(NULL), merchant_reticle_(NULL), back_button_(NULL),
       focus_(-1), open_(false), start_open_(false), behind_(false), start_index_(0), gone_(NULL),
       focus_near_gone_(false), slots_closed_top_(0),
-      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_slot_(-1), hand_linger_(-1), hand_t_(0), auto_t_(0),
+      slots_open_top_(0), slots_height_(0), hand_(NULL), hand_given_(false), hand_given_t_(0), hand_slot_(-1), hand_linger_(-1), hand_t_(0), auto_t_(0),
       auto_tail_(0) {}
 
 void ShopScreen::set_auto(const Json& steps) {
@@ -371,6 +371,10 @@ Node* ShopScreen::build(const Json& d, std::string* error) {
         if (hand_) {
             hand_->set_animation("default", true, 0);
             hand_start_ = hand_target_ = hand_->position;
+            if (hand_given_) {
+                hand_->position = hand_given_pos_;
+                hand_t_ = hand_given_t_;
+            }
         }
         /* NMerchantDialogue._Ready: transparent until it speaks */
         Node* dl = inventory_->find_unique("Dialogue");
@@ -643,6 +647,13 @@ std::string ShopScreen::input(const PadState& pad) {
         if (s.kind == "removal") return protocol_action("remove_card");
     }
     return std::string();
+}
+
+bool ShopScreen::hand_state(Vec2* pos, double* t) const {
+    if (!hand_) return false;
+    *pos = hand_->position;
+    *t = hand_t_;
+    return true;
 }
 
 void ShopScreen::point_hand(int slot) {

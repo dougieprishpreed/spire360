@@ -132,6 +132,26 @@ public:
     virtual void draw(Canvas& c);
     void restart();
     size_t active_count() const;
+    /* A room's screen is rebuilt for its next decision (GameClient's
+     * collect_loops): take moves what a system has simulated (its
+     * particles, clocks and seed) into a new node of no tree's, and adopt
+     * hands it to the rebuilt screen's system of the same make, which goes
+     * on from there instead of simulating its preprocess again (the hive
+     * rest site's bugs, 40 s of 400 particles: 0.4 s on the console at
+     * each of the room's decisions). adopt: false, nothing moved, when the
+     * two differ or this one has started. */
+    static Particles2D* take(Particles2D& from);
+    bool adopt(Particles2D& from);
+    /* Where the scene library made it: the scene file and the node's path
+     * in it (and the scenes that override it). A system with a preprocess
+     * keeps what its first preprocess left, by this key: the next system
+     * made from the same place starts from a copy (a fight's background
+     * entered again in the act simulated its swarms from empty: most of
+     * the console's 0.7 s of process at each fight's start). */
+    std::string source;
+    /* The kept preprocesses' memory (3 MB at most, the least recently
+     * used let go first). */
+    static size_t preprocess_cache_bytes();
     /* The simulations of one process pass on worker threads: between
      * begin_frame and end_frame each system's process() queues its steps
      * (the sub-emitters' parents and children run at once: one writes the
@@ -191,6 +211,15 @@ private:
     static void run_chunk(void* job, int index);
     bool split_worth() const;
     int preprocess_skip(int steps, double frame_time) const;
+    /* the preprocess's cache (source): started from a kept copy, or this
+     * one's result kept */
+    std::string cache_key() const;
+    bool start_from_cache();
+    void keep_in_cache();
+    void copy_state(const Particles2D& from);
+    /* its preprocess just ran (on a worker, maybe): kept by the frame
+     * loop's next process */
+    bool fresh_preprocess_;
     void skip_steps(int n, double frame_time);
     /* an emission from the parent system (emit_subparticle): its
      * transform, and its velocity if kept */

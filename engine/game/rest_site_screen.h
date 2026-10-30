@@ -6,7 +6,9 @@
  *
  * Once the option is used (the decision's "done"), the choices fade out,
  * the fire goes out (ExtinguishFireIfAble: the characters darker, the
- * lighting off) and the proceed arrow comes in: Y goes to the map. */
+ * lighting off) and the proceed arrow comes in: Y goes to the map. With
+ * options left after one (Miniature Tent: the decision's "proceed"), the
+ * fire stays and they come back beside the proceed arrow. */
 #ifndef SPIRE_REST_SITE_SCREEN_H
 #define SPIRE_REST_SITE_SCREEN_H
 
@@ -69,6 +71,8 @@ private:
     bool done_, passive_, chosen_;
     TweenSet tweens_;
     double t_, proceed_at_; /* -1: none */
+    double again_at_;       /* the options left come back then; -1: none */
+    Node* room_;
     Node* smoke_;           /* NRestSmokeVfx, freed after 4 s */
 };
 

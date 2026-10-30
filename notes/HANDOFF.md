@@ -11,6 +11,124 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The fourth xSDK hardware run (2026-10-30): the saves' hitches, the logic reports
+
+The run (work/rp101, build 5cec63d): fights at 60 fps for the most part;
+momentary pauses the user took for saves (resting, an ancient's relic, each
+fight's start), no black screen (the watchdog's one line was Back + RB's
+screenshot, 3 s writing the BMP: its phase now says so). Sound not tested
+(low volume): the next runs are sound tests too. Neow's loading screen not
+seen yet (no new run).
+
+What the log showed, and what each was:
+
+- Every decision a frame of 80-140 ms, update 60-110 of it (a card played
+  in a fight: one ~100 ms frame). The client's Json was a deep value type:
+  each copy copied the whole tree, thousands of allocations (newlib's on the
+  console), and a fight's card copied its 20-30 KB decision five times
+  (decision_, last_combat_, pending_, the top bar's state, the cues' data).
+  Json's arrays and objects now share one body (atomic count, copied one
+  level at the first write: Json::own): a copy costs nothing, a parse half
+  the allocations (a value no longer carries three empty containers). PC
+  (spire_play --load-trace): a card's update 5-7 ms to under 3.
+- The fight's top bar was built again for every card: kept when what it
+  would show (its player, the context) is what it shows and no save or full
+  belt cue asks for a new one (GameClient::bar_made_from_).
+- Each rest site choice 384 ms of process (and the card select over the
+  room): the room's screen is rebuilt per decision and its particles
+  simulated their preprocess again (the hive rest site's bugs: 40 s of 400
+  particles). collect_loops now moves each system's simulation out
+  (Particles2D::take) and the rebuilt screen's adopts it (adopt): PC 60 ms to
+  under 5. The ancient's relic choice was the same (749 ms of process).
+- Each fight's start 690-850 ms of process: its background's preprocess,
+  from empty at every entry. A system's first preprocess is kept by its
+  place in its scenes (Particles2D::source, set by the scene library: file
+  and node path, the overriding scenes after) and the next one made there
+  starts from a copy (3 MB at most, least recently used out; the frame
+  loop's alone: a worker that ran the preprocess leaves it to the system's
+  next process). A fight's background is scaled to its encounter (0.8 in
+  one, 1 in the next): particles in the canvas' space are moved by the
+  change of placement (a scale and a move; anything else simulates its
+  own); one system a frame from each kept state (two creatures' auras made
+  together would move as one). PC: a hive fight's entry after the first
+  128 ms of process to 9; the fights' own first uses of effects the same.
+  The console's heap line gives the kept size. An act's first fight still
+  simulates its background.
+- The Defect's orbs: each orb's scene, skeleton and effects were read at
+  its first channel, mid-turn (none of the game's preload sets has them).
+  The logic's preload list (Preload.cs) adds every orb's AssetPaths.
+- The log's lines were written to the USB from the frame loop, each one a
+  write (and behind the logic's saves): a writer thread now takes the queue
+  every 50 ms (xsdk main's log_writer).
+- The Crystal Sphere at 15 fps: scry_reveal (effect 40) cost 31 ms of GPU
+  for each of its two draws, some 1200 instructions a pixel. Four circles
+  and four neighbouring cells at a time, every cell's coordinates before
+  the reads, the circles' constants folded on the CPU: 380 lines of
+  microcode (work/shstat/stats.py: glslang, xost, xdis; tfetch 11). The
+  software renderer the same picture; the host's Vulkan (lavapipe) the same
+  as it.
+- Slow frames now say where their update went (GameClient::
+  update_profile, phase_mark from the screens: read, parse, cues, fight:
+  copies / creatures / steps / tips, top bar, potions, the screen's build,
+  loops), on the console with profile=1 and in spire_play --load-trace.
+
+The reports:
+
+- Uproar "never plays an Attack from the draw pile": it did as the game
+  does. Each of the three plays had one card left in the draw pile, a power
+  (Spinner, then Bulk Up; work/rp101 replayed with view_pile). Scenario
+  uproar: the autoplay's Strike flies from the draw pile, hits, then both
+  go to the discard (rendered, work/upr101).
+- Miniature Tent: the driver ended the rest site after any option (the
+  game's RestSiteSynchronizer kept the others: ShouldDisableRemaining-
+  RestSiteOptions false). RunDriver.RestSiteChoiceMade reads the
+  synchronizer's options; the decision has "proceed" beside them; the
+  client fades the choices, plays the option's effect, keeps the fire lit,
+  then the options left come back with the proceed arrow (rendered,
+  work/tent101). Scenario tent. The sweep for the same cause (the driver
+  deciding what the game decides): the event flow reads IsFinished and
+  CurrentOptions; the potion "not consumed" discard never fired in the run;
+  the act's heal formula only runs without the game's flow (tools).
+  Rewards and treasure keep driver flags still (not seen wrong).
+- The merchant's hand jumped at each purchase: the rebuilt shop's hand
+  started from the top. Its place and wobble clock carry over (ShopScreen::
+  hand_state).
+- The smith's cards left a small dark card behind as they flew: the card
+  stayed in its HBoxContainer (CardContainer), whose layout put it back
+  each frame while its trail flew. Preview::start_flight takes it out of a
+  container first (NCardFlyVfx reparents it); the transform's the same.
+- End of turn "all at once" some turns: a long frame (a first use's load,
+  the decision's own frame) fired every cue it covered at once. The
+  fight's cue clock moves 1/30 s a frame at most: a hitch delays the cues
+  instead.
+- The act 3 ancient's name over its third option (shot 01): RichTextLabel
+  fixed each paragraph's alignment when it parsed its text, so the settled
+  banner's left alignment never applied (its title stayed centred, at the
+  bottom). A paragraph without its own alignment now follows the label's.
+- The Battleworn Dummy's fight cut in and out: the game fades through black
+  for an event's fight (EnterRoomWithoutExitingCurrentRoom, unless laid out
+  as a fight) and back (ResumePreviousRoom); the client's room transition
+  now does too on the same floor.
+- Nonupeipe's relic "abrupt": the game raises an ancient's relic into the
+  bar as ours does (AnimateRelic without a start: 40 px, 0.35 s); the press
+  was the 1.4 s hitch (the event's rebuild). Left as is.
+- The Crystal Sphere's rewards: each one taken a 167 ms answer (38 KB, the
+  sphere's state in each) and the update; the update's share is the Json
+  copies'.
+
+Checks (work/check101c.sh): seeded traces (traces/new101c against base6)
+0 differences (the rest site's "proceed" is sent only when true); 34
+scenarios ok (tent and uproar new); spire_check 2354 responses, 0
+failures, audio 22148 voices, 0 decoder failures; PC build without
+warnings; xost's simulator on effect 40 (tools/xsdk/check_shaders.py
+--only effect_40.frag) ok.
+
+Not done, for the next rounds: an act's first fight and first rest site
+still simulate their backgrounds' preprocess (a cache across sessions, or
+fewer steps, would change what the game does); the first uses of other
+effects mid-fight (Echo Form's idle effect, ...) still read their scenes;
+rewards and treasure keep driver flags of their own (not seen wrong).
+
 ## The third run's logic reports (2026-10-29): each checked against the game, the same causes elsewhere
 
 The user asked for the saved logic items before the next console build,

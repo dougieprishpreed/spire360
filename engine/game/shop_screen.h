@@ -36,6 +36,16 @@ public:
     /* The decision before was this room's too (a purchase, the card
      * removal): no welcome again. */
     void set_again(bool again) { again_ = again; }
+    /* NMerchantHand as the screen before left it (where it is, its
+     * wobble's clock): the rebuilt room's hand goes on from there rather
+     * than from the top (a purchase made it jump). hand_state: false
+     * without a hand. */
+    bool hand_state(Vec2* pos, double* t) const;
+    void set_hand_state(const Vec2& pos, double t) {
+        hand_given_ = true;
+        hand_given_pos_ = pos;
+        hand_given_t_ = t;
+    }
     /* Behind the card removal's selection (NOverlayStack): its focused
      * slot shows no hover tip (NMerchantSlot.OnSelected cleared it). */
     void set_behind() { behind_ = true; }
@@ -140,6 +150,9 @@ private:
     TweenSet tweens_;
     class SpineSprite* hand_; /* %MerchantHand's parent, in the inventory */
     Vec2 hand_start_, hand_target_;
+    bool hand_given_;
+    Vec2 hand_given_pos_;
+    double hand_given_t_;
     int hand_slot_;           /* the slot pointed at, -1: none */
     double hand_linger_, hand_t_;
     struct AutoCue {

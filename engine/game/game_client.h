@@ -27,6 +27,7 @@ class ConfirmPopup;
 class DeckPreviews;
 class FtuePopup;
 class LogicLink;
+class Particles2D;
 class PauseMenu;
 class PileScreen;
 class SettingsScreen;
@@ -113,6 +114,10 @@ public:
     const Json& decision() const { return decision_; }
     /* Increments with each new decision shown. */
     int decision_count() const { return decisions_; }
+    /* With a load-trace clock (the console's profile=1, spire_play's
+     * --load-trace): where the last update's time went, by phase (those
+     * of half a millisecond or more), for a slow frame's line. */
+    const std::string& update_profile() const { return update_profile_; }
     /* Waiting for the logic's answer. */
     bool busy() const;
     bool game_over() const { return decision_["decision"].str() == "game_over"; }
@@ -267,6 +272,25 @@ private:
     void collect_loops(Node* n, const std::string& path);
     void restore_loops(Node* n, const std::string& path);
     std::map<std::string, std::pair<std::string, double> > loops_;
+    /* the old screen's particle systems' simulations (Particles2D::take),
+     * by the same paths, till the new screen's adopt them */
+    std::map<std::string, Particles2D*> held_particles_;
+    std::string update_profile_;
+    double phase_at_;
+    /* what the fight's top bar was made from (its player and context): a
+     * decision that would make the same one keeps it */
+    Json bar_made_from_;
+    /* the merchant's hand as the shop's screen left it (ShopScreen::
+     * hand_state), for the rebuilt one */
+    bool shop_hand_;
+    Vec2 shop_hand_pos_;
+    double shop_hand_t_;
+
+public:
+    void phase(const char* what);
+
+private:
+    void drop_held_particles();
     Json transition_pending_;
     std::vector<std::string> queued_; /* sent after the logic's "ready" */
     Json answer_;

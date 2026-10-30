@@ -18,30 +18,89 @@ static const Json& null_json() {
     return n;
 }
 
+Json::Json(const Json& o) : type_(o.type_), num_(o.num_), bool_(o.bool_), str_(o.str_), body_(o.body_) {
+    if (body_) atomic_add(&body_->refs, 1);
+}
+
+Json& Json::operator=(const Json& o) {
+    if (o.body_) atomic_add(&o.body_->refs, 1);
+    Body* old = body_;
+    type_ = o.type_;
+    num_ = o.num_;
+    bool_ = o.bool_;
+    str_ = o.str_;
+    body_ = o.body_;
+    if (old) release(old);
+    return *this;
+}
+
+Json::~Json() {
+    if (body_) release(body_);
+}
+
+void Json::release(Body* b) {
+    if (atomic_add(&b->refs, -1) == 0) delete b;
+}
+
+Json::Body* Json::own() {
+    if (!body_) {
+        body_ = new Body();
+    } else if (body_->refs > 1) {
+        Body* mine = new Body(*body_);
+        release(body_);
+        body_ = mine;
+    }
+    return body_;
+}
+
+static const std::vector<std::string>& no_keys() {
+    static std::vector<std::string> none;
+    return none;
+}
+
+size_t Json::size() const {
+    if (!body_) return 0;
+    return type_ == ARRAY ? body_->arr.size() : (type_ == OBJECT ? body_->keys.size() : 0);
+}
+
+const std::vector<std::string>& Json::keys() const {
+    return type_ == OBJECT && body_ ? body_->keys : no_keys();
+}
+
 const Json& Json::operator[](size_t idx) const {
-    if (type_ != ARRAY || idx >= arr_.size()) return null_json();
-    return arr_[idx];
+    if (type_ != ARRAY || !body_ || idx >= body_->arr.size()) return null_json();
+    return body_->arr[idx];
 }
 
 const Json& Json::operator[](const char* key) const {
-    if (type_ != OBJECT) return null_json();
-    std::map<JsonKey, Json>::const_iterator it = obj_.find(key);
-    return it == obj_.end() ? null_json() : it->second;
+    if (type_ != OBJECT || !body_) return null_json();
+    std::map<JsonKey, Json>::const_iterator it = body_->obj.find(key);
+    return it == body_->obj.end() ? null_json() : it->second;
 }
 
 bool Json::has(const char* key) const {
-    return type_ == OBJECT && obj_.find(key) != obj_.end();
+    return type_ == OBJECT && body_ && body_->obj.find(key) != body_->obj.end();
 }
 
 void Json::set(const std::string& key, const Json& value) {
+    /* value may be one of this value's own members (or below them): held
+     * before the write copies or replaces them */
+    Json keep(value);
     if (type_ != OBJECT) { *this = Json(); type_ = OBJECT; }
-    if (obj_.find(key.c_str()) == obj_.end()) keys_.push_back(key);
-    obj_[key] = value;
+    Body* b = own();
+    std::map<JsonKey, Json>::iterator it = b->obj.find(key.c_str());
+    if (it == b->obj.end()) {
+        b->keys.push_back(key);
+        b->obj.insert(std::make_pair(JsonKey(key), keep));
+    } else {
+        it->second = keep;
+    }
 }
 
 void Json::append(const Json& value) {
+    Json keep(value);
     if (type_ != ARRAY) { *this = Json(); type_ = ARRAY; }
-    arr_.push_back(value);
+    own()->arr.push_back(keep);
 }
 
 void Json::swap(Json& other) {
@@ -55,9 +114,9 @@ void Json::swap(Json& other) {
     bool_ = other.bool_;
     other.bool_ = b;
     str_.swap(other.str_);
-    arr_.swap(other.arr_);
-    keys_.swap(other.keys_);
-    obj_.swap(other.obj_);
+    Body* body = body_;
+    body_ = other.body_;
+    other.body_ = body;
 }
 
 bool Json::operator==(const Json& other) const {
@@ -66,8 +125,13 @@ bool Json::operator==(const Json& other) const {
     case BOOL: return bool_ == other.bool_;
     case NUMBER: return num_ == other.num_;
     case STRING: return str_ == other.str_;
-    case ARRAY: return arr_ == other.arr_;
-    case OBJECT: return obj_ == other.obj_;
+    case ARRAY:
+    case OBJECT: {
+        if (body_ == other.body_) return true;
+        if (size() != other.size()) return false;
+        if (!body_ || !other.body_) return true; /* both empty */
+        return type_ == ARRAY ? body_->arr == other.body_->arr : body_->obj == other.body_->obj;
+    }
     default: return true;
     }
 }
@@ -181,10 +245,11 @@ private:
                 ws();
                 /* parsed into its place: assigning a parsed value copied
                  * its whole subtree, at every level of the tree */
-                std::map<JsonKey, Json>::iterator slot = o.obj_.find(key.c_str());
-                if (slot == o.obj_.end()) {
-                    o.keys_.push_back(key);
-                    slot = o.obj_.insert(std::make_pair(JsonKey(key), Json())).first;
+                Json::Body* b = o.own();
+                std::map<JsonKey, Json>::iterator slot = b->obj.find(key.c_str());
+                if (slot == b->obj.end()) {
+                    b->keys.push_back(key);
+                    slot = b->obj.insert(std::make_pair(JsonKey(key), Json())).first;
                 } else {
                     Json().swap(slot->second);
                 }
@@ -203,16 +268,17 @@ private:
             /* grown by swapping the parsed elements over (a vector's
              * growth copied every element and its subtree) */
             size_t n = 0;
+            std::vector<Json>& arr = o.own()->arr;
             for (;;) {
                 ws();
-                if (n == o.arr_.size()) grow(o.arr_, n ? n * 2 : 4);
-                if (!value(o.arr_[n], depth + 1)) return false;
+                if (n == arr.size()) grow(arr, n ? n * 2 : 4);
+                if (!value(arr[n], depth + 1)) return false;
                 ++n;
                 ws();
                 if (p_ < end_ && *p_ == ',') { ++p_; continue; }
                 if (p_ < end_ && *p_ == ']') {
                     ++p_;
-                    o.arr_.resize(n);
+                    arr.resize(n);
                     return true;
                 }
                 return fail("expected ',' or ']'");
@@ -311,6 +377,12 @@ void set_load_trace(LoadClock clock, bool hold) {
 }
 
 double load_trace_start() { return g_load_clock ? g_load_clock() : -1.0; }
+
+static PhaseMark g_phase_mark = NULL;
+void set_phase_mark(PhaseMark mark) { g_phase_mark = mark; }
+void phase_mark(const char* what) {
+    if (g_phase_mark) g_phase_mark(what);
+}
 
 void load_traced(const char* kind, const std::string& name, double started) {
     if (!g_load_clock || started < 0) return;

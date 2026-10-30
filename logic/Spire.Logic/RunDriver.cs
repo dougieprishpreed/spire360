@@ -91,6 +91,9 @@ public partial class RunDriver
     /// begun with Neow): the map's marker on the starting point.</summary>
     private bool _markerAtStart;
     private bool _restSiteDone; // the rest site's choice is made: only Proceed is left
+    // an option was taken here (NRestSiteRoom.ShowProceedButton): Proceed is
+    // offered beside what the synchronizer left (Miniature Tent's second)
+    private bool _restSiteChosen;
     private object? _restSync;  // the RestSiteSynchronizer whose choices are watched
     private int _goldBeforeCombat;
     private int _lastKnownHp;
@@ -193,6 +196,7 @@ public partial class RunDriver
         ClearRewards();
         _rewardsProcessed = false;
         _restSiteDone = false;
+        _restSiteChosen = false;
         ResetTreasure();
         _pendingBundles = null;
         _pendingBundleTcs = null;
@@ -368,6 +372,7 @@ public partial class RunDriver
             // entered this way skips its rewards)
             _rewardsProcessed = false;
             _restSiteDone = false;
+            _restSiteChosen = false;
             ResetTreasure();
                 _eventOptionChosen = false;
 
@@ -904,6 +909,7 @@ public partial class RunDriver
         // Reset tracking for new room
         _rewardsProcessed = false;
         _restSiteDone = false;
+        _restSiteChosen = false;
         ResetTreasure();
         _eventOptionChosen = false;
         _lastEventOptionCount = 0;
@@ -1307,7 +1313,7 @@ public partial class RunDriver
             WaitForActionExecutor();
             // SMITH done: the room stays with its proceed button (as after HEAL).
             Log("Card selection in rest site (SMITH) done");
-            _restSiteDone = true;
+            if (_runState?.CurrentRoom is RestSiteRoom smithRoom) RestSiteChoiceMade(smithRoom);
             return DetectDecisionPoint();
         }
 
@@ -1475,19 +1481,20 @@ public partial class RunDriver
                 Log($"Rest site ChooseLocalOption failed: {ex}");
             }
 
-            // After non-Smith rest site options (HEAL, etc.), the options may not clear.
-            // Wait for the action to complete (heal/dig), then force transition to map.
             if (!_cardSelector.HasPending)
             {
-                Log("Rest site: option chosen (non-Smith), waiting for action then forcing to map");
+                Log("Rest site: option chosen (non-Smith), waiting for its action");
                 // Give the action time to complete (heal HP, dig for relic, etc.)
                 WaitForActionExecutor();
                 Sched.Pump();
                 Sched.Pump();
                 Sched.Pump();
                 WaitForActionExecutor();
-                // The room stays (its proceed button); rewards it offered first.
-                _restSiteDone = true;
+                // The room stays (its proceed button), with the options the
+                // synchronizer left (ChooseOption: all cleared, unless
+                // Hook.ShouldDisableRemainingRestSiteOptions says otherwise:
+                // Miniature Tent); rewards it offered first.
+                RestSiteChoiceMade(restSiteRoom);
                 if (_rewardList != null)
                     return DetectDecisionPoint();
                 return RestSiteState(restSiteRoom);
@@ -3267,6 +3274,16 @@ public partial class RunDriver
         }
     }
 
+    // NRestSiteRoom.AfterSelectingOptionAsync: the proceed button, and the
+    // choices again while the synchronizer left some (Options.Count > 0).
+    private void RestSiteChoiceMade(RestSiteRoom restRoom)
+    {
+        _restSiteChosen = true;
+        _restSiteDone = restRoom.Options.Count == 0;
+        Log(_restSiteDone ? "Rest site: option done, no options left"
+                          : $"Rest site: option done, {restRoom.Options.Count} left (Proceed or another)");
+    }
+
     private Dictionary<string, object?> RestSiteState(RestSiteRoom restRoom)
     {
         var options = restRoom.Options;
@@ -3303,7 +3320,7 @@ public partial class RunDriver
             ["description"] = SafeText(() => opt.Description.GetFormattedText()),
         }).ToList();
 
-        return new Dictionary<string, object?>
+        var state = new Dictionary<string, object?>
         {
             ["type"] = "decision",
             ["decision"] = "rest_site",
@@ -3312,6 +3329,9 @@ public partial class RunDriver
             ["background"] = background,
             ["player"] = PlayerSummary(player),
         };
+        // an option taken already: Proceed beside the rest
+        if (_restSiteChosen) state["proceed"] = true;
+        return state;
     }
 
     /// <summary>The merchant's room as it stands (a shop_entry cue's view:

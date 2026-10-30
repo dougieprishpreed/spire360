@@ -1239,19 +1239,31 @@ static bool effect_shader(Canvas& c, const MaterialRes* m, bool* ok) {
         e.p[5] = b.b;
         e.p[6] = fmodf((float)g_shader_time * 0.0065f, 1.0f);
         e.p[7] = fmodf((float)g_shader_time * 0.0011f, 1.0f);
-        /* colors[8] (and the ninth the last circle reads: zero), then
-         * circleData[8] */
+        /* colors[8] (and the ninth the last circle reads: zero); circleData
+         * as the shader reads it, four circles to a vector: smoothstep's
+         * start (x / 2) and 1 / its width (to (x + y) / 2), the power, the
+         * step, which a circle past `circles` has at -1 (its mask 1: the
+         * colour as it was) */
         const Json& cols = (*m->props)["shader_parameter/colors"]["v"];
         const Json& data = (*m->props)["shader_parameter/circleData"]["v"];
-        for (int k = 0; k < 8; ++k)
-            for (int q = 0; q < 3; ++q) {
+        for (int k = 0; k < 9; ++k)
+            for (int q = 0; q < 4; ++q) {
                 size_t at = (size_t)(k * 4 + q);
-                e.extra[k * 4 + q] = at < cols.size() ? jv_float(cols[at]) : 0.0f;
-                e.extra[(9 + k) * 4 + q] = at < data.size() ? jv_float(data[at]) : 0.0f;
+                e.extra[k * 4 + q] = k < 8 && q < 3 && at < cols.size() ? jv_float(cols[at]) : 0.0f;
             }
+        int used = (int)e.p[0];
         for (int k = 0; k < 8; ++k) {
-            size_t at = (size_t)(k * 4 + 3);
-            e.extra[(9 + k) * 4 + 3] = at < data.size() ? jv_float(data[at]) : 0.0f;
+            float d[4];
+            for (int q = 0; q < 4; ++q) {
+                size_t at = (size_t)(k * 4 + q);
+                d[q] = at < data.size() ? jv_float(data[at]) : 0.0f;
+            }
+            float from = d[0] * 0.5f, to = (d[0] + d[1]) * 0.5f;
+            int base = (9 + (k / 4) * 4) * 4 + k % 4;
+            e.extra[base] = from;
+            e.extra[base + 4] = to != from ? 1.0f / (to - from) : 1e6f;
+            e.extra[base + 8] = d[2];
+            e.extra[base + 12] = k < used ? d[3] : -1.0f;
         }
         e.extra_count = 17;
         e.tex[0] = effect_texture(c, m, "noiseTex1");

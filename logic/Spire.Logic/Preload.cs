@@ -33,6 +33,12 @@ public partial class RunDriver
             if (runPaths?.Invoke(null, new object[] { characters, false }) is IEnumerable<string> run)
                 paths.UnionWith(run);
             if (_runState.Act is { } act) paths.UnionWith(act.AssetPaths);
+            // the orbs' visuals (OrbModel.AssetPaths): in none of the game's
+            // sets, each made at its first channel; on the console a scene,
+            // its skeleton and its effects read from the USB drive mid-turn
+            foreach (var orb in MegaCrit.Sts2.Core.Models.ModelDb.Orbs.Append(
+                         MegaCrit.Sts2.Core.Models.ModelDb.Orb<MegaCrit.Sts2.Core.Models.Orbs.GlassOrb>()))
+                paths.UnionWith(orb.AssetPaths);
             foreach (var p in _runState.Players)
                 paths.UnionWith(p.Deck.Cards.Select(c => c.PortraitPath));
             response["preload"] = paths.OrderBy(p => p, StringComparer.Ordinal).ToList();

@@ -120,6 +120,11 @@ struct HeldLoad {
 };
 /* The loads held since the last take (each thread's, in the order made). */
 void take_held_loads(std::vector<HeldLoad>& out);
+/* A phase of the client's update ending now (GameClient::update_profile),
+ * marked from the screens it calls; nothing unless a mark is set. */
+typedef void (*PhaseMark)(const char* what);
+void set_phase_mark(PhaseMark mark);
+void phase_mark(const char* what);
 
 } /* namespace spire */
 

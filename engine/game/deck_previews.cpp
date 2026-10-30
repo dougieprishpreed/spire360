@@ -346,6 +346,16 @@ void Preview::start_flight() {
     phase_ = 0;
     ftime_ = 0;
     from_ = global_origin(card_);
+    /* NCardFlyVfx takes the card from where it sat: in a container (the
+     * smith's and the transform's CardContainer) the layout put it back
+     * each frame, dark and small at the start, while its trail flew on */
+    Node* holder = card_->parent;
+    if (holder && holder->is_container() && root_ && root_ != holder && root_->is_canvas_item() &&
+        !root_->is_container()) {
+        holder->remove_child(card_);
+        root_->add_child(card_);
+        card_->set_position(inverse(((CanvasItem*)root_)->global_transform()).xform(from_));
+    }
     const std::string& pile = cue_["pile"].str();
     to_ = pile.empty() ? layer_->deck_position() : layer_->pile_position(pile);
     float offset = chaotic_range(100, 400);

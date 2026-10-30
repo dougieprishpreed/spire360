@@ -496,50 +496,91 @@ float4 ps_e39(VsOut i) : COLOR {
 }
 
 // 40: scry_reveal (the Crystal Sphere): the ball's noisy circles and the
-// fog's cells (their alphas in tex2) with borders between them.
+// fog's cells (their alphas in tex2) with borders between them. Four
+// circles and four neighbouring cells at a time: one at a time (and each
+// cell's read after its own coordinates) it was some 1200 instructions a
+// pixel on the console, 31 ms for each of the screen's two draws.
 float4 ps_e40(VsOut i) : COLOR {
     const float g = 11.0;
     float m = g_p0.z;
     float2 gp = ((i.uv * g - g * 0.5) * (1.0 + m * 2.0) - m) + g * 0.5;
     float2 f = floor(gp);
-    float valid = (f.x >= 0.0 && f.y >= 0.0 && f.x < g && f.y < g) ? 1.0 : 0.0;
-    float alpha = valid > 0.5 ? tex2Dlod(g_e2, float4((f + 0.5) / g, 0.0, 0.0)).r : 1.0;
-    float border = 0.0;
-    [unroll] for (int dx = -1; dx <= 1; ++dx) {
-        [unroll] for (int dy = -1; dy <= 1; ++dy) {
-            // (the eight cells around, as floats: xost, the xSDK build's
-            // compiler, takes no integer comparison)
-            if (abs(float(dx)) + abs(float(dy)) > 0.5) {
-                float2 n = f + float2(dx, dy);
-                float inside = (n.x >= 0.0 && n.y >= 0.0 && n.x < g && n.y < g) ? 1.0 : 0.0;
-                float an = tex2Dlod(g_e2, float4((n + 0.5) / g, 0.0, 0.0)).r;
-                float2 tb = max(max(n - gp, 0.0), gp - (n + 1.0));
-                border = max(border, inside * smoothstep(0.05, 0.02, length(tb)) * abs(alpha - an));
-            }
-        }
-    }
+    float2 fr = gp - f;
+    // the columns and rows left of, at and right of the cell in the grid
+    float3 xs = f.x + float3(-1.0, 0.0, 1.0);
+    float3 ys = f.y + float3(-1.0, 0.0, 1.0);
+    // (vectors throughout: GLSL takes no scalar where step and mix want
+    // a vector)
+    float3 top = float3(g, g, g) - 1.0;
+    float3 inx = step(0.0, xs) * step(xs, top);
+    float3 iny = step(0.0, ys) * step(ys, top);
+    float valid = inx.y * iny.y;
+    // the cells' alphas: every coordinate first, then the reads (left,
+    // right, up, down; up left, up right, down left, down right)
+    float2 c0 = (f + 0.5) / g;
+    float4 ea = c0.xyxy + float4(-1.0, 0.0, 1.0, 0.0) / g;
+    float4 eb = c0.xyxy + float4(0.0, -1.0, 0.0, 1.0) / g;
+    float4 da = c0.xyxy + float4(-1.0, -1.0, 1.0, -1.0) / g;
+    float4 db = c0.xyxy + float4(-1.0, 1.0, 1.0, 1.0) / g;
+    float a0 = tex2Dlod(g_e2, float4(c0, 0.0, 0.0)).r;
+    float4 ae = float4(tex2Dlod(g_e2, float4(ea.xy, 0.0, 0.0)).r, tex2Dlod(g_e2, float4(ea.zw, 0.0, 0.0)).r,
+                       tex2Dlod(g_e2, float4(eb.xy, 0.0, 0.0)).r, tex2Dlod(g_e2, float4(eb.zw, 0.0, 0.0)).r);
+    float4 ad = float4(tex2Dlod(g_e2, float4(da.xy, 0.0, 0.0)).r, tex2Dlod(g_e2, float4(da.zw, 0.0, 0.0)).r,
+                       tex2Dlod(g_e2, float4(db.xy, 0.0, 0.0)).r, tex2Dlod(g_e2, float4(db.zw, 0.0, 0.0)).r);
+    float alpha = lerp(1.0, a0, valid);
+    // the distance to each neighbour (an edge's across, a corner's to its
+    // point), the border where it is under 0.05 (smoothstep(0.05, 0.02))
+    float4 de = float4(fr.x, 1.0 - fr.x, fr.y, 1.0 - fr.y);
+    float4 dx = float4(fr.x, 1.0 - fr.x, fr.x, 1.0 - fr.x);
+    float4 dy = float4(fr.y, fr.y, 1.0 - fr.y, 1.0 - fr.y);
+    float4 dd = sqrt(dx * dx + dy * dy);
+    float4 te = saturate((0.05 - de) / 0.03);
+    float4 td = saturate((0.05 - dd) / 0.03);
+    float4 ine = float4(inx.x * iny.y, inx.z * iny.y, inx.y * iny.x, inx.y * iny.z);
+    float4 ind = float4(inx.x * iny.x, inx.z * iny.x, inx.x * iny.z, inx.z * iny.z);
+    float4 bm = max(ine * te * te * (3.0 - 2.0 * te) * abs(alpha - ae), ind * td * td * (3.0 - 2.0 * td) * abs(alpha - ad));
+    float border = max(max(bm.x, bm.y), max(bm.z, bm.w));
     float2 c = i.uv - 0.5;
-    float dist = length(c);
+    float dist = sqrt(dot(c, c));
     float ang = (atan2(c.y, c.x) + 3.14159265) / 6.2831853;
     float n1 = pow(tex2D(g_e0, float2(dist * 2.0, ang + g_p1.z)).r, 0.8);
     float n2 = tex2D(g_e1, float2(dist * 0.5, ang + g_p1.w)).r + 0.4;
     float ns = n1 * n2 * 2.0;
-    float3 col = g_x[0].rgb;
-    float lastmask = 0.0;
     float2 h = 5.0 - abs(5.0 - f);
-    float corner = (h.x + h.y < 3.0 || valid < 0.5) ? 1.0 : 0.0;
-    [unroll] for (int k = 0; k < 8; ++k) {
-        float4 d = g_x[9 + k];
-        float circle = smoothstep(d.x * 0.5, (d.x + d.y) * 0.5, dist);
-        float mask = lerp(1.0, ns, pow(max(circle, 1e-6), d.z)) * (1.0 - circle);
-        float hp = fwidth(mask) * 0.5;
-        mask = saturate((mask - (d.w - hp)) / max(hp * 2.0, 1e-6));
-        mask = (abs(k - g_p0.y) < 0.5 && corner > 0.5) ? 0.0 : mask;
-        float use = k < g_p0.x ? 1.0 : 0.0;
-        lastmask = lerp(lastmask, mask, use);
-        col = lerp(col, lerp(g_x[k + 1].rgb, col, mask), use);
-    }
-    lastmask = g_p0.y < 0.0 ? 1.0 - corner : lastmask;
+    float corner = max(step(h.x + h.y, 2.5), 1.0 - valid);
+    // circles 0..3 and 4..7 (extra 9..12, 13..16): each one's start,
+    // 1 / (end - start), power and step (-1 past the circles used)
+    float4 k0 = float4(0.0, 1.0, 2.0, 3.0);
+    float4 k1 = float4(4.0, 5.0, 6.0, 7.0);
+    float4 one = float4(1.0, 1.0, 1.0, 1.0);
+    float4 half4 = one * 0.5;
+    float4 ns4 = one * ns;
+    float4 t0 = saturate((dist - g_x[9]) * g_x[10]);
+    float4 t1 = saturate((dist - g_x[13]) * g_x[14]);
+    float4 ci0 = t0 * t0 * (3.0 - 2.0 * t0);
+    float4 ci1 = t1 * t1 * (3.0 - 2.0 * t1);
+    float4 m0 = lerp(one, ns4, exp2(g_x[11] * log2(max(ci0, 1e-6)))) * (1.0 - ci0);
+    float4 m1 = lerp(one, ns4, exp2(g_x[15] * log2(max(ci1, 1e-6)))) * (1.0 - ci1);
+    float4 h0 = fwidth(m0) * 0.5;
+    float4 h1 = fwidth(m1) * 0.5;
+    m0 = saturate((m0 - (g_x[12] - h0)) / max(h0 * 2.0, 1e-6));
+    m1 = saturate((m1 - (g_x[16] - h1)) / max(h1 * 2.0, 1e-6));
+    // the outer circle clipped at the grid's corners
+    m0 *= 1.0 - step(abs(k0 - g_p0.y), half4) * corner;
+    m1 *= 1.0 - step(abs(k1 - g_p0.y), half4) * corner;
+    float3 col = g_x[0].rgb;
+    col = lerp(g_x[1].rgb, col, m0.x);
+    col = lerp(g_x[2].rgb, col, m0.y);
+    col = lerp(g_x[3].rgb, col, m0.z);
+    col = lerp(g_x[4].rgb, col, m0.w);
+    col = lerp(g_x[5].rgb, col, m1.x);
+    col = lerp(g_x[6].rgb, col, m1.y);
+    col = lerp(g_x[7].rgb, col, m1.z);
+    col = lerp(g_x[8].rgb, col, m1.w);
+    // the last circle's mask; inside the ball (outer < 0) the grid's
+    float last = g_p0.x - 1.0;
+    float lm = dot(m0, step(abs(k0 - last), half4)) + dot(m1, step(abs(k1 - last), half4));
+    float lastmask = lerp(lm, 1.0 - corner, step(g_p0.y, -0.5));
     float a = saturate(max(alpha, border) * lastmask * i.color.a);
     return float4(saturate((col + float3(g_p0.w, g_p1.x, g_p1.y) * border) * i.color.rgb) * a, a);
 }

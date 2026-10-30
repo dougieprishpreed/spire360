@@ -82,7 +82,7 @@ static Control* as_control(Node* n) { return n && n->is_control() ? (Control*)n 
 
 RestSiteScreen::RestSiteScreen(SceneLibrary* lib)
     : lib_(lib), choices_screen_(NULL), description_(NULL), lighting_(NULL), focus_(-1), start_focus_(0),
-      done_(false), passive_(false), chosen_(false), t_(0), proceed_at_(-1), smoke_(NULL) {}
+      done_(false), passive_(false), chosen_(false), t_(0), proceed_at_(-1), again_at_(-1), room_(NULL), smoke_(NULL) {}
 
 /* NRestSiteButton per option (Create, Reload): the icon (OptionId's
  * images/ui/rest_site/option_<id>.png), the title; a disabled option
@@ -130,6 +130,7 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
     tweens_.clear();
     t_ = 0;
     proceed_at_ = -1;
+    again_at_ = -1;
     smoke_ = NULL;
     focus_ = -1;
     chosen_ = false;
@@ -138,9 +139,12 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
         if (error) *error = "no rest_site_room.tscn";
         return NULL;
     }
+    room_ = room;
     const Json& options = d["options"];
     done_ = d["done"].b() || options.size() == 0;
-    bool after_choice = done_ && before_["options"].size() > 0;
+    /* an option was just taken (the decision before showed them): with
+     * none left, or with some (the synchronizer kept them: Miniature Tent) */
+    bool after_choice = before_["options"].size() > 0 && (done_ || d["proceed"].b());
 
     /* The act's background (Act.CreateRestSiteBackground) behind the
      * characters, and its %RestSiteLighting. */
@@ -191,12 +195,23 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
     proceed_.set_text(Loc::get("gameplay_ui", "PROCEED_BUTTON"));
     proceed_.set_pulse(true);
 
-    if (!done_) {
+    if (!done_ && after_choice && !passive_) {
+        /* AfterSelectingOptionAsync with options left: the choices fade
+         * (HideChoices, 0.5 s) as the option's effect plays, the fire
+         * stays; then the ones left (UpdateRestSiteOptions) and the proceed
+         * arrow (frame) */
+        make_options(room, before_["options"], false);
+        if (choices_screen_) tweens_.tween_from(&choices_screen_->modulate.a, 1.0f, 0.0f, 0.5f);
+        double wait = post_select(room, d["steps"]);
+        again_at_ = wait > 0.5 ? wait : 0.5;
+        chosen_ = true;
+    } else if (!done_) {
         make_options(room, options, true);
         if (!passive_ && !options_.empty()) {
             int f = start_focus_ < 0 ? 0 : start_focus_;
             focus(f >= (int)options_.size() ? (int)options_.size() - 1 : f);
         }
+        if (d["proceed"].b() && !passive_) proceed_.enable(true);
     } else {
         /* AfterSelectingOptionAsync: the choices (the ones just shown)
          * fade out, the fire goes out, the proceed arrow comes in. */
@@ -272,6 +287,8 @@ std::string RestSiteScreen::input(const PadState& pad) {
         if ((pad.pressed & PadState::Y) && proceed_.enabled()) return protocol_action("leave_room");
         return std::string();
     }
+    /* the proceed arrow beside options left (Miniature Tent) */
+    if ((pad.pressed & PadState::Y) && proceed_.enabled() && !chosen_) return protocol_action("leave_room");
     if (chosen_ || options_.empty()) return std::string();
     int n = (int)options_.size();
     /* Focus neighbours wrap left / right. NRestSiteButton plays NButton's
@@ -365,6 +382,22 @@ void RestSiteScreen::frame(double dt) {
     if (proceed_at_ >= 0 && t_ >= proceed_at_) {
         proceed_at_ = -1;
         proceed_.enable();
+    }
+    if (again_at_ >= 0 && t_ >= again_at_) {
+        /* UpdateRestSiteOptions, ShowProceedButton, ShowChoices (0.5 s
+         * Cubic Out), the first option focused */
+        again_at_ = -1;
+        for (size_t i = 0; i < options_.size(); ++i) options_[i].node->queue_free();
+        options_.clear();
+        focus_ = -1;
+        make_options(room_, decision_["options"], false);
+        proceed_.enable();
+        if (choices_screen_) {
+            tweens_.kill(&choices_screen_->modulate.a);
+            tweens_.tween(&choices_screen_->modulate.a, 1.0f, 0.5f, TRANS_CUBIC, EASE_OUT);
+        }
+        if (!options_.empty()) focus(0);
+        chosen_ = false;
     }
     if (smoke_ && t_ >= 4.0) {
         smoke_->queue_free();

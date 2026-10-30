@@ -22,6 +22,8 @@ namespace spire {
 
 #if defined(SPIRE_WIN_THREADS)
 
+long atomic_add(volatile long* v, long delta) { return InterlockedExchangeAdd((LONG volatile*)v, delta) + delta; }
+
 Mutex::Mutex() {
     CRITICAL_SECTION* cs = new CRITICAL_SECTION;
     InitializeCriticalSection(cs); /* recursive */
@@ -170,6 +172,8 @@ Workers::~Workers() {
 }
 
 #else
+
+long atomic_add(volatile long* v, long delta) { return __sync_add_and_fetch(v, delta); }
 
 Mutex::Mutex() {
     pthread_mutex_t* m = new pthread_mutex_t;

@@ -47,8 +47,48 @@ using namespace spire;
 static FILE* g_log_file = NULL;
 static bool g_log_started = false;
 
+/* The log goes to the USB drive from a thread of its own (log_writer): a
+ * line written from the frame loop waited for the drive, each one a write
+ * and the file's growth, and longer behind the logic's saves (the hitch
+ * at each save). The frame loop queues its lines; the writer takes them
+ * every 50 ms, so a hung frame loop still leaves its last lines. Before
+ * the writer starts, and in flush_log (Back, the exit), the caller writes
+ * them itself. */
+static Mutex* g_log_lock = NULL;    /* the queue (made at the start of main) */
+static Mutex* g_log_io_lock = NULL; /* the file */
+static std::string g_log_queue;
+static volatile bool g_log_writer = false, g_log_stop = false;
+
+static void write_log_lines(const std::string& lines) {
+    ScopedLock io(*g_log_io_lock);
+    if (!g_log_file) {
+        g_log_file = fopen("game:/spire360.txt", g_log_started ? "ab" : "wb");
+        if (g_log_file) g_log_started = true;
+    }
+    if (g_log_file) {
+        fwrite(lines.data(), 1, lines.size(), g_log_file);
+        fflush(g_log_file);
+        if (ferror(g_log_file)) {
+            fclose(g_log_file);
+            g_log_file = NULL;
+        }
+    }
+}
+
 static void flush_log() {
-    if (g_log_file) fflush(g_log_file);
+    std::string lines;
+    {
+        ScopedLock lock(*g_log_lock);
+        lines.swap(g_log_queue);
+    }
+    if (!lines.empty()) write_log_lines(lines);
+}
+
+static void log_writer_main(void*) {
+    while (!g_log_stop) {
+        sleep_ms(50);
+        flush_log();
+    }
 }
 
 static void logf(const char* fmt, ...) {
@@ -59,18 +99,11 @@ static void logf(const char* fmt, ...) {
     va_end(ap);
     buf[sizeof(buf) - 2] = 0;
     strcat(buf, "\n");
-    if (!g_log_file) {
-        g_log_file = fopen("game:/spire360.txt", g_log_started ? "ab" : "wb");
-        if (g_log_file) g_log_started = true;
+    {
+        ScopedLock lock(*g_log_lock);
+        g_log_queue += buf;
     }
-    if (g_log_file) {
-        fputs(buf, g_log_file);
-        flush_log(); /* A hung frame must leave the last completed log line. */
-        if (ferror(g_log_file)) {
-            fclose(g_log_file);
-            g_log_file = NULL;
-        }
-    }
+    if (!g_log_writer) flush_log();
 }
 
 static void engine_log(const char* line) { logf("%s", line); }
@@ -377,6 +410,8 @@ static const double DISPLAY_GAMMA = 2.2 / 2.5;
 static const double TRACE_GPU_MS = 36, TRACE_EVERY_MS = 20000, SLOW_CPU_MS = 40;
 
 int main() {
+    g_log_lock = new Mutex();
+    g_log_io_lock = new Mutex();
     set_log_sink(engine_log);
 #if defined(SPIRE_GIT_COMMIT)
     logf("spire360 starting (xSDK build, source %s of %s)", SPIRE_GIT_COMMIT, SPIRE_GIT_DATE);
@@ -441,6 +476,8 @@ int main() {
     Thread watchdog;
     watchdog_open();
     watchdog.start(watchdog_main, NULL, 5);
+    Thread log_writer;
+    if (log_writer.start(log_writer_main, NULL, 5)) g_log_writer = true;
     /* The particles' simulation on the hardware threads the frame loop
      * (0), the logic (2) and the mix (4) leave: the other thread of each
      * core (the watchdog on 5 sleeps). */
@@ -560,6 +597,7 @@ int main() {
             static int shots = 0;
             char path[64];
             snprintf(path, sizeof(path), "game:/spire360_shot_%02d.bmp", ++shots);
+            g_trace_phase = "screenshot (writing it)";
             logf("screenshot %s: %s (canvas group mode %d)", path, renderer->save_screenshot(path) ? "saved" : "failed",
                  renderer->group_debug());
         }
@@ -585,6 +623,8 @@ int main() {
         if (work > 250) {
             logf("long frame %u: %.0f ms (update %.0f, process + layout %.0f, draw %.0f), decision %d", g_frame, work,
                  update_ms, f1 - f0, f2 - f1, game->decision_count());
+            if (update_ms > 20 && !game->update_profile().empty())
+                logf("  its update: %s", game->update_profile().c_str());
             if (!frame_loads.empty()) log_loads(frame_loads);
         }
         if (g_profile) {
@@ -597,6 +637,8 @@ int main() {
                      "GPU %.1f ms, decision %d",
                      g_frame, work, update_ms, fp - f0, f1 - fa, f2 - f1, renderer->draw_calls(),
                      renderer->last_frame_gpu_ms(), game->decision_count());
+                if (update_ms > 20 && !game->update_profile().empty())
+                    logf("  its update: %s", game->update_profile().c_str());
                 slow_logged = now;
             }
             if (renderer->last_frame_gpu_ms() > TRACE_GPU_MS && now - traced > TRACE_EVERY_MS) {
@@ -623,9 +665,10 @@ int main() {
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
             SceneLibrary::MemoryStats ms = lib->memory_stats();
             logf("heap: %.1f MB in use of %.1f MB held; parsed scenes %.1f MB (%u files), skeletons %.1f MB (%u, %u "
-                 "in use, %u let go)",
+                 "in use, %u let go), particle preprocesses kept %.1f MB",
                  heap_in_use() / 1048576.0, heap_held() / 1048576.0, ms.scene_bytes / 1048576.0, ms.scene_files,
-                 ms.skeleton_bytes / 1048576.0, ms.skeletons, ms.skeletons_used, ms.skeletons_evicted);
+                 ms.skeleton_bytes / 1048576.0, ms.skeletons, ms.skeletons_used, ms.skeletons_evicted,
+                 Particles2D::preprocess_cache_bytes() / 1048576.0);
             double state_ms, submit_ms;
             renderer->take_draw_times(&state_ms, &submit_ms);
             if (g_profile) {
@@ -675,6 +718,9 @@ int main() {
     g_quitting = true;
     watchdog.join();
     if (g_watch_file) fclose(g_watch_file);
+    g_log_stop = true;
+    log_writer.join();
+    g_log_writer = false;
     delete flow;
     delete game;
     delete tree;

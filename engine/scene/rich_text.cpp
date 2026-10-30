@@ -224,9 +224,7 @@ struct RtlBuilder {
     std::vector<RichTextLabel::Para>& paras;
     std::vector<std::pair<std::string, RichTextLabel::Style> > stack; /* tag, style after it */
     int char_ofs;
-    int default_align;
-    explicit RtlBuilder(std::vector<RichTextLabel::Para>& p, int def_align)
-        : paras(p), char_ofs(0), default_align(def_align) {
+    explicit RtlBuilder(std::vector<RichTextLabel::Para>& p) : paras(p), char_ofs(0) {
         paras.clear();
         paras.push_back(RichTextLabel::Para());
     }
@@ -234,7 +232,9 @@ struct RtlBuilder {
     RichTextLabel::Para& para() { return paras.back(); }
     void touch(const RichTextLabel::Style& st) {
         if (!para().has_content) {
-            para().align = st.align >= 0 ? st.align : default_align;
+            /* -1: the label's horizontal_alignment as it is when drawn (an
+             * NAncientNameBanner settling sets it left after the text) */
+            para().align = st.align;
             para().has_content = true;
         }
     }
@@ -340,7 +340,7 @@ void RichTextLabel::parse() {
     for (size_t i = 0; i < src.size(); ++i)
         if (!(src[i] == '\r' && i + 1 < src.size() && src[i + 1] == '\n')) clean += src[i];
     utf8_decode(clean, t);
-    RtlBuilder b(*paras_, h_align);
+    RtlBuilder b(*paras_);
     if (!bbcode) {
         b.add_text(t, 0, t.size());
         return;
@@ -421,7 +421,7 @@ void RichTextLabel::parse() {
             b.paragraph(al);
             b.stack.back().first = tag;
         } else if (name == "p") {
-            int al = b.cur().align >= 0 ? b.cur().align : h_align;
+            int al = b.cur().align;
             std::string a = opts.count("align") ? opts["align"] : std::string();
             if (a == "center" || a == "c") al = HALIGN_CENTER;
             else if (a == "right" || a == "r") al = HALIGN_RIGHT;

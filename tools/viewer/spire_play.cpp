@@ -470,6 +470,7 @@ static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
  * 8 ms (the software drawing's own time is no measure of the console's). */
 static long g_dump_draws_at = -1;
 static bool g_profile_cpu = false;
+static const GameClient* g_trace_game = NULL; /* its update's phases with a slow frame */
 
 static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float scale, double update_ms, double t0) {
     static long frame_no = 0;
@@ -483,8 +484,11 @@ static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float s
     sw.end();
     double end = now_ms();
     ++frame_no;
-    if (d0 - t0 + update_ms > 8.0)
+    if (d0 - t0 + update_ms > 8.0) {
         log_info("frame %ld: update %.1f ms, process %.1f ms (draw %.1f)", frame_no, update_ms, d0 - t0, end - d0);
+        if (update_ms > 2.0 && g_trace_game && !g_trace_game->update_profile().empty())
+            log_info("  its update: %s", g_trace_game->update_profile().c_str());
+    }
     if (frame_no % 600 == 0) {
         Canvas::TextureStats st = canvas.take_texture_stats();
         log_info("textures: %u held, %.1f MB (peak %.1f), created %u, evicted %u, %u frames over the budget (%u by their own)",
@@ -656,6 +660,7 @@ int main(int argc, char** argv) {
     SceneTree tree;
     tree.set_viewport(Vec2(1920, 1080), Xform2D::scaling(scale, scale));
     GameClient game(&lib, &tree, replay ? (LogicLink*)&replayed : (LogicLink*)&link);
+    g_trace_game = &game;
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
     /* the software renderer's textures are decoded (4 bytes a pixel): with

@@ -6,6 +6,9 @@
 
 namespace spire {
 
+/* *v += delta as one step (another thread's never lost); the new value. */
+long atomic_add(volatile long* v, long delta);
+
 /* A recursive lock. */
 class Mutex {
 public:

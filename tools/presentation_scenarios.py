@@ -62,6 +62,10 @@ spire_play --replay-run (frame captures) and spire_check replay.
   waterfall_giant the Waterfall Giant built up Steam Eruption, knocked out
             (its HP bar infinite, a Stun intent, still standing in its
             knockout pose), then its explosion the next turn
+  tent      Miniature Tent: resting leaves the Smith beside Proceed (the
+            synchronizer keeps the options), then the Smith's upgrade
+  uproar    Uproar: its two hits, then an Attack from the draw pile played
+            (CardCmd.AutoPlay)
 
 Each writes OUT/scenario/<name>.jsonl and .log (content_coverage's Runner).
 """
@@ -626,6 +630,39 @@ def main():
         if bosses != [False, True]:
             case.status = "error"
             case.notes.append("the last act's two bosses were not both fought")
+    if not only or "tent" in only:
+        case = cc.Case("scenario", "tent")
+        lg = run.logic("scenario", "tent")
+        run.new_run(case, lg, character="Ironclad", seed="tent")
+        run.step(case, lg, {"cmd": "obtain", "relics": ["MINIATURE_TENT"]})
+        run.step(case, lg, {"cmd": "set_player", "hp": 20})
+        state = run.step(case, lg, {"cmd": "enter_room", "type": "rest_site"})
+        heal = [o for o in state.get("options") or [] if o.get("option_id") == "HEAL"]
+        if heal:
+            state = run.step(case, lg, {"cmd": "action", "action": "choose_option",
+                                        "args": {"option_index": heal[0]["index"]}})
+        left = [o.get("option_id") for o in state.get("options") or []]
+        if state.get("decision") != "rest_site" or "SMITH" not in left or not state.get("proceed"):
+            case.status = "error"
+            case.notes.append(f"after resting: {state.get('decision')} {left} proceed={state.get('proceed')}")
+        else:
+            smith = [o for o in state["options"] if o.get("option_id") == "SMITH"][0]
+            state = run.step(case, lg, {"cmd": "action", "action": "choose_option",
+                                        "args": {"option_index": smith["index"]}})
+            if state.get("decision") == "card_select":
+                state = run.step(case, lg, {"cmd": "action", "action": "select_cards", "args": {"indices": "0"}})
+            if state.get("decision") != "rest_site" or state.get("options"):
+                case.status = "error"
+                case.notes.append(f"after the smith: {state.get('decision')} {state.get('options')}")
+        run.finish(case, lg)
+    if not only or "uproar" in only:
+        case, lg, state = fight("uproar", "SHRINKER_BEETLE_WEAK")
+        run.step(case, lg, {"cmd": "set_player", "enemy_hp": 200})
+        state = run.step(case, lg, {"cmd": "get_state"})
+        before = state.get("draw_pile_count")
+        state = play(case, lg, state, "UPROAR")
+        case.notes.append(f"draw pile {before} -> {state.get('draw_pile_count')}")
+        run.finish(case, lg)
     bad = [c for c in run.cases if c.status != "ok"]
     # a case's status can change after it printed (the double boss checks)
     for c in bad:

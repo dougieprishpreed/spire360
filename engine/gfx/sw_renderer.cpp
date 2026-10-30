@@ -831,11 +831,14 @@ void SwRenderer::effect_pixel(const SwTexture* tex, float u, float v, int flags,
         float hx = 5.0f - fabsf(5.0f - fx), hy = 5.0f - fabsf(5.0f - fy);
         bool corner = hx + hy < 3.0f || !valid;
         for (int i = 0; i < 8 && i < circles; ++i) {
-            const float* d = &e.extra[(9 + i) * 4];
-            float circle = smoothstepf(d[0] * 0.5f, (d[0] + d[1]) * 0.5f, dist);
-            float pw = circle > 0 ? powf(circle, d[2]) : (d[2] == 0 ? 1.0f : 0.0f);
+            /* (shaders.cpp packs four circles to a vector: start, 1 / width,
+             * power, step) */
+            const float* d = &e.extra[(9 + (i / 4) * 4) * 4 + i % 4];
+            float t = clampf((dist - d[0]) * d[4], 0, 1);
+            float circle = t * t * (3 - 2 * t);
+            float pw = circle > 0 ? powf(circle, d[8]) : (d[8] == 0 ? 1.0f : 0.0f);
             float mask = (1 + (ns - 1) * pw) * (1 - circle);
-            mask = mask >= d[3] ? 1.0f : 0.0f;
+            mask = mask >= d[12] ? 1.0f : 0.0f;
             if (i == outer && corner) mask = 0;
             lastmask = mask;
             const float* next = &e.extra[(i + 1) * 4];

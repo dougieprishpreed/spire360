@@ -222,9 +222,10 @@ enum EffectId {
      * (its red, 1 outside the grid) and the borders where it differs from
      * a neighbour's (p3..5 the border colour); the ball's noise (tex0 at
      * the polar uv + (0, p6), tex1 at + (0, p7)) through p0 circles
-     * (extra: colours 0..8 then circle data 0..7) clipped at the grid's
-     * corners (p1: the outer circle, < 0 the inside); times the vertex
-     * colour. */
+     * (extra 0..8: the colours; 9..12 circles 0..3's starts, 1 / (end -
+     * start), powers and steps, 13..16 circles 4..7's; a step of -1 past
+     * the circles used) clipped at the grid's corners (p1: the outer
+     * circle, < 0 the inside); times the vertex colour. */
     EFFECT_SCRY = 40,
     /* shaders/crystal_sphere_item.gdshader: COLOR (vertex times texel) with
      * 0.75 added where |UV.x - UV.y - o| <= 0.17 and 0.5 where |UV.x - UV.y

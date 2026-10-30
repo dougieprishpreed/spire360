@@ -345,6 +345,9 @@ GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
       confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {
+    phase_at_ = -1;
+    shop_hand_ = false;
+    shop_hand_t_ = 0;
     ftue_ = NULL;
     ftue_node_ = NULL;
     ftue_frames_ = 0;
@@ -493,13 +496,34 @@ void GameClient::start_room_transition() {
 
 static Json sold_out(const Json& shop, const Json& steps);
 
+/* the client whose update runs (its screens' phase_mark calls) */
+static GameClient* g_updating = NULL;
+static void mark_phase(const char* what) {
+    if (g_updating) g_updating->phase(what);
+}
+
+/* update_profile: the time since the last mark, under what's name */
+void GameClient::phase(const char* what) {
+    if (phase_at_ < 0) return;
+    double now = load_trace_start();
+    if (now - phase_at_ >= 0.5)
+        update_profile_ += format("%s%s %.1f", update_profile_.empty() ? "" : ", ", what, now - phase_at_);
+    phase_at_ = now;
+}
+
 void GameClient::update(const PadState& pad) {
     std::string line;
     g_trace_step = "client: logic answers";
+    update_profile_.clear();
+    phase_at_ = load_trace_start();
+    g_updating = this;
+    set_phase_mark(phase_at_ >= 0 ? mark_phase : NULL);
     while (link_->poll(line)) {
         if (line.empty() || line[0] != '{') continue; /* not protocol */
+        phase("read");
         std::string err;
         Json msg = Json::parse(line.c_str(), line.size(), &err);
+        phase("parse");
         if (!err.empty()) {
             log_warn("logic: unreadable line (%s)", err.c_str());
             continue;
@@ -529,7 +553,23 @@ void GameClient::update(const PadState& pad) {
             if (msg["preload"].size()) lib_->warm(msg["preload"]);
             bool changed_room = !decision_.is_null() && msg["decision"].str() != "map_select" &&
                 msg["context"]["total_floor"].i() != decision_["context"]["total_floor"].i();
-            if ((!transition_ || transition_->phase == 0) && changed_room) start_room_transition();
+            /* the same floor's room changes the game fades through black
+             * too: an event's fight (RunManager.EnterRoomWithoutExiting-
+             * CurrentRoom, fadeToBlack unless the event is laid out as a
+             * fight), and back to the event once it is won
+             * (ResumePreviousRoom); they cut straight across (the
+             * Battleworn Dummy) */
+            const std::string& was_room = decision_["context"]["room_type"].str();
+            const std::string& now_room = msg["context"]["room_type"].str();
+            bool same_floor = !decision_.is_null() &&
+                msg["context"]["total_floor"].i() == decision_["context"]["total_floor"].i();
+            bool was_fight = was_room == "Monster" || was_room == "Elite" || was_room == "Boss";
+            bool now_fight = now_room == "Monster" || now_room == "Elite" || now_room == "Boss";
+            bool event_fight = same_floor && decision_["decision"].str() == "event_choice" &&
+                decision_["layout"].str() != "Combat" && msg["decision"].str() == "combat_play" && now_fight;
+            bool back_to_event = same_floor && was_fight && now_room == "Event";
+            if ((!transition_ || transition_->phase == 0) && (changed_room || event_fight || back_to_event))
+                start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
             else {
                 g_trace_step = "client: show";
@@ -862,6 +902,14 @@ void GameClient::auto_bar(const std::string& kind, const std::string& id) {
     if (bar) screen_->add_child(bar);
 }
 
+/* A cue of that type in the decision's steps (not marked). */
+static bool any_cue(const Json& d, const char* type) {
+    for (size_t i = 0; i < d["steps"].size(); ++i)
+        for (size_t k = 0; k < d["steps"][i].size(); ++k)
+            if (d["steps"][i][k]["t"].str() == type) return true;
+    return false;
+}
+
 /* A cue of that type in the decision's steps (marked used). */
 static bool has_cue(const Json& d, const char* type) {
     bool found = false;
@@ -910,6 +958,7 @@ void GameClient::show(const Json& d) {
     if (!previews->parent) tree_->root()->add_child(previews);
     deck_previews_->play(d["steps"], d["player"]["character"].str());
     play_global_cues(lib_, previews, d["steps"]);
+    phase("cues");
     /* NSimpleCardsViewScreen.ShowScreen (Pandora's Box): a capstone over
      * whatever comes next; Trial's Double Down: NAbandonRunConfirmPopup
      * (NModalContainer) over the event */
@@ -966,21 +1015,34 @@ void GameClient::show(const Json& d) {
         last_combat_ = d;
         target_ = -1;
         combat_->update_decision(d);
-        Node* old_bar = screen_->get_node("TopBarLayer");
-        if (old_bar) { screen_->remove_child(old_bar); delete old_bar; }
+        phase("fight");
         /* HP and gold as before the steps (their cues move them); the
          * potions as now (PotionModel.RemoveBeforeUse empties a slot as the
          * potion is used, a new one drops in) */
-        Json bar_state = d;
         Json bar_player = prev_player;
         bar_player.set("potions", d["player"]["potions"]);
         /* the relics as now too: their counters and status */
         bar_player.set("relics", d["player"]["relics"]);
-        bar_state.set("player", bar_player);
-        Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
-        if (bar) screen_->add_child(bar);
-        if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
+        /* the bar as it stands when this one's would be the same (most of
+         * a fight's cards change nothing on it: a new one was a tenth of
+         * the console's time for a card played); a save's indicator, a
+         * full belt's shake need a new one */
+        Json made_from;
+        made_from.set("player", bar_player);
+        made_from.set("context", d["context"]);
+        Node* old_bar = screen_->get_node("TopBarLayer");
+        if (!old_bar || made_from != bar_made_from_ || any_cue(d, "saved") || any_cue(d, "potion_full")) {
+            if (old_bar) { screen_->remove_child(old_bar); delete old_bar; }
+            Json bar_state = d;
+            bar_state.set("player", bar_player);
+            Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
+            if (bar) screen_->add_child(bar);
+            if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
+            bar_made_from_ = made_from;
+        }
+        phase("top bar");
         potions_.attach(screen_, d["player"]);
+        phase("potions");
         return;
     }
     if (combat_ && prev_kind == "combat_play" && (kind == "rewards" || kind == "game_over") && d["steps"].size() > 0) {
@@ -1042,9 +1104,11 @@ void GameClient::show(const Json& d) {
         shop_open_ = shop->inventory_open();
         shop_kind_ = shop->focused_kind();
         shop_index_ = shop->focused_index();
+        shop_hand_ = shop->hand_state(&shop_hand_pos_, &shop_hand_t_);
     }
     /* the same room's next decision: its screen's loops carry on */
     loops_.clear();
+    drop_held_particles();
     {
         const Json& now = d["context"];
         const Json& was = decision_["context"];
@@ -1056,6 +1120,7 @@ void GameClient::show(const Json& d) {
     choices_ = choices(d);
     focus_ = 0;
     ++decisions_;
+    phase("loops");
     if (screen_) {
         screen_->parent->remove_child(screen_);
         delete screen_;
@@ -1069,6 +1134,7 @@ void GameClient::show(const Json& d) {
     room_ = kept_room;
     delete behind_;
     behind_ = NULL;
+    phase("old screen");
     target_ = -1;
     std::string err;
     if (kind == "rewards") {
@@ -1217,6 +1283,7 @@ void GameClient::show(const Json& d) {
         bool again = prev_kind == "shop" || prev_kind == "card_select";
         s->set_state(again && shop_open_, shop_kind_, shop_index_);
         s->set_again(again);
+        if (again && shop_open_ && shop_hand_) s->set_hand_state(shop_hand_pos_, shop_hand_t_);
         if (shop_auto_) s->set_auto(auto_steps_);
         ported_ = s;
         screen_ = s->build(d, &err);
@@ -1286,13 +1353,16 @@ void GameClient::show(const Json& d) {
     }
     plain_ = !screen_;
     if (!screen_) screen_ = plain_screen(d);
+    phase(kind.c_str());
     /* The top bar over every screen of the run. */
+    bar_made_from_ = Json();
     if (d["player"].is_object() && kind != "game_over") {
         Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
         if (bar) screen_->add_child(bar);
         /* Player.AddPotionFailed: NPotionContainer.PlayAddFailedAnim */
         if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
     }
+    phase("top bar");
     /* The room's screen shake target, unless a fight's room holds it. */
     if (ported_ && ported_->shake_target() && !ScreenShake::get().target())
         screen_->add_child(make_shake_driver(ported_->shake_target()));
@@ -1302,8 +1372,11 @@ void GameClient::show(const Json& d) {
     if (kind == "event_choice")
         for (size_t i = 0; i < room_vfx_.size(); ++i) add_room_vfx(lib_, screen_, room_vfx_[i]);
     potions_.attach(screen_, d["player"]);
+    phase("room cues, potions");
     if (!loops_.empty()) restore_loops(screen_, anim_path("", screen_, 0));
     loops_.clear();
+    drop_held_particles();
+    phase("loops");
     tree_->root()->add_child(screen_);
     if (deck_previews_) {
         Node* previews = deck_previews_->layer();
@@ -1314,6 +1387,12 @@ void GameClient::show(const Json& d) {
         tree_->root()->remove_child(transition_); tree_->root()->add_child(transition_);
     }
     refresh_plain_screen();
+}
+
+void GameClient::drop_held_particles() {
+    for (std::map<std::string, Particles2D*>::iterator i = held_particles_.begin(); i != held_particles_.end(); ++i)
+        delete i->second;
+    held_particles_.clear();
 }
 
 /* A room's screen is rebuilt for each of its decisions (a purchase, an
@@ -1340,7 +1419,12 @@ void GameClient::collect_loops(Node* n, const std::string& path) {
         if (!a.empty()) loops_[path] = std::make_pair(a, ((AnimationPlayer*)n)->position());
     } else if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") {
         Particles2D* p = (Particles2D*)n;
-        if (p->emitting && !p->one_shot) loops_[path] = std::make_pair(std::string("particles"), p->clock());
+        if (p->emitting && !p->one_shot) {
+            loops_[path] = std::make_pair(std::string("particles"), p->clock());
+            std::map<std::string, Particles2D*>::iterator h = held_particles_.find(path);
+            if (h != held_particles_.end()) delete h->second;
+            held_particles_[path] = Particles2D::take(*p);
+        }
     }
     for (size_t i = 0; i < n->children.size(); ++i) collect_loops(n->children[i], anim_path(path, n->children[i], i));
 }
@@ -1357,11 +1441,15 @@ void GameClient::restore_loops(Node* n, const std::string& path) {
         std::map<std::string, std::pair<std::string, double> >::const_iterator it = loops_.find(path);
         if (it != loops_.end()) ((AnimationPlayer*)n)->resume(it->second.first, it->second.second);
     } else if (n->type == "GPUParticles2D" || n->type == "CPUParticles2D") {
-        /* a new emitter fills from empty: warmed up as long as the old one
-         * ran (a lifetime at most), so it shows as full as it was */
+        /* the old emitter's particles carry on in the new one; one that
+         * differs fills from empty, warmed up as long as the old one ran (a
+         * lifetime at most), so it shows as full as it was */
         std::map<std::string, std::pair<std::string, double> >::const_iterator it = loops_.find(path);
         Particles2D* p = (Particles2D*)n;
-        if (it != loops_.end() && p->emitting && !p->one_shot) {
+        std::map<std::string, Particles2D*>::iterator h = held_particles_.find(path);
+        if (h != held_particles_.end() && p->emitting && !p->one_shot && p->adopt(*h->second)) {
+            /* adopted */
+        } else if (it != loops_.end() && p->emitting && !p->one_shot) {
             double run = it->second.second, life = p->lifetime * (1.0 + p->lifetime_randomness);
             if (run > p->preprocess) p->preprocess = run < life ? run : life;
         }

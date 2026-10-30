@@ -1659,8 +1659,12 @@ void CombatScreen::process(double dt) {
         }
     }
     /* The steps' cues as their time comes; the damage numbers fly
-     * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). */
-    if (!paused_) cue_t_ += dt;
+     * (NDamageNumVfx._Process: velocity, gravity 2000 px/s2). The cues'
+     * clock moves a thirtieth of a second a frame at most: a long frame
+     * (a first use's load, the decision's own frame) fired every cue it
+     * covered at once, a turn's end of orbs and burns together, where
+     * the game's frames keep them apart; a hitch delays them instead. */
+    if (!paused_) cue_t_ += dt < 1.0 / 30.0 ? dt : 1.0 / 30.0;
     life_t_ += dt;
     if (radial_off_at_ > 0 && life_t_ >= radial_off_at_) {
         radial_off_at_ = 0;
@@ -2537,6 +2541,7 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
     end_play();
     if (tips_) { root_->remove_child(tips_); delete tips_; tips_ = NULL; }
     tips_for_ = -2;
+    phase_mark("fight: copies");
     if (!finishing) {
         std::vector<Creature> next;
         std::vector<std::string> who;
@@ -2620,8 +2625,11 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
     } else {
         add_summoned(d["steps"], root_->find_unique("EnemyContainer"));
     }
+    phase_mark("fight: creatures");
     play_steps(d["steps"], d, finishing);
+    phase_mark("fight: steps");
     if (!finishing) refresh_tips();
+    phase_mark("fight: tips");
 }
 
 void CombatScreen::show_aftermath(const Json& player) {
