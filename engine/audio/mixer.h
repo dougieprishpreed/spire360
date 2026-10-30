@@ -36,6 +36,7 @@ private:
     AudioMixer& operator=(const AudioMixer&);
     struct Voice;
     Voice* find(u32 id);
+    bool start_pending(Voice& v, int frames);
     const Pack* pack_;
     u32 rate_, next_id_;
     bool paused_;

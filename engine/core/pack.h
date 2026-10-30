@@ -44,6 +44,9 @@ public:
     const PackEntry* find(const char* name) const;
     bool read(const PackEntry* e, std::vector<u8>& out) const;
     bool read(const char* name, std::vector<u8>& out) const;
+    /* read, ahead of the others: their next pieces wait while it runs (a
+     * sound a voice waits on goes before the textures being read) */
+    bool read_urgent(const PackEntry* e, std::vector<u8>& out) const;
     /* A texture entry read straight into out's levels (no second copy of a
      * 10 MB background in the heap, as parse_texture of read's makes). */
     bool read_texture(const char* name, TextureData& out) const;
@@ -63,11 +66,14 @@ public:
     static bool parse_texture_size(const std::vector<u8>& head, int* w, int* h, int* orig_w, int* orig_h);
 
 private:
-    /* n bytes at off, in pieces of PIECE, lock_ taken for each */
-    bool read_span(u64 off, void* buf, size_t n) const;
+    /* n bytes at off, in pieces of PIECE, lock_ taken for each; urgent: the
+     * others hold off between theirs until it is done */
+    bool read_span(u64 off, void* buf, size_t n, bool urgent = false) const;
     FILE* f_;
     /* read / read_head seek and read f_: the audio thread reads too */
     mutable Mutex lock_;
+    /* urgent reads under way (read_urgent) */
+    mutable volatile long urgent_;
     std::string path_;
     u32 flags_;
     std::string game_version_;

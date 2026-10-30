@@ -83,6 +83,8 @@ private:
 };
 
 void sleep_ms(int ms);
+/* A monotonic clock in milliseconds (the start is arbitrary). */
+double clock_ms();
 
 /* Where the main thread is, for a watchdog on another thread (the console
  * build logs it when a frame hangs): the frame loop's phase, the client's

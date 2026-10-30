@@ -672,10 +672,14 @@ struct AudioEvents::Impl {
     Bank* load(const std::string& name) {
         if (banks.count(name)) return banks[name];
         double started = load_trace_start();
+        double t0 = clock_ms();
         Bank* bank = new Bank; bank->name = name;
         if (!read_json(pack, "audio/runtime/" + name + ".json", bank->doc)) { delete bank; return NULL; }
         banks[name] = bank;
         load_traced("bank", name, started);
+        /* read and parsed under the lock, the mix waiting (AudioEvents::
+         * preload is the way round it): which, and how long */
+        log_info("audio: bank %s read as a sound played (%.0f ms)", name.c_str(), clock_ms() - t0);
         return bank;
     }
     Bank* bank_for(const std::string& path) {

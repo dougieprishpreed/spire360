@@ -20,7 +20,7 @@ u64 fnv1a64(const char* s) {
     return h;
 }
 
-Pack::Pack() : f_(NULL), flags_(0) {}
+Pack::Pack() : f_(NULL), urgent_(0), flags_(0) {}
 Pack::~Pack() { close(); }
 
 void Pack::close() {
@@ -134,25 +134,36 @@ const char* Pack::name_of(const PackEntry* e) const {
  * half a second: the mix ran dry (crackles; the music stopped for seconds). */
 enum { PIECE = 256 * 1024 };
 
-bool Pack::read_span(u64 off, void* buf, size_t n) const {
+bool Pack::read_span(u64 off, void* buf, size_t n, bool urgent) const {
     u8* p = (u8*)buf;
-    while (n) {
+    if (urgent) atomic_add(&urgent_, 1);
+    bool ok = true;
+    while (n && ok) {
         size_t k = n < (size_t)PIECE ? n : (size_t)PIECE;
+        /* a sound's read goes first: a voice waits on it */
+        while (!urgent && urgent_ > 0) sleep_ms(1);
         {
             ScopedLock lock(lock_);
-            if (!read_at(f_, off, p, k)) return false;
+            ok = read_at(f_, off, p, k);
         }
         off += k;
         p += k;
         n -= k;
     }
-    return true;
+    if (urgent) atomic_add(&urgent_, -1);
+    return ok;
 }
 
 bool Pack::read(const PackEntry* e, std::vector<u8>& out) const {
     if (!e || !f_) return false;
     out.resize(e->size);
     return e->size == 0 || read_span(e->offset, &out[0], e->size);
+}
+
+bool Pack::read_urgent(const PackEntry* e, std::vector<u8>& out) const {
+    if (!e || !f_) return false;
+    out.resize(e->size);
+    return e->size == 0 || read_span(e->offset, &out[0], e->size, true);
 }
 
 bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {

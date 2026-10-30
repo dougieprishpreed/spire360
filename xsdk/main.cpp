@@ -26,6 +26,7 @@
 
 #include "../engine/core/heap.h"
 #include "../engine/core/pack.h"
+#include "../engine/audio/decoder.h"
 #include "../engine/audio/game_audio.h"
 #include "../engine/game/game.h"
 #include "../engine/game/game_client.h"
@@ -475,8 +476,8 @@ int main() {
     lib->set_audio(&audio);
     if (!audio.open_output()) logf("audio: xsdk's audio output unavailable");
     /* The mix on hardware thread 4 (core 2): the frame loop keeps core 0,
-     * the logic core 1 */
-    else if (!audio.start_thread(4)) logf("audio: no audio thread (mixed in the frame loop)");
+     * the logic core 1; the sounds read on 5 */
+    else if (!audio.start_thread(4, 5)) logf("audio: no audio thread (mixed in the frame loop)");
     Thread watchdog;
     watchdog_open();
     watchdog.start(watchdog_main, NULL, 5);
@@ -525,6 +526,8 @@ int main() {
     VkRenderer::LayerCounts was = renderer->layer_counts(); /* at the 600 frames' start */
     std::vector<HeldLoad> frame_loads;
     bool low_logged = false, logic_ended = false;
+    unsigned silent_logged = 0;
+    double silent_at = -1e9;
     for (;;) {
         /* Any controller plays: on a console the pad can be signed in to
          * any of the four slots. */
@@ -664,6 +667,15 @@ int main() {
             }
         }
         if (work > 16.7) ++slow;
+        /* the output played silence (the mix behind): when, at once, at
+         * most once a second */
+        AudioOutput::Stats as;
+        if (audio.output_stats(&as) && as.silent > silent_logged && f3 - silent_at > 1000) {
+            logf("audio: %u frames of silence (the mix behind) by frame %u, decision %d", as.silent - silent_logged,
+                 g_frame, game->decision_count());
+            silent_logged = as.silent;
+            silent_at = f3;
+        }
         if (++frames == 600) {
             unsigned free_mb = free_memory_mb();
             if (free_mb < least_free) least_free = free_mb;
@@ -677,6 +689,15 @@ int main() {
                  (unsigned)canvas->texture_count(), canvas->texture_bytes() / 1048576.0, ts.peak_bytes / 1048576.0,
                  ts.created, ts.evicted, ts.over_frames, ts.starved);
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
+            double mix_worst, mix_average;
+            int mixes;
+            audio.mix_times(&mix_worst, &mix_average, &mixes);
+            AudioDecoder::LoadStats loads = AudioDecoder::load_stats();
+            if (audio.output_stats(&as))
+                logf("audio: %u frames of silence in all, fewest queued %u of %u; mix %.2f ms a frame of 5.3 (worst %.2f, "
+                     "%d frames); %d sounds read (%.1f MB, the longest waited %.0f ms), %.1f MB kept",
+                     as.silent, as.fewest_queued, as.queue, mix_average, mix_worst, mixes, loads.loads,
+                     loads.bytes / 1048576.0, loads.longest_ms, loads.kept / 1048576.0);
             SceneLibrary::MemoryStats ms = lib->memory_stats();
             logf("heap: %.1f MB in use of %.1f MB held, big blocks %.1f MB; parsed scenes %.1f MB (%u files), "
                  "skeletons %.1f MB (%u, %u in use, %u let go), particle preprocesses kept %.1f MB",

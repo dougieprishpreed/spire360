@@ -100,6 +100,7 @@
 #include "../../engine/core/heap.h"
 #include "../../engine/core/pack.h"
 #include "../../engine/core/pack_reader.h"
+#include "../../engine/audio/decoder.h"
 #include "../../engine/audio/game_audio.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
@@ -1089,5 +1090,15 @@ int main(int argc, char** argv) {
                frame_times.worst[2]);
     if (audio.events().available()) printf("audio: %.0f voices started, %u absent event calls, %u decoder failures\n",
         (double)audio.events().started_voices(), audio.events().missing_events(), audio.events().failures());
+    if (audio_thread) {
+        /* the console's: the sounds the loader read, the mix's time */
+        double mix_worst, mix_average;
+        int mixes;
+        audio.mix_times(&mix_worst, &mix_average, &mixes);
+        AudioDecoder::LoadStats loads = AudioDecoder::load_stats();
+        printf("audio thread: %d sounds read (%.1f MB, the longest waited %.0f ms), %.1f MB kept; mix %.3f ms a frame "
+               "of 5.3 (worst %.2f)\n", loads.loads, loads.bytes / 1048576.0, loads.longest_ms, loads.kept / 1048576.0,
+               mix_average, mix_worst);
+    }
     return 0;
 }

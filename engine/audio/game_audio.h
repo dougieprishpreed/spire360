@@ -14,8 +14,15 @@ public:
     ~GameAudio();
     bool open_output(bool muted = false);
     /* The device fed from its own thread (the console's hardware thread
-     * hw_thread); update() then does nothing. After open_output. */
-    bool start_thread(int hw_thread);
+     * hw_thread); update() then does nothing. After open_output. The
+     * sounds read on a thread of their own (loader_hw_thread), none in the
+     * mix or under its lock. */
+    bool start_thread(int hw_thread, int loader_hw_thread = -1);
+    /* The mix's time for each 256 frames (5.3 ms of sound) since the last
+     * call: the worst, the average (ms), and how many. */
+    void mix_times(double* worst_ms, double* average_ms, int* count);
+    /* The output's own count (AudioOutput::stats). */
+    bool output_stats(AudioOutput::Stats* out) const { return output_.stats(out); }
     bool record(const char* path);
     void update(double seconds);
     void cue(const Json& cue);
@@ -60,6 +67,9 @@ private:
     friend class GameLock;
     Thread thread_;
     volatile bool stopping_;
+    /* the audio thread's renders (mix_times), under lock_ */
+    double mix_worst_, mix_total_, slow_logged_;
+    int mix_count_;
     bool dry_;
     static void thread_main(void* self);
 };

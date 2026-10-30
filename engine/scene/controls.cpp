@@ -734,7 +734,7 @@ bool CanvasGroup::set(const std::string& key, const Json& v, const PropCtx& ctx)
     else if (key == "clear_margin") {
     } else {
         bool ok = Node2D::set(key, v, ctx);
-        if (key == "material") refresh();
+        if (key == "material" || key == "self_modulate") refresh();
         return ok;
     }
     return true;
@@ -746,7 +746,12 @@ static bool mask_material(const MaterialRes* m) {
     return m->props && (*m->props)["shader_parameter/mask"].b();
 }
 
-void CanvasGroup::refresh() { clip_children = mask_material(material) ? 1 : 0; }
+/* A group through its mask (canvas_group_mask_blur), or through its own
+ * self_modulate's alpha: Godot draws the children into the group's buffer
+ * and the buffer with the group's modulate (TestSubject.SetColor's half
+ * transparent white while Intangible: the body seen through whole, not
+ * limb by limb). */
+void CanvasGroup::refresh() { clip_children = mask_material(material) || self_modulate.a < 0.999f ? 1 : 0; }
 
 /* The visible children's rects in its coordinates, grown by fit_margin. */
 Rect2 CanvasGroup::item_rect() const {
@@ -781,7 +786,13 @@ Rect2 CanvasGroup::item_rect() const {
  * the group's UV mapped onto mask_region (in the atlas's pixels) widened by
  * mask_offset; the atlas behind the texture is what the shader samples. */
 void CanvasGroup::draw(Canvas& c) {
-    if (!clip_children || !material || !material->props) return;
+    if (!clip_children) return;
+    if (!mask_material(material)) {
+        /* the buffer through self_modulate (the item's colour) */
+        c.draw_rect(item_rect(), Color(1, 1, 1, 1));
+        return;
+    }
+    if (!material->props) return;
     Resource* r = shader_param_resource(material, "mask_texture");
     if (!r || !r->is_texture()) return;
     Texture2DRes* atlas = (Texture2DRes*)r;

@@ -59,7 +59,7 @@ struct AudioOutput::Impl {
 #else
 struct AudioOutput::Impl {};
 #endif
-AudioOutput::AudioOutput() : impl_(NULL) {}
+AudioOutput::AudioOutput() : impl_(NULL), ahead_(0) {}
 AudioOutput::~AudioOutput() { close(); }
 void AudioOutput::close() { delete impl_; impl_ = NULL; }
 bool AudioOutput::open(u32 rate, bool silent) {
@@ -102,7 +102,7 @@ bool AudioOutput::open(u32 rate, bool silent) {
     impl_ = p;
     return true;
 #elif defined(SPIRE_XSDK_OUTPUT)
-    if (rate != XSDK_AUDIO_RATE_HZ || xsdk_audio_open(XSDK_AUDIO_FRAMES_AHEAD_DEFAULT) != 0) return false;
+    if (rate != XSDK_AUDIO_RATE_HZ || xsdk_audio_open(ahead_ > 0 ? (u32)ahead_ : 0) != 0) return false;
     impl_ = new Impl;
     impl_->silent = silent;
     return true;
@@ -162,8 +162,25 @@ bool AudioOutput::submit(const float* data, int frames) {
 void AudioOutput::set_queue(int buffers) {
 #if defined(SPIRE_XAUDIO_OUTPUT)
     if (impl_) impl_->queue = buffers < 1 ? 1 : buffers > 15 ? 15 : (unsigned)buffers;
+#elif defined(SPIRE_XSDK_OUTPUT)
+    ahead_ = buffers < 1 ? 1 : buffers > XSDK_AUDIO_FRAMES_AHEAD_MAX ? XSDK_AUDIO_FRAMES_AHEAD_MAX : buffers;
 #else
     (void)buffers;
+#endif
+}
+bool AudioOutput::stats(Stats* out) const {
+#if defined(SPIRE_XSDK_OUTPUT)
+    if (!impl_) return false;
+    XsdkAudioStats st;
+    xsdk_audio_stats(&st);
+    out->played = st.played;
+    out->silent = st.silent;
+    out->fewest_queued = st.fewest_queued;
+    out->queue = ahead_ > 0 ? (u32)ahead_ : (u32)XSDK_AUDIO_FRAMES_AHEAD_DEFAULT;
+    return true;
+#else
+    (void)out;
+    return false;
 #endif
 }
 u64 AudioOutput::played_frames() const {

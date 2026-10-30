@@ -326,6 +326,15 @@ internal static class StandIns
                     case "get_Hitbox": return Hitbox(cr);
                     case "StartDeathAnim":
                         if (a.Length > 1 && a[1] is bool remove && !remove) Steps.MarkDeathKept(Steps.Who(cr));
+                        // its death sound, which the game plays there (with a
+                        // skeleton) and nowhere else: every monster's death was
+                        // silent, the Phrog Parasite's burst into Wrigglers too
+                        if (AnimLengths.HasSkeleton(cr))
+                        {
+                            if (cr.Monster != null && cr.Monster.HasDeathSfx)
+                                MegaCrit.Sts2.Core.Commands.SfxCmd.PlayDeath(cr.Monster);
+                            if (cr.Player != null) MegaCrit.Sts2.Core.Commands.SfxCmd.PlayDeath(cr.Player);
+                        }
                         return DeathAnimLength(cr);
                 }
             }

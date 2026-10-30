@@ -821,6 +821,23 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     return NULL;
 }
 
+/* A new player turn that began with the hand empty: the decision before's
+ * hand less the cards that left it before the turn's round cue (the end of
+ * the turn's discards, Ethereal's exhausts); false without a new turn. */
+static bool turn_began_empty(const Json& before, const Json& d) {
+    int left = (int)before["hand"].size();
+    const Json& steps = d["steps"];
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& c = steps[i][k];
+            if (c["t"].str() == "round") return left <= 0;
+            if (c["t"].str() != "card") continue;
+            if (c["from"].str() == "hand") --left;
+            else if (c["to"].str() == "hand") ++left;
+        }
+    return false;
+}
+
 /* The first cue of that type in the decision's steps; NULL: none. */
 static const Json* cue_of(const Json& d, const char* type) {
     for (size_t i = 0; i < d["steps"].size(); ++i)
@@ -1028,13 +1045,16 @@ void GameClient::show(const Json& d) {
         bar_state.set("player", bar_player);
         Json made_from = top_bar_key(bar_state);
         Node* old_bar = screen_->get_node("TopBarLayer");
-        if (!old_bar || made_from != bar_made_from_ || any_cue(d, "saved") || any_cue(d, "potion_full")) {
+        /* HP and the relics' counters and status changed: set in place (a
+         * relic counting the cards played changed it for most of them) */
+        bool same = old_bar && (made_from == bar_made_from_ || refresh_top_bar(old_bar, made_from, bar_made_from_));
+        if (!same || any_cue(d, "saved") || any_cue(d, "potion_full")) {
             if (old_bar) { screen_->remove_child(old_bar); delete old_bar; }
             Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
             if (bar) screen_->add_child(bar);
             if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
-            bar_made_from_ = made_from;
         }
+        bar_made_from_ = made_from;
         phase("top bar");
         potions_.attach(screen_, d["player"]);
         phase("potions");
@@ -1317,6 +1337,12 @@ void GameClient::show(const Json& d) {
             hand_focus_ = 0;
         }
         Json before = prev_kind == "combat_play" ? last_combat_ : Json();
+        /* each turn the same: CombatManager.StartTurn enables the hand
+         * (AnimEnable) before its draw, and an empty hand's container gives
+         * the first card drawn the focus; cards kept from the turn before
+         * keep the index (DefaultFocusedControl). The index kept from the
+         * last turn's moves put it anywhere, mid-draw over a reshuffle too. */
+        if (turn_began_empty(before, d)) hand_focus_ = 0;
         last_combat_ = d;
         if (continuing) {
             combat_ = room_;
@@ -1932,12 +1958,15 @@ bool GameClient::piles_input(const PadState& pad) {
     if (piles_asked_ || waiting_ || decision_.is_null() || game_over() || potions_.active()) return false;
     if (combat_ && (combat_->busy() || target_ >= 0)) return false;
     const std::string& kind = decision_["decision"].str();
-    if (kind == "card_select" || kind == "card_reward") return false;
+    /* a card reward or a card selection (Quasar's choice in a fight): the
+     * deck only, NTopBarDeckButton's hotkey over the screen (a pick wants
+     * the deck in view); the map and the fight's piles are not */
+    bool choosing = kind == "card_select" || kind == "card_reward";
     const char* pile = NULL;
     unsigned button = 0;
     /* the top bar's map and deck buttons' hotkeys: NButton's ui_click (the
      * combat piles, NCombatCardPile, play none) */
-    if ((pad.pressed & PadState::BACK) && kind != "map_select") {
+    if ((pad.pressed & PadState::BACK) && kind != "map_select" && !choosing) {
         if (lib_->audio()) {
             lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
             lib_->audio()->ui("event:/sfx/ui/map/map_open");
@@ -1950,13 +1979,13 @@ bool GameClient::piles_input(const PadState& pad) {
     if (pad.pressed & PadState::LB) {
         pile = "deck";
         button = PadState::LB;
-    } else if (combat_ && (pad.pressed & PadState::LT)) {
+    } else if (combat_ && !choosing && (pad.pressed & PadState::LT)) {
         pile = "draw";
         button = PadState::LT;
-    } else if (combat_ && (pad.pressed & PadState::RT)) {
+    } else if (combat_ && !choosing && (pad.pressed & PadState::RT)) {
         pile = "discard";
         button = PadState::RT;
-    } else if (combat_ && (pad.pressed & PadState::RB) && decision_["exhaust_pile_count"].i() > 0) {
+    } else if (combat_ && !choosing && (pad.pressed & PadState::RB) && decision_["exhaust_pile_count"].i() > 0) {
         pile = "exhaust";
         button = PadState::RB;
     }

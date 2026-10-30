@@ -163,7 +163,7 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Rect2 item_rect() const;
     virtual void draw(Canvas& c);
-    /* Follows the material (call after changing it). */
+    /* Follows the material and self_modulate (call after changing them). */
     void refresh();
 };
 

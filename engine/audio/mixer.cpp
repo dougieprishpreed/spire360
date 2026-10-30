@@ -16,9 +16,32 @@ struct AudioMixer::Voice {
     u32 gain_frames;
     double fraction;
     bool next_valid, alive, stop_after_ramp;
+    /* its sound still being read (AudioDecoder::pending): where and how it
+     * was asked to start, the output frames since */
+    bool pending;
+    u32 offset, start, end;
+    int loop_count;
+    double waited;
     Voice() : buffer(4096), id(0), cursor(0), loop_start(0), loop_end(0), loops(0), used(0), count(0),
         left(0), right(0), next_left(0), next_right(0), gain(1), gain_step(0), pitch(1), gain_frames(0),
-        fraction(0), next_valid(false), alive(true), stop_after_ramp(false) {}
+        fraction(0), next_valid(false), alive(true), stop_after_ramp(false), pending(false), offset(0), start(0),
+        end(0), loop_count(0), waited(0) {}
+    /* From frame `at` of its open sound, looping start..end loop_count
+     * times; false and why if it cannot. */
+    bool begin(u32 at, const char** failure) {
+        if (at >= decoder.frames()) { *failure = "start past the end"; return false; }
+        if (!decoder.seek(at)) { *failure = "cannot seek"; return false; }
+        if (loop_count != 0) {
+            u32 e = end ? end : decoder.frames();
+            if (start >= e || e > decoder.frames() || at >= e) { *failure = "bad loop region"; return false; }
+            loop_start = start; loop_end = e; loops = loop_count;
+        }
+        cursor = at;
+        if (!fetch(left, right)) { *failure = "cannot decode"; return false; }
+        next_valid = fetch(next_left, next_right);
+        if (!next_valid) { next_left = left; next_right = right; }
+        return true;
+    }
     bool fetch(float& l, float& r) {
         if (cursor == loop_end && loops != 0) {
             if (!decoder.seek(loop_start)) return false;
@@ -70,32 +93,19 @@ u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start
     }
     Voice* v = new Voice;
     v->path = path;
+    v->offset = offset;
+    v->start = start;
+    v->end = end;
+    v->loop_count = loops;
+    v->gain = maxf(gain, 0);
+    v->pitch = clampf(ratio, 0.125f, 8);
     if (!v->decoder.open(*pack_, path)) failure_ = "cannot open";
-    else if (offset >= v->decoder.frames()) failure_ = "start past the end";
-    else if (!v->decoder.seek(offset)) failure_ = "cannot seek";
+    else if (v->decoder.pending()) v->pending = true;
+    else v->begin(offset, &failure_);
     if (*failure_) {
         delete v;
         return 0;
     }
-    if (loops != 0) {
-        if (!end) end = v->decoder.frames();
-        if (start >= end || end > v->decoder.frames() || offset >= end) {
-            failure_ = "bad loop region";
-            delete v;
-            return 0;
-        }
-        v->loop_start = start; v->loop_end = end; v->loops = loops;
-    }
-    v->cursor = offset;
-    v->gain = maxf(gain, 0);
-    v->pitch = clampf(ratio, 0.125f, 8);
-    if (!v->fetch(v->left, v->right)) {
-        failure_ = "cannot decode";
-        delete v;
-        return 0;
-    }
-    v->next_valid = v->fetch(v->next_left, v->next_right);
-    if (!v->next_valid) { v->next_left = v->left; v->next_right = v->right; }
     v->id = next_id_++;
     if (!next_id_) ++next_id_;
     voices_.push_back(v);
@@ -131,7 +141,7 @@ bool AudioMixer::playing(u32 id) const {
 double AudioMixer::remaining(u32 id) const {
     for (size_t i = 0; i < voices_.size(); ++i) if (voices_[i]->id == id) {
         const Voice& v = *voices_[i];
-        if (v.loops < 0) return -1;
+        if (v.loops < 0 || v.pending) return -1;
         double frames = (double)v.decoder.frames() - v.cursor + (v.next_valid ? 2 : 1) - v.fraction;
         frames += (double)v.loops * (v.loop_end - v.loop_start);
         return frames / (v.decoder.rate() * v.pitch);
@@ -167,6 +177,47 @@ void AudioMixer::stop_all(double seconds) {
         voices_.clear();
     }
 }
+/* A voice whose sound was being read: started once it is (false: not this
+ * time). A stream (music, ambience) keeps to its timeline, from where it
+ * would be by now; a sound effect starts late, but not a second late. */
+bool AudioMixer::start_pending(Voice& v, int frames) {
+    if (v.stop_after_ramp) {
+        v.alive = false;
+        return false;
+    }
+    if (v.gain_frames) {
+        u32 k = v.gain_frames < (u32)frames ? v.gain_frames : (u32)frames;
+        v.gain += v.gain_step * (float)k;
+        v.gain_frames -= k;
+    }
+    if (!v.decoder.poll()) {
+        if (v.decoder.pending() && (v.decoder.big() || v.waited < rate_)) {
+            v.waited += frames;
+            return false;
+        }
+        log_warn("audio voice not started: %s (%s)", v.path.c_str(), v.decoder.pending() ? "read too late" : "cannot read");
+        v.alive = false;
+        return false;
+    }
+    v.pending = false;
+    double at = v.offset;
+    if (v.decoder.big()) {
+        at += v.waited * v.decoder.rate() * v.pitch / rate_;
+        u32 e = v.loop_count != 0 && v.end ? v.end : v.decoder.frames();
+        while (v.loop_count != 0 && at >= e && e > v.start) {
+            at -= e - v.start;
+            if (v.loop_count > 0) --v.loop_count;
+        }
+    }
+    const char* why = "";
+    if (at >= v.decoder.frames() || !v.begin((u32)at, &why)) {
+        if (*why) log_warn("audio voice not started: %s (%s)", v.path.c_str(), why);
+        v.alive = false;
+        return false;
+    }
+    return true;
+}
+
 size_t AudioMixer::buffer_bytes() const {
     size_t bytes = 0;
     for (size_t i = 0; i < voices_.size(); ++i) bytes += voices_[i]->buffer.size() * sizeof(float);
@@ -178,6 +229,7 @@ void AudioMixer::render(float* out, int frames) {
     if (paused_) return;
     for (size_t i = 0; i < voices_.size(); ++i) {
         Voice& v = *voices_[i];
+        if (v.pending && !start_pending(v, frames)) continue;
         double step = (double)v.decoder.rate() * v.pitch / rate_;
         for (int f = 0; f < frames && v.alive; ++f) {
             float fraction = (float)v.fraction;

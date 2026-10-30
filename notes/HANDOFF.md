@@ -11,6 +11,116 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The sixth xSDK hardware run (2026-10-30): the sound's stalls, the reports
+
+The run (work/rp103, build d3e49de): the Necrobinder run's end (floor 45 to
+The Architect), then a Regent run to floor 19. The user's reports: the music
+dropping out or crackling in slow moments (the Test Subject fight, Eradicate),
+the Test Subject's Intangible not see-through and hit for 5, its phase's end
+shown as its skeleton until the next hit, no sound or effect as the Phrog
+Parasite bursts into Wrigglers, LB doing nothing over a card reward or a
+fight's card choice (Quasar), the hand's focus after a draw with a shuffle,
+the music after the act 1 boss's last blow, the Act 1 shop's transition, the
+map's wind after a rest site, Pael's Tooth's removal silent, the rest site's
+second option without its focus outline (Miniature Tent), the relic row's
+focus; questions (the knight's Hex without a bubble, the Regent's attack, a
+Strike at 4 after Prowess under Shrink). The cache partition: asked about.
+
+The sound (the main report):
+
+- What stalled the mix: a Vorbis decoder's setup (stb_vorbis_open_memory, its
+  codebooks) for every voice, 11-53 ms each on the PC (DBGMIX timing, since
+  removed), several times that on the console, on the audio thread (cues the
+  mix runs) or under its lock (the game thread's cues); a card like
+  Eradicate starts a dozen sounds. And the reads: a sound up to 512 KB read
+  whole at its first play under the lock, the longer ones (music, ambience)
+  streamed with fread from the mix, each waiting behind a texture's piece.
+  The console's feeder holds 43 ms (set_queue never reached it: xSDK's
+  queue is xsdk_audio_open's frames ahead).
+- AudioDecoder::start_loader (GameAudio::start_thread, hardware thread 5):
+  every sound read whole on a thread of its own (Pack::read_urgent: the
+  textures' reads hold off between their pieces while one runs), one with
+  up to 2 MB of samples decoded there to 16-bit samples (a voice starts at
+  once), a longer one (the music's stems, 2-3.5 MB of Vorbis) kept as it is
+  and each voice's decoder set up there (OpenJob). A voice before that is
+  pending (AudioMixer::start_pending): a stream keeps to its timeline (from
+  where it would be by now), an effect starts late (not a second late).
+  32 MB kept (KEPT_BUDGET), the least recently played that no voice reads
+  going first. On the PC (spire_play --audio-thread, the Regent's act 1):
+  414 sounds read, the longest wait 99 ms, the mix 0.33 ms a 5.3 ms frame
+  (0.53 before).
+- The feeder's frames ahead 12 (64 ms), set before it opens.
+- The log: "audio: N frames of silence (the mix behind) by frame F,
+  decision D" as it happens (xsdk_audio_stats); each 600 frames the
+  silence in all, the fewest queued, the mix's average and worst, the
+  sounds read and the longest wait, the bytes kept; "audio: a mix of 5.3 ms
+  took N ms (voices)" past 40 ms; "audio: bank X read as a sound played".
+- The cache partition (the user's question): retail titles get a "cache:"
+  utility drive in the HDD's reserved partition (XMountUtilityDrive), the
+  dashboard's to wipe; the drive was not the bottleneck (the setup was), and
+  RAM holds what the mix needs now.
+
+The reports:
+
+- The Test Subject: the anim.trigger hook dropped a dead creature's
+  triggers, so DeadTrigger (knockout1, knocked_out_loop1) and RespawnTrigger
+  never reached the client and "die" (the skeleton) stayed until the next
+  Hit. TriggerAnim drops only a dead player's; a dead monster's Hit is still
+  dropped (the death cue comes before it here, the game's die after it).
+- Intangible: TestSubject.SetColor's half-transparent white on its
+  %CanvasGroup was set, but our CanvasGroup drew its children straight: a
+  CanvasGroup whose self_modulate is not opaque is now a group (the
+  clip_children path) composited through a white rect in that colour
+  (CanvasGroup::refresh/draw). The 5 damage: The Boot
+  (ModifyHpLostAfterOstyLate raises 1 to 5, after Intangible's cap): the
+  game's.
+- Monster deaths were silent: SfxCmd.PlayDeath is called only in
+  NCreature.StartDeathAnim, a stand-in here; it plays there now (with a
+  skeleton, as the game). The Phrog Parasite's burst is its death sound and
+  animation; the Wrigglers are shown after the death animation as the
+  game's InfestedPower does.
+- LB over a card reward or a card selection (in a fight too) opens the
+  deck (NTopBarDeckButton's hotkey); the map and the fight's piles stay
+  closed there.
+- The hand's focus: CombatManager.StartTurn enables the hand before its
+  draw, and an empty hand's container gives the first card drawn the focus
+  (AddCardHolder); the index kept from the turn before put it anywhere
+  (turn_began_empty).
+- The boss's track: PlayCustomMusic at the fight's start, and nothing stops
+  it (StopCustomMusic is never called) until the next act's UpdateMusic: the
+  logic's context keeps it (_customMusic); the act track came back at the
+  killing blow.
+- The fight's top bar: still made again for 200 of 274 card plays (Tuning
+  Fork's counter, Ink Bottle's...): HP and the relics' counters and status
+  set in place (refresh_top_bar).
+- Not changed: the Spectral Knight's Hex has no TalkCmd; the Regent's
+  attacks are its two weapons' animations (NRegentVfx) as placed by the
+  scene; the relic row's focus is the icon at 1.25 and its tips (no box);
+  Shrink takes 30% (7 x 0.7 = 4.9, 4); Pael's Tooth's removal
+  (RemoveFromDeck, NCardRemoveVfx) has no sound; the map after a rest site
+  keeps the rest site's Progress and the fire's out state (the wind) until
+  the next room; the shop's music jumps to its section without a fade (the
+  track's own transition).
+- Not reproduced: Miniature Tent's second option shows its focus outline
+  on the PC after the rest and after a cancelled smith (a console capture
+  wanted); floor 19's instrument (needs listening).
+- set_player's enemy_power (a power on each living enemy) for probes.
+
+Checks (work/check103.sh): seeded traces (traces/new103 against base6): the
+same 3 differences as before (the transform_options base6 lacks); 35
+scenarios ok; spire_check 2357 responses, 0 failures, audio 22384 voices,
+10 absent event calls (the casts as before, and the death sounds of the Eye
+With Teeth and the Snapping Jaxfruit, which the banks lack), 0 decoder
+failures; the audio fixtures, the music and the events 0 failures; PC build
+without warnings. spire_play --audio-thread over the session's runs: no
+voice not started. The console's logic (MSVC, work/logic103w.cmd): the 15
+seeded runs 14 identical to the JIT's (the other a monster's random skin),
+35 scenarios ok, no trap or [ERROR].
+
+Branches: xsdk became main (the GitHub default); the XDK build's branch
+(claude/peaceful-ritchie-zgh7h5) became xdk, its README saying it is no
+longer maintained; main's README describes the xSDK build.
+
 ## The fifth xSDK hardware run (2026-10-30): memory, the drive, the music's mix
 
 The run (work/rp102, build 7db9a72): a continued Defect run to The Architect,

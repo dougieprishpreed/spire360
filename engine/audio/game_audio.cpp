@@ -1,6 +1,7 @@
 #include "game_audio.h"
 #include "../core/cue_ledger.h"
 #include "../core/pack.h"
+#include "decoder.h"
 #include <algorithm>
 
 namespace spire {
@@ -12,7 +13,7 @@ bool is_audio_call(const std::string& call) {
 }
 GameAudio::GameAudio(const Pack* pack) : pack_(pack), events_(pack), music_id_(0), ambience_id_(0), rng_(0x39ba1u),
     floor_(-1), context_progress_(-1), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
-    stopping_(false), dry_(false) {
+    stopping_(false), mix_worst_(0), mix_total_(0), slow_logged_(-1e9), mix_count_(0), dry_(false) {
     /* The banks every screen uses, parsed before the first sound (sfx.bank
      * alone is a long parse, a hitch at the first attack otherwise). */
     if (events_.available()) {
@@ -51,14 +52,32 @@ private:
 GameAudio::~GameAudio() {
     stopping_ = true;
     thread_.join();
+    AudioDecoder::stop_loader();
     if (recording_) { wave_header(recording_, recorded_frames_); fclose(recording_); }
 }
-bool GameAudio::start_thread(int hw_thread) {
+/* The sounds kept with the loader: the act's music (four stems, 10-12 MB)
+ * and ambience beside the effects. */
+enum { KEPT_BUDGET = 32 * 1024 * 1024 };
+
+bool GameAudio::start_thread(int hw_thread, int loader_hw_thread) {
     if (!output_.active() || thread_.started()) return false;
-    /* 12 buffers, 64 ms: a stream's refill can wait behind a texture's
-     * read piece (Pack::read_span) */
+    /* 12 buffers, 64 ms (the XAudio2 path's; the xSDK feeder's were set as
+     * it opened) */
     output_.set_queue(12);
+    /* No reads in the mix or under its lock: a stream's refill waited for
+     * the drive, behind a texture's piece (Pack::read_span), and a sound's
+     * first play read it whole in a cue, the mix waiting for the lock: the
+     * music's dropouts and crackles in slow moments (rp103) */
+    AudioDecoder::start_loader(pack_, loader_hw_thread, KEPT_BUDGET);
     return thread_.start(thread_main, this, hw_thread);
+}
+void GameAudio::mix_times(double* worst_ms, double* average_ms, int* count) {
+    ScopedLock lock(lock_);
+    *worst_ms = mix_worst_;
+    *average_ms = mix_count_ ? mix_total_ / mix_count_ : 0;
+    *count = mix_count_;
+    mix_worst_ = mix_total_ = 0;
+    mix_count_ = 0;
 }
 void GameAudio::thread_main(void* self) {
     GameAudio* a = (GameAudio*)self;
@@ -69,7 +88,18 @@ void GameAudio::thread_main(void* self) {
             ScopedLock lock(a->lock_);
             g_trace_audio = "mixing";
             while (a->output_.demand()) {
+                double t0 = clock_ms();
                 a->render(samples, 256);
+                double t = clock_ms() - t0;
+                if (t > a->mix_worst_) a->mix_worst_ = t;
+                /* longer than the output holds: what was playing */
+                if (t > 40 && t0 - a->slow_logged_ > 1000) {
+                    a->slow_logged_ = t0;
+                    log_warn("audio: a mix of 5.3 ms took %.0f ms (%u voices: %s)", t, (unsigned)a->events_.active_voices(),
+                             a->events_.describe_voices().c_str());
+                }
+                a->mix_total_ += t;
+                ++a->mix_count_;
                 if (!a->output_.submit(samples, 256)) break;
                 /* the game's thread waits for the lock: its turn, the rest after the sleep */
                 if (a->waiting_) break;
@@ -86,7 +116,11 @@ bool GameAudio::record(const char* path) {
     if (recording_) wave_header(recording_, 0);
     return recording_ != NULL;
 }
-bool GameAudio::open_output(bool muted) { return output_.open(48000, muted); }
+bool GameAudio::open_output(bool muted) {
+    /* the xSDK feeder's frames ahead, 12 (64 ms) where its default is 8 */
+    output_.set_queue(12);
+    return output_.open(48000, muted);
+}
 
 std::string GameAudio::stream(const std::string& path) {
     if (path.compare(0, 6, "event:") == 0 || path.compare(0, 6, "res://") == 0 || path.find('/') != std::string::npos) return path;

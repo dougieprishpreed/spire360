@@ -1740,6 +1740,8 @@ bool special_node_call(const std::string& call, const Json& args, VfxAnchors& an
             unsigned long v = strtoul(s.c_str() + 1, NULL, 16);
             ((CanvasItem*)n)->self_modulate = Color((float)((v >> 24) & 255) / 255.0f, (float)((v >> 16) & 255) / 255.0f,
                                                     (float)((v >> 8) & 255) / 255.0f, (float)(v & 255) / 255.0f);
+            /* a CanvasGroup's colour is its buffer's: a group while not opaque */
+            if (n->type == "CanvasGroup") ((CanvasGroup*)n)->refresh();
         }
     } else if (call == "NFlyconidSporesVfx.SetSporeTypeIsVulnerable") {
         bool vulnerable = args.size() > 1 && args[1].b();

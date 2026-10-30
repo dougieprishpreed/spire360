@@ -476,6 +476,25 @@ static int count_id(const Json& relics, const std::string& id, size_t n) {
     return c;
 }
 
+/* NRelicInventoryHolder.RefreshAmount: the counter while ShowCounter.
+ * RefreshStatus / RelicModel.UpdateTexture: Disabled greys (#808080) and
+ * is_used, Active pulses, wax tints; melted is dark red. */
+static void relic_state(Node* holder, const Json& relic) {
+    Node* amount = holder->find_unique("AmountLabel");
+    set_visible(amount, relic["relic_amount"].is_number());
+    if (relic["relic_amount"].is_number()) set_label(amount, format("%d", relic["relic_amount"].i()));
+    Node* icon = holder_relic_icon(holder);
+    if (!icon || !icon->is_canvas_item()) return;
+    CanvasItem* ic = (CanvasItem*)icon;
+    const std::string& status = relic["relic_status"].str();
+    bool melted = relic["relic_melted"].b();
+    ic->modulate = status == "Disabled" ? hex(0x808080) : Color(1, 1, 1, 1);
+    ic->shader_params["is_wax"] = relic["relic_wax"].b() ? 1.0f : 0.0f;
+    ic->shader_params["pulse"] = !melted && status == "Active" ? 1.0f : 0.0f;
+    ic->shader_params["is_used"] = !melted && status == "Disabled" ? 1.0f : 0.0f;
+    ic->self_modulate = melted ? Color(0.545098f, 0, 0, 1) /* Colors.DarkRed */ : Color(1, 1, 1, 1);
+}
+
 /* NRelicInventory: the relics in acquisition order, 68 px each, in a row
  * under the bar (run.tscn, which places it, is not in the bundles: the
  * game's screenshots show the row from x ~11, y ~81). With the player as
@@ -498,22 +517,7 @@ static Node* make_relics(SceneLibrary* lib, const Json& player, const Json& befo
         ((Control*)r)->custom_minimum_size = Vec2(68, 68);
         Node* icon = holder_relic_icon(r);
         set_relic_icon(lib, icon, relic_icon_base(relics[i]));
-        /* NRelicInventoryHolder.RefreshAmount: the counter while ShowCounter */
-        Node* amount = r->find_unique("AmountLabel");
-        set_visible(amount, relics[i]["relic_amount"].is_number());
-        if (relics[i]["relic_amount"].is_number()) set_label(amount, format("%d", relics[i]["relic_amount"].i()));
-        /* RefreshStatus / RelicModel.UpdateTexture: Disabled greys (#808080)
-         * and is_used, Active pulses, wax tints; melted is dark red */
-        if (icon && icon->is_canvas_item()) {
-            CanvasItem* ic = (CanvasItem*)icon;
-            const std::string& status = relics[i]["relic_status"].str();
-            bool melted = relics[i]["relic_melted"].b();
-            ic->modulate = status == "Disabled" ? hex(0x808080) : Color(1, 1, 1, 1);
-            ic->shader_params["is_wax"] = relics[i]["relic_wax"].b() ? 1.0f : 0.0f;
-            ic->shader_params["pulse"] = !melted && status == "Active" ? 1.0f : 0.0f;
-            ic->shader_params["is_used"] = !melted && status == "Disabled" ? 1.0f : 0.0f;
-            if (melted) ic->self_modulate = Color(0.545098f, 0, 0, 1); /* Colors.DarkRed */
-        }
+        relic_state(r, relics[i]);
         const std::string& id = relics[i]["id"].str();
         Vec2 from;
         float from_scale = 1;
@@ -551,6 +555,43 @@ Json top_bar_key(const Json& d) {
     key.set("context", ctx);
     key.set("map", Json::make_bool(d["decision"].str() == "map_select"));
     return key;
+}
+
+/* A key without what refresh_top_bar changes in place. */
+static Json fixed_part(const Json& key) {
+    static const char* const changing[] = { "relic_amount", "relic_status", "relic_wax", "relic_melted" };
+    Json k = key;
+    Json player = key["player"];
+    player.set("hp", Json());
+    player.set("max_hp", Json());
+    Json relics = Json::make_array();
+    const Json& rs = key["player"]["relics"];
+    for (size_t i = 0; i < rs.size(); ++i) {
+        Json r = rs[i];
+        for (size_t c = 0; c < sizeof(changing) / sizeof(changing[0]); ++c) r.set(changing[c], Json());
+        relics.append(r);
+    }
+    player.set("relics", relics);
+    k.set("player", player);
+    return k;
+}
+
+bool refresh_top_bar(Node* root, const Json& now, const Json& was) {
+    if (!root || fixed_part(now) != fixed_part(was)) return false;
+    Node* row = NULL;
+    Node* bar = NULL;
+    for (size_t i = 0; i < root->children.size(); ++i) {
+        if (root->children[i]->name == "RelicInventory") row = root->children[i];
+        else bar = root->children[i];
+    }
+    const Json& relics = now["player"]["relics"];
+    if (!row || !bar || row->children.size() != relics.size()) return false;
+    const Json& player = now["player"];
+    if (player["hp"] != was["player"]["hp"] || player["max_hp"] != was["player"]["max_hp"])
+        set_label(bar->find_unique("HpLabel"), format("%d/%d", player["hp"].i(), player["max_hp"].i()));
+    for (size_t i = 0; i < relics.size(); ++i)
+        if (relics[i] != was["player"]["relics"][i]) relic_state(row->children[i], relics[i]);
+    return true;
 }
 
 Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Json& before) {

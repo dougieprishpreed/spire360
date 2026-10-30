@@ -440,10 +440,16 @@ internal static partial class Hooks
             Steps.Cue(new Dictionary<string, object?> { ["t"] = "ui", ["call"] = "NRainVfx.Create", ["args"] = new List<object?>() }));
         // CreatureCmd.TriggerAnim(creature, trigger, waitTime): the trigger as
         // it starts; its pacing is the CustomScaledWait it ends with (a "wait"
-        // step after this one), so the cue itself waits for nothing.
+        // step after this one), so the cue itself waits for nothing. A dead
+        // player's are dropped, as TriggerAnim does; a dead monster's go on
+        // (the Test Subject's DeadTrigger and RespawnTrigger: its knock-out
+        // and revival, where the die animation stayed), but for the killing
+        // blow's Hit, which the game plays before StartDeathAnim's die and
+        // the death cue here comes first.
         Spire.HookBridge.Hooks.RegisterBefore("anim.trigger", a =>
         {
-            if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)
+            if (a.Length > 1 && a[0] is Creature c && a[1] is string name &&
+                !(c.IsDead && (c.IsPlayer || name == "Hit")))
             {
                 Steps.Cue(new Dictionary<string, object?>
                 {

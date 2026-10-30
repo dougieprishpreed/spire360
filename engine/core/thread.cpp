@@ -83,6 +83,13 @@ void Thread::join() {
 
 void sleep_ms(int ms) { Sleep((DWORD)ms); }
 
+double clock_ms() {
+    LARGE_INTEGER t, f;
+    QueryPerformanceCounter(&t);
+    QueryPerformanceFrequency(&f);
+    return (double)t.QuadPart * 1000.0 / (double)f.QuadPart;
+}
+
 /* Workers: an auto-reset start event per worker, one done event set by
  * the last worker to finish. The console's interlocked operations carry no
  * barrier: lwsync orders a worker's results before its count goes down. */
@@ -244,6 +251,12 @@ void sleep_ms(int ms) {
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (long)(ms % 1000) * 1000000L;
     nanosleep(&ts, 0);
+}
+
+double clock_ms() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 }
 
 /* Workers: a generation count under one mutex wakes them; the last to

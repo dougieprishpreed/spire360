@@ -217,6 +217,7 @@ public partial class RunDriver
         _restSync = null;
         _musicRoom = null;
         _musicAct = -1;
+        _customMusic = null;
         _preloadKey = null;
         _wiredRemoval = null;
     }
@@ -225,6 +226,11 @@ public partial class RunDriver
     // entered in this act, the map's after it.
     private AbstractRoom? _musicRoom;
     private int _musicAct = -1;
+    // An encounter's own track (PlayCustomMusic: the bosses'): nothing stops
+    // it (StopCustomMusic is never called), it plays on after its fight until
+    // the next act's UpdateMusic (SetActInternal) or the run's (NRun._Ready:
+    // a continued run).
+    private string? _customMusic;
 
     // ─── Test/Debug commands ───
 
@@ -345,6 +351,18 @@ public partial class RunDriver
             {
                 foreach (var e in player.Creature.CombatState.Enemies.Where(e => e.IsAlive).ToList())
                     Sched.Run(() => CreatureCmd.GainBlock(e, block, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered, null));
+                WaitForActionExecutor();
+            }
+            // a power on each living enemy ({"id": "INTANGIBLE_POWER", "amount": 1}):
+            // a card's text tried against it
+            if (args.TryGetValue("enemy_power", out var epEl) && epEl.TryGetProperty("id", out var epId) &&
+                player.Creature?.CombatState != null)
+            {
+                var canonical = ModelDb.GetById<PowerModel>(new ModelId("POWER", epId.GetString() ?? ""));
+                decimal amount = epEl.TryGetProperty("amount", out var epAmount) ? epAmount.GetDecimal() : 1m;
+                if (canonical == null) return Error($"Unknown power: {epId.GetString()}");
+                foreach (var e in player.Creature.CombatState.Enemies.Where(e => e.IsAlive).ToList())
+                    Sched.Run(() => PowerCmd.Apply(new ThrowingPlayerChoiceContext(), canonical.ToMutable(), e, amount, e, null));
                 WaitForActionExecutor();
             }
 
@@ -3877,11 +3895,13 @@ public partial class RunDriver
             // (NMapScreen.Opened) makes it MerchantEnd. The act's first map
             // (a MapRoom entered) is Init.
             var current = _runState.CurrentRoom;
+            if (_runState.CurrentActIndex != _musicAct) _customMusic = null;
             if (current is not MapRoom || _runState.CurrentActIndex != _musicAct)
             {
                 _musicRoom = current is MapRoom ? null : current;
                 _musicAct = _runState.CurrentActIndex;
             }
+            if (CombatManager.Instance.IsInProgress && encounter?.HasBgm == true) _customMusic = encounter.CustomBgm;
             var musicRoom = current is MapRoom ? _musicRoom : current;
             var roomType = musicRoom?.RoomType;
             bool combat = roomType is RoomType.Monster or RoomType.Elite or RoomType.Boss;
@@ -3897,7 +3917,7 @@ public partial class RunDriver
             {
                 ["track"] = selection?.Track, ["bank"] = selection?.BankPath,
                 ["ambience"] = encounter?.HasAmbientSfx == true ? encounter.AmbientSfx : musicAct.AmbientSfx,
-                ["custom"] = CombatManager.Instance.IsInProgress && encounter?.HasBgm == true ? encounter.CustomBgm : null,
+                ["custom"] = _customMusic,
                 ["progress"] = progress,
             };
         }

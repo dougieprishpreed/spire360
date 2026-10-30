@@ -25,6 +25,11 @@ Node* make_top_bar(SceneLibrary* lib, const Json& decision, bool in_map_room, co
 /* What make_top_bar shows of a decision: equal keys, the same bar (the run
  * time is left out: the bar's timer counts on by itself). */
 Json top_bar_key(const Json& decision);
+/* The bar made from key `was` (make_top_bar's node) brought to key `now` in
+ * place, when they differ only in HP and the relics' counters and status
+ * (most of a fight's cards: Tuning Fork's, Ink Bottle's counts); false
+ * otherwise (the caller makes a new bar). */
+bool refresh_top_bar(Node* bar, const Json& now, const Json& was);
 /* AnimateRelic / AnimatePotion(startPosition): the next bar's new relic or
  * potion of that id ("relic", "potion") comes from that global position and
  * scale (a shop's slot) instead of rising into place. */
