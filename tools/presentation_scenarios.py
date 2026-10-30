@@ -66,6 +66,8 @@ spire_play --replay-run (frame captures) and spire_check replay.
             synchronizer keeps the options), then the Smith's upgrade
   uproar    Uproar: its two hits, then an Attack from the draw pile played
             (CardCmd.AutoPlay)
+  claws     Claws: the transform selection's cards each with the Maul it
+            becomes (transform_preview), six picked
 
 Each writes OUT/scenario/<name>.jsonl and .log (content_coverage's Runner).
 """
@@ -654,6 +656,25 @@ def main():
             if state.get("decision") != "rest_site" or state.get("options"):
                 case.status = "error"
                 case.notes.append(f"after the smith: {state.get('decision')} {state.get('options')}")
+        run.finish(case, lg)
+    if not only or "claws" in only:
+        # Claws (Tanx's relic): six cards picked, each with the Maul it
+        # becomes beside it (transform_preview), then the transform
+        case = cc.Case("scenario", "claws")
+        lg = run.logic("scenario", "claws")
+        run.new_run(case, lg, character="Ironclad", seed="claws")
+        state = run.step(case, lg, {"cmd": "obtain", "relics": ["CLAWS"]})
+        cards = state.get("cards") or []
+        previews = [c.get("transform_preview", {}).get("id") for c in cards if c.get("transform_preview")]
+        case.notes.append(f"{state.get('decision')} {state.get('select_kind') or state.get('kind')}: "
+                          f"{len(cards)} cards, {len(previews)} previews {sorted(set(previews))}")
+        if state.get("decision") != "card_select" or len(previews) != len(cards):
+            case.status = "error"
+        else:
+            picks = ",".join(str(c["index"]) for c in cards[:6])
+            state = run.step(case, lg, {"cmd": "action", "action": "select_cards", "args": {"indices": picks}})
+            deck = [c.get("id") for c in (state.get("player") or {}).get("deck") or []]
+            case.notes.append(f"after: {state.get('decision')}, Mauls in the deck {sum(1 for d in deck if 'MAUL' in (d or ''))}")
         run.finish(case, lg)
     if not only or "uproar" in only:
         case, lg, state = fight("uproar", "SHRINKER_BEETLE_WEAK")

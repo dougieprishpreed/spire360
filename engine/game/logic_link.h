@@ -12,6 +12,8 @@
 #define SPIRE_LOGIC_LINK_H
 
 #include "../core/base.h"
+#include "../core/json.h"
+#include "../core/thread.h"
 
 #include <deque>
 
@@ -26,6 +28,37 @@ public:
     virtual bool poll(std::string& line) = 0;
     /* The logic has exited (or failed to start). */
     virtual bool finished() = 0;
+    /* The next protocol line (a JSON object) and its value, if one is
+     * ready; other lines are passed over. err: why the line did not parse
+     * (msg then null). */
+    virtual bool poll_message(std::string& line, Json& msg, std::string& err);
+};
+
+/* Another link's lines read and parsed on a thread of their own (the
+ * console's frame loop took 5-8 ms of each fight decision to parse its 30-50
+ * KB). The inner link is the caller's and outlives this one. */
+class ParsingLink : public LogicLink {
+public:
+    explicit ParsingLink(LogicLink* inner);
+    virtual ~ParsingLink(); /* stops the thread */
+    /* hw_thread: the console's hardware thread (-1 any) */
+    bool start(int hw_thread);
+    virtual bool send(const std::string& line) { return inner_->send(line); }
+    virtual bool poll(std::string& line);
+    virtual bool finished();
+    virtual bool poll_message(std::string& line, Json& msg, std::string& err);
+
+private:
+    struct Message {
+        std::string line, err;
+        Json msg;
+    };
+    static void thread_main(void* self);
+    LogicLink* inner_;
+    Mutex lock_;
+    std::deque<Message> ready_;
+    Thread thread_;
+    volatile bool stopping_;
 };
 
 class SrtLink : public LogicLink {

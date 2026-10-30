@@ -126,7 +126,7 @@ public:
 class EmbarkWipe : public Control {
 public:
     EmbarkWipe(SceneLibrary* lib, const std::string& character)
-        : elapsed(0), wipe_(NULL), simple_(NULL), loading_(NULL) {
+        : elapsed(0), wipe_(NULL), simple_(NULL) {
         flags |= NF_PROCESS;
         name = "EmbarkWipe";
         z_index = 4096;
@@ -143,17 +143,11 @@ public:
         place(wipe_);
         place(simple_);
         place(this);
-        /* Instant would skip it; without a material only the fade shows */
+        /* Instant would skip it; without a material only the fade shows.
+         * No "Loading..." over the black, as the game's embark has none:
+         * the run's first screen is read while the character select shows
+         * (MenuFlow) */
         if (!wipe_->material) wipe_->visible = false;
-        /* NLoadingOverlay (the profile screen's and the multiplayer
-         * menus'): its "Loading..." in the corner once the black lasts,
-         * while the console makes the run and reads its first screen */
-        loading_ = instance(lib, "scenes/screens/main_menu/loading_overlay.tscn");
-        if (loading_) {
-            set_label(ctl(loading_, "Label"), Loc::get("main_menu_ui", "LOADING_OVERLAY.label"));
-            hide(loading_);
-            add_child(loading_);
-        }
     }
     double elapsed;
     bool done() const { return elapsed >= 0.8; }
@@ -162,7 +156,6 @@ public:
         float k = clampf((float)(elapsed / 0.8), 0, 1);
         wipe_->shader_params["threshold"] = k;
         simple_->modulate.a = tween_interpolate(TRANS_QUAD, EASE_IN, k, 0, 1, 1);
-        if (loading_ && elapsed >= LOADING_AFTER) set_visible(loading_, true);
     }
 
 private:
@@ -173,12 +166,7 @@ private:
     }
     ColorRect* wipe_;
     ColorRect* simple_;
-    Node* loading_;
-    /* the wipe's 0.8 s, then a second of black */
-    static const double LOADING_AFTER;
 };
-
-const double EmbarkWipe::LOADING_AFTER = 1.8;
 
 /* A new run opens on Neow (the first act's ancient): its layout, its room
  * and its dialogue's italic font, read while the logic makes the run (once
@@ -340,7 +328,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), hand_focus_floor_(-1), target_(-1), last_target_(-1), script_at_(0), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), shop_auto_(false),
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), fade_after_finishing_(false), shop_auto_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
@@ -518,12 +506,10 @@ void GameClient::update(const PadState& pad) {
     phase_at_ = load_trace_start();
     g_updating = this;
     set_phase_mark(phase_at_ >= 0 ? mark_phase : NULL);
-    while (link_->poll(line)) {
-        if (line.empty() || line[0] != '{') continue; /* not protocol */
-        phase("read");
-        std::string err;
-        Json msg = Json::parse(line.c_str(), line.size(), &err);
-        phase("parse");
+    Json msg;
+    std::string err;
+    while (link_->poll_message(line, msg, err)) {
+        phase("read and parse");
         if (!err.empty()) {
             log_warn("logic: unreadable line (%s)", err.c_str());
             continue;
@@ -568,6 +554,10 @@ void GameClient::update(const PadState& pad) {
             bool event_fight = same_floor && decision_["decision"].str() == "event_choice" &&
                 decision_["layout"].str() != "Combat" && msg["decision"].str() == "combat_play" && now_fight;
             bool back_to_event = same_floor && was_fight && now_room == "Event";
+            /* the fight's last steps (its killing blow) first: the fade
+             * back to the event comes after them (show's finishing) */
+            if (back_to_event && combat_ && decision_["decision"].str() == "combat_play" && msg["steps"].size() > 0)
+                back_to_event = false;
             if ((!transition_ || transition_->phase == 0) && (changed_room || event_fight || back_to_event))
                 start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
@@ -679,6 +669,12 @@ void GameClient::update(const PadState& pad) {
         Json d = finishing_;
         finishing_ = Json();
         d.set("steps", Json()); /* already played on the persistent room */
+        if (fade_after_finishing_) {
+            fade_after_finishing_ = false;
+            start_room_transition();
+            transition_pending_ = d;
+            return;
+        }
         g_trace_step = "client: show after the steps";
         show(d);
         return;
@@ -1008,6 +1004,7 @@ void GameClient::show(const Json& d) {
     }
     if (combat_ && prev_kind == "combat_play" && kind == "combat_play") {
         if (lib_->audio()) lib_->audio()->decision(d);
+        phase("audio");
         potions_.detach();
         decision_ = d;
         choices_ = choices(d);
@@ -1027,14 +1024,12 @@ void GameClient::show(const Json& d) {
          * a fight's cards change nothing on it: a new one was a tenth of
          * the console's time for a card played); a save's indicator, a
          * full belt's shake need a new one */
-        Json made_from;
-        made_from.set("player", bar_player);
-        made_from.set("context", d["context"]);
+        Json bar_state = d;
+        bar_state.set("player", bar_player);
+        Json made_from = top_bar_key(bar_state);
         Node* old_bar = screen_->get_node("TopBarLayer");
         if (!old_bar || made_from != bar_made_from_ || any_cue(d, "saved") || any_cue(d, "potion_full")) {
             if (old_bar) { screen_->remove_child(old_bar); delete old_bar; }
-            Json bar_state = d;
-            bar_state.set("player", bar_player);
             Node* bar = make_top_bar(lib_, bar_state, false, prev_player);
             if (bar) screen_->add_child(bar);
             if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);
@@ -1045,11 +1040,15 @@ void GameClient::show(const Json& d) {
         phase("potions");
         return;
     }
-    if (combat_ && prev_kind == "combat_play" && (kind == "rewards" || kind == "game_over") && d["steps"].size() > 0) {
+    if (combat_ && prev_kind == "combat_play" && (kind == "rewards" || kind == "game_over" || kind == "event_choice") &&
+        d["steps"].size() > 0) {
         /* Keep the actual room through its killing blow, including deaths
-         * caused by powers and orbs. Open the overlay after playback. */
+         * caused by powers and orbs. Open the overlay after playback; an
+         * event's fight (the Battleworn Dummy) then fades back to its
+         * event (ResumePreviousRoom): its blow was cut by the fade. */
         combat_->update_decision(d, true);
         finishing_ = d;
+        fade_after_finishing_ = kind == "event_choice" && d["context"]["room_type"].str() == "Event";
         return;
     }
     if (ported_ && prev_kind == "event_choice" && decision_["layout"].str() == "Combat" && d["steps"].size() > 0 &&
@@ -1510,6 +1509,7 @@ void GameClient::clear_screen() {
     last_shop_ = Json();
     finishing_ = Json();
     event_finishing_ = false;
+    fade_after_finishing_ = false;
     enemy_places_.clear();
 }
 

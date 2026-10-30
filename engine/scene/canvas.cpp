@@ -1,6 +1,7 @@
 #include "canvas.h"
 
 #include "../core/pack.h"
+#include "../core/pack_reader.h"
 
 #include <math.h>
 
@@ -12,10 +13,10 @@ static unsigned next_serial() {
 }
 
 Canvas::Canvas(Renderer* r, const Pack* pack)
-    : serial_(next_serial()), epoch_(0), texture_bytes_(0), texture_budget_(80 * 1024 * 1024), texture_clock_(0), frame_(0), console_sizes_(false),
+    : serial_(next_serial()), epoch_(0), texture_bytes_(0), texture_budget_(80 * 1024 * 1024), want_free_(0), texture_clock_(0), frame_(0), console_sizes_(false),
       dump_pending_(false), dumping_(false), dump_draws_(0), dump_glyphs_(0), dump_what_(NULL),
       decoded_w_(0), decoded_h_(0), glyphs_held_(false),
-      r_(r), pack_(pack), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false), wind_on_(false), wind_(0),
+      r_(r), pack_(pack), reader_(NULL), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false), wind_on_(false), wind_(0),
       wind_height_(0) {
     stats_.created = stats_.evicted = stats_.over_frames = stats_.starved = 0;
     stats_.peak_bytes = 0;
@@ -88,18 +89,25 @@ void Canvas::end_frame() {
     /* Within the budget only idle textures go (TEXTURE_IDLE_FRAMES unused):
      * a look once a second is enough (the walk through the cache's tree,
      * every node a cache miss on the console, was every frame). */
-    else if (frame_ % 60 != 0) return;
+    else if (frame_ % 60 != 0 && !want_free_) return;
+    /* A texture the GPU's memory had no room for (the console's memory
+     * nearly gone after a long session): the least recently drawn go too,
+     * up to its size, and it is made again a few frames on (no_room: the
+     * freed textures go once the GPU is done with them). */
+    size_t freed = 0;
     for (;;) {
         std::map<std::string, CachedTexture>::iterator oldest = textures_.end();
+        bool over = texture_bytes_ > texture_budget_ || freed < want_free_;
         for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it) {
             if (!it->second.texture) continue;
             bool expired =
                 !it->second.kept && frame_ > it->second.frame && frame_ - it->second.frame > TEXTURE_IDLE_FRAMES;
-            if (texture_bytes_ <= texture_budget_ && !expired) continue;
+            if (!over && !expired) continue;
             if (!expired && it->second.frame == frame_) continue;
             if (oldest == textures_.end() || it->second.touched < oldest->second.touched) oldest = it;
         }
         if (oldest == textures_.end()) break;
+        freed += oldest->second.bytes;
         texture_bytes_ -= oldest->second.bytes;
         r_->destroy_texture(oldest->second.texture);
         textures_.erase(oldest);
@@ -107,6 +115,7 @@ void Canvas::end_frame() {
         ++stats_.evicted;
     }
     if (texture_bytes_ > texture_budget_) ++stats_.starved;
+    want_free_ = 0;
 }
 
 Canvas::TextureStats Canvas::take_texture_stats() {
@@ -147,7 +156,11 @@ Texture* Canvas::cache_texture(const std::string& key, const TextureData& data) 
     if (found) return found;
     CachedTexture entry;
     entry.texture = r_->create_texture(data);
-    if (!entry.texture) return NULL;
+    if (!entry.texture) {
+        /* no room in the GPU's memory: end_frame makes some */
+        want_free_ += console_texture_bytes(data);
+        return NULL;
+    }
     /* Use the backend's allocation estimate, including tiled alignment and
      * decoded software pixels, rather than compressed pack payload bytes. */
     entry.bytes = console_sizes_ ? console_texture_bytes(data) : entry.texture->memory_bytes;
@@ -180,9 +193,8 @@ bool Canvas::derive(const DerivedImage& d, TextureData& out) {
     if (!d.source->get_rect_region(full, Rect2(), od, os, &src) || !src || src->derived) return false;
     if (os.size.x == 0 && os.size.y == 0) os = Rect2(Vec2(0, 0), src->size());
     if (decoded_path_ != src->path) {
-        std::vector<u8> data;
         TextureData td;
-        if (!pack_->read(src->path.c_str(), data) || !Pack::parse_texture(data, td) || td.levels.empty() ||
+        if (!pack_->read_texture(src->path.c_str(), td) || td.levels.empty() ||
             td.levels[0].empty() ||
             !decode_texture_level(td.format, td.width, td.height, &td.levels[0][0], td.levels[0].size(), decoded_,
                                   (td.flags & TEXF_DATA) == 0))
@@ -245,14 +257,36 @@ bool Canvas::derive(const DerivedImage& d, TextureData& out) {
 bool Canvas::prefetch(const std::string& path) {
     const std::string key = "pack:" + path;
     if (textures_.count(key)) return false;
-    std::vector<u8> data;
     TextureData td;
     double started = load_trace_start();
-    if (!pack_ || !pack_->read(path.c_str(), data) || !Pack::parse_texture(data, td) || !cache_texture(key, td))
-        return false;
+    if (!pack_ || !pack_->read_texture(path.c_str(), td) || !cache_texture(key, td)) return false;
     textures_[key].kept = true;
     load_traced("texture (warm)", path, started);
     return true;
+}
+
+int Canvas::prefetch_async(const std::string& path) {
+    if (!reader_ || !reader_->started()) {
+        prefetch(path);
+        return 0;
+    }
+    const std::string key = "pack:" + path;
+    if (textures_.count(key)) return 0;
+    TextureData td;
+    double started = load_trace_start();
+    if (reader_->take(path, td)) {
+        if (!cache_texture(key, td)) return -1;
+        textures_[key].kept = true;
+        load_traced("texture (read ahead)", path, started);
+        return 0;
+    }
+    PackReader::State s = reader_->state(path);
+    if (s == PackReader::NONE) {
+        if (!pack_ || !pack_->find(path.c_str())) return -1;
+        reader_->want(path);
+        return 1;
+    }
+    return s == PackReader::FAILED ? -1 : 1;
 }
 
 Texture* Canvas::gpu_texture(ImageTextureRes* img) {
@@ -260,12 +294,19 @@ Texture* Canvas::gpu_texture(ImageTextureRes* img) {
     if (img->render_target) return img->rendered;
     if (img->gpu_canvas == serial_ && img->gpu_epoch == epoch_ && img->gpu_entry) {
         CachedTexture* e = (CachedTexture*)img->gpu_entry;
-        e->touched = ++texture_clock_;
-        e->frame = frame_;
-        return e->texture;
+        if (e->texture || !e->retry_at || frame_ < e->retry_at) {
+            e->touched = ++texture_clock_;
+            e->frame = frame_;
+            return e->texture;
+        }
     }
     const std::string key = "pack:" + img->path;
     std::map<std::string, CachedTexture>::iterator it = textures_.find(key);
+    if (it != textures_.end() && !it->second.texture && it->second.retry_at && frame_ >= it->second.retry_at) {
+        textures_.erase(it);
+        ++epoch_;
+        it = textures_.end();
+    }
     if (it == textures_.end()) {
         load_gpu_texture(img, key);
         it = textures_.find(key);
@@ -279,23 +320,37 @@ Texture* Canvas::gpu_texture(ImageTextureRes* img) {
 
 /* The image made into a texture (from its pack entry or derived), cached
  * under key; NULL entries remember a failure. */
+/* A texture read but not made (create_texture failed: the console's memory
+ * was all but gone after a long session): read again a few frames on, not
+ * every frame (the main menu's top layer, 3 MB, was read 25 times in 4 s
+ * after a run's save and quit). */
+void Canvas::no_room(const std::string& key, const std::string& path) {
+    CachedTexture& e = textures_[key];
+    e = CachedTexture();
+    e.retry_at = frame_ + 4;
+    log_warn("texture %s: no room in the GPU's memory; idle textures go, then it is made again", path.c_str());
+}
+
 Texture* Canvas::load_gpu_texture(ImageTextureRes* img, const std::string& key) {
-    std::vector<u8> data;
     TextureData td;
     double started = load_trace_start();
     if (img->derived) {
         if (derive(*img->derived, td)) {
             Texture* t = cache_texture(key, td);
             load_traced("texture", img->path, started);
+            if (!t) no_room(key, img->path);
             return t;
         }
         log_warn("texture %s: could not be made", img->path.c_str());
         textures_[key] = CachedTexture();
         return NULL;
     }
-    if (pack_ && pack_->read(img->path.c_str(), data) && Pack::parse_texture(data, td)) {
+    /* read ahead (or under way, waited for), else read now */
+    bool ahead = reader_ && reader_->wait_take(img->path, td);
+    if (ahead || (pack_ && pack_->read_texture(img->path.c_str(), td))) {
         Texture* t = cache_texture(key, td);
-        load_traced("texture", img->path, started);
+        load_traced(ahead ? "texture (read ahead)" : "texture", img->path, started);
+        if (!t) no_room(key, img->path);
         return t;
     }
     log_warn("texture %s: not in the pack", img->path.c_str());
@@ -577,6 +632,17 @@ void Canvas::put_triangles(Texture* tex, const std::vector<Vec2>& v, const std::
         r_->commit();
         at += (size_t)run;
     }
+}
+
+bool Canvas::direct(ImageTextureRes* img, Direct* out) {
+    if (!img || dumping_ || count_only_ || wind_on_) return false;
+    out->tex = gpu_texture(img);
+    if (!out->tex) return false;
+    out->xform = xform_;
+    out->modulate = modulate_;
+    out->blend = blend_;
+    r_->target_size(&out->target_w, &out->target_h);
+    return true;
 }
 
 void Canvas::draw_triangles(ImageTextureRes* img, const std::vector<Vec2>& v, const std::vector<Vec2>& uv,

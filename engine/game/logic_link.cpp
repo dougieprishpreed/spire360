@@ -15,6 +15,67 @@
 
 namespace spire {
 
+bool LogicLink::poll_message(std::string& line, Json& msg, std::string& err) {
+    while (poll(line)) {
+        if (line.empty() || line[0] != '{') continue; /* not protocol */
+        err.clear();
+        msg = Json::parse(line.c_str(), line.size(), &err);
+        return true;
+    }
+    return false;
+}
+
+/* ---- ParsingLink ---- */
+
+ParsingLink::ParsingLink(LogicLink* inner) : inner_(inner), stopping_(false) {}
+
+ParsingLink::~ParsingLink() {
+    stopping_ = true;
+    thread_.join();
+}
+
+bool ParsingLink::start(int hw_thread) { return thread_.start(thread_main, this, hw_thread); }
+
+void ParsingLink::thread_main(void* self) {
+    ParsingLink* p = (ParsingLink*)self;
+    while (!p->stopping_) {
+        Message m;
+        if (!p->inner_->poll_message(m.line, m.msg, m.err)) {
+            sleep_ms(1);
+            continue;
+        }
+        ScopedLock lock(p->lock_);
+        p->ready_.push_back(Message());
+        /* swapped in: no copy of the line or the tree */
+        p->ready_.back().line.swap(m.line);
+        p->ready_.back().err.swap(m.err);
+        p->ready_.back().msg.swap(m.msg);
+    }
+}
+
+bool ParsingLink::poll_message(std::string& line, Json& msg, std::string& err) {
+    if (!thread_.started()) return inner_->poll_message(line, msg, err);
+    ScopedLock lock(lock_);
+    if (ready_.empty()) return false;
+    line.swap(ready_.front().line);
+    err.swap(ready_.front().err);
+    msg.swap(ready_.front().msg);
+    ready_.pop_front();
+    return true;
+}
+
+bool ParsingLink::poll(std::string& line) {
+    Json msg;
+    std::string err;
+    return poll_message(line, msg, err);
+}
+
+bool ParsingLink::finished() {
+    if (!inner_->finished()) return false;
+    ScopedLock lock(lock_);
+    return ready_.empty();
+}
+
 /* ---- SrtLink ---- */
 
 SrtLink::SrtLink() : buf_(1 << 20) {}

@@ -31,6 +31,7 @@
 #include "../engine/game/game_client.h"
 #include "../engine/game/menu_flow.h"
 #include "../engine/game/loc.h"
+#include "../engine/core/pack_reader.h"
 #include "../engine/game/logic_link.h"
 #include "../engine/gfx/vk_renderer.h"
 #include "../engine/scene/canvas.h"
@@ -227,6 +228,9 @@ static void log_memory(const char* when) {
     memory_mb(&f, &t);
     logf("memory %s: %u MB free of %u MB, logic %u MB", when, f, t, spire_logic_memory_kb() / 1024);
 }
+
+/* the big blocks' pages (big_alloc.c) */
+extern "C" size_t spire_big_bytes(void);
 
 static double now_ms() {
     struct timespec ts;
@@ -490,13 +494,23 @@ int main() {
     FontLibrary* fonts = new FontLibrary(&pack);
     FontLibrary::set_current(fonts);
     Canvas* canvas = new Canvas(renderer, &pack);
+    /* textures read ahead beside the frame loop (the warm-up's: menus,
+     * Neow, the run's sets), on the hardware thread of the parse, the
+     * watchdog and the log's writer: it waits on the drive */
+    static PackReader reader(&pack);
+    if (reader.start(5)) canvas->set_reader(&reader);
+    else logf("textures: read in the frame loop");
     SceneTree* tree = new SceneTree();
     tree->set_viewport(Vec2(1920, 1080), Xform2D::scaling(2.0f / 3.0f, 2.0f / 3.0f));
 
     /* The main menu of the last profile until a run starts, back to it
      * after the run (MenuFlow). The client asks the logic for the menu's
      * data at once (the game data loads meanwhile). */
-    TimedLogicLink link;
+    TimedLogicLink logic_link;
+    /* the answers parsed beside the frame loop, on the hardware thread of
+     * the watchdog and the log's writer (both mostly asleep) */
+    ParsingLink link(&logic_link);
+    if (!link.start(5)) logf("logic: answers parsed in the frame loop");
     GameClient* game = new GameClient(lib, tree, &link);
     MenuFlow* flow = new MenuFlow(lib, tree, game, pack.game_version());
     tree->layout();
@@ -664,9 +678,10 @@ int main() {
                  ts.created, ts.evicted, ts.over_frames, ts.starved);
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
             SceneLibrary::MemoryStats ms = lib->memory_stats();
-            logf("heap: %.1f MB in use of %.1f MB held; parsed scenes %.1f MB (%u files), skeletons %.1f MB (%u, %u "
-                 "in use, %u let go), particle preprocesses kept %.1f MB",
-                 heap_in_use() / 1048576.0, heap_held() / 1048576.0, ms.scene_bytes / 1048576.0, ms.scene_files,
+            logf("heap: %.1f MB in use of %.1f MB held, big blocks %.1f MB; parsed scenes %.1f MB (%u files), "
+                 "skeletons %.1f MB (%u, %u in use, %u let go), particle preprocesses kept %.1f MB",
+                 heap_in_use() / 1048576.0, heap_held() / 1048576.0, spire_big_bytes() / 1048576.0,
+                 ms.scene_bytes / 1048576.0, ms.scene_files,
                  ms.skeleton_bytes / 1048576.0, ms.skeletons, ms.skeletons_used, ms.skeletons_evicted,
                  Particles2D::preprocess_cache_bytes() / 1048576.0);
             double state_ms, submit_ms;

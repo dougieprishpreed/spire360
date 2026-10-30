@@ -32,7 +32,14 @@ struct AudioMixer::Voice {
             if (frames > 2048) frames = 2048;
             count = decoder.read(&buffer[0], frames);
             used = 0;
-            if (!count) return false;
+            if (!count) {
+                /* a read that failed well before the end (an Ogg's length
+                 * may count a few frames more than it decodes): the voice
+                 * ends early */
+                if (cursor + 4800 < decoder.frames())
+                    log_warn("audio voice ended at frame %u of %u: %s", cursor, decoder.frames(), path.c_str());
+                return false;
+            }
         }
         int channels = decoder.channels();
         l = buffer[(size_t)used * channels];
@@ -141,6 +148,7 @@ void AudioMixer::volume(u32 id, float gain, double seconds) {
     else v->gain = gain;
 }
 void AudioMixer::pitch(u32 id, float ratio) { Voice* v = find(id); if (v) v->pitch = clampf(ratio, 0.125f, 8); }
+void AudioMixer::finish(u32 id) { Voice* v = find(id); if (v) v->loops = 0; }
 void AudioMixer::stop(u32 id, double seconds) {
     Voice* v = find(id);
     if (!v) return;

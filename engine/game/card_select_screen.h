@@ -51,6 +51,7 @@ private:
     void focus(int i);
     void toggle(int i);
     void open_preview();
+    void open_transform_preview(Control* box);
     void close_preview();
     std::string confirm();
     void show_button(Button& b, bool shown, bool at_once = false);
@@ -84,6 +85,14 @@ private:
     Button close_, confirm_, preview_cancel_, preview_confirm_;
     PeekButton peek_; /* in a fight (MegaInput.peek) */
     TweenSet tweens_;
+    /* NTransformPreview.CycleThroughCards: a random transform's After
+     * holder showing each of its options in turn, 0.2 s each */
+    struct Cycle {
+        std::vector<Node*> cards;
+        size_t at;
+        float t;
+    };
+    std::vector<Cycle> cycles_;
     class InspectCardScreen* inspect_; /* OpenPreviewScreen (Y on the row) */
     Node* inspect_node_;
 

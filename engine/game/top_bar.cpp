@@ -537,6 +537,22 @@ static Node* make_relics(SceneLibrary* lib, const Json& player, const Json& befo
     return row;
 }
 
+Json top_bar_key(const Json& d) {
+    static const char* player_keys[] = { "character", "ascension", "hp", "max_hp", "gold", "potions", "max_potions",
+                                         "relics", "deck_size" };
+    static const char* context_keys[] = { "room_type", "second_boss", "at_boss", "boss", "boss_tint", "floor",
+                                          "total_floor" };
+    Json player, ctx, key;
+    for (size_t i = 0; i < sizeof(player_keys) / sizeof(player_keys[0]); ++i)
+        player.set(player_keys[i], d["player"][player_keys[i]]);
+    for (size_t i = 0; i < sizeof(context_keys) / sizeof(context_keys[0]); ++i)
+        ctx.set(context_keys[i], d["context"][context_keys[i]]);
+    key.set("player", player);
+    key.set("context", ctx);
+    key.set("map", Json::make_bool(d["decision"].str() == "map_select"));
+    return key;
+}
+
 Node* make_top_bar(SceneLibrary* lib, const Json& d, bool in_map_room, const Json& before) {
     Node* bar = instance(lib, "scenes/ui/top_bar.tscn");
     if (!bar) return NULL;

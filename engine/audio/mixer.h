@@ -15,6 +15,8 @@ public:
     u32 play(const std::string& path, float volume = 1, float pitch = 1,
              u32 loop_start = 0, u32 loop_end = 0, int loop_count = 0, u32 offset = 0);
     void stop(u32 voice, double fade = 0);
+    /* No more loops: the voice plays to the end of its sound */
+    void finish(u32 voice);
     void stop_all(double fade = 0);
     void volume(u32 voice, float value, double ramp = 0);
     void pitch(u32 voice, float ratio);

@@ -25,36 +25,66 @@ static bool audio_seek(FILE* file, u64 offset) {
  * where each opened the pack again and read the sound's headers (on the
  * console a few ms from its USB drive, in the frame loop under the audio
  * lock, for each sound an effect plays), and the mix reads none while
- * textures load. Kept till exit, as voices point into them. */
+ * textures load. Past the budget the least recently played that no voice
+ * reads go: kept till exit, the budget filled in a long session and every
+ * new sound after it streamed, a file each, until the console's 32 handles
+ * ran out and voices did not start ("cannot open"). */
 enum { KEPT_MAX = 512 * 1024, KEPT_TOTAL = 12 * 1024 * 1024 };
+struct KeptSound {
+    std::vector<u8> data;
+    int users;
+    u64 used;
+};
 static Mutex g_kept_lock;
-static std::map<std::string, std::vector<u8>*> g_kept;
+static std::map<std::string, KeptSound*> g_kept;
 static size_t g_kept_bytes = 0;
+static u64 g_kept_clock = 0;
 
-static const std::vector<u8>* kept_sound(const Pack& pack, const PackEntry* entry, const std::string& path) {
+static KeptSound* kept_sound(const Pack& pack, const PackEntry* entry, const std::string& path) {
     if (entry->size > KEPT_MAX) return NULL;
     ScopedLock lock(g_kept_lock);
-    std::map<std::string, std::vector<u8>*>::iterator it = g_kept.find(path);
-    if (it != g_kept.end()) return it->second;
-    if (g_kept_bytes + entry->size > KEPT_TOTAL) return NULL;
-    std::vector<u8>* data = new std::vector<u8>();
-    if (!pack.read(entry, *data) || data->size() < 12) {
-        delete data;
+    std::map<std::string, KeptSound*>::iterator it = g_kept.find(path);
+    if (it != g_kept.end()) {
+        ++it->second->users;
+        it->second->used = ++g_kept_clock;
+        return it->second;
+    }
+    while (g_kept_bytes + entry->size > KEPT_TOTAL) {
+        std::map<std::string, KeptSound*>::iterator oldest = g_kept.end();
+        for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
+            if (!k->second->users && (oldest == g_kept.end() || k->second->used < oldest->second->used)) oldest = k;
+        if (oldest == g_kept.end()) return NULL;
+        g_kept_bytes -= oldest->second->data.size();
+        delete oldest->second;
+        g_kept.erase(oldest);
+    }
+    KeptSound* k = new KeptSound();
+    if (!pack.read(entry, k->data) || k->data.size() < 12) {
+        delete k;
         return NULL;
     }
-    g_kept[path] = data;
-    g_kept_bytes += data->size();
-    return data;
+    k->users = 1;
+    k->used = ++g_kept_clock;
+    g_kept[path] = k;
+    g_kept_bytes += k->data.size();
+    return k;
+}
+
+static void unkeep(KeptSound* k) {
+    ScopedLock lock(g_kept_lock);
+    --k->users;
 }
 
 AudioDecoder::AudioDecoder()
     : vorbis_(NULL), pcm_(NULL), kept_(NULL), kept_size_(0), kept_pos_(0), data_offset_(0), frames_(0), position_(0),
-      rate_(0), channels_(0) {}
+      rate_(0), channels_(0), kept_entry_(NULL) {}
 AudioDecoder::~AudioDecoder() { close(); }
 void AudioDecoder::close() {
     if (vorbis_) stb_vorbis_close((stb_vorbis*)vorbis_);
     if (pcm_) fclose(pcm_);
+    if (kept_entry_) unkeep(kept_entry_);
     vorbis_ = NULL; pcm_ = NULL;
+    kept_entry_ = NULL;
     kept_ = NULL;
     kept_size_ = kept_pos_ = 0;
     frames_ = position_ = rate_ = 0;
@@ -112,8 +142,13 @@ bool AudioDecoder::open(const Pack& pack, const std::string& path) {
     close();
     const PackEntry* entry = pack.find(path.c_str());
     if (!entry || entry->type != PACK_AUDIO) return false;
-    const std::vector<u8>* kept = kept_sound(pack, entry, path);
-    if (kept) return open_kept(*kept);
+    KeptSound* kept = kept_sound(pack, entry, path);
+    if (kept) {
+        kept_entry_ = kept;
+        if (open_kept(kept->data)) return true;
+        close();
+        return false;
+    }
     std::vector<u8> head;
     if (!pack.read_head(entry, 12, head) || head.size() < 12) return false;
     FILE* input = pack.open_stream(entry);

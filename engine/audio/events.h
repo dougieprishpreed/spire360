@@ -33,6 +33,8 @@ public:
     void bus_volume(const std::string& path, float linear);
     void render(float* stereo, int frames);
     size_t active_voices() const;
+    /* the voices playing, by sample (AudioMixer::describe; checks) */
+    std::string describe_voices() const;
     size_t active_events() const;
     unsigned failures() const;
     unsigned missing_events() const;

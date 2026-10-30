@@ -22,6 +22,9 @@ class SceneLibrary;
  * button is disabled there). before: the player as the decision before
  * had them (null for none): the potions gained or used since animate. */
 Node* make_top_bar(SceneLibrary* lib, const Json& decision, bool in_map_room, const Json& before = Json());
+/* What make_top_bar shows of a decision: equal keys, the same bar (the run
+ * time is left out: the bar's timer counts on by itself). */
+Json top_bar_key(const Json& decision);
 /* AnimateRelic / AnimatePotion(startPosition): the next bar's new relic or
  * potion of that id ("relic", "potion") comes from that global position and
  * scale (a shop's slot) instead of rising into place. */

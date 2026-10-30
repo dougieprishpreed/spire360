@@ -21,6 +21,7 @@
 #ifndef SPIRE_PARTICLES_H
 #define SPIRE_PARTICLES_H
 
+#include "canvas.h"
 #include "node.h"
 
 namespace spire {
@@ -173,6 +174,9 @@ public:
     bool finished() const { return !emitting && active_count() == 0 && pending_.empty(); }
 
 private:
+    void draw_direct(Canvas& c, const Canvas::Direct& dd, const Xform2D& view, const Vec2& ts, const Vec2& is,
+                     const Rect2& src, bool anim, int hf, int vf, bool loop, int fb, float fb_frames,
+                     const Vec2& fb_size, const CurveData& fb_curve, const Vec2& pivot, bool ray, float grow);
     /* The shader's DisplayParameters / DynamicsParameters /
      * PhysicalParameters as drawn from a particle's seed at its start
      * (process() draws the same ones each frame); seed: the sequence

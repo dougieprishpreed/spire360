@@ -259,6 +259,9 @@ private:
     EmbarkWipe* wipe_;
     DeckPreviews* deck_previews_; /* NRun.GlobalUi's card previews (over the screens) */
     bool event_finishing_;        /* finishing_ waits for the event's room */
+    /* finishing_ (an event's fight's last steps) then the fade back to
+     * the event */
+    bool fade_after_finishing_;
     bool shop_auto_;              /* finishing_ waits for the shop buying by itself (Lord's Parasol) */
     Json auto_steps_;             /* its cues */
     Json auto_player_;            /* the player as its top bar shows them meanwhile */

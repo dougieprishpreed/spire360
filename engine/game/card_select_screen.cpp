@@ -373,6 +373,10 @@ void CardSelectScreen::open_preview() {
     show_button(preview_cancel_, true);
     show_button(preview_confirm_, true);
     for (size_t k = 0; k < order_.size(); ++k) set_card_highlight(cards_[(size_t)order_[k]], false);
+    if (kind_ == "transform") {
+        open_transform_preview(box);
+        return;
+    }
 
     const Json& cs = decision_["cards"];
     Node* before = find_named(box, "Before");
@@ -414,10 +418,63 @@ void CardSelectScreen::open_preview() {
     }
 }
 
+/* NTransformPreview.Initialize: each pick left of Before (the last picked
+ * nearest the arrows), what it becomes right of After (the logic's
+ * transform_preview: Claws' Maul), 300 px apart plus 30, all scaled to fit
+ * left of Before less 100 px; a random transform's After cycles through
+ * some of its options (transform_options). The generic row left the
+ * transform screen's preview blank (it has no Cards row: the box itself
+ * was hidden). */
+void CardSelectScreen::open_transform_preview(Control* box) {
+    Node* before = find_named(box, "Before");
+    Node* after = find_named(box, "After");
+    if (!before || !after || !before->is_control()) return;
+    set_visible(find_named(box, "Arrows"), true);
+    const Json& cs = decision_["cards"];
+    int n = (int)order_.size();
+    /* Before's GlobalPosition.X: TransformPreview at the screen's centre */
+    float bx = 960.0f + ((Control*)before)->offset[SIDE_LEFT];
+    float s = (bx - 100.0f) / ((float)n * 300.0f + (float)(n - 1) * 30.0f);
+    if (s > 1) s = 1;
+    cycles_.clear();
+    for (int i = 0; i < n; ++i) {
+        const Json& c = cs[(size_t)order_[(size_t)i]];
+        int k = n - i;
+        const Json& replacement = c["transform_preview"];
+        const Json& options = c["transform_options"];
+        for (int side = 0; side < 2; ++side) {
+            Control* h = (Control*)SceneLibrary::create_node("Control");
+            h->name = "PreviewCard";
+            h->scale = Vec2(s, s);
+            float x = side == 0 ? -((float)k - 0.5f) * 300.0f * s - (float)(k - 1) * 30.0f
+                                : ((float)i + 0.5f) * 300.0f * s + (float)i * 30.0f;
+            place(h, x, 0, 0, 0);
+            (side == 0 ? before : after)->add_child(h);
+            if (side == 0 || replacement.is_object() || !options.size()) {
+                Node* card = make_card(lib_, side == 0 || !replacement.is_object() ? c : replacement);
+                if (card) h->add_child(card);
+                continue;
+            }
+            Cycle cycle;
+            cycle.at = 0;
+            cycle.t = 0;
+            for (size_t o = 0; o < options.size(); ++o) {
+                Node* card = make_card(lib_, options[o]);
+                if (!card) continue;
+                set_visible(card, cycle.cards.empty());
+                h->add_child(card);
+                cycle.cards.push_back(card);
+            }
+            if (cycle.cards.size() > 1) cycles_.push_back(cycle);
+        }
+    }
+}
+
 /* CancelSelection: back to the grid, nothing picked. */
 void CardSelectScreen::close_preview() {
     if (!preview_box_) return;
     preview_ = false;
+    cycles_.clear();
     preview_box_->visible = false;
     show_button(preview_cancel_, false, true);
     show_button(preview_confirm_, false, true);
@@ -526,9 +583,11 @@ std::string CardSelectScreen::input(const PadState& pad) {
             focus(focus_ + columns_ < n ? focus_ + columns_ : n - 1);
         if ((pad.pressed & PadState::A) && focus_ >= 0) {
             toggle(focus_);
-            if (!manual_confirm_ && max_ > 0 && (int)order_.size() >= max_) {
+            /* OnCardClicked: the deck screens open their preview at the
+             * limit, manual confirmation or not (Claws' six waited for Y) */
+            if (max_ > 0 && (int)order_.size() >= max_) {
                 if (single_box_ || multi_box_) open_preview();
-                else return confirm();
+                else if (!manual_confirm_) return confirm();
             }
         }
     }
@@ -542,6 +601,15 @@ std::string CardSelectScreen::input(const PadState& pad) {
 
 void CardSelectScreen::frame(double dt) {
     tweens_.update(dt);
+    for (size_t i = 0; i < cycles_.size(); ++i) {
+        Cycle& c = cycles_[i];
+        c.t += (float)dt;
+        if (c.t < 0.2f) continue;
+        c.t -= 0.2f;
+        set_visible(c.cards[c.at], false);
+        c.at = (c.at + 1) % c.cards.size();
+        set_visible(c.cards[c.at], true);
+    }
     peek_.frame(dt);
     tips_.frame();
     if (!rows_) return;

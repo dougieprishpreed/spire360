@@ -1,7 +1,8 @@
 /* Streaming decoders for the converter's Ogg samples and PCM16 WAVs.
- * Sounds up to 512 KB are read once and kept in memory (12 MB of them),
- * each decoder reading its own way through them; the rest, music among
- * them, stream from the pack through a handle of each decoder's own. */
+ * Sounds up to 512 KB are read once and kept in memory (12 MB of them, the
+ * least recently played that no voice reads going first), each decoder
+ * reading its own way through them; the rest, music among them, stream
+ * from the pack through a handle of each decoder's own. */
 #ifndef SPIRE_AUDIO_DECODER_H
 #define SPIRE_AUDIO_DECODER_H
 
@@ -10,6 +11,7 @@
 
 namespace spire {
 class Pack;
+struct KeptSound;
 class AudioDecoder {
 public:
     AudioDecoder();
@@ -34,6 +36,7 @@ private:
     u64 data_offset_;
     u32 frames_, position_, rate_;
     int channels_;
+    KeptSound* kept_entry_; /* the kept sound this one reads (one of its users) */
 };
 }
 #endif

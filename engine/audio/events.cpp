@@ -6,6 +6,10 @@
 #include <string.h>
 
 namespace spire {
+/* --audio-trace: every event started, every timeline jump (a music
+ * section's change by its parameters) */
+static bool g_trace_plays = false;
+
 namespace {
 const double EPS = 0.0000001;
 double mind(double a, double b) { return a < b ? a : b; }
@@ -30,6 +34,20 @@ float curve_value(const Json& points, double x, float fallback) {
         return lerpf(points[i - 1][1].f(), points[i][1].f(), t);
     }
     return points[points.size() - 1][1].f();
+}
+/* Studio's volume fader taper: a volume automation curve's values are fader
+ * positions, -42 the bottom (silence), -20 and above decibels as they are
+ * (the banks' own property mappings are all this one; 91 of their 138
+ * volume curves rest at -42, none lower). Applied as decibels, -42 left
+ * every section's muted music stems faintly on (the rest site's music; a
+ * fire's crackle on after it went out). */
+float fader_db(float position) {
+    static const float x[] = { -42, -39, -36, -32, -27, -20 }, y[] = { -80, -60, -50, -40, -30, -20 };
+    if (position >= -20) return position;
+    if (position <= -42) return -80;
+    for (int i = 1; i < 6; ++i)
+        if (position <= x[i]) return lerpf(y[i - 1], y[i], (position - x[i - 1]) / (x[i] - x[i - 1]));
+    return position;
 }
 bool read_json(const Pack* pack, const std::string& path, Json& out) {
     std::vector<u8> bytes;
@@ -100,13 +118,14 @@ struct AudioEvents::Impl {
         };
         std::vector<BusStep> chain;
         bool chain_ready;
+        bool untriggered; /* its conditions stopped holding (untrigger) */
         Player(Impl* s, Bank* b, const Json* d, bool e, Player* ctx, const std::string& k)
             : system(s), bank(b), def(d), context(ctx), event(e), started(false), done(false), first(true), releasing(false),
               voice(0), age(0), pos(0), delay(0), cutoff(-1), release_at(0), release_time(0), next_spawn(0), volume(1), pitch(1),
               gain_db(0), pitch_st(0), bridge_start(0), fade_in(0), bridge(NULL), fade_curves(NULL), fade_owner(NULL),
               fade_start(0), source_timeline(-1), destination_started(false), transition_release(false),
               repeats(0), selected(-1), spawn_count(0), key(k), kind(K_OTHER), def_props(false), end_at(0),
-              chain_ready(false) {
+              chain_ready(false), untriggered(false) {
             ++bank->references;
             if (event) {
                 end_at = (*def)["end"].num();
@@ -238,7 +257,7 @@ struct AudioEvents::Impl {
                 const Json& c = controls[i];
                 double x = c["parameter"].str().empty() ? timeline_position() : parameter(c["parameter"].str());
                 float value = curve_value(c["points"], x, 0);
-                if (c["property"].i() == 0) db = value; else st = value;
+                if (c["property"].i() == 0) db = fader_db(value); else st = value;
             }
             db += db_mod; st += st_mod;
         }
@@ -304,6 +323,19 @@ struct AudioEvents::Impl {
         void add_instrument(const std::string& id, int box, double offset = 0) {
             Player* p = instrument(id, offset);
             if (p) children.push_back(Child(p, box, id));
+        }
+        /* Untriggered: an envelope's release, else a loop plays out (a
+         * sound to its end, a multi's or a scatterer's last one) */
+        void untrigger() {
+            double r = release_length();
+            if (r > 0) {
+                release(r);
+                return;
+            }
+            repeats = 0;
+            untriggered = true;
+            if (voice) system->mixer.finish(voice);
+            for (size_t k = 0; k < children.size(); ++k) children[k].player->untrigger();
         }
         void release(double fade) {
             if (releasing) return;
@@ -380,6 +412,7 @@ struct AudioEvents::Impl {
                 if (system->random() * 100 >= t["chance"].num(100)) continue;
                 double destination = t["to"].num();
                 if (fabs(destination - pos) < EPS) continue;
+                if (g_trace_plays) log_info("audio jump %s at %.2f s -> %.2f s", id.c_str(), pos, destination);
                 /* A jump into the region of an async (unlocked) instrument
                  * that is playing leaves it playing (menu_update loops its
                  * playhead inside the box of the theme it picked) */
@@ -429,12 +462,23 @@ struct AudioEvents::Impl {
                 if (bridge) { pos = destination; destination_started = true; }
                 break;
             }
+            /* An instrument is triggered while the playhead is in its box
+             * and its conditions hold, and untriggered when they stop
+             * holding there (Studio's trigger behaviour): checked once at
+             * the box's start, the act's ambience (one 85 s box a layer)
+             * took a loop to follow Progress, and the campfire's crackle
+             * (Rest and the fire lit) played on into the next room. */
             const Json& boxes = (*def)["boxes"];
             for (size_t i = 0; i < boxes.size(); ++i) {
                 const Json& box = boxes[i];
                 bool inside = pos + EPS >= box_at[i] && pos < box_end[i] - EPS;
                 const std::string& id = box_keys[i];
-                if (inside && !enabled[id]) {
+                bool met = inside && matches(bank->doc["nodes"].get(box["id"].str())["conditions"]);
+                if (inside && !met && enabled[id]) {
+                    for (size_t k = 0; k < children.size(); ++k)
+                        if (children[k].box == (int)i) children[k].player->untrigger();
+                }
+                if (met && !enabled[id]) {
                     size_t before = children.size();
                     add_instrument(box["id"].str(), (int)i, box_locked[i] ? pos - box_at[i] : 0);
                     if (bridge && children.size() > before) {
@@ -445,7 +489,7 @@ struct AudioEvents::Impl {
                         } else destination->fade_in = (*bridge)["lead_out"].num();
                     }
                 }
-                enabled[id] = inside;
+                enabled[id] = met;
             }
             const Json& parameter_nodes = (*def)["parameter_instruments"];
             for (size_t i = 0; i < parameter_nodes.size(); ++i) {
@@ -514,7 +558,7 @@ struct AudioEvents::Impl {
                     done = true;
                 }
             }
-            if (!event && kind == K_SCATTERER && age + EPS >= next_spawn + delay) {
+            if (!event && kind == K_SCATTERER && !untriggered && age + EPS >= next_spawn + delay) {
                 int limit = (*def)["count"].i(-1);
                 if ((limit < 0 || spawn_count < limit) && children.size() < (size_t)(*def)["polyphony"].i(1)) { select(); ++spawn_count; }
                 next_spawn = age - delay + system->range((*def)["spawn"][(size_t)0].f(), (*def)["spawn"][1].f());
@@ -540,7 +584,7 @@ struct AudioEvents::Impl {
                     select();
                     if (!children.empty()) children.back().player->tick(depth + 1);
                 } else if (kind == K_SCATTERER) {
-                    if ((*def)["count"].i() > 0 && spawn_count >= (*def)["count"].i()) done = true;
+                    if (untriggered || ((*def)["count"].i() > 0 && spawn_count >= (*def)["count"].i())) done = true;
                 } else if (kind == K_SILENCE) done = age >= delay + (*def)["duration"].num();
                 else done = true;
             }
@@ -710,7 +754,6 @@ void AudioEvents::prefer_bank(const std::string& bank) {
     ScopedLock lock(impl_->lock);
     impl_->preferred = bank;
 }
-static bool g_trace_plays = false;
 void AudioEvents::set_trace(bool on) { g_trace_plays = on; }
 
 u32 AudioEvents::play(const std::string& path, float volume, const Json& params) {
@@ -813,6 +856,10 @@ void AudioEvents::render(float* out, int frames) {
 size_t AudioEvents::active_voices() const {
     ScopedLock lock(impl_->lock);
     return impl_->mixer.active_voices();
+}
+std::string AudioEvents::describe_voices() const {
+    ScopedLock lock(impl_->lock);
+    return impl_->mixer.describe();
 }
 size_t AudioEvents::active_events() const {
     ScopedLock lock(impl_->lock);

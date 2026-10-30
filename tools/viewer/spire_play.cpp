@@ -99,6 +99,7 @@
  * directory is ours: give it SPIRE_DATA in the environment for localization. */
 #include "../../engine/core/heap.h"
 #include "../../engine/core/pack.h"
+#include "../../engine/core/pack_reader.h"
 #include "../../engine/audio/game_audio.h"
 #include "../../engine/game/game.h"
 #include "../../engine/game/loc.h"
@@ -663,6 +664,10 @@ int main(int argc, char** argv) {
     g_trace_game = &game;
     SwRenderer sw;
     Canvas canvas(&sw, &pack);
+    /* the warm-up's textures read on a thread of their own, as on the
+     * console */
+    PackReader reader(&pack);
+    if (reader.start(-1)) canvas.set_reader(&reader);
     /* the software renderer's textures are decoded (4 bytes a pixel): with
      * the console's budget a fight's would be read again every frame */
     if (load_trace) canvas.set_texture_budget((size_t)1 << 30);

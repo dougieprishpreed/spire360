@@ -76,7 +76,7 @@ public:
      * screen, Neow). */
     void warm_first(const std::vector<std::string>& paths);
     void warm_step(Canvas& canvas);
-    bool warming() const { return !warm_queue_.empty() || !warm_first_.empty(); }
+    bool warming() const { return !warm_queue_.empty() || !warm_first_.empty() || !warm_reading_.empty(); }
     bool warming_first() const { return !warm_first_.empty(); }
     void set_warm_enabled(bool on) { warm_enabled_ = on; }
     /* A clock (ms) and each frame's share of it: warm_step reads until the
@@ -118,6 +118,9 @@ private:
     std::deque<std::string> warm_queue_;
     std::deque<std::string> warm_first_;
     std::set<std::string> warmed_;
+    /* textures the canvas's reader is reading (Canvas::prefetch_async):
+     * made as each is in, a frame's share at a time */
+    std::vector<std::string> warm_reading_;
     bool warm_enabled_;
     LoadClock warm_clock_;
     double warm_share_, warm_spent_;

@@ -55,7 +55,9 @@ GameAudio::~GameAudio() {
 }
 bool GameAudio::start_thread(int hw_thread) {
     if (!output_.active() || thread_.started()) return false;
-    output_.set_queue(8);
+    /* 12 buffers, 64 ms: a stream's refill can wait behind a texture's
+     * read piece (Pack::read_span) */
+    output_.set_queue(12);
     return thread_.start(thread_main, this, hw_thread);
 }
 void GameAudio::thread_main(void* self) {
@@ -91,12 +93,18 @@ std::string GameAudio::stream(const std::string& path) {
     return "debug_audio/" + path;
 }
 void GameAudio::ui(const std::string& path, float volume) { GameLock lock(this); events_.play(stream(path), volume); }
+/* Each change of track in the log (a console session's music, for reports
+ * of a room's wrong or missing track; a track started again is one that
+ * stopped by itself). */
 void GameAudio::music(const std::string& path) {
     if (track_ == path && events_.playing(music_id_)) return;
+    log_info("music: %s%s", path.empty() ? "(none)" : path.c_str(), track_ == path && !path.empty() ? " (again)" : "");
     events_.stop(music_id_, 0.4); track_ = path; music_id_ = path.empty() ? 0 : events_.play(path);
 }
 void GameAudio::ambience(const std::string& path) {
     if (ambience_ == path && events_.playing(ambience_id_)) return;
+    log_info("ambience: %s%s", path.empty() ? "(none)" : path.c_str(),
+             ambience_ == path && !path.empty() ? " (again)" : "");
     events_.stop(ambience_id_, 0.5); ambience_ = path; ambience_id_ = path.empty() ? 0 : events_.play(path);
 }
 void GameAudio::menu() {
@@ -241,7 +249,11 @@ void GameAudio::decision(const Json& d) {
     /* UpdateTrack runs at room/combat changes, not at every card decision.
      * Keep TriggerEliteSecondPhase's Progress=8 until the combat ends. */
     int progress = a["progress"].i();
-    if (progress != context_progress_) { events_.global_parameter("Progress", (float)progress); context_progress_ = progress; }
+    if (progress != context_progress_) {
+        log_info("music progress: %d (%s)", progress, d["context"]["room_type"].str().c_str());
+        events_.global_parameter("Progress", (float)progress);
+        context_progress_ = progress;
+    }
     if (d["context"]["room_type"].str() == "RestSite") events_.parameter(ambience_id_, "Campfire", d["done"].b() ? 1.0f : 0.0f);
     if (d["decision"].str() == "game_over") { stop_room_loops(); music(""); ambience(""); ui("event:/temp/sfx/game_over"); }
 }

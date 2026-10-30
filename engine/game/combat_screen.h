@@ -344,6 +344,8 @@ private:
     std::vector<CostRoll> cost_rolls_;
     void update_cost_rolls(double dt);
     void move_creature_x(Creature& c, float dx, float duration, TweenTrans trans, TweenEase ease);
+    void move_creature_to(Creature& c, const Vec2& to, float duration, TweenTrans trans, TweenEase ease);
+    static Vec2 osty_offset(const Creature& player, float osty_max_hp);
     bool sandpit_call(const std::string& method, const Json& args);
     void special_scripted(const std::string& call, const Json& args);
     /* NCreature.AnimShake running, by who: its time */

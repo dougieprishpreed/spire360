@@ -44,6 +44,9 @@ public:
     const PackEntry* find(const char* name) const;
     bool read(const PackEntry* e, std::vector<u8>& out) const;
     bool read(const char* name, std::vector<u8>& out) const;
+    /* A texture entry read straight into out's levels (no second copy of a
+     * 10 MB background in the heap, as parse_texture of read's makes). */
+    bool read_texture(const char* name, TextureData& out) const;
     /* The first bytes of an entry (headers). */
     bool read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const;
     /* An independent file handle positioned at this entry, for streaming
@@ -60,6 +63,8 @@ public:
     static bool parse_texture_size(const std::vector<u8>& head, int* w, int* h, int* orig_w, int* orig_h);
 
 private:
+    /* n bytes at off, in pieces of PIECE, lock_ taken for each */
+    bool read_span(u64 off, void* buf, size_t n) const;
     FILE* f_;
     /* read / read_head seek and read f_: the audio thread reads too */
     mutable Mutex lock_;

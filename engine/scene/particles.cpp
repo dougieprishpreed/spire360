@@ -570,6 +570,12 @@ void Particles2D::process(double dt) {
         fresh_preprocess_ = false;
         keep_in_cache();
     }
+    /* hidden (itself or a parent): no step, as in Godot (CPUParticles2D's
+     * _update_internal returns when it is not visible in the tree, and a
+     * GPU system's process is asked for by its canvas item's draw). The
+     * Insatiable's background hides 23 of its 68 systems, 5,000 particles
+     * the console simulated each frame. */
+    if (!is_visible_in_tree()) return;
     if (!started_) start_from_cache();
     if ((int)particles_.size() != amount) {
         particles_.assign(amount > 0 ? amount : 0, Particle());
@@ -1770,6 +1776,11 @@ void Particles2D::draw(Canvas& c) {
     bool per_screen = shader_screen_particle(0, &screen);
     CurveData erosion;
     if (vfx && sm) CurveData::from(shader_param_resource(sm, "erosion_curve"), erosion);
+    Canvas::Direct dd;
+    if (!trail_enabled && !per_screen && !per_effect && !vfx && c.direct(img, &dd)) {
+        draw_direct(c, dd, view, ts, is, src, anim, hf, vf, loop, fb, fb_frames, fb_size, fb_curve, pivot, ray, grow);
+        return;
+    }
     /* the frame's quads, kept between frames (no allocation each draw);
      * written by index, never through a temporary: the console's core
      * stalls on a value read back just after it was stored */
@@ -1919,6 +1930,107 @@ void Particles2D::draw(Canvas& c) {
     }
     if (img) c.draw_triangles(img, v, uv, col, idx);
     else c.draw_colored_triangles(v, idx, col);
+}
+
+/* The plain particles (no trail, no shader of their own per particle):
+ * each quad's six vertices written once, where the renderer keeps them, in
+ * the screen's space; the transparent ones and those off the render target
+ * left out. Through draw_triangles each quad was built twice (its corners,
+ * then each of six vertices transformed again): The Insatiable's sand
+ * falls, 16,000 dots, took 17 ms of the console's frame to draw. The
+ * corners, the frames' uv and the colours are draw's own arithmetic. */
+void Particles2D::draw_direct(Canvas& c, const Canvas::Direct& dd, const Xform2D& view, const Vec2& ts, const Vec2& is,
+                              const Rect2& src, bool anim, int hf, int vf, bool loop, int fb, float fb_frames,
+                              const Vec2& fb_size, const CurveData& fb_curve, const Vec2& pivot, bool ray, float grow) {
+    static const float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
+    static const int quad[6] = { 0, 1, 2, 2, 3, 0 };
+    enum { BATCH = Renderer::RESERVE_MAX / 6 };
+    Xform2D to_screen = dd.xform * view;
+    float ahead = gpu && interpolate && fixed_fps > 0 ? (float)frame_remainder_ : 0.0f;
+    float tw = (float)dd.target_w, th = (float)dd.target_h;
+    /* a vertex alpha of 0 shows nothing when mixed or added (straight
+     * alpha); the other blends draw it */
+    bool skip_clear = dd.blend == BLEND_MIX || dd.blend == BLEND_ADD;
+    Vec2 h = Vec2(ts.x / (anim ? hf : 1), ts.y / (anim ? vf : 1)) * 0.5f;
+    float pox = pivot.x * ts.x, poy = pivot.y * ts.y;
+    float hx = h.x * grow, hy = h.y * grow;
+    size_t i = 0, n = particles_.size();
+    /* room for the live ones only: a batch's reserve that does not fit
+     * what the renderer holds sends that first (a draw call) */
+    int live = 0;
+    for (size_t j = 0; j < n; ++j)
+        if (particles_[j].active) ++live;
+    while (i < n && live > 0) {
+        int room = live < (int)BATCH ? live : (int)BATCH;
+        Vertex* w = c.direct_reserve(dd, room * 6);
+        int used = 0, seen = 0;
+        for (; i < n && seen < room; ++i) {
+            const Particle& p = particles_[i];
+            if (!p.active) continue;
+            ++seen;
+            Color k = dd.modulate * p.color;
+            if (skip_clear && k.a <= 0) continue;
+            Xform2D pxf = p.xform;
+            pxf.origin = pxf.origin + p.velocity * ahead;
+            Xform2D px = to_screen * pxf;
+            float rx = ray ? p.custom[2] : 1.0f;
+            Vec2 at[4];
+            for (int q = 0; q < 4; ++q)
+                at[q] = px.xform(Vec2(((cu[q] * 2.0f - 1.0f) * hx + pox) * rx, (cv[q] * 2.0f - 1.0f) * hy + poy));
+            if (tw > 0) {
+                float x0 = at[0].x, x1 = at[0].x, y0 = at[0].y, y1 = at[0].y;
+                for (int q = 1; q < 4; ++q) {
+                    x0 = minf(x0, at[q].x);
+                    x1 = maxf(x1, at[q].x);
+                    y0 = minf(y0, at[q].y);
+                    y1 = maxf(y1, at[q].y);
+                }
+                if (x1 < 0 || y1 < 0 || x0 > tw || y0 > th) continue;
+            }
+            float fu0 = 0, fv0 = 0, fw = 1, fh = 1;
+            if (anim) {
+                float total = (float)(hf * vf);
+                float frame = floorf(p.custom[2] * total);
+                frame = loop ? fmodf(frame, total) : clampf(frame, 0, total - 1);
+                if (frame < 0) frame += total;
+                fw = 1.0f / hf;
+                fh = 1.0f / vf;
+                fu0 = fmodf(frame, (float)hf) / hf;
+                fv0 = floorf((frame + 0.5f) / hf) / vf;
+            }
+            if (fb) {
+                float life = p.custom[3] > 0 ? p.custom[1] / p.custom[3] : 0.0f;
+                float prog = fb_curve.valid() ? fb_curve.sample(life) : 0.0f; /* hint_default_black */
+                float frame;
+                if (fb == 3) {
+                    frame = floorf(fb_frames * p.custom[2] * 0.99f);
+                } else if (fb == 1) {
+                    frame = floorf((fb_frames * p.custom[2] + fb_frames * prog) * 0.99f);
+                } else {
+                    float fx = floorf(p.custom[2] * fb_size.y) / fb_size.y;
+                    float fy = floorf(prog * fb_size.x) / fb_size.x / fb_size.y;
+                    frame = floorf((fx + fy) * fb_frames);
+                }
+                if (frame < 0) frame = 0;
+                fw = 1.0f / fb_size.x;
+                fh = 1.0f / fb_size.y;
+                fu0 = fmodf(frame, fb_size.x) / fb_size.x;
+                fv0 = floorf(frame / fb_size.x) / fb_size.y;
+            }
+            Vertex* o = w + used * 6;
+            for (int q = 0; q < 6; ++q) {
+                int k4 = quad[q];
+                float u = fu0 + cu[k4] * fw, vv = fv0 + cv[k4] * fh;
+                o[q].pos = at[k4];
+                o[q].uv = Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + vv * src.size.y) / is.y);
+                o[q].color = k;
+            }
+            ++used;
+        }
+        live -= seen;
+        c.direct_commit((room - used) * 6);
+    }
+    c.direct_done();
 }
 
 /* ---- LightOccluder2D ---- */

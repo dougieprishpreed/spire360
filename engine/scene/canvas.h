@@ -12,6 +12,8 @@
 
 namespace spire {
 
+class PackReader;
+
 class Pack;
 
 enum NinePatchAxis { AXIS_STRETCH = 0, AXIS_TILE = 1, AXIS_TILE_FIT = 2 };
@@ -50,9 +52,37 @@ public:
      * kept until the budget needs its room (an idle one is not released).
      * False: it was there already, or the pack has no such texture. */
     bool prefetch(const std::string& path);
+    /* The same through the reader (set_reader): 0 the texture is held (made
+     * now from what was read, or before), 1 its read is under way (ask
+     * again), -1 it cannot be made. Without a reader: prefetch's read. */
+    int prefetch_async(const std::string& path);
+    /* Textures read ahead on its thread (PackReader); NULL: read here. */
+    void set_reader(PackReader* reader) { reader_ = reader; }
     /* A renderer texture its owner no longer uses (a SubViewport's capture),
      * destroyed at the next begin_frame. */
     static void release_later(Texture* t);
+
+    /* For a caller that writes its own quads' vertices (Particles2D's
+     * plain particles): the texture, the item's transform and modulate,
+     * its blend, the render target's size (0 0: unknown). False when the
+     * vertices must go through draw_triangles (a dump, counting, the
+     * wind's sway, no texture yet). direct_reserve / direct_commit then
+     * frame each batch (at most Renderer::RESERVE_MAX vertices); one draw
+     * counted for the lot (direct_done). */
+    struct Direct {
+        Texture* tex;
+        Xform2D xform;
+        Color modulate;
+        BlendMode blend;
+        int target_w, target_h;
+    };
+    bool direct(ImageTextureRes* img, Direct* out);
+    Vertex* direct_reserve(const Direct& d, int count) { return r_->reserve(d.tex, count, blend_, tex_flags_); }
+    void direct_commit(int unused) {
+        if (unused > 0) r_->give_back(unused);
+        r_->commit();
+    }
+    void direct_done() { ++calls_; }
 
     /* Item state. xform maps local coordinates to screen pixels. */
     void set_item(const Xform2D& xform, const Color& modulate, BlendMode blend, int tex_flags);
@@ -117,12 +147,18 @@ private:
         size_t bytes;
         u64 touched, frame;
         bool kept; /* prefetch: no idle release */
-        CachedTexture() : texture(NULL), bytes(0), touched(0), frame(0), kept(false) {}
+        /* a texture the GPU's memory had no room for: tried again from
+         * this frame (0: missing from the pack, never) */
+        u64 retry_at;
+        CachedTexture() : texture(NULL), bytes(0), touched(0), frame(0), kept(false), retry_at(0) {}
     };
     std::map<std::string, CachedTexture> textures_;
     unsigned serial_; /* this canvas among all (ImageTextureRes::gpu_canvas) */
     unsigned epoch_;  /* textures_' erasures: an image's remembered entry is stale */
     size_t texture_bytes_, texture_budget_;
+    /* bytes end_frame releases beyond the budget's (a texture not made for
+     * want of memory) */
+    size_t want_free_;
     u64 texture_clock_, frame_;
     TextureStats stats_;
     bool console_sizes_;
@@ -149,6 +185,7 @@ private:
 
     Renderer* r_;
     const Pack* pack_;
+    PackReader* reader_;
     Xform2D xform_;
     Color modulate_;
     BlendMode blend_;
@@ -158,6 +195,7 @@ private:
     bool wind_on_;
     float wind_, wind_height_;
     Texture* load_gpu_texture(ImageTextureRes* img, const std::string& key);
+    void no_room(const std::string& key, const std::string& path);
     void put_triangles(Texture* tex, const std::vector<Vec2>& v, const std::vector<Vec2>* uv,
                        const std::vector<Color>* colors, const std::vector<int>& idx, int flags);
     Vec2 sway(const Vec2& p, const Vec2& uv) const {

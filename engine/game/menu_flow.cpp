@@ -336,6 +336,18 @@ bool MenuFlow::update(const PadState& in) {
             } else if (a == TitleScreen::SINGLEPLAYER) {
                 screen_node_ = chars_->build(game_->characters(), last_character_, &err);
                 if (screen_node_) {
+                    /* every character's portrait read while the screen
+                     * shows (each read as it was picked stopped the menu,
+                     * and its sound, 0.2-0.3 s on the console), then the
+                     * run's first screen (Neow): the embark's black has
+                     * nothing left to read */
+                    Json bgs = Json::make_array();
+                    const Json& cs = game_->characters()["characters"];
+                    for (size_t i = 0; i < cs.size(); ++i)
+                        bgs.append(Json::make_string("scenes/screens/char_select/char_select_bg_" +
+                                                     lower(cs[i]["id"].str()) + ".tscn"));
+                    lib_->warm(bgs);
+                    game_->warm_run_start();
                     screen_ = CHARACTERS;
                     chars_->set_progress(menu_);
                     title_->set_covered(true);

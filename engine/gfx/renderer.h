@@ -159,6 +159,18 @@ public:
             draw_triangles(scratch_tex_, &scratch_[0], (int)scratch_.size(), scratch_blend_, scratch_flags_);
         scratch_.clear();
     }
+    /* Before commit: the last count vertices reserved go unused (a caller
+     * that reserved for a batch and left some of it out). */
+    virtual void give_back(int count) {
+        scratch_.resize(scratch_.size() > (size_t)count ? scratch_.size() - (size_t)count : 0);
+    }
+    /* The size in pixels of what draws land on now (the screen, or a
+     * capture's target); 0 0 when unknown (nothing is left out for being
+     * off it). */
+    virtual void target_size(int* w, int* h) const {
+        *w = 0;
+        *h = 0;
+    }
     /* Parameters of the next DRAW_MSDF draws (Godot's canvas shader: pixel
      * range of the glyph atlas, outline thickness; 0 = fill). */
     virtual void set_msdf(float px_range, float outline) = 0;

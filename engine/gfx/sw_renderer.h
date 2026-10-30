@@ -61,6 +61,10 @@ public:
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
     virtual bool begin_capture(int w, int h);
+    virtual void target_size(int* w, int* h) const {
+        *w = cap_w_ ? cap_w_ : fb_.w;
+        *h = cap_w_ ? cap_h_ : fb_.h;
+    }
     virtual Texture* end_capture(Texture* reuse);
 
     const Image& framebuffer() const { return fb_; }

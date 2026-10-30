@@ -444,6 +444,7 @@ internal static partial class Hooks
         Spire.HookBridge.Hooks.RegisterBefore("anim.trigger", a =>
         {
             if (a.Length > 1 && a[0] is Creature c && a[1] is string name && !c.IsDead)
+            {
                 Steps.Cue(new Dictionary<string, object?>
                 {
                     ["t"] = "anim", ["who"] = Steps.Who(c), ["name"] = name,
@@ -451,6 +452,24 @@ internal static partial class Hooks
                     // what the creature's CreatureAnimator plays for it
                     ["play"] = Animators.Trigger(c, name),
                 });
+                // TriggerAnim's own sound for the player's Attack, Cast and
+                // PowerUp comes after its creature node: outside a fight
+                // the stand-ins have none (The Architect's last exchange,
+                // the event's room shown as a fight), and the game's
+                // attack sounds there were lost
+                if (c.IsPlayer && c.Player != null && c.GetCreatureNode() == null)
+                {
+                    var character = c.Player.Character;
+                    string? sfx = name switch
+                    {
+                        "Attack" => character.AttackSfx,
+                        "Cast" => character.CastSfx,
+                        "PowerUp" => character.PowerUpSfx,
+                        _ => null,
+                    };
+                    if (sfx != null) SfxCmd.Play(sfx);
+                }
+            }
         });
 
         // TestMode at the rules that depend on it (testmode.game_flow.*): off
@@ -492,8 +511,25 @@ internal static partial class Hooks
         // once, record the pacing for the presentation.
         Bridge.Register("cmd.wait", a =>
         {
-            Steps.Wait(a.Length > 0 ? WaitMs(a[0]) : 0, "cmd");
+            int ms = a.Length > 0 ? WaitMs(a[0]) : 0;
+            if (_turnEndCardAt >= 0)
+            {
+                // a turn-end card's offset: what is left of it
+                ms = (int)Math.Max(0, _turnEndCardAt - Steps.ClockMs);
+                _turnEndCardAt = -1;
+            }
+            Steps.Wait(ms, "cmd");
             return Task.CompletedTask;
+        });
+        // CombatManager.DoTurnEndCards: each turn-end card at its own offset
+        // from the start (0, 0.8, 1.4, 1.88 s... in Normal mode, half in
+        // Fast), each after the one before it is done. Headless they run in
+        // turn, and the offsets were waited one after the other: four Burns
+        // took 4 s of pauses where the game's take 1.9.
+        Spire.HookBridge.Hooks.RegisterBefore("combat.turn_end_cards", _ => _turnEndStart = Steps.ClockMs);
+        Spire.HookBridge.Hooks.RegisterBefore("combat.turn_end_card_delay", a =>
+        {
+            if (a.Length > 2) _turnEndCardAt = _turnEndStart + WaitMs(a[2]);
         });
         Bridge.Register("task.delay", a =>
         {
@@ -785,6 +821,10 @@ internal static partial class Hooks
                 });
         }
     }
+
+    // DoTurnEndCards' start on the presentation clock, and the next turn-end
+    // card's offset from it (-1: none pending)
+    private static long _turnEndStart, _turnEndCardAt = -1;
 
     private static int WaitMs(object? arg) => arg switch
     {

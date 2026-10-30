@@ -138,6 +138,33 @@ static int music_cases(const Pack& pack) {
         if (audio.active_voices()) { fprintf(stderr, "FAIL music voices survived stop\n"); ++failed; }
         ++checked;
     }
+    /* The campfire's crackle (Rest and the fire lit) goes with the rest
+     * site: Studio untriggers an instrument whose conditions stop holding
+     * (its envelope's release), not at the ambience's next loop */
+    audio.stop_all(); audio.render(samples, 256);
+    audio.global_parameter("Progress", 3);
+    u32 ambience = audio.play("event:/sfx/ambience/act1_ambience");
+    audio.parameter(ambience, "Campfire", 0);
+    /* the lit fire's loop and, once it is out, the embers' */
+    const char* lit_loop = "357aa40c1ab0", *embers = "a954c2e74693";
+    for (int k = 0; k < 190; ++k) audio.render(samples, 256);
+    std::string lit = audio.describe_voices();
+    audio.parameter(ambience, "Campfire", 1);
+    for (int k = 0; k < 940; ++k) audio.render(samples, 256);
+    std::string out = audio.describe_voices();
+    audio.parameter(ambience, "Campfire", 0);
+    for (int k = 0; k < 190; ++k) audio.render(samples, 256);
+    audio.global_parameter("Progress", 2);
+    for (int k = 0; k < 940; ++k) audio.render(samples, 256);
+    std::string shop = audio.describe_voices();
+    printf("audio: act 1 ambience: fire lit [%s], fire out [%s], lit then the shop [%s]\n", lit.c_str(), out.c_str(),
+           shop.c_str());
+    if (lit.find(lit_loop) == std::string::npos || out.find(lit_loop) != std::string::npos ||
+        out.find(embers) == std::string::npos || shop.find(lit_loop) != std::string::npos) {
+        fprintf(stderr, "FAIL the campfire's crackle does not follow the fire and the room\n");
+        ++failed;
+    }
+    audio.stop_all(); audio.global_parameter("Progress", 0);
     printf("audio: %d music events, Progress 0..9 and boss parameters, %u decoder failures, %d failures\n", checked, audio.failures(), failed);
     return failed || audio.failures() ? 1 : 0;
 }

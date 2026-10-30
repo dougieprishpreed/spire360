@@ -170,6 +170,11 @@ public:
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags);
     virtual Vertex* reserve(Texture* tex, int count, BlendMode blend, int flags);
     virtual void commit() {}
+    virtual void give_back(int count) { batch_count_ -= count; }
+    virtual void target_size(int* w, int* h) const {
+        *w = cap_w_ ? cap_w_ : width_;
+        *h = cap_w_ ? cap_h_ : height_;
+    }
     virtual void set_msdf(float px_range, float outline);
     virtual void set_color_matrix(const float* m);
     virtual void set_ripple(const float* p);

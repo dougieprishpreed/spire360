@@ -127,19 +127,62 @@ const char* Pack::name_of(const PackEntry* e) const {
     return e->name_offset < names_.size() ? &names_[e->name_offset] : "";
 }
 
+/* A read in pieces, the lock taken for each: the audio's reads (a sound
+ * kept in memory, read at its first play) wait for a piece, not for a whole
+ * texture, and the USB drive serves the music's streams (their own handles)
+ * between the pieces. A 10 MB background read in one request held the drive
+ * half a second: the mix ran dry (crackles; the music stopped for seconds). */
+enum { PIECE = 256 * 1024 };
+
+bool Pack::read_span(u64 off, void* buf, size_t n) const {
+    u8* p = (u8*)buf;
+    while (n) {
+        size_t k = n < (size_t)PIECE ? n : (size_t)PIECE;
+        {
+            ScopedLock lock(lock_);
+            if (!read_at(f_, off, p, k)) return false;
+        }
+        off += k;
+        p += k;
+        n -= k;
+    }
+    return true;
+}
+
 bool Pack::read(const PackEntry* e, std::vector<u8>& out) const {
     if (!e || !f_) return false;
-    ScopedLock lock(lock_);
     out.resize(e->size);
-    return e->size == 0 || read_at(f_, e->offset, &out[0], e->size);
+    return e->size == 0 || read_span(e->offset, &out[0], e->size);
 }
 
 bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
     if (!e || !f_) return false;
-    ScopedLock lock(lock_);
     if (len > e->size) len = e->size;
     out.resize(len);
-    return len == 0 || read_at(f_, e->offset, &out[0], len);
+    return len == 0 || read_span(e->offset, &out[0], len);
+}
+
+bool Pack::read_texture(const char* name, TextureData& t) const {
+    const PackEntry* e = find(name);
+    std::vector<u8> head;
+    if (!e || !read_head(e, 12, head) || head.size() < 12) return false;
+    int n = head[1];
+    if (!read_head(e, (u32)(12 + 4 * n), head) || head.size() < (size_t)(12 + 4 * n)) return false;
+    t.format = head[0];
+    t.flags = be16(&head[2]);
+    t.width = be16(&head[4]);
+    t.height = be16(&head[6]);
+    t.orig_width = be16(&head[8]);
+    t.orig_height = be16(&head[10]);
+    t.levels.assign(n, std::vector<u8>());
+    for (int i = 0; i < n; ++i) {
+        u32 a = be32(&head[12 + 4 * i]);
+        u32 b = i + 1 < n ? be32(&head[12 + 4 * (i + 1)]) : e->size;
+        if (a > b || b > e->size) return false;
+        t.levels[i].resize(b - a);
+        if (b > a && !read_span(e->offset + a, &t.levels[i][0], b - a)) return false;
+    }
+    return true;
 }
 
 FILE* Pack::open_stream(const PackEntry* e) const {

@@ -57,6 +57,11 @@ public partial class RunDriver
         // EnchantmentDescriptionContainer)
         public (EnchantmentModel model, int amount)? PendingEnchantment { get; private set; }
         private (EnchantmentModel model, int amount)? _nextEnchantment;
+        // FromDeckForTransformation's card-to-transformation (NDeckTransform-
+        // SelectScreen's preview of what each pick becomes; null: a random
+        // card, CardTransformation(original))
+        public Func<CardModel, CardTransformation>? PendingTransform { get; private set; }
+        private Func<CardModel, CardTransformation>? _nextTransform;
         private bool _nextMustPick;
 
         /// <summary>
@@ -94,6 +99,13 @@ public partial class RunDriver
                 foreach (var a in args)
                     if (a is bool canSkip) mustPick = !canSkip;
             }
+            Func<CardModel, CardTransformation>? transform = null;
+            if (kind == "transform")
+            {
+                foreach (var a in args)
+                    if (a is Func<CardModel, CardTransformation> f) transform = f;
+                transform ??= c => new CardTransformation(c);
+            }
             (EnchantmentModel, int)? enchantment = null;
             if (kind == "enchant")
                 for (int i = 0; i + 1 < args.Length; ++i)
@@ -106,12 +118,14 @@ public partial class RunDriver
                 PendingCancelable = cancelable;
                 PendingManualConfirm = manual;
                 PendingEnchantment = enchantment;
+                PendingTransform = transform;
                 if (mustPick && PendingOptions?.Count > 0) PendingMinSelect = Math.Max(PendingMinSelect, 1);
             }
             else if (result is Task t && !t.IsCompleted)
             {
                 _next = (kind, prompt, cancelable, manual);
                 _nextEnchantment = enchantment;
+                _nextTransform = transform;
                 _nextMustPick = mustPick;
             }
         }
@@ -135,8 +149,10 @@ public partial class RunDriver
             PendingCancelable = _next?.cancelable ?? false;
             PendingManualConfirm = _next?.manual ?? false;
             PendingEnchantment = _nextEnchantment;
+            PendingTransform = _nextTransform;
             _next = null;
             _nextEnchantment = null;
+            _nextTransform = null;
             if (_nextMustPick) PendingMinSelect = Math.Max(minSelect, 1);
             _nextMustPick = false;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();

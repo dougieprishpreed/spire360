@@ -216,13 +216,17 @@ std::string PotionMenu::input(const PadState& pad, CombatScreen* combat, const J
             return std::string();
         }
         /* NRelicInventory.UpdateNavigation: left / right around the row,
-         * up to the first potion slot */
+         * up to the first potion slot, down to the top bar's
+         * ActiveScreenProxy, which hands the focus back to the screen (the
+         * hand in a fight: FocusedControlFromTopBar) */
         if (pad.pressed & PadState::LEFT) focus_relic((relic_ + n - 1) % n);
         if (pad.pressed & PadState::RIGHT) focus_relic((relic_ + 1) % n);
         if (pad.pressed & PadState::UP) {
             unfocus_relic();
             mode_ = SLOTS;
             focus_slot(0);
+        } else if (pad.pressed & PadState::DOWN) {
+            close();
         }
         return std::string();
     }

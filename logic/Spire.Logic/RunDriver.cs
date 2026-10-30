@@ -1781,6 +1781,8 @@ public partial class RunDriver
                 var stats = new Dictionary<string, object?>();
                 try { foreach (var dv in card.DynamicVars.Values) stats[dv.Name.ToLowerInvariant()] = (int)dv.BaseValue; } catch { }
                 var selkws = card.Keywords?.Where(k => k != CardKeyword.None).Select(k => k.ToString()).ToList();
+                (Dictionary<string, object?>? preview, List<Dictionary<string, object?>>? options) transform =
+                    _cardSelector.PendingKind == "transform" ? TransformPreviewView(card, _cardSelector.PendingTransform) : (null, null);
                 return WithCardView(card, card.Pile?.Type ?? PileType.None, new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -1797,6 +1799,8 @@ public partial class RunDriver
                     ["after_upgrade"] = GetUpgradedInfo(card),
                     ["upgrade_preview"] = _cardSelector.PendingKind is "upgrade" or "hand_upgrade" ? UpgradePreviewView(card) : null,
                     ["inspect_upgrade"] = _cardSelector.PendingKind is "upgrade" or "hand_upgrade" ? null : UpgradePreviewView(card),
+                    ["transform_preview"] = transform.preview,
+                    ["transform_options"] = transform.options,
                 });
             }).ToList();
 
@@ -3606,6 +3610,44 @@ public partial class RunDriver
             Spire.Logic.Log.Warn($"upgrade preview {card.Id}: {ex.Message}");
             return null;
         }
+    }
+
+    // NTransformPreview.Initialize: the card a pick becomes (its
+    // CardTransformation's Replacement: Claws' Maul), else some of what it
+    // may become (ReplacementOptions or CardFactory.GetDefaultTransformation-
+    // Options), which the screen cycles through every 0.2 s: six, spread over
+    // the list (a preview draws no RNG of the run's).
+    private static (Dictionary<string, object?>? preview, List<Dictionary<string, object?>>? options) TransformPreviewView(
+        CardModel card, Func<CardModel, CardTransformation>? toTransformation)
+    {
+        try
+        {
+            var t = toTransformation != null ? toTransformation(card) : new CardTransformation(card);
+            if (t.Replacement != null) return (PreviewCardView(t.Replacement), null);
+            var all = (t.ReplacementOptions ?? MegaCrit.Sts2.Core.Factories.CardFactory.GetDefaultTransformationOptions(card, t.IsInCombat)).ToList();
+            var options = new List<Dictionary<string, object?>>();
+            int n = Math.Min(6, all.Count);
+            for (int i = 0; i < n; ++i)
+            {
+                var view = PreviewCardView(all[i * all.Count / n]);
+                if (view != null) options.Add(view);
+            }
+            return (null, options.Count > 0 ? options : null);
+        }
+        catch (Exception ex)
+        {
+            Spire.Logic.Log.Warn($"transform preview {card.Id}: {ex.Message}");
+            return (null, null);
+        }
+    }
+
+    // A card that is no card of the run (a preview): its view
+    private static Dictionary<string, object?>? PreviewCardView(CardModel card)
+    {
+        var shown = card.IsMutable ? card : card.ToMutable();
+        var d = new Dictionary<string, object?> { ["type"] = shown.Type.ToString(), ["rarity"] = shown.Rarity.ToString() };
+        AddCardView(d, shown, PileType.None);
+        return d;
     }
 
     // NPotionPopup: whether Use and Discard are enabled, and Use's label

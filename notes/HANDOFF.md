@@ -11,6 +11,160 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The fifth xSDK hardware run (2026-10-30): memory, the drive, the music's mix
+
+The run (work/rp102, build 7db9a72): a continued Defect run to The Architect,
+then a new Necrobinder run to floor 40, save and quit; screenshots of Osty
+(floors 12, 25), the Decimillipede, The Insatiable, a summoned minion. The
+user's reports: sound crackles in slowdowns, the music stopping for seconds,
+the rest site's music wrong and its crackle on into the shop, no music change
+in ? rooms or treasure, a freeze at the main menu after save and quit, a
+hitch (and sound) at each character in the character select, Neow's loading
+screen, Burns at a turn's end slow one by one, the Architect's last hits
+silent, Claws' confirm screen blank, a dead Decimillipede segment with an
+attack intent, a summoned minion with none, the Battleworn Dummy's last blow
+cut by the fade, Osty too near the enemies, a step back at The Insatiable's
+turn ends, the relic row's Down.
+
+Performance and memory (the log's slow frames, its heap lines):
+
+- The fight's top bar was built again for every card (12 ms each): its key
+  held the context's run_time, new each decision. top_bar_key: what the bar
+  shows (the player's character, ascension, HP, gold, potions, relics, deck
+  size; the room, floor and bosses).
+- Each answer's 30-50 KB parsed in the frame loop (5-8 ms): ParsingLink
+  reads and parses it on hardware thread 5 (logic_link.h).
+- The heap held 139 MB with 97 in use, free memory down to 17 MB: each shop's
+  10 MB backdrop (and the card atlases, Neow) read into the heap, its levels
+  copied again, the holes too small for the next. Pack::read_texture reads
+  the levels in place; xsdk/big_alloc.c gives blocks of 1 MB and more their
+  own kernel pages, freed whole (the link wraps malloc, free, realloc and
+  calloc); the heap line says "big blocks".
+- After the save and quit the main menu's top layer (3 MB) failed to be
+  made and was read again every frame, 25 times in 4 s: a texture the GPU
+  has no room for now releases the idle ones (end_frame, up to its size) and
+  is made again 4 frames on (Canvas::no_room).
+- The drive: a texture read in one request held it half a second, and the
+  mix's stream refills (music, long sounds) waited behind it: crackles, the
+  music gone for seconds. Pack::read_span reads 256 KB a request, the pack's
+  lock taken for each. The mix's queue is 12 buffers (64 ms). The sounds kept
+  in memory (12 MB) were kept till exit, and in a long session every new
+  sound streamed with a file of its own until the console's 32 handles ran
+  out ("cannot open"): the least recently played that no voice reads go now.
+- PackReader (core/pack_reader.h): textures read on hardware thread 5 ahead
+  of their use, the warm-up's (Canvas::prefetch_async), a draw waiting for
+  one under way instead of reading it twice. The character select warms every
+  character's portrait (0.2-0.3 s each, read as it was picked) and Neow's
+  first screen while it shows; the embark's black has nothing left to read.
+- The Insatiable's background: 68 particle systems, 21,500 particles, 17 ms
+  of the frame to draw and 11 to simulate. Hidden systems are not simulated
+  (as Godot's: CPUParticles2D's _update_internal returns, a GPU system's
+  process is asked by its draw), 5,000 of them; the plain particles' quads
+  are written once where the renderer keeps them (Particles2D::draw_direct),
+  the transparent ones and those off the render target left out (Canvas::
+  direct, Renderer::give_back / target_size). The render the same, pixel for
+  pixel.
+- The log: "music: / ambience: / music progress:" at each change, a voice
+  that ends well before its sound does ("audio voice ended at frame"), the
+  fight decision's phases finer (audio, unfocus, copies, end play, old tips).
+
+The music (audio/events.cpp):
+
+- An act's track is three stems and the merchant's layer playing throughout,
+  each section its own mix by automation of their buses' volume along the
+  timeline. Those curves are fader positions (the banks' own mappings are
+  all Studio's taper: -42 is silence, -39 is -60 dB ...; 91 of 138 volume
+  curves rest at -42): read as decibels every muted stem stayed on at -42 dB
+  (the rest site's "music", ? rooms and treasure much like the rest).
+  fader_db.
+- An instrument is triggered while the playhead is in its box and its
+  conditions hold, and untriggered when they stop holding (its envelope's
+  release, else a loop plays out): checked only when the box began, the
+  campfire's loop (Rest and the fire lit) played on into the next room, and a
+  change took the ambience's 85 s loop to show. spire_audio_check --music
+  checks the campfire: lit, out (the embers'), then the shop.
+
+The reports:
+
+- Burns: DoTurnEndCards starts each turn-end card at an offset from the same
+  moment (0, 0.8, 1.4, 1.88 s; half in Fast); headless they run in turn and
+  the offsets were waited one after the other (4 s of pauses for four Burns).
+  The cmd.wait of AddTurnEndCardToPlayPileWithDelay is what is left of its
+  offset (patches combat.turn_end_cards, combat.turn_end_card_delay).
+- The Architect's last hits: TriggerAnim's Attack / Cast / PowerUp sound
+  comes after the creature node, which the stand-ins give only in a fight;
+  the anim.trigger hook plays it where there is no node.
+- Osty: summoned after the room is laid out, the summon's OstyScaleToSize
+  puts it at the player's place now plus GetOstyOffsetFromPlayer; from where
+  the player was before PositionLocalPlayerOsty moved it, it stood 125-300 px
+  too far right. OstyScaleToSize moves it too (linear, its time). The
+  Sandpit's update took Osty's offset from the nodes: each update moved the
+  player again by any difference (the step back); GetOstyOffsetFromPlayer.
+- The Decimillipede: a dead segment (kept for its revive) is a ghost, not
+  among the decision's enemies; RefreshIntents went to the enemies only, so it
+  kept the attack it died with and never showed the heal it revives by.
+- A minion summoned mid-fight was made with the decision's intents in its
+  data: its RefreshIntents and the final sync saw nothing new. Its intents
+  start empty.
+- The Battleworn Dummy (an event's fight back to its event): the fade began
+  with the decision and no path played a fight's last steps before an
+  event's screen. show's finishing takes event_choice too, then the fade.
+- Claws (Tanx): the transform screen's preview (NTransformPreview: the picks
+  left of Before, what each becomes right of After, a random transform's
+  options cycling every 0.2 s) was the generic row, which hid the whole box
+  (no Cards row in the transform scene). The logic sends transform_preview
+  (the card's CardTransformation.Replacement) or transform_options (six of
+  what it may become); the deck screens open their preview at the pick
+  limit, manual confirmation or not (OnCardClicked).
+- The relic row: Down goes to the top bar's ActiveScreenProxy, back to the
+  screen.
+- Neow: no "Loading..." over the embark's black (the game's embark has
+  none; the run's first screen is read during the character select).
+- Not changed: Echo Form plays a Bound card twice (the play loop does not
+  ask ShouldPlay again); Sozu's potion reward is taken and lost silently
+  (PotionReward.OnSelect); the card into the deck's swoosh plays on the PC
+  (on the console it was likely one of the sounds the handles cut).
+
+The audit the user asked for (each card's and relic's own text):
+
+- tools/text_audit.py: every card, relic, enchantment, affliction and potion
+  in the English tables, tagged by the flows its text names (rest, shop,
+  rewards, treasure, map, event, deck changes, potions, gold, max HP, pickup)
+  and what it touches (powers, keywords, card types, piles, orbs, Osty,
+  stars, energy, block, timing); work/text_audit.tsv (the game's text: not
+  committed). 605 cards (368 touching two or more things), 306 relics (153
+  naming a flow outside a fight).
+- tools/relic_flow_probe.py: each relic whose text names a room, the room with
+  it beside the same room without it (same seed): the rest site (options,
+  after resting), the shop (stock, prices), the chest, a fight's rewards and
+  the deck after it, an elite fight's start and rewards, a ? room. 46 relic
+  rooms: every one changes as its text says, but the two with no model in
+  this version (Cursed Kettle, Glowing Orb) and the probe's own blind spots
+  (Lasting Candy's every other combat, Maw Bank's floors, Planisphere's ?
+  map point, Golden Compass's act 2 map, Juzu Bracelet's ? rolls, Sword of
+  Stone's five elites, White Star in a normal fight).
+- Rewards and treasure: the rewards go through the game's
+  RewardsSetSynchronizer (taken and completed as the game decides); a refused
+  one stays selectable as NRewardButton's. The treasure room follows
+  NTreasureRoom; its extra rewards are taken at once (only custom runs'
+  modifiers add any).
+
+Checks (work/check102.sh): seeded traces (traces/new102 against base6):
+3 differences, all the new transform_options (a random transform's
+selection); 35 scenarios ok (claws new); spire_check 2357 responses, 0
+failures, audio 22178 voices, 5 absent event calls (enemy casts the banks
+lack), 0 decoder failures; the audio fixtures, the music (the campfire's
+case new) and the events 0 failures; PC build without warnings.
+The console's logic (native host, out/logic/c as built): the 15 seeded
+runs 14 identical to the JIT's (the other a monster's random skin), 35
+scenarios ok, no trap or [ERROR].
+
+Not done, for the next rounds: the bosses' and unique elites' own pass (the
+encounters suite with the presentation audit), The Insatiable's cloud
+layers over the mounds (the scene's order; a picture of the game wanted),
+the text's per-frame layout and theme lookups (labels 1.6-1.9 ms a fight
+frame), an act's first fight's background preprocess.
+
 ## The fourth xSDK hardware run (2026-10-30): the saves' hitches, the logic reports
 
 The run (work/rp101, build 5cec63d): fights at 60 fps for the most part;

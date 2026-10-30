@@ -299,6 +299,20 @@
       "note": "Creature.SetNodeVisible sets the creature node's Visible (a Godot setter, not recorded): recorded as a node_visible cue (InfestedPower hides the Wrigglers until the elite's death animation is over)."
     },
     {
+      "id": "combat.turn_end_cards",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Combat.CombatManager",
+      "method": "DoTurnEndCards",
+      "note": "DoTurnEndCards starts each turn-end card (Burn, Decay, ...) at its own offset from this moment (AddTurnEndCardToPlayPileWithDelay, the tasks run alongside each other). Recorded: the presentation clock here."
+    },
+    {
+      "id": "combat.turn_end_card_delay",
+      "action": "call_before",
+      "type": "MegaCrit.Sts2.Core.Combat.CombatManager",
+      "method": "AddTurnEndCardToPlayPileWithDelay",
+      "note": "A turn-end card's Cmd.Wait(delay), an offset from DoTurnEndCards' start. Headless the cards run in turn, so its wait is what is left of the offset after the cards before it (cmd.wait)."
+    },
+    {
       "id": "card.play_index",
       "action": "call_before",
       "type": "MegaCrit.Sts2.Core.Models.CardModel",

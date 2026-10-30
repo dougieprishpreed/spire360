@@ -52,6 +52,7 @@ public:
     virtual void set_clip(const Rect2* clip);
     virtual void draw_triangles(Texture* tex, const Vertex* v, int count, BlendMode blend, int flags);
     virtual Vertex* reserve(Texture* tex, int count, BlendMode blend, int flags);
+    virtual void give_back(int count) { batch_count_ -= count; }
     virtual void commit() {}
     virtual void set_msdf(float px_range, float outline);
     virtual void set_color_matrix(const float* m);

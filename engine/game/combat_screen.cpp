@@ -644,15 +644,16 @@ void CombatScreen::position_players(std::vector<Creature>& cs, float scaling, bo
             int k = r * cols + c;
             if (k >= n) break;
             cs[k].node->set_position(Vec2(-x - cs[k].width * 0.5f, 200.0f - row_rise * (float)r));
-            if (k == 0 && osty && osty->node) {
-                /* PositionLocalPlayerOsty: the player 150 px further left,
-                 * Osty right of where the player was (GetOstyOffsetFromPlayer:
-                 * half the player's hitbox, plus 150..250 px by its max HP,
-                 * 75 px up). */
-                float t = clampf(osty_max_hp / 150.0f, 0.0f, 1.0f);
-                Vec2 off(cs[k].hitbox.size.x * 0.5f + 150.0f + 100.0f * t, -75.0f);
+            if (k == 0 && osty) {
+                /* PositionLocalPlayerOsty: the player 150 px further left.
+                 * Osty is summoned after the room is laid out (the
+                 * Necrobinder's relic at the fight's start), and the
+                 * summon's OstyScaleToSize puts it at the player's place
+                 * now plus GetOstyOffsetFromPlayer: from where the player
+                 * was, as the room would for an Osty already there, it
+                 * stood 125-300 px too far right, near the enemies. */
                 cs[k].node->set_position(Vec2(-x - cs[k].width * 0.5f - 150.0f, 200.0f - row_rise * (float)r));
-                osty->node->set_position(Vec2(-x, 200.0f - row_rise * (float)r) + off);
+                if (osty->node) osty->node->set_position(cs[k].node->position + osty_offset(cs[k], osty_max_hp));
                 x += 100.0f;
             }
             if (k == 0 && pets_x) *pets_x = x;
@@ -2266,7 +2267,10 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
                 break;
             }
     }
-    position_players(ally_nodes, scaling, view["fully_center_players"].b(), &osty_, osty_max_hp, &pets_x_);
+    /* PositionLocalPlayerOsty for the Necrobinder only (the logic sends
+     * "osty" for no one else), with or without an Osty yet */
+    position_players(ally_nodes, scaling, view["fully_center_players"].b(), d["osty"].is_object() ? &osty_ : NULL,
+                     osty_max_hp, &pets_x_);
     position_pets(pets_x_);
     /* Where the enemies stand: as before in this fight; laid out again
      * (all of them) when one has no place yet. */
@@ -2519,7 +2523,9 @@ void CombatScreen::add_summoned(const Json& steps, Node* container) {
 }
 
 void CombatScreen::update_decision(const Json& d, bool finishing) {
+    phase_mark("fight: the client's");
     unfocus_creatures(); /* the creatures may change */
+    phase_mark("fight: unfocus");
     if (visual_only_ && !finishing) {
         /* NCombatRoom.TransitionToActiveCombat keeps all creature nodes. */
         visual_only_ = false;
@@ -2538,10 +2544,12 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
     }
     pending_ = d;
     previous_ = state_;
+    phase_mark("fight: copies");
     end_play();
+    phase_mark("fight: end play");
     if (tips_) { root_->remove_child(tips_); delete tips_; tips_ = NULL; }
     tips_for_ = -2;
-    phase_mark("fight: copies");
+    phase_mark("fight: old tips");
     if (!finishing) {
         std::vector<Creature> next;
         std::vector<std::string> who;
@@ -2568,6 +2576,11 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
                 container->add_child(c.node);
                 c.hp_bar_reduction = es[i]["hp_bar_reduction"].f();
                 c.data = es[i];
+                /* no intents yet: its RefreshIntents cue (or the final
+                 * sync) makes them; with the decision's in its data both
+                 * saw nothing new, and a minion summoned mid-fight never
+                 * showed what it meant to do */
+                c.data.set("intents", Json());
                 c.powers = es[i]["powers"];
                 update_bounds(c);
                 refresh_state(c, false);
@@ -2616,6 +2629,9 @@ void CombatScreen::update_decision(const Json& d, bool finishing) {
             if (allies && make_creature("osty", false, osty_)) {
                 allies->add_child(osty_.node);
                 osty_.data = d["osty"];
+                /* NCombatRoom.AddCreature: OstyScaleToSize(MaxHp, 0) */
+                if (player_.node)
+                    osty_.node->set_position(player_.node->position + osty_offset(player_, (float)d["osty"]["max_hp"].num(0)));
                 update_bounds(osty_);
                 refresh_state(osty_, false);
                 play_idle(osty_.node);
@@ -3308,13 +3324,27 @@ void CombatScreen::update_cost_rolls(double dt) {
 /* A creature's node moved along x by dx (TweenProperty "global_position:x"),
  * a move it was making replaced. */
 void CombatScreen::move_creature_x(Creature& c, float dx, float duration, TweenTrans trans, TweenEase ease) {
+    if (c.node) move_creature_to(c, c.node->position + Vec2(dx, 0), duration, trans, ease);
+}
+
+/* NCreature.GetOstyOffsetFromPlayer: half the player's hitbox right, plus
+ * Osty.MinOffset..MaxOffset by its max HP over 150 (150..250 px right, 75
+ * up). */
+Vec2 CombatScreen::osty_offset(const Creature& player, float osty_max_hp) {
+    float t = clampf(osty_max_hp / 150.0f, 0.0f, 1.0f);
+    return Vec2(player.hitbox.size.x * 0.5f + 150.0f + 100.0f * t, -75.0f);
+}
+
+/* A creature's node moved to a place (TweenProperty "position"), a move it
+ * was making replaced. */
+void CombatScreen::move_creature_to(Creature& c, const Vec2& to, float duration, TweenTrans trans, TweenEase ease) {
     if (!c.node) return;
     for (size_t i = creature_moves_.size(); i-- > 0;)
         if (creature_moves_[i].node == c.node) creature_moves_.erase(creature_moves_.begin() + (long)i);
     CreatureMove m;
     m.node = c.node;
     m.from = c.node->position;
-    m.to = m.from + Vec2(dx, 0);
+    m.to = to;
     m.t = 0;
     m.duration = duration > 0 ? duration : 0.001f;
     m.trans = trans;
@@ -3357,8 +3387,10 @@ bool CombatScreen::sandpit_call(const std::string& method, const Json& args) {
     float num6 = 0;
     Creature* osty = args.size() > 4 && args[4].is_string() ? creature_for(args[4].str()) : NULL;
     if (osty && osty->node && t->player) {
-        /* NCreature.GetOstyOffsetFromPlayer: where it stands from the player */
-        float x = global_origin(osty->node).x - global_origin(t->node).x;
+        /* NCreature.GetOstyOffsetFromPlayer (where it is meant to stand, not
+         * where it stands: each update measuring the nodes moved the player
+         * again by any difference, a step back at the turn's end) */
+        float x = osty_offset(*t, (float)osty->data["max_hp"].num(0)).x;
         lead = osty;
         num2 += x;
         num3 = (num2 - num) / (float)initial;
@@ -3461,9 +3493,15 @@ bool CombatScreen::creature_call(const std::string& method, const Json& args, co
         c->scale_default = a1;
         scale_visuals(*c, a2);
     } else if (method == "OstyScaleToSize") {
-        /* Osty.ScaleRange 1..2 over 0..150 HP */
+        /* Osty.ScaleRange 1..2 over 0..150 HP; and to the player's place
+         * plus GetOstyOffsetFromPlayer, in the same time (linear) */
         c->scale_osty = 1.0f + clampf(a1 / 150.0f, 0.0f, 1.0f);
         scale_visuals(*c, a2);
+        if (c == &osty_ && player_.node) {
+            Vec2 to = player_.node->position + osty_offset(player_, a1);
+            if (a2 <= 0) c->node->set_position(to);
+            else move_creature_to(*c, to, a2, TRANS_LINEAR, EASE_IN_OUT);
+        }
     } else if (method == "StartReviveAnim") {
         /* the Revive trigger where the creature's animator has one (its ops
          * from the logic: Osty's revive, a Decimillipede segment's
@@ -4016,17 +4054,23 @@ void CombatScreen::fire(const Cue& c) {
          * its fade left as it is; RefreshIntents then reveals them */
         const Json& args = c.data["args"];
         std::string who = args.size() > 0 ? args[(size_t)0].str() : "";
-        for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i) {
-            if (enemy_who_[i] != who || !enemies_[i].node) continue;
+        /* a dead creature that stays (a Decimillipede segment: its
+         * DEAD_MOVE's no intents, then REATTACH_MOVE's heal) is a ghost,
+         * not among the decision's enemies: its intents change all the
+         * same (they kept the attack it died with) */
+        int index = -1;
+        for (size_t i = 0; i < enemy_who_.size() && i < enemies_.size(); ++i)
+            if (enemy_who_[i] == who) index = (int)i;
+        Creature* e = who.compare(0, 1, "e") == 0 ? creature_for(who) : NULL;
+        if (e && e->node) {
             Json intents = c.data["intents"].size() > 0 ? c.data["intents"] : Json();
-            if (enemies_[i].data["intents"] != intents) {
-                Control* row = ctl(enemies_[i].node, "Intents");
+            if (e->data["intents"] != intents) {
+                Control* row = ctl(e->node, "Intents");
                 float alpha = row ? row->modulate.a : 1.0f;
-                make_intents(enemies_[i], intents, (int)i);
+                make_intents(*e, intents, index < 0 ? 0 : index);
                 if (row) row->modulate.a = alpha;
-                enemies_[i].data.set("intents", intents);
+                e->data.set("intents", intents);
             }
-            break;
         }
         if (c.data["call"].str() == "NCreature.UpdateIntent") return;
     }

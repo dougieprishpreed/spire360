@@ -528,12 +528,24 @@ void SceneLibrary::warm_first(const std::vector<std::string>& paths) {
 
 void SceneLibrary::warm_step(Canvas& canvas) {
     if (skeleton_bytes_ > skeleton_budget_) trim_skeletons();
-    if (warm_queue_.empty() && warm_first_.empty()) return;
+    if (warm_queue_.empty() && warm_first_.empty() && warm_reading_.empty()) return;
     /* a frame's share: a time with a clock (the console reads a texture in
      * tens of ms), else 24 files and 4 textures */
     int files = 0, textures = 0;
     double start = warm_clock_ ? warm_clock_() : 0;
     ++warm_frames_;
+    /* the textures read on the reader's thread, made as each is in (the
+     * making alone is the frame's) */
+    for (size_t i = 0; i < warm_reading_.size();) {
+        if (warm_clock_ ? (textures > 0 && warm_clock_() - start >= warm_share_) : textures >= 4) break;
+        int got = canvas.prefetch_async(warm_reading_[i]);
+        if (got > 0) {
+            ++i;
+            continue;
+        }
+        if (got == 0) ++textures;
+        warm_reading_.erase(warm_reading_.begin() + (long)i);
+    }
     while (!warm_queue_.empty() || !warm_first_.empty()) {
         if (warm_clock_ ? (files + textures > 0 && warm_clock_() - start >= warm_share_) : (files >= 24 || textures >= 4))
             break;
@@ -545,7 +557,9 @@ void SceneLibrary::warm_step(Canvas& canvas) {
         const PackEntry* e = pack_ ? pack_->find(p.c_str()) : NULL;
         if (!e) continue;
         if (e->type == PACK_TEXTURE) {
-            if (canvas.prefetch(p)) ++textures;
+            int got = canvas.prefetch_async(p);
+            if (got > 0) warm_reading_.push_back(p);
+            else if (got == 0) ++textures;
         } else if (e->type == PACK_SCENE) {
             const SceneFile* f = file(p);
             ++files;
@@ -565,7 +579,7 @@ void SceneLibrary::warm_step(Canvas& canvas) {
     warm_files_ += files;
     warm_textures_ += textures;
     if (warm_clock_) warm_spent_ += warm_clock_() - start;
-    if (warm_queue_.empty() && warm_first_.empty()) {
+    if (warm_queue_.empty() && warm_first_.empty() && warm_reading_.empty()) {
         if (warm_clock_)
             log_info("warm: %d files, %d textures in %.0f ms over %d frames", warm_files_, warm_textures_, warm_spent_,
                      warm_frames_);

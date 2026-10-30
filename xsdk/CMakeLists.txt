@@ -35,7 +35,7 @@ target_compile_options(spire_logic PRIVATE ${COMMON_FLAGS} -std=gnu99 -w)
 
 file(GLOB ENGINE_SOURCES "${ROOT}/engine/*/*.cpp")
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "/(d3d9_renderer|sw_renderer)\\.cpp$")
-add_executable(spire360 ${ENGINE_SOURCES} "${ROOT}/xsdk/main.cpp" "${SPIRE_SHADERS}/spire_shaders.c")
+add_executable(spire360 ${ENGINE_SOURCES} "${ROOT}/xsdk/main.cpp" "${ROOT}/xsdk/big_alloc.c" "${SPIRE_SHADERS}/spire_shaders.c")
 target_include_directories(spire360 PRIVATE "${ROOT}/runtime/include" "${SPIRE_SHADERS}")
 target_include_directories(spire360 SYSTEM PRIVATE
     "${VULKAN4XENON}/include" "${VULKAN4XENON}/third_party/vulkan-headers/include")
@@ -44,6 +44,7 @@ target_compile_options(spire360 PRIVATE ${COMMON_FLAGS})
 set_source_files_properties(${ENGINE_SOURCES} "${ROOT}/xsdk/main.cpp" PROPERTIES COMPILE_OPTIONS
     "-std=gnu++98;-Wall;-Wextra;-Wno-unused-parameter;-Wno-missing-field-initializers")
 set_source_files_properties("${SPIRE_SHADERS}/spire_shaders.c" PROPERTIES COMPILE_OPTIONS "-std=gnu99;-w")
+set_source_files_properties("${ROOT}/xsdk/big_alloc.c" PROPERTIES COMPILE_OPTIONS "-std=gnu99;-Wall;-Wextra")
 if(SPIRE_GIT_COMMIT)
     target_compile_definitions(spire360 PRIVATE SPIRE_GIT_COMMIT="${SPIRE_GIT_COMMIT}" SPIRE_GIT_DATE="${SPIRE_GIT_DATE}")
 endif()
@@ -52,4 +53,6 @@ target_link_libraries(spire360 PRIVATE spire_logic "${VULKAN4XENON}/build/libvul
 set_property(TARGET spire360 APPEND PROPERTY LINK_DEPENDS "${VULKAN4XENON}/build/libvulkan4xenon.a")
 # xSDK's import stubs have no .note.GNU-stack; the console has no such thing.
 target_link_options(spire360 PRIVATE "-Wl,--gc-sections,--no-warn-execstack,-Map,${CMAKE_CURRENT_BINARY_DIR}/spire360.map")
+# Big blocks from the kernel's pages, given back whole (big_alloc.c).
+target_link_options(spire360 PRIVATE "-Wl,--wrap=malloc,--wrap=free,--wrap=realloc,--wrap=calloc")
 xsdk_add_xex(spire360 TITLE_ID ${SPIRE_TITLE_ID} NAME "Spire360")
