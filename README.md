@@ -1,5 +1,12 @@
 # Spire360
 
+> **This branch (`xdk`) is no longer maintained.** It holds the build made
+> with Microsoft's Xbox 360 XDK (Visual Studio 2010), as it stood when the
+> work moved to the open [xsdk](https://github.com/xenosworks/xsdk)
+> toolchain. Development continues on the
+> [`main`](https://github.com/dougieprishpreed/spire360/tree/main) branch,
+> which has the current build, its instructions and its fixes.
+
 An unofficial Xbox 360 port of **Slay the Spire 2**, for people who own the
 game on PC.
 
