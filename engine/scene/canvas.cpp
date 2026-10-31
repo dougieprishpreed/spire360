@@ -162,12 +162,30 @@ Texture* Canvas::cache_texture(const std::string& key, const TextureData& data) 
     Texture* found = cached_texture(key);
     if (found) return found;
     CachedTexture entry;
+    /* The fire's bounds (Texture::bright): its bases are small textures, and
+     * a few thousand blocks take a few microseconds. */
+    std::vector<u16> bright;
+    if (data.width * data.height <= 512 * 512 && !data.levels.empty() && !data.levels[0].empty() &&
+        !(data.flags & TEXF_DATA))
+        bright_boxes(data.format, data.width, data.height, &data.levels[0][0], data.levels[0].size(), bright);
+    /* The cells of a big one that hold something (Texture::cover): a
+     * microsecond or two a thousand blocks, read off their alphas. */
+    std::vector<u8> cover;
+    int cover_cols = 0, cover_rows = 0;
+    if (data.width * data.height >= 256 * 256 && !data.levels.empty() && !data.levels[0].empty() &&
+        !(data.flags & TEXF_DATA))
+        alpha_cover(data.format, data.width, data.height, &data.levels[0][0], data.levels[0].size(), cover,
+                    &cover_cols, &cover_rows);
     entry.texture = r_->create_texture(data);
     if (!entry.texture) {
         /* no room in the GPU's memory: end_frame makes some */
         want_free_ += console_texture_bytes(data);
         return NULL;
     }
+    entry.texture->bright.swap(bright);
+    entry.texture->cover.swap(cover);
+    entry.texture->cover_cols = cover_cols;
+    entry.texture->cover_rows = cover_rows;
     /* Use the backend's allocation estimate, including tiled alignment and
      * decoded software pixels, rather than compressed pack payload bytes. */
     entry.bytes = console_sizes_ ? console_texture_bytes(data) : entry.texture->memory_bytes;

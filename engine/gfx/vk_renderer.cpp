@@ -1,6 +1,7 @@
 #include "vk_renderer.h"
 
 #include "../core/pack.h"
+#include "image.h"
 
 #include <vulkan/vulkan.h>
 #if defined(__XSDK__)
@@ -85,7 +86,7 @@ bool vk_ok(VkResult r, const char* what) {
 enum Variant {
     V_PLAIN, V_TEXT, V_MAIN, V_FIRE, V_VFX, V_SCREEN_DARK, V_SCREEN_NOISE, V_SCREEN_LEVEL, V_SCREEN_RADIAL,
     V_SCREEN_GLASS, V_SCREEN_DOOM, V_SCREEN_DISTORT, V_SCREEN_CHROMA, V_SCREEN_AT_UV, V_COPY, V_PRESENT,
-    V_DOOM_BAR, V_VFX_POLAR, V_GROUP, V_COLOR_MATRIX, V_GRADIENT_MAP, V_RIPPLE, V_EFFECT,
+    V_DOOM_BAR, V_VFX_POLAR, V_GROUP, V_COLOR_MATRIX, V_GRADIENT_MAP, V_RIPPLE, V_PLAIN_MASK, V_FIRE_MASK, V_EFFECT,
     V_COUNT = V_EFFECT + EFFECT_COUNT
 };
 
@@ -96,7 +97,7 @@ const char* const VARIANT_FILES[V_EFFECT] = { "plain.frag",          "text.frag"
                                               "screen_chroma.frag",  "screen_at_uv.frag",  "copy.frag",
                                               "present.frag",        "doom_bar.frag",      "vfx_polar.frag",
                                               "group.frag",          "color_matrix.frag",  "gradient_map.frag",
-                                              "ripple.frag" };
+                                              "ripple.frag",         "plain_mask.frag",    "fire_mask.frag" };
 
 /* Blend states: the D3D9 renderer's (one set of factors for colour and
  * alpha), and none (the passes that replace what they draw over). */
@@ -188,6 +189,13 @@ public:
     virtual void screen_barrier() { screen_levels_ = 0; }
     virtual bool begin_group(const Rect2& bounds);
     virtual void end_group();
+    virtual bool can_mask() const {
+        return group_debug_ == 0 && !in_group_ && !cap_w_ && !mask_on_ && !frag_failed_[V_PLAIN_MASK] &&
+               !frag_failed_[V_FIRE_MASK];
+    }
+    virtual void begin_mask();
+    virtual bool end_mask_record();
+    virtual void end_mask();
     virtual bool begin_capture(int w, int h);
     virtual Texture* end_capture(Texture* reuse);
     virtual void end();
@@ -263,6 +271,10 @@ private:
     /* ---- draws ---- */
     bool room(int vertices) const;
     void flush();
+    void draw_batch();
+    void clip_fire();
+    bool cover_batch();
+    bool cover_quad(const Vertex* q);
     void apply_state();
     int variant() const;
     bool copy_screen();
@@ -335,6 +347,7 @@ private:
     enum { BATCH_MAX = RESERVE_MAX };
     Vertex* batch_;
     int batch_count_;
+    std::vector<Vertex> clipped_; /* clip_fire's */
     /* the pending state (what the batch was recorded with) */
     VkTexture* tex_;
     BlendMode blend_;
@@ -360,6 +373,13 @@ private:
     bool effect_on_;
     EffectParams effect_;
     bool in_group_, group_failed_;
+    /* a group drawn through its mask (begin_mask): the mask item's draw
+     * recorded, then c42..c44 of the masked variants and its texture */
+    bool recording_, mask_bad_, mask_on_, mask_missed_;
+    std::vector<Vertex> mask_verts_;
+    VkTexture* mask_tex_;
+    float mask_[12];
+    bool make_mask();
     int cap_w_, cap_h_;
     int group_debug_;
     int width_, height_;
@@ -399,12 +419,14 @@ Impl::Impl()
       params_valid_(false), extra_set_(VK_NULL_HANDLE), batch_(new Vertex[BATCH_MAX]), batch_count_(0), tex_(NULL),
       blend_(BLEND_MIX), flags_(0), cm_on_(false), ripple_on_(false), gm_(NULL), gm_red_(false), fire_on_(false),
       vfx_on_(false), clip_on_(false), dirty_(true), screen_on_(false), screen_levels_(0), screen_failed_(false),
-      effect_on_(false), in_group_(false), group_failed_(false), cap_w_(0), cap_h_(0), group_debug_(0), width_(0),
+      effect_on_(false), in_group_(false), group_failed_(false), recording_(false), mask_bad_(false),
+      mask_on_(false), mask_missed_(false), mask_tex_(NULL), cap_w_(0), cap_h_(0), group_debug_(0), width_(0),
       height_(0), interval_(1), last_vblank_(0), draws_(0), state_ms_(0), submit_ms_(0), frame_ended_(false),
       queries_(VK_NULL_HANDLE), tick_ns_(1), timing_(false), last_gpu_ms_(0), trace_pending_(false), tracing_(false),
       label_(-1) {
     memset(&stats_, 0, sizeof(stats_));
     memset(&trace_counts_, 0, sizeof(trace_counts_));
+    memset(mask_, 0, sizeof(mask_));
     for (int i = 0; i < 3; ++i) layouts_[i] = VK_NULL_HANDLE;
     for (int i = 0; i < 4; ++i) samplers_[i] = VK_NULL_HANDLE;
     for (int v = 0; v < V_COUNT; ++v) {
@@ -1924,6 +1946,77 @@ void Impl::end_group() {
     dirty_ = true;
 }
 
+/* A group through its mask (Renderer::begin_mask): no pass of its own, so
+ * the scene stays in eDRAM (the Underdocks' eleven groups a frame each had
+ * it resolved and drawn back, 0.55 ms of the GPU's apiece, and their passes
+ * the rest of 6 ms). */
+void Impl::begin_mask() {
+    flush();
+    recording_ = true;
+    mask_bad_ = false;
+    mask_verts_.clear();
+    mask_tex_ = NULL;
+}
+
+bool Impl::end_mask_record() {
+    flush();
+    recording_ = false;
+    if (!make_mask()) return false;
+    mask_on_ = true;
+    dirty_ = true;
+    return true;
+}
+
+void Impl::end_mask() {
+    flush();
+    mask_on_ = false;
+    dirty_ = true;
+}
+
+/* The recorded mask item: two triangles of one colour alpha whose uv is
+ * an affine map of the screen and covers a box of uv whole, as a
+ * TextureRect's or a Sprite2D's quad: its uv at the pixel (the screen's
+ * 0..1, as the shaders' v_screen), the alpha and the box. */
+bool Impl::make_mask() {
+    if (mask_bad_ || mask_verts_.size() != 6 || !mask_tex_) return false;
+    const Vertex* v = &mask_verts_[0];
+    for (int i = 1; i < 6; ++i)
+        if (fabsf(v[i].color.a - v[0].color.a) > 1e-4f) return false;
+    double x1 = v[1].pos.x - v[0].pos.x, y1 = v[1].pos.y - v[0].pos.y;
+    double x2 = v[2].pos.x - v[0].pos.x, y2 = v[2].pos.y - v[0].pos.y;
+    double det = x1 * y2 - x2 * y1;
+    if (fabs(det) < 1e-6) return false;
+    double du1 = v[1].uv.x - v[0].uv.x, du2 = v[2].uv.x - v[0].uv.x;
+    double dv1 = v[1].uv.y - v[0].uv.y, dv2 = v[2].uv.y - v[0].uv.y;
+    double a = (du1 * y2 - du2 * y1) / det, b = (x1 * du2 - x2 * du1) / det;
+    double c = (dv1 * y2 - dv2 * y1) / det, d = (x1 * dv2 - x2 * dv1) / det;
+    double tu = v[0].uv.x - a * v[0].pos.x - b * v[0].pos.y, tv = v[0].uv.y - c * v[0].pos.x - d * v[0].pos.y;
+    double u0 = v[0].uv.x, u1 = u0, v0 = v[0].uv.y, v1 = v0;
+    for (int i = 0; i < 6; ++i) {
+        double eu = a * v[i].pos.x + b * v[i].pos.y + tu - v[i].uv.x;
+        double ev = c * v[i].pos.x + d * v[i].pos.y + tv - v[i].uv.y;
+        if (fabs(eu) > 1e-4 || fabs(ev) > 1e-4) return false;
+        if (v[i].uv.x < u0) u0 = v[i].uv.x;
+        if (v[i].uv.x > u1) u1 = v[i].uv.x;
+        if (v[i].uv.y < v0) v0 = v[i].uv.y;
+        if (v[i].uv.y > v1) v1 = v[i].uv.y;
+    }
+    /* the two triangles fill the box: their uv areas add up to it */
+    double area = 0;
+    for (int t = 0; t < 6; t += 3)
+        area += fabs((v[t + 1].uv.x - v[t].uv.x) * (v[t + 2].uv.y - v[t].uv.y) -
+                     (v[t + 2].uv.x - v[t].uv.x) * (v[t + 1].uv.y - v[t].uv.y)) * 0.5;
+    double box = (u1 - u0) * (v1 - v0);
+    if (box <= 0 || fabs(area - box) > box * 1e-3) return false;
+    /* the scene's: a mask is only begun on it (can_mask) */
+    float w = (float)width_, h = (float)height_;
+    float m[12] = { (float)(a * w), (float)(b * h), (float)tu, v[0].color.a,
+                    (float)(c * w), (float)(d * h), (float)tv, 0.0f,
+                    (float)u0, (float)v0, (float)u1, (float)v1 };
+    memcpy(mask_, m, sizeof(mask_));
+    return true;
+}
+
 /* ---- captures: a target of their size, its image given to the texture
  * returned ---- */
 
@@ -2045,7 +2138,8 @@ bool Impl::copy_screen() {
         ensure_pass();
         end_pass();
     }
-    open_pass(screen_lv_[0], false, NULL, NULL);
+    /* fresh: the copy's quad covers it all, nothing to draw back first */
+    open_pass(screen_lv_[0], false, NULL, NULL, true);
     memset(params_, 0, sizeof(params_));
     draw_quad(scene_, V_COPY, BLEND_NONE, 2, width_, height_);
     end_pass();
@@ -2062,7 +2156,7 @@ bool Impl::screen_pass(int level) {
     if (!screen_lv_[level]) screen_lv_[level] = make_target(w, h);
     if (!screen_lv_[level]) return false;
     end_pass();
-    open_pass(screen_lv_[level], false, NULL, NULL);
+    open_pass(screen_lv_[level], false, NULL, NULL, true);
     memset(params_, 0, sizeof(params_));
     params_[88] = 3.0f;
     params_[94] = 1.0f / w;
@@ -2269,6 +2363,12 @@ Vertex* Impl::reserve(Texture* tex, int count, BlendMode blend, int flags) {
  * branches (the screen, the fire, the erosion, the rest), its lean
  * variants with no mode on. */
 int Impl::variant() const {
+    if (mask_on_) {
+        if (fire_on_ && fire_.strength[3] < 1.5f && !effect_on_ && !screen_on_) return V_FIRE_MASK;
+        if (!fire_on_ && !effect_on_ && !screen_on_ && !vfx_on_ && !cm_on_ && !ripple_on_ && !gm_ &&
+            !(flags_ & DRAW_MSDF))
+            return V_PLAIN_MASK;
+    }
     if (effect_on_) return V_EFFECT + effect_.id;
     if (screen_on_ && screen_levels_ > 0) {
         switch (screen_.mode) {
@@ -2301,6 +2401,196 @@ static float smooth_scale(float e0, float e1) {
     float span = e1 - e0;
     if (fabsf(span) < 1e-6f) span = span < 0 ? -1e-6f : 1e-6f;
     return 1.0f / span;
+}
+
+/* Where the stepped fire can light anything, in its texture's uv: its
+ * alpha is smoothstep(outer step, v), v the texture's blue at uv moved by
+ * the distortions times the noises and the mask, at most n1 * n2 + 1, so
+ * a pixel lights only where the blue passes the outer step over that, in
+ * the box Texture::bright keeps for it (a margin for the GPU's 5-bit blue)
+ * and the distortions' reach: d1 * s1 + d2 * s2, each d in 0..1, times a
+ * mask in 0..1. Elsewhere it adds nothing (add) or draws nothing over
+ * (mix). 0: no bound known; 1: box (u0, v0, u1, v1); 2: lights nothing. */
+static int fire_box(const FireParams& f, const Texture* t, int flags, float box[4]) {
+    if (!t || t->bright.empty() || (flags & DRAW_REPEAT) || t->width <= 0 || t->height <= 0) return 0;
+    float e0 = f.steps[2], e1 = f.steps[3];
+    if (!(e1 >= e0) || e0 < 0) return 0;
+    float n = f.strength[0] * f.strength[1];
+    float most = (n > 0 ? n : 0) + 1.0f;
+    float thr = e0 / most;
+    if (thr >= 1.0f) return 2;
+    int k = (int)floorf((thr * 255.0f - 2.0f) / 8.0f);
+    if (k < 0) k = 0;
+    if (k >= BRIGHT_LEVELS) k = BRIGHT_LEVELS - 1;
+    const u16* b = &t->bright[(size_t)k * 4];
+    if (b[2] == 0) return 2;
+    float w = (float)t->width, h = (float)t->height;
+    /* a bilinear read touches the box from half a texel out; the edge
+     * texels clamp beyond the texture */
+    float u0 = b[0] == 0 ? -1e9f : (b[0] - 0.5f) / w, u1 = b[2] >= t->width ? 1e9f : (b[2] + 0.5f) / w;
+    float v0 = b[1] == 0 ? -1e9f : (b[1] - 0.5f) / h, v1 = b[3] >= t->height ? 1e9f : (b[3] + 0.5f) / h;
+    float s1 = f.dist_strength[0], s2 = f.dist_strength[1];
+    float dlo = (s1 < 0 ? s1 : 0) + (s2 < 0 ? s2 : 0), dhi = (s1 > 0 ? s1 : 0) + (s2 > 0 ? s2 : 0);
+    const float eps = 1.0f / 4096;
+    box[0] = u0 - dhi - eps;
+    box[1] = v0 - dhi - eps;
+    box[2] = u1 - dlo + eps;
+    box[3] = v1 - dlo + eps;
+    return 1;
+}
+
+static Vertex lerp_vertex(const Vertex& a, const Vertex& b, float t) {
+    return Vertex(Vec2(a.pos.x + (b.pos.x - a.pos.x) * t, a.pos.y + (b.pos.y - a.pos.y) * t),
+                  Vec2(a.uv.x + (b.uv.x - a.uv.x) * t, a.uv.y + (b.uv.y - a.uv.y) * t),
+                  Color(a.color.r + (b.color.r - a.color.r) * t, a.color.g + (b.color.g - a.color.g) * t,
+                        a.color.b + (b.color.b - a.color.b) * t, a.color.a + (b.color.a - a.color.a) * t));
+}
+
+/* The polygon's part on one side of a line of its uv: (uv[axis] - limit)
+ * * side >= 0. Attributes are linear across a triangle, so the cut ones
+ * are what the GPU interpolates there. */
+static int clip_side(const Vertex* in, int n, Vertex* out, int axis, float limit, float side) {
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        const Vertex& a = in[i];
+        const Vertex& b = in[i + 1 < n ? i + 1 : 0];
+        float da = ((axis ? a.uv.y : a.uv.x) - limit) * side, db = ((axis ? b.uv.y : b.uv.x) - limit) * side;
+        if (da >= 0) out[m++] = a;
+        if ((da >= 0) != (db >= 0)) out[m++] = lerp_vertex(a, b, da / (da - db));
+    }
+    return m;
+}
+
+/* The fire's batch cut to fire_box: the Underdocks' water reflections
+ * light a tenth of their quads, and half of each quad can't light (a
+ * third of the screen six times over, 12 ms of the GPU's frame there). */
+void Impl::clip_fire() {
+    float box[4];
+    int known = fire_box(fire_, tex_, flags_, box);
+    if (known == 0) return;
+    if (known == 2) {
+        batch_count_ = 0;
+        return;
+    }
+    clipped_.clear();
+    for (int i = 0; i + 2 < batch_count_; i += 3) {
+        const Vertex* t = batch_ + i;
+        bool inside = true;
+        for (int j = 0; j < 3 && inside; ++j)
+            inside = t[j].uv.x >= box[0] && t[j].uv.x <= box[2] && t[j].uv.y >= box[1] && t[j].uv.y <= box[3];
+        if (inside) {
+            clipped_.insert(clipped_.end(), t, t + 3);
+            continue;
+        }
+        Vertex a[8], b[8];
+        a[0] = t[0];
+        a[1] = t[1];
+        a[2] = t[2];
+        int n = clip_side(a, 3, b, 0, box[0], 1.0f);
+        n = clip_side(b, n, a, 0, box[2], -1.0f);
+        n = clip_side(a, n, b, 1, box[1], 1.0f);
+        n = clip_side(b, n, a, 1, box[3], -1.0f);
+        for (int j = 1; j + 1 < n; ++j) {
+            clipped_.push_back(a[0]);
+            clipped_.push_back(a[j]);
+            clipped_.push_back(a[j + 1]);
+        }
+    }
+    if ((int)clipped_.size() > BATCH_MAX) return;
+    if (!clipped_.empty()) memcpy(batch_, &clipped_[0], clipped_.size() * sizeof(Vertex));
+    batch_count_ = (int)clipped_.size();
+}
+
+/* A big texture's quads cut to its cells that hold something to draw
+ * (Texture::cover): a texel of 0 alpha draws nothing in the plain
+ * variants (premultiplied, it adds 0, or goes over with 0), and the
+ * Underdocks' layers are half clear, their foreground four fifths, each
+ * a screen's worth of fill. The batch's quads, cut or not, go to
+ * clipped_; false when none was cut. */
+bool Impl::cover_batch() {
+    int v = variant();
+    if ((v != V_PLAIN && v != V_PLAIN_MASK) || tex_->premultiplied || (flags_ & (DRAW_REPEAT | DRAW_MSDF | DRAW_GROUP)) ||
+        !(blend_ == BLEND_MIX || blend_ == BLEND_ADD || blend_ == BLEND_SUB || blend_ == BLEND_PREMULT_ALPHA) ||
+        batch_count_ % 6)
+        return false;
+    clipped_.clear();
+    bool cut = false;
+    for (int q = 0; q < batch_count_; q += 6) {
+        if (cover_quad(batch_ + q)) {
+            cut = true;
+            continue;
+        }
+        clipped_.insert(clipped_.end(), batch_ + q, batch_ + q + 6);
+    }
+    return cut;
+}
+
+/* One quad as its covered cells, into clipped_: two triangles of one
+ * colour and one affine map from uv to the screen, its uv a box within
+ * the texture, at least 128 pixels square. Each cell's corners are the
+ * grid's, the same numbers for every cell they bound, so the cells meet
+ * without cracks or overlaps. False: drawn as it is. */
+bool Impl::cover_quad(const Vertex* q) {
+    double du1 = q[1].uv.x - q[0].uv.x, dv1 = q[1].uv.y - q[0].uv.y;
+    double du2 = q[2].uv.x - q[0].uv.x, dv2 = q[2].uv.y - q[0].uv.y;
+    double det = du1 * dv2 - du2 * dv1;
+    if (fabs(det) < 1e-12) return false;
+    double x1 = q[1].pos.x - q[0].pos.x, y1 = q[1].pos.y - q[0].pos.y;
+    double x2 = q[2].pos.x - q[0].pos.x, y2 = q[2].pos.y - q[0].pos.y;
+    /* pos = q0 + (u - u00) * (ax, ay) + (v - v00) * (bx, by) */
+    double ax = (x1 * dv2 - x2 * dv1) / det, bx = (du1 * x2 - du2 * x1) / det;
+    double ay = (y1 * dv2 - y2 * dv1) / det, by = (du1 * y2 - du2 * y1) / det;
+    double u00 = q[0].uv.x, v00 = q[0].uv.y, px0 = q[0].pos.x, py0 = q[0].pos.y;
+    double u0 = u00, u1 = u00, v0 = v00, v1 = v00;
+    for (int i = 0; i < 6; ++i) {
+        double du = q[i].uv.x - u00, dv = q[i].uv.y - v00;
+        if (fabs(px0 + du * ax + dv * bx - q[i].pos.x) > 0.01 || fabs(py0 + du * ay + dv * by - q[i].pos.y) > 0.01)
+            return false;
+        if (q[i].color.r != q[0].color.r || q[i].color.g != q[0].color.g || q[i].color.b != q[0].color.b ||
+            q[i].color.a != q[0].color.a)
+            return false;
+        if (q[i].uv.x < u0) u0 = q[i].uv.x;
+        if (q[i].uv.x > u1) u1 = q[i].uv.x;
+        if (q[i].uv.y < v0) v0 = q[i].uv.y;
+        if (q[i].uv.y > v1) v1 = q[i].uv.y;
+    }
+    if (u0 < 0 || v0 < 0 || u1 > 1 || v1 > 1) return false;
+    /* the two triangles fill the box, and it is big enough to matter */
+    double box = (u1 - u0) * (v1 - v0), area = 0;
+    for (int t = 0; t < 6; t += 3)
+        area += fabs((q[t + 1].uv.x - q[t].uv.x) * (q[t + 2].uv.y - q[t].uv.y) -
+                     (q[t + 2].uv.x - q[t].uv.x) * (q[t + 1].uv.y - q[t].uv.y)) * 0.5;
+    if (box <= 0 || fabs(area - box) > box * 1e-3) return false;
+    if (fabs(ax * by - ay * bx) * box < 128.0 * 128.0) return false;
+    const VkTexture* t = tex_;
+    int cols = t->cover_cols, rows = t->cover_rows;
+    double cu = (double)COVER_CELL / t->width, cv = (double)COVER_CELL / t->height;
+    int cx0 = (int)floor(u0 / cu), cx1 = (int)ceil(u1 / cu), cy0 = (int)floor(v0 / cv), cy1 = (int)ceil(v1 / cv);
+    if (cx1 > cols) cx1 = cols;
+    if (cy1 > rows) cy1 = rows;
+    for (int cy = cy0; cy < cy1; ++cy) {
+        double va = cy * cv > v0 ? cy * cv : v0, vb = (cy + 1) * cv < v1 ? (cy + 1) * cv : v1;
+        if (vb <= va) continue;
+        for (int cx = cx0; cx < cx1; ++cx) {
+            if (!t->cover[(size_t)cy * cols + cx]) continue;
+            double ua = cx * cu > u0 ? cx * cu : u0, ub = (cx + 1) * cu < u1 ? (cx + 1) * cu : u1;
+            if (ub <= ua) continue;
+            double cu4[4] = { ua, ub, ub, ua }, cv4[4] = { va, va, vb, vb };
+            Vertex c[4];
+            for (int k = 0; k < 4; ++k) {
+                double du = cu4[k] - u00, dv = cv4[k] - v00;
+                c[k] = Vertex(Vec2((float)(px0 + du * ax + dv * bx), (float)(py0 + du * ay + dv * by)),
+                              Vec2((float)cu4[k], (float)cv4[k]), q[0].color);
+            }
+            clipped_.push_back(c[0]);
+            clipped_.push_back(c[1]);
+            clipped_.push_back(c[2]);
+            clipped_.push_back(c[0]);
+            clipped_.push_back(c[2]);
+            clipped_.push_back(c[3]);
+        }
+    }
+    return true;
 }
 
 /* fire.frag's parameters, c7 to c17, folded as the shader says: the six
@@ -2395,6 +2685,15 @@ void Impl::apply_state() {
     if (group) {
         x[X_GROUP] = group_;
         xs[X_GROUP] = 2;
+    }
+    if (v == V_PLAIN_MASK || v == V_FIRE_MASK) {
+        /* c42..c44 */
+        memcpy(&c[168], mask_, sizeof(mask_));
+        x[X_GROUP] = mask_tex_;
+    } else if (mask_on_ && !mask_missed_) {
+        /* the tree lets only the masked variants' children through */
+        mask_missed_ = true;
+        log_warn("vk: a draw through a group's mask in shader %d, drawn unmasked", v);
     }
     VkTexture* lut = gm_ ? gm_ : (vfx_on_ && vfx_.lut ? (VkTexture*)vfx_.lut : NULL);
     if (lut) x[X_LUT] = lut;
@@ -2528,6 +2827,35 @@ bool Impl::room(int vertices) const {
 }
 
 void Impl::flush() {
+    if (recording_) {
+        /* the mask item's draw: one batch of a plain texture */
+        if (batch_count_ == 0) return;
+        if (!mask_verts_.empty() || effect_on_ || screen_on_ || fire_on_ || vfx_on_ || gm_ || cm_on_ || ripple_on_ ||
+            (flags_ & (DRAW_MSDF | DRAW_REPEAT | DRAW_NEAREST | DRAW_GROUP)) || !tex_ || tex_->premultiplied)
+            mask_bad_ = true;
+        mask_verts_.assign(batch_, batch_ + batch_count_);
+        mask_tex_ = tex_;
+        batch_count_ = 0;
+        return;
+    }
+    if (batch_count_ && fire_on_ && fire_.strength[3] < 1.5f) clip_fire();
+    if (batch_count_ && tex_ && !tex_->cover.empty() && cover_batch()) {
+        /* in draws of the batch's size */
+        for (size_t at = 0; at < clipped_.size();) {
+            size_t n = clipped_.size() - at < (size_t)BATCH_MAX ? clipped_.size() - at : (size_t)BATCH_MAX;
+            memcpy(batch_, &clipped_[at], n * sizeof(Vertex));
+            batch_count_ = (int)n;
+            draw_batch();
+            at += n;
+        }
+        batch_count_ = 0;
+        return;
+    }
+    draw_batch();
+}
+
+/* The batch drawn as it is. */
+void Impl::draw_batch() {
     if (batch_count_ == 0 || !dev_) return;
     double t0 = now_ms();
     ensure_pass();

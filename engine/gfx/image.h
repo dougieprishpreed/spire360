@@ -19,6 +19,25 @@ struct Image {
  * into an image of w x h, premultiplied unless asked not to (data textures). */
 bool decode_texture_level(int format, int w, int h, const u8* data, size_t size, Image& out, bool premultiply = true);
 
+/* The stepped fire's bounds (Texture::bright): for each level k of
+ * BRIGHT_LEVELS, the box of texels (x0, y0, x1, y1, ends excluded) that
+ * holds every texel whose straight blue is over k * 8 of 255; x1 = 0 when
+ * none is. DXT blocks count by their endpoints' blue, which no texel of
+ * the block passes, so the boxes go by whole blocks. False for a format it
+ * doesn't read. */
+enum { BRIGHT_LEVELS = 32 };
+bool bright_boxes(int format, int w, int h, const u8* data, size_t size, std::vector<u16>& out);
+
+/* Which cells of COVER_CELL x COVER_CELL texels of a texture with alpha
+ * (DXT5, ARGB8) hold something to draw: cols x rows bytes, 1 where a texel
+ * of the cell, or of a block beside it (a bilinear read reaches half a
+ * texel out), has alpha over 0. A DXT5 block is clear when both its alphas
+ * are 0 and no texel takes the 255 its six-alpha mode adds (any other block
+ * counts as drawn). False for other formats, and where it would leave out
+ * less than a sixth of the cells. */
+enum { COVER_CELL = 64 };
+bool alpha_cover(int format, int w, int h, const u8* data, size_t size, std::vector<u8>& out, int* cols, int* rows);
+
 /* Bilinear read at uv (0..1), edges clamped: premultiplied 0..1 floats. */
 void image_bilinear(const Image& img, float u, float v, float out[4]);
 

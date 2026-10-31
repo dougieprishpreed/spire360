@@ -653,13 +653,16 @@ int main() {
              * time of the latest frame it finished; a GPU trace of one */
             static double slow_logged = -1e9, traced = -1e9;
             double now = now_ms();
-            if (work > SLOW_CPU_MS && work <= 250 && now - slow_logged > 1000) {
+            bool slow = work > SLOW_CPU_MS && work <= 250 && now - slow_logged > 1000;
+            std::string nodes = SceneTree::take_frame_profile(slow);
+            if (slow) {
                 logf("slow frame %u: %.1f ms (update %.1f, process %.1f, layout %.1f, draw %.1f), %ld draw calls, "
                      "GPU %.1f ms, decision %d",
                      g_frame, work, update_ms, fp - f0, f1 - fa, f2 - f1, renderer->draw_calls(),
                      renderer->last_frame_gpu_ms(), game->decision_count());
                 if (update_ms > 20 && !game->update_profile().empty())
                     logf("  its update: %s", game->update_profile().c_str());
+                if (!nodes.empty()) logf("  its nodes (process and draw, ms): %s", nodes.c_str());
                 slow_logged = now;
             }
             if (renderer->last_frame_gpu_ms() > TRACE_GPU_MS && now - traced > TRACE_EVERY_MS) {

@@ -126,7 +126,10 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
     double started = load_trace_start();
     const PackEntry* e = pack_ ? pack_->find(name.c_str()) : NULL;
     std::vector<u8> data;
-    if (e && e->type == PACK_SCENE && pack_->read(e, data)) {
+    /* ahead of the textures being read: the frame waits on it (a power's
+     * icon or an intent's, met in a fight, waited for a background read's
+     * 256 KB, 11 to 18 ms on the console) */
+    if (e && e->type == PACK_SCENE && pack_->read_urgent(e, data)) {
         std::string err;
         size_t heap_before = heap_in_use();
         f = new SceneFile();

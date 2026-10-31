@@ -105,6 +105,86 @@ bool decode_texture_level(int format, int w, int h, const u8* data, size_t size,
     return true;
 }
 
+bool bright_boxes(int format, int w, int h, const u8* data, size_t size, std::vector<u16>& out) {
+    int cell = format == TEX_ARGB8 ? 1 : 4;
+    int cw = (w + cell - 1) / cell, ch = (h + cell - 1) / cell;
+    size_t bsize = format == TEX_ARGB8 ? 4 : format == TEX_DXT1 ? 8 : format == TEX_DXT5 ? 16 : 0;
+    if (!bsize || w <= 0 || h <= 0 || size < (size_t)cw * ch * bsize) return false;
+    int box[BRIGHT_LEVELS][4];
+    for (int k = 0; k < BRIGHT_LEVELS; ++k) {
+        box[k][0] = cw;
+        box[k][1] = ch;
+        box[k][2] = box[k][3] = 0;
+    }
+    for (int y = 0; y < ch; ++y)
+        for (int x = 0; x < cw; ++x) {
+            const u8* b = data + ((size_t)y * cw + x) * bsize;
+            int blue;
+            if (format == TEX_ARGB8) {
+                blue = b[0]; /* B G R A */
+            } else {
+                if (format == TEX_DXT5) b += 8;
+                int b0 = b[0] & 31, b1 = b[2] & 31;
+                int top = b0 > b1 ? b0 : b1;
+                blue = (top << 3) | (top >> 2);
+            }
+            /* the levels it passes: blue > 8k */
+            for (int k = 0; k < BRIGHT_LEVELS && blue > k * 8; ++k) {
+                if (x < box[k][0]) box[k][0] = x;
+                if (y < box[k][1]) box[k][1] = y;
+                if (x + 1 > box[k][2]) box[k][2] = x + 1;
+                if (y + 1 > box[k][3]) box[k][3] = y + 1;
+            }
+        }
+    out.resize(BRIGHT_LEVELS * 4);
+    for (int k = 0; k < BRIGHT_LEVELS; ++k) {
+        bool none = box[k][2] == 0;
+        out[k * 4] = (u16)(none ? 0 : box[k][0] * cell);
+        out[k * 4 + 1] = (u16)(none ? 0 : box[k][1] * cell);
+        out[k * 4 + 2] = (u16)(none ? 0 : (box[k][2] * cell < w ? box[k][2] * cell : w));
+        out[k * 4 + 3] = (u16)(none ? 0 : (box[k][3] * cell < h ? box[k][3] * cell : h));
+    }
+    return true;
+}
+
+bool alpha_cover(int format, int w, int h, const u8* data, size_t size, std::vector<u8>& out, int* cols, int* rows) {
+    if ((format != TEX_DXT5 && format != TEX_ARGB8) || w <= 0 || h <= 0) return false;
+    int bw = (w + 3) / 4, bh = (h + 3) / 4;
+    if (size < (format == TEX_DXT5 ? (size_t)bw * bh * 16 : (size_t)w * h * 4)) return false;
+    int per = COVER_CELL / 4; /* blocks a cell */
+    int cw = (bw + per - 1) / per, ch = (bh + per - 1) / per;
+    out.assign((size_t)cw * ch, 0);
+    for (int by = 0; by < bh; ++by)
+        for (int bx = 0; bx < bw; ++bx) {
+            bool any = false;
+            if (format == TEX_DXT5) {
+                const u8* b = data + ((size_t)by * bw + bx) * 16;
+                u64 bits = 0;
+                for (int k = 0; k < 6; ++k) bits |= (u64)b[2 + k] << (8 * k);
+                /* an index of 7 in a 3-bit field: 255 in six-alpha mode */
+                any = b[0] || b[1] || (bits & (bits >> 1) & (bits >> 2) & 0x249249249249ULL);
+            } else {
+                for (int y = by * 4; y < by * 4 + 4 && y < h && !any; ++y)
+                    for (int x = bx * 4; x < bx * 4 + 4 && x < w && !any; ++x)
+                        any = data[((size_t)y * w + x) * 4 + 3] != 0;
+            }
+            if (!any) continue;
+            /* the cells of the block and of the blocks beside it */
+            for (int y = by - 1; y <= by + 1; ++y)
+                for (int x = bx - 1; x <= bx + 1; ++x)
+                    if (x >= 0 && y >= 0 && x < bw && y < bh) out[(size_t)(y / per) * cw + x / per] = 1;
+        }
+    size_t drawn = 0;
+    for (size_t i = 0; i < out.size(); ++i) drawn += out[i];
+    if (drawn * 6 > out.size() * 5) {
+        out.clear();
+        return false;
+    }
+    *cols = cw;
+    *rows = ch;
+    return true;
+}
+
 /* ---- PNG writer (stored deflate blocks: no compression library needed) ---- */
 
 static u32 crc_table[256];

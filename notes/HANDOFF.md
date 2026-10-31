@@ -4417,3 +4417,80 @@ DECISIONS D6: healing between acts re-implemented in the adapter;
 `random_runs.py`'s agent answers rewards/treasure differently from the
 oldest traces (hence the normalisation in `trace_compare.py`).
 `InitProgressData` warns once on a fresh profile (harmless).
+
+## Frame time (2026-10-31): the fire's quads, the groups without a layer, the layers' clear cells
+
+The eighth run's profile (work/rp105, profile=1): the Underdocks' fights
+drew at 30 fps throughout, the GPU's frame 27-28 ms (paced at 30, 600 of
+600 frames); the Insatiable's 15-18 ms, at the line. Where the
+Underdocks' frame went (its GPU trace): the stepped fire 12.4 ms (19
+draws: the water reflections, a third of the screen each), the 11 canvas
+groups' passes 7.7 ms (each group's begin had the scene resolved, 0.27 ms,
+and the scene's next pass drew it back, 0.27; then the group's resolve and
+its composite), the layers' quads about 4 ms (0.35-0.6 ms each, fill), the
+particles 2, the text 1.3, the present 0.7.
+
+- The stepped fire lights only where its texture's blue, times its noises
+  at most (n1 * n2 + 1), passes the alpha's smoothstep; the distortions
+  move the read by at most their strengths. Texture::bright (image.cpp,
+  bright_boxes, made as the canvas loads a texture of 512x512 or less):
+  for each of 32 levels, the box of blocks whose endpoints' blue passes
+  it. vk_renderer.cpp's clip_fire cuts the fire's triangles to that box
+  (a pixel outside adds nothing, or goes over with nothing): half of each
+  water reflection's quad (spire_view's software renderer counted 50.2% of
+  the pixels inside the box, 10.7% lit, none lit outside it). Host Vulkan
+  renders of the Underdocks' layers before and after: 1 to 5 pixels
+  differ, by 1 of 255 (the cut vertices' rounding).
+- A group whose children only add light (the stepped fire's add variant,
+  or a CanvasItemMaterial set to add, no shader) composites as the screen
+  plus each child times the mask (the layer's alpha stays 0): the tree
+  (adds_through_mask) records the mask item's quad (Renderer::begin_mask,
+  end_mask_record) and the children draw straight onto the screen through
+  plain_mask.frag and fire_mask.frag (the mask's texel alpha and colour
+  alpha at the pixel, nothing outside its quad): no pass of their own, so
+  nothing leaves eDRAM. The Underdocks, the Soul Fysh's, the Lagavulin
+  Matriarch's and the Waterfall Giant's backgrounds: 6 of the 11 groups a
+  frame. Host renders: up to 3 of 255 off (the layer's 8 bits gone).
+  Left as groups: the poles' light masks (layer 04, five a frame, their
+  mask multiplies), the health bars (one a creature, children that mix).
+- Texture::cover (image.cpp, alpha_cover, a texture of 256x256 or more
+  with alpha): its 64-texel cells holding a texel over 0 alpha, or one in
+  a block beside it. A DXT5 block is clear when both its alphas are 0 and
+  no texel takes the six-alpha mode's 255 (a full decode of four of the
+  Underdocks' textures agreed block for block). cover_quad draws a plain
+  textured quad's covered cells only, their corners one grid's (no cracks,
+  no overlaps): the layers are half clear, the foreground four fifths
+  (01_a draws 55% of its quad, 02_a 35%, 05_b 21%). Host renders: up to 2
+  of 255 off at a few hundred pixels.
+- The screen copy and its blur levels begin fresh (their quads cover
+  them): no draw back of the old copy first (0.27 ms a copy).
+- The eviction itself: tools/xsdk/edram_model.py is out of date, and a
+  port of vulkan4xenon df25dc5's queue.c placement (the scratchpad's
+  edram_sim.py) keeps the scene at tile 0 and the group at 720, nothing
+  drawn back; the console counted 11 drawn back and 11 late resolves a
+  frame all the same. Not found; vulkan4xenon's V4X_PROFILE build logs
+  each pass's tile (make BUILD=<another folder> V4X_PROFILE=1 leaves the
+  shared checkout's build alone; CMake links ${VULKAN4XENON}/build).
+
+The CPU:
+
+- A slow frame's log (profile=1) gives its costliest node types or
+  scripts too ("its nodes", SceneTree::take_frame_profile); spire_play
+  --slow-ms N logs the frames over N ms (update, process and draw).
+- A scene file's read goes ahead of the textures being read
+  (read_urgent): a power's or an intent's icon met in a fight waited for a
+  background read's 256 KB piece (11 to 18 ms on the console).
+- spire_play on Windows asks for 1 ms timer ticks (timeBeginPeriod): a
+  pack read behind an audio read slept a 15.6 ms tick, every scene load
+  12.5 ms. The PC's pack is on a disk: a small read is still 3.5 ms there.
+- The replay of the first fight (--audio-thread, --profile-cpu): a frame
+  1 ms of process, 3-4 ms of draw (the console's 9.4 ms; the text's and
+  the skeletons' geometry made each frame); the room's first frame
+  CPUParticles2D 31 ms (their preprocess), its first draws' textures 11.
+
+Checks (work/check106.sh): seeded traces the same 3 differences
+(transform_options); 35 scenarios ok; spire_check 2357 responses, 0
+failures, audio 21951 voices, 10 absent event calls, 0 decoder failures;
+the audio fixtures, the music and the events 0 failures; check_shaders.py
+86 shaders, 0 problems (plain_mask and fire_mask on xost's simulator);
+the host Vulkan renders above. The logic is unchanged.

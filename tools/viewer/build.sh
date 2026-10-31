@@ -18,7 +18,7 @@ fi
 # The POSIX host uses fseeko/usleep; MSYS2 hides them in strict ANSI mode.
 FLAGS="-std=c++98 -pedantic -D_DEFAULT_SOURCE -D_LARGEFILE_SOURCE -Wall -Wextra -Wno-long-long -O2 ${EXTRA_FLAGS:-}"
 LIBS=""
-case "$(uname -s)" in MSYS*|CYGWIN*) FLAGS="$FLAGS -I/usr/include/w32api"; LIBS="-lole32" ;; esac
+case "$(uname -s)" in MSYS*|CYGWIN*) FLAGS="$FLAGS -I/usr/include/w32api"; LIBS="-lole32 -lwinmm" ;; esac
 stamp=out/engine/compiler-flags
 if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$CXX $FLAGS" ]; then
     printf '%s\n' "$CXX $FLAGS" > "$stamp"

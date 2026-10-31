@@ -91,8 +91,9 @@ void SceneTree::layout(int passes) {
 /* The profile: ms and counts of process and draw by node type or script. */
 struct ProfileCost {
     double process_ms, draw_ms;
+    double frame_ms; /* both, this frame (take_frame_profile) */
     unsigned processed, drawn;
-    ProfileCost() : process_ms(0), draw_ms(0), processed(0), drawn(0) {}
+    ProfileCost() : process_ms(0), draw_ms(0), frame_ms(0), processed(0), drawn(0) {}
 };
 static LoadClock g_profile_clock = NULL;
 static std::map<std::string, ProfileCost> g_profile;
@@ -144,6 +145,20 @@ void SceneTree::log_profile(int frames) {
     g_profile.clear();
 }
 
+std::string SceneTree::take_frame_profile(bool want) {
+    std::string out;
+    if (!g_profile_clock) return out;
+    std::vector<std::pair<double, const std::string*> > order;
+    for (std::map<std::string, ProfileCost>::iterator it = g_profile.begin(); it != g_profile.end(); ++it) {
+        if (want && it->second.frame_ms >= 0.5) order.push_back(std::make_pair(-it->second.frame_ms, &it->first));
+        it->second.frame_ms = 0;
+    }
+    std::sort(order.begin(), order.end());
+    for (size_t i = 0; i < order.size() && i < 6; ++i)
+        out += format("%s%s %.1f", i ? ", " : "", order[i].second->c_str(), -order[i].first);
+    return out;
+}
+
 void SceneTree::process_node(Node* n, double dt) {
     g_trace_node = n;
     if (n->queued_for_deletion()) return;
@@ -159,13 +174,16 @@ void SceneTree::process_node(Node* n, double dt) {
             double t1 = g_profile_clock();
             ProfileCost& c = profile_of(n, true);
             c.process_ms += t1 - t0;
+            c.frame_ms += t1 - t0;
             ++c.processed;
             t0 = t1;
         }
         if (n->flags & NF_PROCESS) {
             n->process(dt);
             ProfileCost& c = profile_of(n, false);
-            c.process_ms += g_profile_clock() - t0;
+            double ms = g_profile_clock() - t0;
+            c.process_ms += ms;
+            c.frame_ms += ms;
             ++c.processed;
         }
         for (size_t i = 0; i < n->children.size(); ++i) process_node(n->children[i], dt);
@@ -209,7 +227,9 @@ void SceneTree::process(double dt) {
     Particles2D::end_frame();
     if (g_profile_clock) {
         ProfileCost& c = g_profile["particles' steps (workers)"];
-        c.process_ms += g_profile_clock() - p0;
+        double ms = g_profile_clock() - p0;
+        c.process_ms += ms;
+        c.frame_ms += ms;
         ++c.processed;
     }
     if (Node::frees_pending > 0) {
@@ -414,6 +434,33 @@ static bool skip_draw(const SceneTree::DrawItem& d, int mask) {
     return false;
 }
 
+/* A group the renderer may draw through its mask without a layer
+ * (Renderer::begin_mask): every child that draws adds light, plain (a
+ * CanvasItemMaterial set to add, no shader) or in the stepped fire's add
+ * variant, as the Underdocks' layers' water reflections and lights; and the
+ * mask item is a plain texture of its own, unclipped, mixed or added (with
+ * the layer's alpha 0 either composites alike). */
+static bool adds_through_mask(Canvas& canvas, const std::vector<SceneTree::DrawItem*>& order, size_t begin,
+                              size_t mask) {
+    SceneTree::DrawItem& m = *order[mask];
+    if (m.has_clip || (m.ci->effective_texture_flags() & (DRAW_REPEAT | DRAW_NEAREST))) return false;
+    if (m.material && !(m.material->kind == Resource::RES_CANVAS_ITEM_MATERIAL &&
+                        (m.material->blend_mode == 0 || m.material->blend_mode == 1)))
+        return false;
+    for (size_t k = begin + 1; k < mask; ++k) {
+        SceneTree::DrawItem& c = *order[k];
+        if (!c.ci) continue;
+        if (c.group != GROUP_NONE || c.ci->type == "BackBufferCopy") return false;
+        const std::string& t = c.ci->type;
+        bool kind = t == "Sprite2D" || t == "CPUParticles2D" || t == "GPUParticles2D" || t == "TextureRect";
+        bool adds = c.material && ((c.material->kind == Resource::RES_CANVAS_ITEM_MATERIAL && c.material->blend_mode == 1) ||
+                                   (c.material->kind == Resource::RES_SHADER_MATERIAL &&
+                                    c.material->shader == "shaders/vfx/vfx_stepped_shader_fire_add.tres"));
+        if ((!kind || !adds) && draws_something(canvas, c)) return false;
+    }
+    return true;
+}
+
 void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
     std::vector<DrawItem*> order(items.size());
     for (size_t i = 0; i < items.size(); ++i) {
@@ -422,6 +469,7 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
     }
     std::stable_sort(order.begin(), order.end(), DrawOrder());
     DrawItem* group_mask = NULL; /* the open group's mask item */
+    bool masked = false;         /* ... drawn through its mask, no layer */
     for (size_t i = 0; i < order.size(); ++i) {
         DrawItem& d = *order[i];
         int extra_flags = 0;
@@ -433,8 +481,24 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
             /* No children of this z, or nothing to mask with: no group. The
              * mask is not drawn (clip and draw drew the item already) and
              * the children draw as usual. */
-            if (group_mask || j == i + 1 || !draws_something(canvas, m) ||
-                !canvas.renderer()->begin_group(group_bounds(m))) {
+            if (group_mask || j == i + 1 || !draws_something(canvas, m)) {
+                m.ci = NULL;
+                continue;
+            }
+            if (canvas.renderer()->can_mask() && adds_through_mask(canvas, order, i, j)) {
+                /* the mask item recorded, not drawn */
+                canvas.renderer()->begin_mask();
+                canvas.set_item(m.xf, m.modulate, m.material && m.material->blend_mode == 1 ? BLEND_ADD : BLEND_MIX,
+                                m.ci->effective_texture_flags());
+                canvas.set_clip(NULL);
+                m.ci->draw(canvas);
+                if (canvas.renderer()->end_mask_record()) {
+                    group_mask = &m;
+                    masked = true;
+                    continue;
+                }
+            }
+            if (!canvas.renderer()->begin_group(group_bounds(m))) {
                 m.ci = NULL;
                 continue;
             }
@@ -450,8 +514,14 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
         if (g_draw_skip > 0 && d.group == GROUP_NONE && skip_draw(d, g_draw_skip)) continue;
         if (d.group == GROUP_MASK) {
             if (&d != group_mask) continue;
-            canvas.renderer()->end_group();
             group_mask = NULL;
+            if (masked) {
+                /* its children drew through it: nothing to composite */
+                canvas.renderer()->end_mask();
+                masked = false;
+                continue;
+            }
+            canvas.renderer()->end_group();
             extra_flags = DRAW_GROUP;
         }
         BlendMode blend = BLEND_MIX;
@@ -475,7 +545,9 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
             double t0 = g_profile_clock();
             d.ci->draw(canvas);
             ProfileCost& c = profile_of(d.ci, false);
-            c.draw_ms += g_profile_clock() - t0;
+            double ms = g_profile_clock() - t0;
+            c.draw_ms += ms;
+            c.frame_ms += ms;
             ++c.drawn;
         } else {
             d.ci->draw(canvas);
@@ -483,7 +555,8 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
         shader_end(canvas, d.material);
         ++items_drawn;
     }
-    if (group_mask) canvas.renderer()->end_group();
+    if (group_mask && masked) canvas.renderer()->end_mask();
+    else if (group_mask) canvas.renderer()->end_group();
 }
 
 } /* namespace spire */

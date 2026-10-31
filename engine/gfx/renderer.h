@@ -18,13 +18,24 @@ enum { DRAW_REPEAT = 1, DRAW_NEAREST = 2, DRAW_MSDF = 4, DRAW_GROUP = 8 };
 
 class Texture {
 public:
-    Texture() : width(0), height(0), orig_width(0), orig_height(0), format(0), memory_bytes(0), premultiplied(false) {}
+    Texture()
+        : width(0), height(0), orig_width(0), orig_height(0), format(0), memory_bytes(0), premultiplied(false),
+          cover_cols(0), cover_rows(0) {}
     virtual ~Texture() {}
     int width, height;           /* stored pixels */
     int orig_width, orig_height; /* layout units (the game's size) */
     int format;                  /* TexFormat (0: a target or generated) */
     size_t memory_bytes;        /* renderer allocation estimate */
     bool premultiplied;         /* a capture (end_capture): premultiplied alpha */
+    /* A small texture's bright_boxes (image.h), made as the canvas loads
+     * it; empty for the rest. The stepped fire's draws keep to where they
+     * can light anything. */
+    std::vector<u16> bright;
+    /* A big texture's alpha_cover (image.h), made as the canvas loads it:
+     * its quads draw only the cells that hold something; empty for the
+     * rest. */
+    std::vector<u8> cover;
+    int cover_cols, cover_rows;
 };
 
 struct Vertex {
@@ -217,6 +228,19 @@ public:
     }
     virtual bool begin_group(const Rect2& bounds) = 0;
     virtual void end_group() = 0;
+    /* A canvas group drawn without its layer: begin_mask, the mask item
+     * drawn (recorded, not drawn), end_mask_record; when the mask is one
+     * textured quad (true), the draws until end_mask go straight onto the
+     * screen times the mask's texel alpha and colour alpha at the pixel,
+     * nothing outside its quad. For a group whose children only add light
+     * (stepped fire or plain, blend add) that is what the layer composited
+     * through the mask gives: its alpha stays 0, so out = screen + layer *
+     * mask. The tree asks can_mask first, and begins a group as usual when
+     * end_mask_record says no. */
+    virtual bool can_mask() const { return false; }
+    virtual void begin_mask() {}
+    virtual bool end_mask_record() { return false; }
+    virtual void end_mask() {}
     /* Render to texture (Godot's SubViewport): draws between begin_capture
      * and end_capture go to a transparent offscreen layer, w x h pixels at
      * the top left of the screen (w and h multiples of 32, within the

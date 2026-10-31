@@ -26,6 +26,10 @@ public:
      * starts again. NULL: off. */
     static void set_profile(LoadClock clock);
     static void log_profile(int frames);
+    /* With the profile on: the frame's costliest node types or scripts
+     * (ms of process and draw since the last call, those over half a
+     * millisecond) when want, for a slow frame's log; called each frame. */
+    static std::string take_frame_profile(bool want);
     /* A diagnostic: render() leaving out a kind of draw (what each costs the
      * GPU; the console's profile=1), and without the warm-up's step. -1:
      * off, 0: everything drawn. */

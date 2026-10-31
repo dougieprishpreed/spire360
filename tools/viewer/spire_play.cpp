@@ -53,6 +53,10 @@
  *
  * --no-shots: the run without the PNGs (soaks).
  *
+ * --slow-ms N (with --load-trace): the frames whose update, process and
+ * draw take over N ms logged with their phases and costliest nodes
+ * (default 8; the console's CPU is about five times slower).
+ *
  * --profile (with --load-trace): every 600 frames, the node types and
  * scripts whose process and draw cost the most (the console's profile=1),
  * and the heap allocations per frame (the console's allocator makes each
@@ -118,6 +122,11 @@
 #include <algorithm>
 #include <deque>
 #include <new>
+
+#if defined(__CYGWIN__) || defined(__MSYS__)
+/* winmm: Windows sleeps in its 15.6 ms ticks unless asked for 1 ms */
+extern "C" __attribute__((dllimport)) unsigned int __stdcall timeBeginPeriod(unsigned int ms);
+#endif
 #include <set>
 #include <fstream>
 #include <signal.h>
@@ -484,6 +493,7 @@ static void run_frame(SceneTree& tree, GameAudio& audio, FrameTimes& ft) {
  * 8 ms (the software drawing's own time is no measure of the console's). */
 static long g_dump_draws_at = -1;
 static bool g_profile_cpu = false;
+static double g_slow_ms = 8.0; /* --slow-ms: a frame over it logged with --load-trace */
 static const GameClient* g_trace_game = NULL; /* its update's phases with a slow frame */
 
 static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float scale, double update_ms, double t0) {
@@ -498,10 +508,13 @@ static void trace_frame(SceneTree& tree, SwRenderer& sw, Canvas& canvas, float s
     sw.end();
     double end = now_ms();
     ++frame_no;
-    if (d0 - t0 + update_ms > 8.0) {
+    bool slow = end - t0 + update_ms > g_slow_ms;
+    std::string nodes = SceneTree::take_frame_profile(slow);
+    if (slow) {
         log_info("frame %ld: update %.1f ms, process %.1f ms (draw %.1f)", frame_no, update_ms, d0 - t0, end - d0);
         if (update_ms > 2.0 && g_trace_game && !g_trace_game->update_profile().empty())
             log_info("  its update: %s", g_trace_game->update_profile().c_str());
+        if (!nodes.empty()) log_info("  its nodes (process and draw, ms): %s", nodes.c_str());
     }
     if (frame_no % 600 == 0) {
         Canvas::TextureStats st = canvas.take_texture_stats();
@@ -524,6 +537,11 @@ static bool save_text(const std::string& path, const std::string& text) {
 }
 
 int main(int argc, char** argv) {
+#if defined(__CYGWIN__) || defined(__MSYS__)
+    /* the profile's times as the console's: a pack read behind an audio
+     * read slept a whole tick (a scene's load 12.5 ms) */
+    timeBeginPeriod(1);
+#endif
     if (argc < 3) {
         fprintf(stderr, "usage: spire_play <pack.s3p> <out_dir> --logic CMD [--character C] [--seed S] [--steps N] "
                         "[--scale S] [--auto SEED]\n");
@@ -594,6 +612,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--console-textures") == 0) console_textures = true;
         else if (strcmp(argv[i], "--profile") == 0) SceneTree::set_profile(now_ms);
         else if (strcmp(argv[i], "--profile-cpu") == 0) g_profile_cpu = true;
+        else if (strcmp(argv[i], "--slow-ms") == 0 && i + 1 < argc) g_slow_ms = atof(argv[++i]);
         else if (strcmp(argv[i], "--skip-draws") == 0 && i + 1 < argc) SceneTree::set_draw_skip(atoi(argv[++i]));
         else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
         else if (strcmp(argv[i], "--dump-draws-shot") == 0 && i + 1 < argc) dump_draws_shot = atoi(argv[++i]);
