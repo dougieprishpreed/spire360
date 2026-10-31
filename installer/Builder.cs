@@ -239,7 +239,8 @@ namespace Spire360Installer
         {
             var sb = new StringBuilder();
             sb.AppendLine("export DEBIAN_FRONTEND=noninteractive");
-            sb.AppendLine("command -v git >/dev/null || { apt-get update -q && apt-get install -y -q git ca-certificates; }");
+            sb.AppendLine("command -v git >/dev/null || { echo 'Installing git...'; apt-get update -qq && " +
+                          "apt-get install -y -qq git ca-certificates > /dev/null; }");
             if (!string.IsNullOrEmpty(token))
             {
                 sb.AppendLine("git config --global credential.helper store");

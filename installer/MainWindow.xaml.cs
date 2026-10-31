@@ -245,10 +245,20 @@ namespace Spire360Installer
             StartStage("source", updatePending ? "Fetching the latest source" : "Fetching the source");
             if (await builder.FetchSource() != 0)
             {
-                // a private repository: a token, once
-                string token = TokenDialog.Ask(this);
-                if (token == null || await builder.FetchSource(token) != 0)
-                    throw new Exception("Couldn't fetch the source (see the log)");
+                // a private repository: a token (asked again, with what to
+                // check, when GitHub refuses one)
+                string refused = null;
+                bool fetched = false;
+                for (int attempt = 0; attempt < 3 && !fetched; attempt++)
+                {
+                    string token = TokenDialog.Ask(this, refused);
+                    if (token == null) break;
+                    fetched = await builder.FetchSource(token) == 0;
+                    refused = "GitHub refused that token for this repository. On the token's page check: Repository " +
+                              "access is \"Only select repositories\" with this repository chosen, and Repository " +
+                              "permissions, Contents, is \"Read-only\". Then paste it again (or a new one).";
+                }
+                if (!fetched) throw new Exception("Couldn't fetch the source (see the log)");
             }
             if (updatePending && await builder.ApplyChanges() != 0)
                 throw new Exception("Couldn't update the source (see the log)");
@@ -322,10 +332,11 @@ namespace Spire360Installer
         }
     }
 
-    /// <summary>A GitHub token for a private repository, asked once.</summary>
+    /// <summary>A GitHub token for a private repository; refused: why the last
+    /// one didn't do.</summary>
     static class TokenDialog
     {
-        public static string Ask(Window owner)
+        public static string Ask(Window owner, string refused = null)
         {
             var box = new PasswordBox { Margin = new Thickness(0, 10, 0, 14), Padding = new Thickness(4) };
             var ok = new Button { Content = "Use this token", Style = (Style)owner.FindResource("GoldButton"), IsDefault = true };
@@ -337,6 +348,12 @@ namespace Spire360Installer
             };
             ok.Click += (s, e) => w.DialogResult = true;
             var panel = new StackPanel { Margin = new Thickness(18) };
+            if (refused != null)
+                panel.Children.Add(new TextBlock
+                {
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10),
+                    Foreground = (Brush)owner.FindResource("Ember"), Text = refused,
+                });
             panel.Children.Add(new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
