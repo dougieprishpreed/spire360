@@ -2,9 +2,10 @@
 
 `spire360.xex` built with the open [xsdk](https://github.com/xenosworks/xsdk) toolchain and
 [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon), in place of the Microsoft XDK
-(`xdk/`, no longer worked on). It runs on an RGH or JTAG console from the dashboard, as the XDK
-build did, and reads the same files: `game:\spire\` (the converter's output), `spire360.ini`, and
-writes `spire360.txt`, `spire360_logic.txt` and `spire360_shot_NN.bmp`.
+(`xdk/`, no longer worked on). It runs from the dashboard of a console that runs homebrew (such
+as with ABadAvatar), as the XDK build did, and reads the same files: `game:\spire\` (the
+converter's output), `spire360.ini`, and writes `spire360.txt`, `spire360_logic.txt` and
+`spire360_shot_NN.bmp`.
 
 What differs from the XDK build:
 

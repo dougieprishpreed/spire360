@@ -3,14 +3,12 @@
 An unofficial Xbox 360 port of **Slay the Spire 2**, built on your PC from your own copy of the game.
 
 The game's rules, cards and monsters are your copy's own code, translated for the Xbox 360's processor; the art,
-sound and text are converted from your copy's files. Nothing from the game is in this repository, and nothing the
-build makes may be shared: **build it yourself, keep it to yourself.** This project is not affiliated with or
-endorsed by Mega Crit.
+sound and text are converted from your copy's files.
 
 ## Status
 
-**Fully playable** on an RGH or JTAG console with a controller: whole runs from the main menu to the last boss, with
-the game's music and sound, saves, and Save and Quit. Seeded runs play out exactly as on PC.
+**Fully playable** on an Xbox 360 that runs homebrew, with a controller: whole runs from the main menu to the last
+boss, with the game's music and sound, saves, and Save and Quit. Seeded runs play out exactly as on PC.
 
 Expect some bugs in the game's logic or its screens. Please report them in
 [Issues](../../issues), with the two logs and a screenshot (see [Reporting a bug](#reporting-a-bug)). Not done yet:
@@ -19,7 +17,7 @@ multiplayer, custom and daily runs.
 ## What you need
 
 - Slay the Spire 2 installed on a Windows 10 or 11 PC (64-bit).
-- An Xbox 360 that runs homebrew (RGH or JTAG), and a way to copy files to it (USB drive or FTP).
+- An Xbox 360 that runs homebrew (such as with ABadAvatar), and a way to copy files to it (USB drive or FTP).
 - About **30 GB free** on the drive you build on, for the first build. The finished folder for the console is
   about **1 GB**; the rest is the build environment, which you can keep to build future updates (or delete).
 - An internet connection, and an hour or two for the first build (later ones are much quicker).
@@ -71,7 +69,9 @@ Options for testing and performance reports are in `spire360.ini` beside `defaul
 
 How the port works and how to build each part by hand: [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
-## License
+## Keep your build to yourself
 
-Spire360's own code is under the MIT license ([LICENSE](LICENSE)). Third-party code keeps its own licenses:
-[THIRD_PARTY.md](THIRD_PARTY.md).
+The build is made from your copy of the game: `default.xex` holds the game's own code, translated, and the pack its
+art, sound and text. That's why nothing from the game is in this repository and why everyone builds their own:
+don't share your `spire360` folder or anything the build makes. This project is not affiliated with or endorsed by
+Mega Crit.
