@@ -65,9 +65,11 @@ namespace Spire360Installer
 
         // ---- processes ----
 
-        /// <summary>Runs a program, each line of its output to the log (and to onLine).</summary>
-        Task<int> Exec(string file, string args, Action<string> onLine = null, bool utf8 = true)
+        /// <summary>Runs a program, each line of its output to onLine and,
+        /// unless quiet, to the log.</summary>
+        Task<int> Exec(string file, string args, Action<string> onLine = null, bool quiet = false)
         {
+            const bool utf8 = true;
             var tcs = new TaskCompletionSource<int>();
             var psi = new ProcessStartInfo(file, args)
             {
@@ -86,7 +88,7 @@ namespace Spire360Installer
                 if (e.Data == null) return;
                 string l = e.Data.Replace("\0", "");
                 onLine?.Invoke(l);
-                if (!l.StartsWith("##spire ")) Log(l);
+                if (!quiet && !l.StartsWith("##spire ")) Log(l);
             };
             p.OutputDataReceived += h;
             p.ErrorDataReceived += h;
@@ -104,20 +106,24 @@ namespace Spire360Installer
 
         /// <summary>A bash script run as root in the instance, from a file (no
         /// quoting through wsl.exe's command line).</summary>
-        async Task<int> Bash(string script, Action<string> onLine = null)
+        async Task<int> Bash(string script, Action<string> onLine = null, bool quiet = false)
         {
             string path = Path.Combine(StateDir, "job-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".sh");
             // git fails rather than waiting for a password nobody can type
             File.WriteAllText(path, "set -e\nexport GIT_TERMINAL_PROMPT=0\n" + script.Replace("\r\n", "\n") + "\n",
                               new UTF8Encoding(false));
-            try { return await Exec("wsl.exe", $"-d {Distro} -u root -e bash {Quote(LinuxPath(path))}", onLine); }
+            // double quotes: with -e, wsl.exe hands the arguments over as
+            // Windows split them, where single quotes are characters
+            try { return await Exec("wsl.exe", $"-d {Distro} -u root -e bash \"{LinuxPath(path)}\"", onLine, quiet); }
             finally { try { File.Delete(path); } catch { } }
         }
 
+        /// <summary>A program's output, kept out of the log (WSL's list of the
+        /// PC's other instances, its version).</summary>
         async Task<string> Capture(string file, string args)
         {
             var sb = new StringBuilder();
-            await Exec(file, args, l => sb.AppendLine(l));
+            await Exec(file, args, l => sb.AppendLine(l), quiet: true);
             return sb.ToString();
         }
 
@@ -175,11 +181,21 @@ namespace Spire360Installer
             int rc = await Exec("wsl.exe", $"--import {Distro} \"{DistroDir}\" \"{image}\" --version 2");
             if (rc != 0) throw new Exception("wsl --import failed (" + rc + ")");
             File.Delete(image);
-            // the build's tools are Linux's own: Windows' PATH (its dotnet,
-            // python) stays out
-            rc = await Bash("printf '[interop]\\nappendWindowsPath=false\\n[automount]\\nroot=/mnt/\\n' > /etc/wsl.conf");
-            if (rc != 0) throw new Exception("Couldn't set up the instance");
-            await Exec("wsl.exe", $"--terminate {Distro}");
+        }
+
+        /// <summary>The instance's settings, each run until they're in place (a
+        /// run stopped after the import comes back here): the build's tools are
+        /// Linux's own, Windows' PATH (its dotnet, python) stays out.</summary>
+        public async Task ConfigureDistro()
+        {
+            bool changed = false;
+            // appended: Debian's image has a wsl.conf of its own ([boot])
+            int rc = await Bash("grep -qs '^appendWindowsPath=false' /etc/wsl.conf && exit 0\n" +
+                                "printf '\\n[interop]\\nappendWindowsPath=false\\n' >> /etc/wsl.conf\n" +
+                                "echo @@restart",
+                                l => { if (l.Trim() == "@@restart") changed = true; }, quiet: true);
+            if (rc != 0) throw new Exception("Couldn't set up the build environment (see the log)");
+            if (changed) await Exec("wsl.exe", $"--terminate {Distro}", quiet: true);
         }
 
         static async Task<(string, string)> DebianImage()

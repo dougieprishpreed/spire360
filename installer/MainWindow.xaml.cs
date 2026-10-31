@@ -240,6 +240,7 @@ namespace Spire360Installer
             StartStage("instance", "Preparing the build environment");
             if (!await builder.DistroExists())
                 await builder.CreateDistro();
+            await builder.ConfigureDistro();
 
             StartStage("source", updatePending ? "Fetching the latest source" : "Fetching the source");
             if (await builder.FetchSource() != 0)
