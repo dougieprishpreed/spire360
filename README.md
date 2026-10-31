@@ -1,3 +1,5 @@
+# IF YOU HAPPEN TO STUMBLE UPON THIS RIGHT NOW, IT IS NOT READY YET. WAIT TO BUILD UNTIL I UPLOAD THE INSTALLER TO RELEASES!
+
 # Spire360
 
 An unofficial Xbox 360 port of **Slay the Spire 2**, built on your PC from your own copy of the game.
