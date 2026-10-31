@@ -148,8 +148,9 @@ stage_sources() {
 }
 
 stage_toolchain() {
-  # skips what it has built; its sources are checked by SHA-256
-  (cd "$SRC/xsdk" && PREFIX="$TC" WORK="$HOME_DIR/tmp/toolchain" JOBS="$JOBS" tools/toolchain/build.sh)
+  # skips what it has built; its sources are checked by SHA-256 (through
+  # bash: xsdk's repository has it without the executable bit)
+  (cd "$SRC/xsdk" && PREFIX="$TC" WORK="$HOME_DIR/tmp/toolchain" JOBS="$JOBS" bash tools/toolchain/build.sh)
   rm -rf "$HOME_DIR/tmp/toolchain"
   "$TC/bin/powerpc-xsdk-elf-gcc" --version
 }
