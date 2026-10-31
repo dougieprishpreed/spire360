@@ -26,10 +26,10 @@ multiplayer, custom and daily runs.
 
 ## Building it (Windows)
 
-1. Download **Spire360Setup.exe** from [Releases](../../releases) into an empty folder, such as `D:\Spire360`.
-   Everything the build needs goes into that folder.
-2. Run it, click **Choose folder...** and pick the Slay the Spire 2 folder (in Steam: right-click the game,
-   *Manage*, *Browse local files*). Then click **Build**.
+1. Download the **Spire360Setup** zip from [Releases](../../releases) and extract it where there's room, such as
+   `D:\`. Everything the build needs goes into its `Spire360Setup` folder.
+2. Run **Spire360Setup.exe** from that folder, click **Choose folder...** and pick the Slay the Spire 2 folder (in
+   Steam: right-click the game, *Manage*, *Browse local files*). Then click **Build**.
 3. Wait: the window shows each step as it goes. If WSL (Windows Subsystem for Linux) isn't installed yet, Setup
    offers to install it; restart the PC when it asks, then run Setup again.
 
