@@ -1,126 +1,77 @@
 # Spire360
 
-An unofficial Xbox 360 port of **Slay the Spire 2**, for people who own the
-game on PC.
+An unofficial Xbox 360 port of **Slay the Spire 2**, built on your PC from your own copy of the game.
 
-Spire360 does not re-create the game. It takes **your installed copy** and
-turns it into something the Xbox 360 can run:
-
-- **The game itself** (its rules, cards, monsters and random number
-  generator) is your copy's own code, translated to run natively on the
-  Xbox 360's processor. A run with a given seed plays out exactly as it does
-  on PC.
-- **The graphics and sound** come from a new engine that reproduces the
-  game's own screens and audio: the same layouts, art, fonts, animations,
-  effects, music and sound effects, converted from your copy's game files.
-
-Nothing from the game is in this repository. Everything the tools produce is
-made from your copy of the game, so **keep your builds to yourself**. This
-project is not affiliated with or endorsed by Mega Crit.
-
-This branch (`main`) is the build made with the open
-[xsdk](https://github.com/xenosworks/xsdk) toolchain and
-[vulkan4xenon](https://github.com/xenosworks/vulkan4xenon). The earlier
-build with Microsoft's XDK is kept on the `xdk` branch and is no longer
-maintained.
+The game's rules, cards and monsters are your copy's own code, translated for the Xbox 360's processor; the art,
+sound and text are converted from your copy's files. Nothing from the game is in this repository, and nothing the
+build makes may be shared: **build it yourself, keep it to yourself.** This project is not affiliated with or
+endorsed by Mega Crit.
 
 ## Status
 
-Work in progress: **a preview, playable with a controller on an RGH or
-JTAG console.**
+**Fully playable** on an RGH or JTAG console with a controller: whole runs from the main menu to the last boss, with
+the game's music and sound, saves, and Save and Quit. Seeded runs play out exactly as on PC.
 
-- Whole runs play, drawn as the game draws them: the main menu, character
-  select, Neow, the map, fights, rewards, events, rest sites, shops,
-  treasure rooms, bosses, the game over screen. Seeded runs play out exactly
-  as on PC.
-- Music and sound effects play from the game's own sound banks.
-- Runs save as the game saves them; Save and Quit, then Continue, picks the
-  run up where it was.
-- Not done yet: multiplayer, custom and daily runs. Tested with Slay the
-  Spire 2 v0.111.0.
-- xSDK builds don't run in the Xenia emulator: they are tested on PC first
-  (below), then on a console.
+Expect some bugs in the game's logic or its screens. Please report them in
+[Issues](../../issues), with the two logs and a screenshot (see [Reporting a bug](#reporting-a-bug)). Not done yet:
+multiplayer, custom and daily runs.
 
 ## What you need
 
-- Slay the Spire 2 on a Windows PC.
-- An Xbox 360 that can run homebrew (RGH/JTAG).
-- To build:
-  - Python 3.9 or newer (`pip install -r converter/requirements.txt`);
-  - the .NET 10 SDK and wasi-sdk 29 (to build the game logic);
-  - Linux, or WSL on Windows, with xsdk's toolchain built (its
-    `docs/GETTING_STARTED.md`) and checkouts of xsdk, vulkan4xenon and
-    glslang-xenon.
+- Slay the Spire 2 installed on a Windows 10 or 11 PC (64-bit).
+- An Xbox 360 that runs homebrew (RGH or JTAG), and a way to copy files to it (USB drive or FTP).
+- About **30 GB free** on the drive you build on, for the first build. The finished folder for the console is
+  about **1 GB**; the rest is the build environment, which you can keep to build future updates (or delete).
+- An internet connection, and an hour or two for the first build (later ones are much quicker).
 
-## Building
+## Building it (Windows)
 
-1. **Convert the game's files** into a pack the console reads:
+1. Download **Spire360Setup.exe** from [Releases](../../releases) into an empty folder, such as `D:\Spire360`.
+   Everything the build needs goes into that folder.
+2. Run it, click **Choose folder...** and pick the Slay the Spire 2 folder (in Steam: right-click the game,
+   *Manage*, *Browse local files*). Then click **Build**.
+3. Wait: the window shows each step as it goes. If WSL (Windows Subsystem for Linux) isn't installed yet, Setup
+   offers to install it; restart the PC when it asks, then run Setup again.
 
-   ```
-   python converter\convert.py fetch-godot
-   python converter\convert.py build "C:\...\Slay the Spire 2\SlayTheSpire2.pck" out
-   ```
+When it finishes, the `spire360` folder next to Setup is ready for the console.
 
-   This writes `out\pack.s3p` (about 1 GB) and `out\data`. `fetch-godot`
-   downloads the official Godot 4.5.1 build once; it renders the game's
-   fonts for the console.
+Building on Linux or macOS instead: [docs/BUILD_LINUX_MAC.md](docs/BUILD_LINUX_MAC.md).
 
-2. **Build the game logic** from your copy's code:
-   [docs/LOGIC_BUILD.md](docs/LOGIC_BUILD.md).
+## Putting it on the console
 
-3. **Build `default.xex`** in Linux or WSL:
-   [xsdk/README.md](xsdk/README.md#build).
+Copy the whole `spire360` folder to the console, for example to `Hdd1:\Games\spire360` or a USB drive's
+`Games\spire360`, and start `default.xex` from your dashboard (Aurora, FSD, ...).
 
-## Running it
+## Updates
 
-Copy the converter's output folder (`pack.s3p` and `data\`) to a `spire`
-folder on the console's drive, put `default.xex` beside it, and start it
-from the dashboard:
+Run **Spire360Setup.exe** again. It lists what has changed since your build; **Update and rebuild** builds the
+latest. Copy the new `spire360` folder over the old one: your saves (`spire\data\user`) and your `spire360.ini`
+are kept.
 
-```
-Games\spire360\default.xex
-Games\spire360\spire\pack.s3p
-Games\spire360\spire\data\...
-```
+To remove everything, run `wsl --unregister Spire360` in a command prompt and delete the folder.
 
-Options for testing go in `spire360.ini` beside the XEX (see
-[xdk/spire360/spire360.ini](xdk/spire360/spire360.ini): `invincible`,
-`godmode`, `trace_loads`, `profile`); without it every option is off.
+## Controls
 
-### Controls
+- D-pad or left stick: move. A: confirm. B: back. Start: pause.
+- Y: the screen's proceed arrow (Skip, Proceed) and End Turn.
+- X: potions. LB: your deck. In a fight, LT, RT and RB: the draw, discard and exhaust piles.
+- Back: the map.
+- In a fight: A takes a card, A again plays it (left and right to aim), B puts it back.
+- **Back + RB: a screenshot** (`spire360_shot_NN.bmp`, beside `default.xex`). Back + Start: quit.
 
-Any of the four controller slots plays.
+## Reporting a bug
 
-- D-pad or left stick: move the focus. A: confirm. B: back. Start: pause.
-- Y: the screen's proceed arrow (Skip, Proceed), and End Turn in a fight.
-- X: the potions (A: drink, throw or discard).
-- LB: your deck, on any screen of a run (a card reward and a card choice
-  too). In a fight, LT, RT and RB: the draw, discard and exhaust piles.
-- Back: the map (and the log written out).
-- In a fight: A takes a card, A again plays it (left/right aim), B puts it
-  back.
-- Back + RB: a screenshot (`spire360_shot_NN.bmp`). Back + Start: quit.
+Each start writes `spire360.txt` and `spire360_logic.txt` beside `default.xex`. Open an [issue](../../issues) saying
+what happened and what you expected, and attach both logs and a screenshot (Back + RB) if it's something you can
+see. The logs let a session be replayed exactly as it was played.
 
-### The logs
+Options for testing and performance reports are in `spire360.ini` beside `default.xex`.
 
-Each start writes `spire360.txt` (start-up, every decision and how long it
-took, slow frames, memory, sound) and `spire360_logic.txt` (the game
-logic's own output and the commands it was sent) beside the XEX, and copies
-the saves it started from to `spire\data\session_start`. With those, a
-session can be replayed on the PC exactly as it was played. Send them with
-a report.
+## For developers
 
-## Repository
+How the port works and how to build each part by hand: [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
-| Folder | What |
-|---|---|
-| `converter/` | Reads the game's `.pck` and builds the console pack (textures, scenes, fonts, animations, sound banks) |
-| `logic/` | Prepares the game's code for the console: Godot stand-ins, patches, a command interface |
-| `runtime/` | Runs the translated game code: memory, files, clocks |
-| `engine/` | The console engine: scenes, layout, text, particles, Spine animations, audio, renderers |
-| `xsdk/` | The Xbox 360 program built with xsdk (its build: [xsdk/README.md](xsdk/README.md)) |
-| `tools/` | Build scripts, PC tools (a scene viewer, a headless player, checks), test runners |
-| `xdk/` | The earlier Visual Studio 2010 + XDK projects (no longer maintained) |
-| `third_party/` | w2c2 (the WebAssembly-to-C translator) and stb_vorbis |
+## License
 
-Third-party code and licenses: [THIRD_PARTY.md](THIRD_PARTY.md).
+Spire360's own code is under the MIT license ([LICENSE](LICENSE)). Third-party code keeps its own licenses:
+[THIRD_PARTY.md](THIRD_PARTY.md).

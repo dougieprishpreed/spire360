@@ -20,8 +20,12 @@ Not included:
 - **Spine.** The game's skeletal animations are played by this project's own
   Spine 4.2 runtime (`engine/spine/`, `converter/spire_convert/spine.py`),
   written from the format's public description: no Esoteric Software code.
-- **Xbox 360 XDK.** Microsoft licensed it to registered developers only; you
-  need your own copy to build the XEX.
+- **The console toolchain.** xsdk, vulkan4xenon and glslang-xenon, and the
+  GCC, binutils and newlib xsdk builds, are fetched by the build, not kept
+  here; the XEX links xsdk, vulkan4xenon, newlib and GCC's runtime, whose
+  licenses the build puts beside it (`licenses/`).
+- **Xbox 360 XDK.** Only the old `xdk` branch used it (Microsoft licensed it
+  to registered developers only); the main build doesn't.
 
 Game files (sts2.dll and its dependencies, the .pck and everything extracted
 or compiled from them) belong to Mega Crit and stay on the player's machine.

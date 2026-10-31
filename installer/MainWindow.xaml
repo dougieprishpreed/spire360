@@ -1,0 +1,166 @@
+<Window x:Class="Spire360Installer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Spire360 Setup" Width="960" Height="760" MinWidth="760" MinHeight="620"
+        WindowStartupLocation="CenterScreen" Foreground="{StaticResource Ink}" FontFamily="{StaticResource Body}">
+  <Window.Background>
+    <RadialGradientBrush Center="0.5,0" GradientOrigin="0.5,0" RadiusX="1.1" RadiusY="1.2">
+      <GradientStop Color="#3A2A1E" Offset="0"/>
+      <GradientStop Color="#18120E" Offset="0.65"/>
+      <GradientStop Color="#0F0B09" Offset="1"/>
+    </RadialGradientBrush>
+  </Window.Background>
+
+  <Grid Margin="28,18,28,22">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <!-- the title -->
+    <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,10">
+      <TextBlock Text="Spire360" FontFamily="{StaticResource Ornate}" FontSize="76" Foreground="{StaticResource Gold}"
+                 HorizontalAlignment="Center" Margin="0,-10,0,-18">
+        <TextBlock.Effect>
+          <DropShadowEffect Color="#000000" BlurRadius="14" ShadowDepth="2" Opacity="0.8"/>
+        </TextBlock.Effect>
+      </TextBlock>
+      <TextBlock Text="Builds the Xbox 360 port from your own copy of Slay the Spire 2" FontSize="14"
+                 Foreground="{StaticResource Dim}" HorizontalAlignment="Center"/>
+      <Rectangle Height="1" Width="420" Margin="0,12,0,0">
+        <Rectangle.Fill>
+          <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+            <GradientStop Color="#00D9B45A" Offset="0"/>
+            <GradientStop Color="#D9B45A" Offset="0.5"/>
+            <GradientStop Color="#00D9B45A" Offset="1"/>
+          </LinearGradientBrush>
+        </Rectangle.Fill>
+      </Rectangle>
+    </StackPanel>
+
+    <!-- the game's folder -->
+    <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+            CornerRadius="8" Padding="16,12" Margin="0,4,0,12">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="Your game" FontFamily="{StaticResource Ornate}" FontSize="26" Foreground="{StaticResource Gold}"
+                     Margin="0,-6,0,-4"/>
+          <TextBlock x:Name="GamePath" Text="Choose the Slay the Spire 2 folder (the one holding SlayTheSpire2.pck)"
+                     TextTrimming="CharacterEllipsis" Foreground="{StaticResource Dim}" FontSize="13"/>
+        </StackPanel>
+        <Button Grid.Column="1" x:Name="BrowseButton" Content="Choose folder..." Style="{StaticResource QuietButton}"
+                VerticalAlignment="Center" Click="Browse_Click"/>
+      </Grid>
+    </Border>
+
+    <!-- the stages and the log -->
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="1.05*"/>
+        <ColumnDefinition Width="14"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+              CornerRadius="8" Padding="16,12">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="Progress" FontFamily="{StaticResource Ornate}" FontSize="26"
+                     Foreground="{StaticResource Gold}" Margin="0,-6,0,2"/>
+          <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <ProgressBar x:Name="Overall" Height="8" Minimum="0" Maximum="1" Value="0" BorderThickness="0"
+                         Background="#3A2F27" Foreground="{StaticResource Gold}"/>
+            <TextBlock x:Name="StatusText" Text="Ready" Margin="0,8,0,0" FontSize="13" TextWrapping="Wrap"/>
+          </StackPanel>
+          <Grid>
+          <TextBlock x:Name="ProgressHint" TextWrapping="Wrap" FontSize="13" Foreground="{StaticResource Dim}"
+                     Margin="0,6,0,0" LineHeight="20"
+                     Text="Choose your game's folder, then Build. Each step shows here as it runs: setting up WSL and the build environment, fetching the source and the toolchain, converting the game's art, sound and text, building its logic and default.xex, and putting the console folder together."/>
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="StageList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,4">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="26"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Glyph}" Foreground="{Binding GlyphBrush}" FontSize="15"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Title}" Foreground="{Binding TitleBrush}" FontSize="14"
+                               TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="{Binding Time}" Foreground="{StaticResource Dim}" FontSize="12"
+                               VerticalAlignment="Center" Margin="8,0,0,0"/>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          </Grid>
+        </DockPanel>
+      </Border>
+
+      <Grid Grid.Column="2">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+                CornerRadius="8" Padding="16,12" Margin="0,0,0,12">
+          <StackPanel>
+            <TextBlock Text="Updates" FontFamily="{StaticResource Ornate}" FontSize="26" Foreground="{StaticResource Gold}"
+                       Margin="0,-6,0,0"/>
+            <TextBlock x:Name="UpdateText" Text="Not checked yet." TextWrapping="Wrap" FontSize="13"
+                       Foreground="{StaticResource Dim}"/>
+            <ItemsControl x:Name="ChangeList" Margin="0,6,0,0" MaxHeight="150">
+              <ItemsControl.Template>
+                <ControlTemplate>
+                  <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsPresenter/>
+                  </ScrollViewer>
+                </ControlTemplate>
+              </ItemsControl.Template>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12.5" Margin="0,2"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+        <Border Grid.Row="1" Background="#120E0B" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+                CornerRadius="8" Padding="10">
+          <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Text="Log" FontSize="12" Foreground="{StaticResource Dim}" Margin="2,0,0,6"/>
+            <TextBox x:Name="LogBox" IsReadOnly="True" Background="Transparent" BorderThickness="0"
+                     Foreground="#CFC3AC" FontFamily="Cascadia Mono, Consolas" FontSize="11.5" TextWrapping="NoWrap"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+          </DockPanel>
+        </Border>
+      </Grid>
+    </Grid>
+
+    <!-- the actions -->
+    <Grid Grid.Row="3" Margin="0,16,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock x:Name="SpaceText" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource Dim}"
+                 TextWrapping="Wrap" Margin="0,0,16,0"/>
+      <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <Button x:Name="OpenButton" Content="Open the output folder" Style="{StaticResource QuietButton}"
+                Margin="0,0,10,0" Click="Open_Click"/>
+        <Button x:Name="UpdateButton" Content="Check for updates" Style="{StaticResource QuietButton}"
+                Margin="0,0,10,0" Click="Update_Click"/>
+        <Button x:Name="BuildButton" Content="Build" Style="{StaticResource GoldButton}" Click="Build_Click"/>
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>

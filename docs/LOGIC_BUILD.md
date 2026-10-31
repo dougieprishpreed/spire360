@@ -25,16 +25,16 @@ player's game code: keep them local.
 3. Check the feed is reachable: opening
    `https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-experimental/nuget/v3/index.json`
    in a browser shows JSON.
-4. Open **Visual Studio Command Prompt (2010)** (Start menu, Visual Studio
-   2010, Visual Studio Tools); its `cl` builds w2c2. Not the Xbox 360 prompt:
-   its `cl` targets PowerPC.
-5. In the repository:
+4. Open a **Developer Command Prompt** of Visual Studio (any edition, or its
+   free Build Tools with the C++ workload); its `cl` builds w2c2. CMake on
+   `PATH` is used instead when there is one.
+5. In the repository, with `<game>` the Slay the Spire 2 folder (the one
+   holding `SlayTheSpire2.pck`):
 
    ```
-   cd /d F:\downloads\temp\python\hermes\spire360
-   python converter\pck_tool.py extract "F:\Program Files (x86)\Slay the Spire 2\SlayTheSpire2.pck" data "localization/*"
+   python converter\pck_tool.py extract "<game>\SlayTheSpire2.pck" data "localization/*"
    set WASI_SDK_PATH=C:\wasi-sdk-29.0-x86_64-windows
-   python tools\build_logic.py --game-dir "F:\Program Files (x86)\Slay the Spire 2" > build_logic.log 2>&1
+   python tools\build_logic.py --game-dir "<game>" > build_logic.log 2>&1
    ```
 
    The first run downloads the ILCompiler.LLVM packages (a few hundred MB)
@@ -50,8 +50,9 @@ player's game code: keep them local.
    `C:\wasi-sdk-29.0-x86_64-windows` (or next to the repository): the
    script finds it.
 
-WSL (Ubuntu) works as well, with the Linux wasi-sdk tarball and the game at
-`/mnt/f/Program Files (x86)/Slay the Spire 2`.
+Linux and WSL work as well, with the Linux wasi-sdk tarball and the game's
+folder as Linux sees it (in WSL, `/mnt/c/...`). `tools/install/build_all.sh`
+does all of this on Linux in one go.
 
 ## One command
 

@@ -43,12 +43,13 @@ What differs from the XDK build:
 ## Build
 
 On Linux, or in WSL on Windows, with xsdk's toolchain built (its `docs/GETTING_STARTED.md`) and
-checkouts of xsdk, vulkan4xenon and glslang-xenon (its host build gives `glslang`); here they
-sit in `/opt/ctr360-xsdk`:
+checkouts of xsdk, vulkan4xenon and glslang-xenon (its host build gives `glslang`), with
+`<deps>` the folder that holds them (`tools/install/build_all.sh` sets all of this up and runs
+the build):
 
 ```
-export XSDK=/opt/ctr360-xsdk/xsdk VULKAN4XENON=/opt/ctr360-xsdk/vulkan4xenon \
-  GLSLANG=/opt/ctr360-xsdk/glslang/build-host/StandAlone/glslang XSDK_TOOLCHAIN=/opt/ctr360-xsdk/toolchain
+export XSDK=<deps>/xsdk VULKAN4XENON=<deps>/vulkan4xenon \
+  GLSLANG=<deps>/glslang-xenon/build/StandAlone/glslang XSDK_TOOLCHAIN=<deps>/xsdk-gcc
 tools/xsdk/build.sh
 ```
 

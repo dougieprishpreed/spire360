@@ -3996,12 +3996,12 @@ Use the PC tools (spire_view, spire_play, the JIT logic) to check the work.
 - Comments say what the game does and where (the C# class or scene being
   ported, its numbers), in the style of the surrounding code.
 
-## The user's machine
+## The development setup
 
 | What | Where |
 |---|---|
-| Repository | `F:\downloads\temp\python\hermes\spire360` (was a zip extract; becomes a git clone at the start of the desktop session) |
-| Game (v0.111.0) | `F:\Program Files (x86)\Slay the Spire 2` (`SlayTheSpire2.pck`, sts2.dll in its data folder) |
+| Repository | a git clone |
+| Game (v0.111.0) | its Steam folder (`SlayTheSpire2.pck`, sts2.dll in its data folder) |
 | wasi-sdk 29 | `C:\wasi-sdk-29.0-x86_64-windows` |
 | XDK | Visual Studio 2010 + Xbox 360 XDK; "Xbox 360 Command Prompt"; `xdk\build.cmd` |
 | Emulator | Xenia Canary; the XEX's log is `game:\spire360.txt`, Xenia's own log `xenia.log` |
@@ -4015,7 +4015,7 @@ translated logic; `out\logic\w2c2_base.h.stamp`), `logic\lib`, `data`,
 
 The PC tools need a POSIX shell and g++ for `tools/viewer/build.sh`: use
 WSL (Ubuntu: `sudo apt install g++ python3 python3-pip`, .NET 10 SDK for
-Linux, the repo at `/mnt/f/downloads/temp/python/hermes/spire360`) or
+Linux, the repo under `/mnt/<drive>/...`) or
 MSYS2. Pick one environment and run the logic, the converter and the tools
 from it. Paths below are relative to the repository.
 
@@ -4617,3 +4617,67 @@ Checks (work/check107.sh): seeded traces the same 3 differences
 and the events 0 failures; native against JIT 14 of 15 traces identical
 (the unseeded skin); the monkey 96 decisions, no crash; the logic built
 through every stage (patch, jit, smoke, wasm, c, native).
+
+## Building it from the player's own game: the installer (2026-10-31)
+
+Anyone who plays builds the port from their own copy (the XEX holds the
+game's code; nothing made from the game is shared). The pieces:
+
+- tools/install/build_all.sh: the whole build on Linux (Debian or Ubuntu)
+  in one run, from the game's folder to the console's: the system
+  packages, xsdk, vulkan4xenon and glslang-xenon (their latest), xsdk's GCC
+  (tools/toolchain/build.sh; its work folder deleted after), glslang, a
+  Python venv, .NET 10 (dotnet-install.sh), wasi-sdk 29, the pack
+  (convert.py; Godot fetched once), the logic (build_logic.py copy, patch,
+  jit, smoke, wasm, c), default.xex (tools/xsdk/build.sh) and the staging
+  (tools/install/stage.py). Everything under --home (default
+  ~/spire360-build). --assets-only converts the pack and stages it beside
+  the default.xex already in --out. --jobs defaults to the cores, at most
+  one a GB of free memory. Each stage's output goes to the terminal and
+  <home>/logs/<stage>.log; the lines "##spire plan <id> <title>",
+  "##spire stage <n> <total> <id> <title>", "##spire done <out>" and
+  "##spire fail <id> <log>" are the installer's.
+- tools/install/stage.py: default.xex and its licenses/, spire360.ini (the
+  release options: trace_loads and profile off, they cost frame time; an
+  existing ini is the player's and stays), spire/pack.s3p and spire/data
+  (spire/data/user, the saves, and session_start are never touched nor
+  copied from the pack's folder: a PC run's saves sat in work/pack-80's and
+  replaced the test folder's), the FATX name check, and build.json (the
+  source commit, the XEX's md5, the game's version). Staged from this
+  round's XEX and work/pack-80: 1040 MB; staged again with --keep-xex, the
+  saves and a changed ini stayed.
+- Each stage runs in a subshell with -e in force and its status read from
+  PIPESTATUS (under `if !` bash ignores -e in the function: a failed
+  command mid-stage went unnoticed); apt runs through `sudo env
+  DEBIAN_FRONTEND=noninteractive` (sudo drops the variable). On Debian 13's
+  Python 3.13 the converter's etcpak and texture2ddecoder install from their
+  abi3 wheels (python3-dev is there for a source build anyway).
+- installer/ (Spire360Setup.exe, WPF on .NET Framework 4.8: part of
+  Windows 10 and 11, one 60 KB exe; `dotnet build -c Release installer`;
+  `Spire360Setup.exe --snapshot out.png` draws the window offscreen). It
+  works in its own folder: a WSL instance "Spire360" imported from
+  Microsoft's Debian image (WSL's DistributionInfo.json, its SHA-256
+  checked) into wsl\, with appendWindowsPath=false (the build uses Linux's
+  own tools); the source cloned to /opt/spire360/src/spire360 (a token
+  asked once for a private repository, kept in the instance's git
+  credentials; GIT_TERMINAL_PROMPT=0 so git never waits on a prompt);
+  build_all.sh run there with --home /opt/spire360 and --out the
+  installer's spire360\. Each Linux command goes through a script file
+  (no quoting through wsl.exe). The player chooses the game's folder (no
+  search). Re-opened, it lists the commits since the checkout (git log
+  HEAD..FETCH_HEAD) and offers "Update and rebuild". When spire360\'s
+  build.json names the checked-out commit and the game's version, it only
+  converts the pack. source.txt beside it names another repository or
+  branch. Without WSL it offers `wsl --install --no-distribution` (as
+  administrator, then a restart).
+- README.md rewritten for players (status, the installer, the console,
+  updates, controls, bug reports); docs/DEVELOPING.md has what it held for
+  developers; docs/BUILD_LINUX_MAC.md is the Linux and macOS guide, written
+  for an agent to follow (macOS through an x86-64 Linux VM, untested).
+  The docs name no local paths (docs/LOGIC_BUILD.md, xdk/README.md,
+  xsdk/README.md, this file's setup table).
+- LICENSE: MIT for Spire360's own code; THIRD_PARTY.md for the rest, and
+  for the toolchain the build fetches.
+
+Not tried yet: a run of the installer from an empty folder (the user's
+test), build_all.sh from scratch, macOS.

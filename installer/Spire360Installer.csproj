@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows installer: builds the port from the player's own copy of
+       the game in a WSL instance of its own, inside the installer's folder.
+       .NET Framework 4.8 is part of Windows 10 and 11: one small exe, no
+       runtime to install. Build: dotnet build -c Release installer -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Spire360Setup</AssemblyName>
+    <RootNamespace>Spire360Installer</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <Product>Spire360 Setup</Product>
+    <Description>Builds Spire360 from your copy of Slay the Spire 2</Description>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

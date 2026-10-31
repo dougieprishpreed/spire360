@@ -18,10 +18,9 @@ big-endian PowerPC under qemu before being committed.
 
 ## Build
 
-Open the **Xbox 360 Command Prompt** and run:
+Open the **Xbox 360 Command Prompt**, go to the repository and run:
 
 ```
-cd /d F:\downloads\temp\python\hermes\spire360
 xdk\build.cmd
 ```
 
