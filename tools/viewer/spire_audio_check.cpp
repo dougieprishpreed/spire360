@@ -99,6 +99,7 @@ static int event_cases(const Pack& pack) {
         u64 before = audio.started_voices();
         for (int k = 0; k < 375; ++k) audio.render(buffer, 256);
         if (audio.started_voices() > before) ++sounded;
+        else printf("audio: %s starts no sample within 2 s\n", name.c_str());
         ++events;
     }
     for (size_t i = 0; i < pack.count(); ++i) {
@@ -230,6 +231,25 @@ int main(int argc, char** argv) {
         }
         printf("audio: XAudio2 %d buffers submitted, %.0f frames consumed (muted)\n", submitted, (double)output.played_frames());
         return submitted == 16 && output.played_frames() > 0 ? 0 : 1;
+    }
+    if (argc == 4 && !strcmp(argv[2], "--event-levels")) {
+        /* An event's loudness over its first 3 s, 50 ms at a time (where
+         * its sounds fall: a hit timed inside an attack's event). */
+        Pack pack;
+        std::string error;
+        if (!pack.open(argv[1], &error)) { fprintf(stderr, "%s\n", error.c_str()); return 2; }
+        AudioEvents audio(&pack);
+        if (!audio.available()) return 1;
+        audio.play(argv[3]);
+        float buffer[2 * 2400];
+        for (int w = 0; w < 60; ++w) {
+            audio.render(buffer, 2400);
+            double sum = 0;
+            for (int i = 0; i < 2 * 2400; ++i) sum += (double)buffer[i] * buffer[i];
+            printf("%4d ms %6.3f %s\n", w * 50, sqrt(sum / (2 * 2400)),
+                   std::string((size_t)(sqrt(sum / (2 * 2400)) * 200), '#').c_str());
+        }
+        return 0;
     }
     if (argc < 2 || argc > 3) { fprintf(stderr, "usage: spire_audio_check <pack.s3p> [--mix-only] | --device-check\n"); return 2; }
     bool mix_only = argc == 3 && !strcmp(argv[2], "--mix-only");

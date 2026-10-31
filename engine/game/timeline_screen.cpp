@@ -13,6 +13,7 @@
 #include "../scene/spine_sprite.h"
 #include "../spine/spine.h"
 
+#include <algorithm>
 #include <math.h>
 
 namespace spire {
@@ -292,8 +293,18 @@ void TimelineScreen::add_slot(const Json& e, bool animated, float delay) {
  * the others. */
 void TimelineScreen::sync_slots(const Json& slots, bool animated) {
     float delay = animated ? 2.0f : 0.0f;
-    for (size_t i = 0; i < slots.size(); ++i) {
-        const Json& e = slots[i];
+    /* InitScreen: by era position (OrderBy) before AddEpochSlots, each new
+     * slot going above its column's others, the highest on top; in the
+     * answer's order a column came back in another order than it was
+     * revealed in. */
+    std::vector<size_t> order;
+    for (size_t i = 0; i < slots.size(); ++i) order.push_back(i);
+    if (!animated)
+        for (size_t i = 1; i < order.size(); ++i)
+            for (size_t j = i; j > 0 && slots[order[j]]["era_position"].i() < slots[order[j - 1]]["era_position"].i(); --j)
+                std::swap(order[j], order[j - 1]);
+    for (size_t n = 0; n < order.size(); ++n) {
+        const Json& e = slots[order[n]];
         bool found = false;
         for (size_t k = 0; k < slots_.size(); ++k) {
             if (slots_[k].id != e["id"].str()) continue;

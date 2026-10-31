@@ -342,6 +342,21 @@ private:
         float t, duration, offset;
     };
     std::vector<CostRoll> cost_rolls_;
+    /* CardCmd.Transform in the hand (a card_transform cue): the holder has
+     * the new card's id and view; the old card's node shines until its
+     * update, then the new card's takes its place (CardShine). The hand's
+     * updates meanwhile change the holder's data, not its node (the shine
+     * is a child of it): the new card is made from the latest, and made
+     * again after the shine if it changed since (built: what it shows). */
+    struct HandShine {
+        int id;
+        Json built;
+        class CardShine* shine;
+    };
+    std::vector<HandShine> shines_;
+    bool shining(int id) const;
+    void transform_in_hand(const Json& ch);
+    void update_shines(double dt);
     void update_cost_rolls(double dt);
     void move_creature_x(Creature& c, float dx, float duration, TweenTrans trans, TweenEase ease);
     void move_creature_to(Creature& c, const Vec2& to, float duration, TweenTrans trans, TweenEase ease);
@@ -453,6 +468,7 @@ private:
     Json previous_;
     std::map<int, Vec2>* places_;
     bool final_;
+    bool losing_; /* the decision these steps lead to is game_over */
     bool visual_only_;
     Control* vfx_box_;                    /* %CombatVfxContainer (screen coordinates) */
     struct Banner {

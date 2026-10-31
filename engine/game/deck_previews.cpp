@@ -996,4 +996,88 @@ void install_deck_preview_scripts() {
     register_script("res://src/Core/Nodes/Vfx/Cards/NCardRemoveVfx.cs", make_card_remove);
 }
 
+CardShine::CardShine(SceneLibrary* lib, Node* card)
+    : tweens_(new TweenSet()), card_(card), shine_(NULL), data_(NULL), overlay_(NULL), glow_(NULL), stage_(1), t_(0),
+      swap_at_(0), shined_(false) {
+    Node* box = card ? find_named(card, "CardVfxContainer") : NULL;
+    shine_ = box ? instance(lib, "scenes/vfx/ui/card/vfx_card_transform.tscn") : NULL;
+    data_ = shine_ && shine_->script == "res://src/Core/Nodes/Vfx/Cards/NCardTransformShineVfx.cs" ? shine_->behavior : NULL;
+    if (!data_) {
+        delete shine_;
+        shine_ = NULL;
+        return;
+    }
+    box->add_child(shine_);
+    Node* o = vfx_exported(shine_, "_overlay");
+    Node* g = vfx_exported(shine_, "_borderGlow");
+    overlay_ = o && o->is_canvas_item() ? (CanvasItem*)o : NULL;
+    glow_ = g && g->is_control() ? (Control*)g : NULL;
+    if (glow_) glow_->self_modulate.a = 0;
+    if (overlay_) {
+        overlay_->self_modulate = Color(1, 1, 1, 0);
+        tweens_->tween(&overlay_->self_modulate.a, 1.0f, ((TransformShine*)data_)->show, TRANS_QUART, EASE_IN_OUT);
+    }
+}
+
+CardShine::~CardShine() {
+    delete tweens_;
+    if (shine_ && shine_->parent) shine_->parent->remove_child(shine_);
+    delete shine_;
+}
+
+int CardShine::step(float dt, float* scale) {
+    TransformShine* d = (TransformShine*)data_;
+    t_ += dt;
+    tweens_->update(dt);
+    *scale = 1;
+    if (!data_) {
+        /* no shine scene: the card changes at once */
+        if (stage_ == 1) {
+            stage_ = 3;
+            return 1;
+        }
+        return 2;
+    }
+    if (stage_ == 1) {
+        float k = t_ / (d->show + d->idle);
+        *scale = TransformShine::at(d->anticipation, k < 1 ? k : 1).x;
+        if (k < 1) return 0;
+        stage_ = 2;
+        swap_at_ = t_;
+        if (glow_) {
+            glow_->self_modulate.a = 1;
+            glow_->scale = Vec2(1, 1);
+            tweens_->tween(&glow_->scale, Vec2(d->glow_top, d->glow_top), d->glow_fade, TRANS_QUINT, EASE_OUT);
+            tweens_->tween(&glow_->self_modulate.a, 0.0f, d->glow_fade, TRANS_QUINT, EASE_OUT);
+        }
+        if (overlay_) {
+            tweens_->kill(&overlay_->self_modulate.a);
+            tweens_->tween(&overlay_->self_modulate.a, 0.0f, d->hide, TRANS_QUART, EASE_OUT);
+        }
+        vfx_restart(vfx_exported(shine_, "_revealParticles"));
+        return 1;
+    }
+    float s = t_ - swap_at_;
+    float k = s / d->glow_fade;
+    *scale = TransformShine::at(d->reveal, k < 1 ? k : 1).x;
+    if (s >= d->shine_delay && !shined_) {
+        shined_ = true;
+        vfx_restart(vfx_exported(shine_, "_shineParticles"));
+    }
+    if (stage_ == 2 && s >= d->shine_delay + d->end_delay) {
+        vfx_restart(vfx_exported(shine_, "_endParticles"));
+        stage_ = 3;
+    }
+    /* DelayedFree: the end particles play out */
+    return stage_ == 3 && s >= d->shine_delay + d->end_delay + 1.0f ? 2 : 0;
+}
+
+void CardShine::move_to(Node* card) {
+    card_ = card;
+    Node* box = card ? find_named(card, "CardVfxContainer") : NULL;
+    if (!shine_ || !box) return;
+    if (shine_->parent) shine_->parent->remove_child(shine_);
+    box->add_child(shine_);
+}
+
 } /* namespace spire */

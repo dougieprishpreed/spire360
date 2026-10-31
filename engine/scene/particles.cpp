@@ -360,8 +360,8 @@ void Particles2D::end_frame() {
     std::sort(g_queue.begin(), g_queue.end(), by_weight);
     /* One system was the frame's floor: the hive's bugs (150 with
      * turbulence) took 18 ms a frame on one worker, the fight at 30 fps.
-     * The turbulent ones step here one at a time, each step's particles
-     * over the workers; then the rest side by side. */
+     * The heavy ones (split_worth) step here one at a time, each step's
+     * particles over the workers; then the rest side by side. */
     for (size_t i = 0; i < g_queue.size() && g_queue[i].split; ++i) {
         Particles2D* p = g_queue[i].system;
         p->split_ = true;
@@ -989,8 +989,9 @@ void Particles2D::step(double p_delta) {
             if (yl > 0) p.xform.y = p.xform.y / yl;
             p.xform.x = Vec2(p.xform.y.y, -p.xform.y.x);
         } else {
-            p.xform.x = Vec2(cosf(p.rotation), -sinf(p.rotation));
-            p.xform.y = Vec2(sinf(p.rotation), cosf(p.rotation));
+            float ca = cosf(p.rotation), sa = sinf(p.rotation);
+            p.xform.x = Vec2(ca, -sa);
+            p.xform.y = Vec2(sa, ca);
         }
         float bs = lerpf(pmin[P_SCALE], pmax[P_SCALE], p.scale_rand);
         Vec2 base_scale(maxf(tex_scale.x * bs, 0.00001f), maxf(tex_scale.y * bs, 0.00001f));
@@ -1388,7 +1389,8 @@ void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec
         }
         ctrl = ctrl + emission_.basis_xform(disp * (1.0f / dt));
     }
-    if (dt >= 0.001f) {
+    /* (a particle of no radial velocity adds 0: the glow dots, most) */
+    if (dt >= 0.001f && d.radial != 0) {
         float mult = mat.radial_velocity.valid() ? mat.radial_velocity.r(lp) : 1.0f;
         Vec2 pivot = emission_.xform(Vec2(mat.velocity_pivot[0], mat.velocity_pivot[1]));
         float rel[3] = { pos.x - pivot.x, pos.y - pivot.y, -mat.velocity_pivot[2] };
@@ -1424,13 +1426,18 @@ void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec
         d.tangent_accel * (curves[P_TANGENTIAL_ACCEL].valid() ? curves[P_TANGENTIAL_ACCEL].sample(lp) : 1.0f);
     float damping = d.damping * (curves[P_DAMPING].valid() ? curves[P_DAMPING].sample(lp) : 1.0f);
     Vec2 force = gravity;
-    float vlen = sqrtf(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y + p.vz * p.vz);
-    if (vlen > 0) force = force + p.velocity * (linear / vlen);
-    Vec2 diff = pos - emission_.origin;
-    float dlen = sqrtf(diff.x * diff.x + diff.y * diff.y);
-    if (dlen > 0) {
-        force = force + diff * (radial / dlen);
-        force = force + Vec2(-diff.y, diff.x) * (tangent / dlen);
+    /* (no acceleration adds 0) */
+    if (linear != 0) {
+        float vlen = sqrtf(p.velocity.x * p.velocity.x + p.velocity.y * p.velocity.y + p.vz * p.vz);
+        if (vlen > 0) force = force + p.velocity * (linear / vlen);
+    }
+    if (radial != 0 || tangent != 0) {
+        Vec2 diff = pos - emission_.origin;
+        float dlen = sqrtf(diff.x * diff.x + diff.y * diff.y);
+        if (dlen > 0) {
+            force = force + diff * (radial / dlen);
+            force = force + Vec2(-diff.y, diff.x) * (tangent / dlen);
+        }
     }
     p.velocity = p.velocity + force * dt;
     if (damping > 0) {
@@ -1513,8 +1520,10 @@ void Particles2D::gpu_process(Particle& p, double dt_d, bool collided, const Vec
         p.xform.y = y;
         p.xform.x = Vec2(y.y, -y.x);
     } else {
-        p.xform.x = Vec2(cosf(p.custom[0]), -sinf(p.custom[0]));
-        p.xform.y = Vec2(sinf(p.custom[0]), cosf(p.custom[0]));
+        /* each once (cosf and sinf may set errno: not merged) */
+        float ca = cosf(p.custom[0]), sa = sinf(p.custom[0]);
+        p.xform.x = Vec2(ca, -sa);
+        p.xform.y = Vec2(sa, ca);
     }
     if (mat.scale_over_velocity.valid()) {
         float range = mat.scale_over_velocity_max - mat.scale_over_velocity_min;
@@ -1594,11 +1603,13 @@ void Particles2D::step_gpu(double delta) {
     pending_.clear();
 }
 
-/* A turbulent system with enough particles to share out (the noise: 12 4D
- * noises a particle step). Not a sub-emitter's parent or child: those
- * write each other's emissions. */
+/* A system with enough particles to share out: a turbulent one of 32 (the
+ * noise: 12 4D noises a particle step), any of 256 (the Vantom's
+ * background, 2,500 glow dots in one system, was the frame's longest
+ * step on one worker). Not a sub-emitter's parent or child: those write
+ * each other's emissions. */
 bool Particles2D::split_worth() const {
-    return gpu && mat.turbulence && particles_.size() >= 32 && !sub_mode_ && sub_emitter.empty();
+    return gpu && particles_.size() * (mat.turbulence ? 8 : 1) >= 256 && !sub_mode_ && sub_emitter.empty();
 }
 
 void Particles2D::run_chunk(void* job, int index) {
@@ -1611,7 +1622,11 @@ void Particles2D::run_chunk(void* job, int index) {
 void Particles2D::step_gpu_particles(int begin, int end, double delta, double prev_phase, double phase,
                                      Particles2D* sub) {
     int total = (int)particles_.size();
-    for (int i = begin; i < end; ++i) {
+    /* i and total as doubles kept, not converted each particle (the
+     * console's int to float goes through memory, a stall) */
+    const double dtotal = double(total);
+    double di = double(begin);
+    for (int i = begin; i < end; ++i, di += 1.0) {
         Particle& p = particles_[i];
         double local_delta = delta;
         bool restart = false;
@@ -1625,14 +1640,14 @@ void Particles2D::step_gpu_particles(int begin, int end, double delta, double pr
                 restart = emitted = true;
             }
         } else if (emitting) {
-            double restart_phase = double(i) / double(total);
+            double restart_phase = di / dtotal;
             if (randomness > 0.0) {
                 u32 s = cycle_;
                 if (restart_phase >= phase) s -= 1u;
                 s *= (u32)total;
                 s += (u32)i;
                 double r = double(idhash(s) % 65536u) / 65536.0;
-                restart_phase += randomness * r * 1.0 / double(total);
+                restart_phase += randomness * r * 1.0 / dtotal;
             }
             restart_phase *= (1.0 - explosiveness);
             if (phase > prev_phase) {
@@ -1939,11 +1954,17 @@ void Particles2D::draw(Canvas& c) {
  * then each of six vertices transformed again): The Insatiable's sand
  * falls, 16,000 dots, took 17 ms of the console's frame to draw. The
  * corners, the frames' uv and the colours are draw's own arithmetic. */
+static inline void put_vertex(Vertex& o, const Vec2& at, float u, float v, const Color& k) {
+    o.pos = at;
+    o.uv = Vec2(u, v);
+    o.color = k;
+}
+
 void Particles2D::draw_direct(Canvas& c, const Canvas::Direct& dd, const Xform2D& view, const Vec2& ts, const Vec2& is,
                               const Rect2& src, bool anim, int hf, int vf, bool loop, int fb, float fb_frames,
                               const Vec2& fb_size, const CurveData& fb_curve, const Vec2& pivot, bool ray, float grow) {
+    /* the corners (u, v); a quad's six vertices are 0, 1, 2, 2, 3, 0 */
     static const float cu[4] = { 0, 1, 1, 0 }, cv[4] = { 0, 0, 1, 1 };
-    static const int quad[6] = { 0, 1, 2, 2, 3, 0 };
     enum { BATCH = Renderer::RESERVE_MAX / 6 };
     Xform2D to_screen = dd.xform * view;
     float ahead = gpu && interpolate && fixed_fps > 0 ? (float)frame_remainder_ : 0.0f;
@@ -1954,6 +1975,19 @@ void Particles2D::draw_direct(Canvas& c, const Canvas::Direct& dd, const Xform2D
     Vec2 h = Vec2(ts.x / (anim ? hf : 1), ts.y / (anim ? vf : 1)) * 0.5f;
     float pox = pivot.x * ts.x, poy = pivot.y * ts.y;
     float hx = h.x * grow, hy = h.y * grow;
+    /* The quad's corners in the particle's space (cu, cv: -1 or 1 times
+     * the half size, plus the pivot) and, unless animated, the texture's
+     * uvs: the same for every particle. Each corner and colour stays in
+     * registers: the console's core stalls on a value read back just after
+     * it was stored (the arrays indexed by quad[] did, a few each vertex;
+     * the draw took 36 times the PC's, its step 9). */
+    const float lx0 = (cu[0] * 2.0f - 1.0f) * hx + pox, lx1 = (cu[1] * 2.0f - 1.0f) * hx + pox;
+    const float ly0 = (cv[0] * 2.0f - 1.0f) * hy + poy, ly2 = (cv[2] * 2.0f - 1.0f) * hy + poy;
+    const bool fixed_uv = !anim && !fb;
+    const float su0 = (src.pos.x + (0.0f + cu[0] * 1.0f) * src.size.x) / is.x;
+    const float su1 = (src.pos.x + (0.0f + cu[1] * 1.0f) * src.size.x) / is.x;
+    const float sv0 = (src.pos.y + (0.0f + cv[0] * 1.0f) * src.size.y) / is.y;
+    const float sv2 = (src.pos.y + (0.0f + cv[2] * 1.0f) * src.size.y) / is.y;
     size_t i = 0, n = particles_.size();
     /* room for the live ones only: a batch's reserve that does not fit
      * what the renderer holds sends that first (a draw call) */
@@ -1966,26 +2000,34 @@ void Particles2D::draw_direct(Canvas& c, const Canvas::Direct& dd, const Xform2D
         int used = 0, seen = 0;
         for (; i < n && seen < room; ++i) {
             const Particle& p = particles_[i];
+#if defined(__GNUC__)
+            if (i + 4 < n) __builtin_prefetch(&particles_[i + 4]);
+#endif
             if (!p.active) continue;
             ++seen;
-            Color k = dd.modulate * p.color;
+            const Color k = dd.modulate * p.color;
             if (skip_clear && k.a <= 0) continue;
             Xform2D pxf = p.xform;
             pxf.origin = pxf.origin + p.velocity * ahead;
-            Xform2D px = to_screen * pxf;
-            float rx = ray ? p.custom[2] : 1.0f;
-            Vec2 at[4];
-            for (int q = 0; q < 4; ++q)
-                at[q] = px.xform(Vec2(((cu[q] * 2.0f - 1.0f) * hx + pox) * rx, (cv[q] * 2.0f - 1.0f) * hy + poy));
+            const Xform2D px = to_screen * pxf;
+            const float rx = ray ? p.custom[2] : 1.0f;
+            const Vec2 a0 = px.xform(Vec2(lx0 * rx, ly0)), a1 = px.xform(Vec2(lx1 * rx, ly0));
+            const Vec2 a2 = px.xform(Vec2(lx1 * rx, ly2)), a3 = px.xform(Vec2(lx0 * rx, ly2));
             if (tw > 0) {
-                float x0 = at[0].x, x1 = at[0].x, y0 = at[0].y, y1 = at[0].y;
-                for (int q = 1; q < 4; ++q) {
-                    x0 = minf(x0, at[q].x);
-                    x1 = maxf(x1, at[q].x);
-                    y0 = minf(y0, at[q].y);
-                    y1 = maxf(y1, at[q].y);
-                }
+                float x0 = minf(minf(minf(a0.x, a1.x), a2.x), a3.x), x1 = maxf(maxf(maxf(a0.x, a1.x), a2.x), a3.x);
+                float y0 = minf(minf(minf(a0.y, a1.y), a2.y), a3.y), y1 = maxf(maxf(maxf(a0.y, a1.y), a2.y), a3.y);
                 if (x1 < 0 || y1 < 0 || x0 > tw || y0 > th) continue;
+            }
+            Vertex* o = w + used * 6;
+            if (fixed_uv) {
+                put_vertex(o[0], a0, su0, sv0, k);
+                put_vertex(o[1], a1, su1, sv0, k);
+                put_vertex(o[2], a2, su1, sv2, k);
+                put_vertex(o[3], a2, su1, sv2, k);
+                put_vertex(o[4], a3, su0, sv2, k);
+                put_vertex(o[5], a0, su0, sv0, k);
+                ++used;
+                continue;
             }
             float fu0 = 0, fv0 = 0, fw = 1, fh = 1;
             if (anim) {
@@ -2017,14 +2059,16 @@ void Particles2D::draw_direct(Canvas& c, const Canvas::Direct& dd, const Xform2D
                 fu0 = fmodf(frame, fb_size.x) / fb_size.x;
                 fv0 = floorf(frame / fb_size.x) / fb_size.y;
             }
-            Vertex* o = w + used * 6;
-            for (int q = 0; q < 6; ++q) {
-                int k4 = quad[q];
-                float u = fu0 + cu[k4] * fw, vv = fv0 + cv[k4] * fh;
-                o[q].pos = at[k4];
-                o[q].uv = Vec2((src.pos.x + u * src.size.x) / is.x, (src.pos.y + vv * src.size.y) / is.y);
-                o[q].color = k;
-            }
+            const float u0 = (src.pos.x + (fu0 + cu[0] * fw) * src.size.x) / is.x;
+            const float u1 = (src.pos.x + (fu0 + cu[1] * fw) * src.size.x) / is.x;
+            const float v0 = (src.pos.y + (fv0 + cv[0] * fh) * src.size.y) / is.y;
+            const float v2 = (src.pos.y + (fv0 + cv[2] * fh) * src.size.y) / is.y;
+            put_vertex(o[0], a0, u0, v0, k);
+            put_vertex(o[1], a1, u1, v0, k);
+            put_vertex(o[2], a2, u1, v2, k);
+            put_vertex(o[3], a2, u1, v2, k);
+            put_vertex(o[4], a3, u0, v2, k);
+            put_vertex(o[5], a0, u0, v0, k);
             ++used;
         }
         live -= seen;

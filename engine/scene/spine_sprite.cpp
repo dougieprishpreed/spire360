@@ -5,6 +5,7 @@
 #include "canvas.h"
 #include "scene.h"
 #include "shaders.h"
+#include "tree.h"
 
 #include <algorithm>
 #include <map>
@@ -390,6 +391,11 @@ void SpineSprite::draw(Canvas& c) {
         if (!slot_nodes_[(size_t)f->slot_index]) slot_nodes_[(size_t)f->slot_index] = f;
     }
     static const int QUAD[6] = { 0, 1, 2, 2, 3, 0 };
+    /* the profile's parts: the meshes' world vertices, their clipping, the
+     * triangles sent (and the slots' shaders) */
+    const bool prof = SceneTree::profiling();
+    const double p_start = SceneTree::profile_ms();
+    double p_skin = 0, p_clip = 0;
     for (size_t n = 0; n < s.draw_order.size(); ++n) {
         int si = s.draw_order[n];
         const SpSlot& slot = s.slots[si];
@@ -414,6 +420,7 @@ void SpineSprite::draw(Canvas& c) {
             clipper_.end_slot(si);
             continue;
         }
+        const double p0 = prof ? SceneTree::profile_ms() : 0;
         s.world_vertices(slot, world_);
         const std::vector<float>& uvs = a->frame_uvs[frame];
         size_t nv = world_.size() / 2;
@@ -426,11 +433,13 @@ void SpineSprite::draw(Canvas& c) {
         const std::vector<float>* pos = &world_;
         const std::vector<float>* uv = &uvs;
         if (clipper_.active()) {
+            const double c0 = prof ? SceneTree::profile_ms() : 0;
             clipper_.clip(world_, uvs, idx_, cpos_, cuv_, ctris_);
             pos = &cpos_;
             uv = &cuv_;
             idx_ = ctris_;
             nv = cpos_.size() / 2;
+            if (prof) p_clip += SceneTree::profile_ms() - c0;
         }
         v_.resize(nv);
         uv_.resize(nv);
@@ -439,6 +448,7 @@ void SpineSprite::draw(Canvas& c) {
             v_[i] = Vec2((*pos)[i * 2], (*pos)[i * 2 + 1]);
             uv_[i] = Vec2((*uv)[i * 2], (*uv)[i * 2 + 1]);
         }
+        if (prof) p_skin += SceneTree::profile_ms() - p0;
         /* SpineSprite.update_meshes: the sprite's material for the slot's
          * blend mode when it has one (the scene's choice: Neow's room draws
          * its multiply and screen slots as normal ones), else the mode's. */
@@ -481,6 +491,13 @@ void SpineSprite::draw(Canvas& c) {
     }
     clipper_.end();
     c.set_blend(item_blend);
+    if (prof) {
+        double all = SceneTree::profile_ms() - p_start;
+        SceneTree::profile_part("spine skinning", p_skin - p_clip);
+        SceneTree::profile_part("spine clipping", p_clip);
+        SceneTree::profile_part("spine triangles and the rest", all - p_skin);
+        SceneTree::profile_by("spine draw by skeleton", data_res ? data_res->path : std::string("?"), all);
+    }
 }
 
 } /* namespace spire */

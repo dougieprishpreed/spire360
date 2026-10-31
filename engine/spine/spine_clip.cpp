@@ -77,6 +77,14 @@ void SpClipper::start(const SpSkeleton& skel, const SpSlot& slot, const SpAttach
         }
     }
     triangulate(poly, triangles_);
+    bounds_.clear();
+    for (size_t c = 0; c + 5 < triangles_.size(); c += 6) {
+        const float* t = &triangles_[c];
+        bounds_.push_back(minf(minf(t[0], t[2]), t[4]));
+        bounds_.push_back(minf(minf(t[1], t[3]), t[5]));
+        bounds_.push_back(maxf(maxf(t[0], t[2]), t[4]));
+        bounds_.push_back(maxf(maxf(t[1], t[3]), t[5]));
+    }
     end_slot_ = clip.end_slot;
     active_ = !triangles_.empty();
 }
@@ -91,39 +99,53 @@ void SpClipper::end() {
     triangles_.clear();
 }
 
-struct ClipVert {
-    float x, y, u, v;
-};
+/* A drawn triangle that misses a clip triangle's bounds by more than the
+ * arithmetic's error keeps nothing of it: left out before the edges (the
+ * Decimillipede's segments clip their bodies against polygons of many
+ * triangles, every drawn triangle against each: their skeletons' draw
+ * took 1-2 ms each on the console, against 0.2-0.5 for the others). */
+static const float CLIP_SLACK = 0.01f;
 
 void SpClipper::clip(const std::vector<float>& pos, const std::vector<float>& uv, const std::vector<int>& tris,
                      std::vector<float>& out_pos, std::vector<float>& out_uv, std::vector<int>& out_tris) {
     out_pos.clear();
     out_uv.clear();
     out_tris.clear();
-    std::vector<ClipVert> a, b;
+    std::vector<Vert>& a = a_;
+    std::vector<Vert>& b = b_;
     for (size_t t = 0; t + 2 < tris.size(); t += 3) {
-        for (size_t c = 0; c + 5 < triangles_.size(); c += 6) {
+        const int i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
+        const float tx0 = minf(minf(pos[i0 * 2], pos[i1 * 2]), pos[i2 * 2]);
+        const float tx1 = maxf(maxf(pos[i0 * 2], pos[i1 * 2]), pos[i2 * 2]);
+        const float ty0 = minf(minf(pos[i0 * 2 + 1], pos[i1 * 2 + 1]), pos[i2 * 2 + 1]);
+        const float ty1 = maxf(maxf(pos[i0 * 2 + 1], pos[i1 * 2 + 1]), pos[i2 * 2 + 1]);
+        for (size_t c = 0, cb = 0; c + 5 < triangles_.size(); c += 6, cb += 4) {
+            const float* bb = &bounds_[cb];
+            if (tx1 < bb[0] - CLIP_SLACK || ty1 < bb[1] - CLIP_SLACK || tx0 > bb[2] + CLIP_SLACK ||
+                ty0 > bb[3] + CLIP_SLACK)
+                continue;
             const float* ct = &triangles_[c];
             a.clear();
             for (int k = 0; k < 3; ++k) {
                 int i = tris[t + k];
-                ClipVert v = { pos[i * 2], pos[i * 2 + 1], uv[i * 2], uv[i * 2 + 1] };
+                Vert v = { pos[i * 2], pos[i * 2 + 1], uv[i * 2], uv[i * 2 + 1] };
                 a.push_back(v);
             }
             /* Against each edge of the (counter-clockwise) clip triangle. */
             for (int e = 0; e < 3 && !a.empty(); ++e) {
                 float ex0 = ct[e * 2], ey0 = ct[e * 2 + 1], ex1 = ct[((e + 1) % 3) * 2], ey1 = ct[((e + 1) % 3) * 2 + 1];
                 b.clear();
-                for (size_t k = 0; k < a.size(); ++k) {
-                    const ClipVert& p = a[k];
-                    const ClipVert& q = a[(k + 1) % a.size()];
+                const size_t n = a.size();
+                for (size_t k = 0; k < n; ++k) {
+                    const Vert& p = a[k];
+                    const Vert& q = a[k + 1 < n ? k + 1 : 0];
                     float dp = cross(ex0, ey0, ex1, ey1, p.x, p.y), dq = cross(ex0, ey0, ex1, ey1, q.x, q.y);
                     bool pin = dp >= 0, qin = dq >= 0;
                     if (pin) b.push_back(p);
                     if (pin != qin) {
                         float s = dp / (dp - dq);
-                        ClipVert m = { p.x + (q.x - p.x) * s, p.y + (q.y - p.y) * s, p.u + (q.u - p.u) * s,
-                                       p.v + (q.v - p.v) * s };
+                        Vert m = { p.x + (q.x - p.x) * s, p.y + (q.y - p.y) * s, p.u + (q.u - p.u) * s,
+                                   p.v + (q.v - p.v) * s };
                         b.push_back(m);
                     }
                 }

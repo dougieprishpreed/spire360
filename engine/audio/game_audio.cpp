@@ -1,4 +1,5 @@
 #include "game_audio.h"
+#include <ctype.h>
 #include "../core/cue_ledger.h"
 #include "../core/pack.h"
 #include "decoder.h"
@@ -12,7 +13,7 @@ bool is_audio_call(const std::string& call) {
 }
 }
 GameAudio::GameAudio(const Pack* pack) : pack_(pack), events_(pack), music_id_(0), ambience_id_(0), rng_(0x39ba1u),
-    floor_(-1), context_progress_(-1), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
+    floor_(-1), context_progress_(-1), game_over_(false), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
     stopping_(false), mix_worst_(0), mix_total_(0), slow_logged_(-1e9), mix_count_(0), dry_(false) {
     /* The banks every screen uses, parsed before the first sound (sfx.bank
      * alone is a long parse, a hitch at the first attack otherwise). */
@@ -139,6 +140,22 @@ std::string GameAudio::stream(const std::string& path) {
     return "debug_audio/" + path;
 }
 void GameAudio::ui(const std::string& path, float volume) { GameLock lock(this); events_.play(stream(path), volume); }
+/* Their attacks' first plays waited for the loader behind the fight's
+ * music (the Decimillipede's second and third segments hit in silence,
+ * 462 ms late, rp106); read in the background, behind any sound a voice
+ * waits on. */
+void GameAudio::warm_monsters(const std::vector<std::string>& ids) {
+    std::vector<std::string> names;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        std::string id = ids[i];
+        size_t dot = id.find('.');
+        if (dot != std::string::npos) id = id.substr(dot + 1);
+        for (size_t k = 0; k < id.size(); ++k) id[k] = (char)tolower((unsigned char)id[k]);
+        names.push_back(id);
+    }
+    events_.warm_monsters(names);
+}
+
 void GameAudio::prefetch(const std::string& path) {
     if (pack_) AudioDecoder::prefetch(*pack_, stream(path));
 }
@@ -282,7 +299,24 @@ void GameAudio::steps(const Json& steps) {
         }
     }
 }
+void GameAudio::game_over() {
+    stop_room_loops();
+    GameLock lock(this);
+    if (game_over_) return;
+    game_over_ = true;
+    music("");
+    ambience("");
+    ui("event:/temp/sfx/game_over");
+}
+
 void GameAudio::decision(const Json& d) {
+    /* the run's end: at once if the death before it did not play it (the
+     * act's track must not start again) */
+    if (d["decision"].str() == "game_over") {
+        game_over();
+        return;
+    }
+    game_over_ = false;
     const Json& a = d["context"]["audio"];
     if (a.is_null()) return;
     std::string bank = a["bank"].str();
@@ -309,7 +343,6 @@ void GameAudio::decision(const Json& d) {
         context_progress_ = progress;
     }
     if (d["context"]["room_type"].str() == "RestSite") events_.parameter(ambience_id_, "Campfire", d["done"].b() ? 1.0f : 0.0f);
-    if (d["decision"].str() == "game_over") { stop_room_loops(); music(""); ambience(""); ui("event:/temp/sfx/game_over"); }
 }
 void GameAudio::render(float* out, int count) {
     int cursor = 0;

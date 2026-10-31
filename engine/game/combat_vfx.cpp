@@ -2237,6 +2237,24 @@ public:
     }
 };
 ScriptBehavior* make_block_broken(Node*) { return new BlockBroken(); }
+
+/* NBlockSparkVfx: its _particles restarted (one-shot, none emitting until
+ * then), freed when _specks finishes. Without it each blocked hit drew
+ * nothing and stayed, its systems drawn for the rest of the fight (rp106). */
+class BlockSpark : public Effect {
+protected:
+    virtual void begin(Node* n) {
+        std::vector<Node*> list;
+        exported(n, "_particles", list);
+        for (size_t i = 0; i < list.size(); ++i) restart(list[i]);
+    }
+    virtual void tick(Node* n, double) {
+        Node* specks = exported_one(n, "_specks");
+        if (t_ > 0.1 && (!is_particles(specks) || ((Particles2D*)specks)->finished()) && !n->queued_for_deletion())
+            n->queue_free();
+    }
+};
+ScriptBehavior* make_block_spark(Node*) { return new BlockSpark(); }
 ScriptBehavior* make_stab(Node*) { return new Stab(); }
 ScriptBehavior* make_ground_fire(Node*) { return new GroundFire(); }
 ScriptBehavior* make_stunned(Node*) { return new Stunned(); }
@@ -2994,12 +3012,11 @@ bool spawn_combat_vfx(SceneLibrary* lib, Node* box, const std::string& call, con
     }
     if (cls == "NBlockSparkVfx") {
         /* CreatureCmd.Damage, a hit fully blocked: the sparks at the
-         * creature's VfxSpawnPosition (an interactable one), freed with its
-         * specks */
+         * creature's VfxSpawnPosition (an interactable one); its script
+         * (BlockSpark) restarts them and frees it with its specks */
         if (!have || !c.interactable) return true;
         static const Spec spark = { "NBlockSparkVfx", "scenes/vfx/block_spark_vfx.tscn", "NBlockSparkVfx.cs", AT_CENTER,
-                                    TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false,
-                                    { { 0, OP_RESTART, "_particles" } }, -1.0f };
+                                    TINT_NONE, NULL, 0, FLIP_NONE, NULL, false, false, {}, -1.0f };
         return spawn_spec(lib, box, spark, a, anchors);
     }
     if (cls == "NDamageBlockedVfx") {
@@ -3415,6 +3432,7 @@ void install_combat_vfx_scripts() {
     for (size_t i = 0; i < sizeof(SPECS) / sizeof(SPECS[0]); ++i)
         register_script((std::string("res://src/Core/Nodes/Vfx/") + SPECS[i].script).c_str(), make_sequence);
     register_script("res://src/Core/Nodes/Vfx/NThinSliceVfx.cs", make_thin_slice);
+    register_script("res://src/Core/Nodes/Vfx/NBlockSparkVfx.cs", make_block_spark);
     register_script("res://src/Core/Nodes/Vfx/NScreamVfx.cs", make_scream);
     register_script("res://src/Core/Nodes/Vfx/NSpookyScreamVfx.cs", make_spooky_scream);
     register_script("res://src/Core/Nodes/Vfx/Cards/NHellraiserAttackVfx.cs", make_hellraiser_attack);

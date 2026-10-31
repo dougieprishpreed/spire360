@@ -26,6 +26,14 @@ public:
      * starts again. NULL: off. */
     static void set_profile(LoadClock clock);
     static void log_profile(int frames);
+    /* With the profile on, the parts of a node's draw its code times:
+     * profiling() whether it is, profile_ms() the clock (0 when off);
+     * profile_part adds ms under a part (a literal), profile_by under a
+     * part and a name (a skeleton's file); log_profile logs them a frame. */
+    static bool profiling();
+    static double profile_ms();
+    static void profile_part(const char* part, double ms);
+    static void profile_by(const char* part, const std::string& name, double ms);
     /* With the profile on: the frame's costliest node types or scripts
      * (ms of process and draw since the last call, those over half a
      * millisecond) when want, for a slow frame's log; called each frame. */

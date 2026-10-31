@@ -348,6 +348,28 @@ internal static partial class Hooks
             if (a.Length > 0 && a[0] is CardModel c && c.Pile?.Type == PileType.Deck && _transformStyle is { } s
                 && s != MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle.None)
                 DeckCue("transform", c, _transformedFrom, s, 0);
+            // In the hand: NCardTransformShineVfx on the original's node, which
+            // becomes the new card once its overlay is up, the next card's
+            // CustomScaledWait(0.1, 0.25) on (Transform's vfx loop, skipped
+            // under TestMode: the client saw the original leave the hand for
+            // nowhere, and it stayed in the play pile's place).
+            else if (a.Length > 0 && a[0] is CardModel h && h.Pile?.Type == PileType.Hand && _transformedFrom is { } from
+                     && CombatManager.Instance.IsInProgress && Driver != null)
+            {
+                Steps.CueAsIs(new Dictionary<string, object?>
+                {
+                    ["t"] = "card_transform", ["card"] = Steps.IdOf(from), ["to"] = Steps.IdOf(h),
+                    ["view"] = Driver.DeckCardView(h),
+                });
+                ScaledWait(0.1f, 0.25f);
+            }
+            // In the draw, discard or exhaust pile (Charge's and Seance's): the
+            // original turning into the new card in the fight's preview
+            // container (NCardTransformVfx), then to its pile.
+            else if (a.Length > 0 && a[0] is CardModel p && p.Pile?.Type is PileType.Draw or PileType.Discard or PileType.Exhaust
+                     && CombatManager.Instance.IsInProgress && _transformStyle is { } ps
+                     && ps != MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle.None)
+                DeckCue("transform", p, _transformedFrom, ps, 0, p.Pile.Type.ToString().ToLowerInvariant());
             _transformedFrom = null;
         });
         // TheArchitect: OnRoomEnter looks for the Architect among the room's

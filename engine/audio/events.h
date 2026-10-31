@@ -19,6 +19,11 @@ public:
     void preload(const std::string& bank);
     /* The bank an event would play from, parsed the same way. */
     void preload_for(const std::string& path);
+    /* An event's samples read ahead (AudioDecoder::prefetch), for sounds
+     * met soon; warm_monsters: the events under enemy_attacks/<folder>/ of
+     * each monster id (lower case) that starts with the folder. */
+    void warm(const std::string& path);
+    void warm_monsters(const std::vector<std::string>& ids);
     u32 play(const std::string& path, float volume = 1, const Json& parameters = Json());
     /* A test aid (spire_play --audio-trace): every play logged with its
      * path. */

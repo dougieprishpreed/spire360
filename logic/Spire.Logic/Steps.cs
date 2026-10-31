@@ -678,19 +678,21 @@ internal static class Steps
 
         foreach (var (id, nb) in b.Cards)
         {
-            if (!a.Cards.TryGetValue(id, out var na))
-            {
-                d.Add(new Dictionary<string, object?> { ["t"] = "card", ["card"] = id, ["id"] = nb.CardId, ["from"] = "none", ["to"] = nb.Pile });
-                continue;
-            }
+            if (!a.Cards.TryGetValue(id, out var na)) continue;
             if (na.Pile != nb.Pile)
                 d.Add(new Dictionary<string, object?> { ["t"] = "card", ["card"] = id, ["id"] = nb.CardId, ["from"] = na.Pile, ["to"] = nb.Pile });
             else if (na.CardId != nb.CardId)
                 d.Add(new Dictionary<string, object?> { ["t"] = "card_changed", ["card"] = id, ["from_id"] = na.CardId, ["id"] = nb.CardId });
         }
+        // The cards that left before those that came: a card played goes to
+        // the play pile (no pile here) before what its play makes (Infernal
+        // Blade's attack came into the hand ahead of the Blade's going out).
         foreach (var (id, na) in a.Cards)
             if (!b.Cards.ContainsKey(id))
                 d.Add(new Dictionary<string, object?> { ["t"] = "card", ["card"] = id, ["id"] = na.CardId, ["from"] = na.Pile, ["to"] = "none" });
+        foreach (var (id, nb) in b.Cards)
+            if (!a.Cards.ContainsKey(id))
+                d.Add(new Dictionary<string, object?> { ["t"] = "card", ["card"] = id, ["id"] = nb.CardId, ["from"] = "none", ["to"] = nb.Pile });
 
         if (!a.Hand.SequenceEqual(b.Hand))
             d.Add(new Dictionary<string, object?> { ["t"] = "hand", ["cards"] = b.Hand.ToList() });

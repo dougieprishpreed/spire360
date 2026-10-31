@@ -2188,7 +2188,13 @@ public partial class RunDriver
                 // NHoverTipCardContainer: a card the tip names (Add a Shiv, ...)
                 if (t is MegaCrit.Sts2.Core.HoverTips.CardHoverTip ct && _current != null)
                 {
-                    list.Add(new Dictionary<string, object?> { ["card"] = _current.DeckCardView(ct.Card) });
+                    // The tip's card is made anew each time the tips are read
+                    // (HoverTipFactory): its id changed with every decision,
+                    // and so did every view holding it (Byrdpip's tip had the
+                    // top bar made again for each card played).
+                    var view = _current.DeckCardView(ct.Card);
+                    view.Remove("instance_id");
+                    list.Add(new Dictionary<string, object?> { ["card"] = view });
                     continue;
                 }
                 if (t is not MegaCrit.Sts2.Core.HoverTips.HoverTip h) continue;

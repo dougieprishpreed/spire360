@@ -205,6 +205,10 @@ void ShopScreen::purchased(const Slot& s) {
          * the slot (the next top bar's) */
         top_bar_acquire_from(s.kind, (*entry)["id"].str(), g.origin, scale);
     }
+    /* UpdateVisual: the slot (its price, its sale tag) goes as the item
+     * leaves it, not with the decision after (the price stayed a moment
+     * on its own) */
+    hide(s.node);
 }
 
 std::string ShopScreen::focused_kind() const {

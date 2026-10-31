@@ -4494,3 +4494,126 @@ failures, audio 21951 voices, 10 absent event calls, 0 decoder failures;
 the audio fixtures, the music and the events 0 failures; check_shaders.py
 86 shaders, 0 problems (plain_mask and fire_mask on xost's simulator);
 the host Vulkan renders above. The logic is unchanged.
+
+## The ninth run (2026-10-31, work/rp106): transforms in hand, the defeat, the block sparks, the particles' draw
+
+The ninth run (work/rp106, profile=1): a new profile (slot 2) at Normal
+speed with the tutorials, to the act 2 boss's floor; the first console
+test of both 4929333 (the mix spiral) and 841551b (the frame time). The
+mix stayed at 1.79 ms a frame at worst, no freezes, 9 frames of silence
+once (the act 2 map). Replays: replay.py's cmds.jsonl and responses.jsonl
+from the [CMD] lines and session_start; cmds_noftue.txt (the ftue_done
+commands out, accept_tutorials false: the tutorials' popups stall
+spire_play); work/cap106.sh, work/capv106.sh (captures), work/prof106c.sh
+and prof106d.sh (profiles), work/dbg106.sh (the debug build to step 299).
+
+The user's reports:
+
+- Primal Force's Giant Rocks left their Strikes standing mid-screen, and a
+  Bash at the fight's end: CardCmd.Transform in the hand was never shown
+  (NCardTransformShineVfx skips under TestMode). Hooks.cs
+  deck.transformed_to sends a card_transform cue for a card in the hand
+  (its new id and DeckCardView), then ScaledWait(0.1, 0.25) as the game
+  waits between cards; draw, discard and exhaust piles keep the preview
+  (NCardTransformVfx). The client (transform_in_hand, CardShine in
+  deck_previews.cpp: vfx_card_transform.tscn's TransformShine data, its
+  anticipation and reveal curves on the card's scale) relabels the holder
+  at once (the moves after it find the card) and swaps the card's node at
+  the reveal. While it shines, sync_hand changes the holder's data only:
+  the shine is a child of the card's node (its rebuild freed it under the
+  shine: the segfault at step 297), the new card is made from the latest
+  data and again after the shine if it changed. Guards, Begone, Charge,
+  Seance take the same path.
+- Infernal Blade's new card came before its exhaust: Steps.cs's diff now
+  sends the existing cards' moves, then the removals (to none), then the
+  additions (from none).
+- The defeat music came with the game over screen: GameAudio::game_over()
+  (StopMusic, the game_over stinger) at the player's Dead cue when the
+  steps lead to a game_over decision (CombatScreen::losing_); the decision
+  itself plays it only if the death did not.
+- The Decimillipede's second and third segments hit in silence: their
+  attack sounds waited 462 ms for the loader behind the fight's music.
+  GameAudio::warm_monsters at the fight's build reads the events under
+  enemy_attacks/<folder>/ of each monster ahead (AudioEvents::warm, the
+  samples an event's nodes reach, AudioDecoder::prefetch).
+- The first hand's deal sounds before the cards: the card atlases had
+  expired from the texture cache between fights (idle 3600 frames) and
+  turn one's first draw read them (a 479 ms frame) while the sounds kept
+  time. Atlases and fonts are kept (CachedTexture::kept).
+- The tutorials showed the keyboard's key: ftue.cpp shows the confirm
+  label's HotkeyIcon glyph (show_glyph "a").
+- The timeline's epochs out of order after a return: sync_slots sorts by
+  era_position when not animating.
+- Answered: Uppercut against the beetle's 2 Artifact is right; Nibbit's
+  hiss has no sound of its own in the game (the buff sound and the power
+  icon); the Vantom background's particles are there (about 30 sparkle
+  systems, thousands of small glow dots twinkling over the pale dunes,
+  faint by design). The smith's card: the user thought its title stayed
+  white on the console (not sure); the cue has upgrade_level 1 and the
+  "+" title, PC renders it green: left alone unless it comes back.
+- The shop: a bought card's slot kept its price until the next decision
+  rebuilt the screen (the card had flown at once). purchased() hides the
+  slot as the item leaves it (NMerchantSlot UpdateVisual: Visible false),
+  cards, relics and potions alike.
+
+Frame time:
+
+- NBlockSparkVfx (a fully blocked hit) was never freed and never shown:
+  its spec was a local static, not in SPECS, so its script had no
+  behaviour, and its particles are one-shot, not emitting until restarted.
+  Three a frame were drawn through the Vantom fight. BlockSpark
+  (combat_vfx.cpp) restarts _particles and frees it when _specks finishes.
+  The presentation audit had it "ported" by the blanket verdict for the
+  screens' scripts; the others under that verdict all have owners that
+  free them.
+- The particles' steps: a system of 256 particles or more (32 with
+  turbulence) steps in chunks over the workers (split_worth): the Vantom's
+  2,500 glow dots were one worker's job and the frame's wait (PC: 0.54 ms
+  to 0.25). The step leaves out what adds 0 (radial velocity, the
+  accelerations) and takes cosf and sinf once each (they may set errno: the
+  compiler does not merge them); i and total are kept as doubles.
+- draw_direct: each corner and the colour stay in registers (the arrays
+  read through quad[] stored and reloaded each vertex: the console's draw
+  took 36 times the PC's against the step's 9), the uvs once a system when
+  not animated. -ffp-contract=off: the same arithmetic in the same order,
+  279 captured frames of the Vantom fight identical before and after.
+- The console's Decimillipede fight drew its skeletons in 6-8 ms a frame
+  (1-1.4 ms each against 0.15-0.5 elsewhere). The profile's new lines
+  ("draw parts a frame": spine skinning, clipping, the triangles and the
+  rest; "spine draw by skeleton") put it in the clipping: the middle and
+  back segments clip their bodies to polygons of many triangles, every
+  drawn triangle against each. SpClipper keeps each clip triangle's
+  bounds and leaves out a pair whose bounds miss by more than 0.01 px
+  (nothing of it is inside: what the edges keep lies within both), and
+  its scratch polygons between calls. PC: clipping 0.18-0.25 ms a frame
+  to 0.06-0.08; spire_view renders of the three segments at three times,
+  with the test and without, identical.
+- The top bar was made again for most decisions in a fight (the "top
+  bar" phase: 6.3 ms median on the console, a 40-50 ms frame at each
+  card played): Byrdpip's hover tip names Byrd Swoop, a card the game
+  makes anew each time the tips are read (HoverTipFactory), so its view's
+  instance_id changed every decision and with it the relics in the bar's
+  key. RunDriver.Tips leaves the id out of a tip's card (the client only
+  draws it). The replay to step 380: 184 of 234 decisions rebuilt the
+  bar, now 24 (rooms and potions); the rest keep it or refresh it.
+- Replay screenshots of a step differ run to run (the hand caught at
+  another moment): exactness is checked with spire_view's single scenes,
+  A against B in one tree.
+- tools/viewer/build_debug.sh links winmm (timeBeginPeriod).
+
+Open: the pad monkey (work/monkey107b.sh, from work/play-data's profile:
+from a fresh profile it stops at the combat basics tutorial, as before)
+opened the potion menu on a card reward and discarded: the logic's nested
+card reward loop (Program.cs) answers only the reward's own commands, so
+discard_potion came back an error and the client read the state again.
+Check what the game allows there (the top bar's potions over
+NCardRewardSelectionScreen), then take potion commands in that loop or
+keep the menu shut.
+
+Checks (work/check107.sh): seeded traces the same 3 differences
+(transform_options); 35 scenarios ok (JIT and native); content coverage
+926 cases ok; spire_check 2357 responses, 0 failures, audio 21984 voices,
+10 absent event calls, 0 decoder failures; the audio fixtures, the music
+and the events 0 failures; native against JIT 14 of 15 traces identical
+(the unseeded skin); the monkey 96 decisions, no crash; the logic built
+through every stage (patch, jit, smoke, wasm, c, native).

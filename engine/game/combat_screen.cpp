@@ -56,7 +56,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
       arrow_head_(NULL) {
     player_.node = NULL;
     osty_.node = NULL;
-    paused_ = watch_shuffle_ = shuffle_hit_ = hand_unfocused_ = false;
+    paused_ = watch_shuffle_ = shuffle_hit_ = hand_unfocused_ = losing_ = false;
     end_state_ = 1;
     end_shiny_ = false;
     boulder_t0_ = boulder_done_ = 0;
@@ -960,9 +960,11 @@ void CombatScreen::sync_hand(const Json& cards, bool animate) {
             kept[j] = true;
             found = true;
             if (h.data != cards[i]) {
-                if (h.card_node) { h.node->remove_child(h.card_node); delete h.card_node; }
-                h.card_node = make_card(lib_, cards[i]);
-                if (h.card_node) h.node->add_child(h.card_node);
+                if (!shining(id)) {
+                    if (h.card_node) { h.node->remove_child(h.card_node); delete h.card_node; }
+                    h.card_node = make_card(lib_, cards[i]);
+                    if (h.card_node) h.node->add_child(h.card_node);
+                }
                 h.data = cards[i];
                 h.text = cards[i]["description_bbcode"].str();
                 h.text_multi = cards[i]["description_multi"].is_string() ? cards[i]["description_multi"].str() : h.text;
@@ -1672,6 +1674,7 @@ void CombatScreen::process(double dt) {
         hide(root_ ? find_named(root_, "RadialBlur") : NULL);
     }
     update_cost_rolls(dt);
+    update_shines(dt);
     for (size_t i = creature_moves_.size(); i-- > 0;) {
         CreatureMove& m = creature_moves_[i];
         m.t += (float)dt;
@@ -2227,6 +2230,11 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         enemy_node_ids.push_back(es[i]["combat_id"].i(-1));
         enemies_.push_back(c);
     }
+    if (lib_->audio()) {
+        std::vector<std::string> ids;
+        for (size_t i = 0; i < es.size(); ++i) ids.push_back(es[i]["id"].str());
+        lib_->audio()->warm_monsters(ids);
+    }
     /* The enemies of the decision before that are gone now: they stay
      * where they stood while their death plays (play_steps). */
     const Json& before = previous_["enemies"];
@@ -2523,6 +2531,7 @@ void CombatScreen::add_summoned(const Json& steps, Node* container) {
 }
 
 void CombatScreen::update_decision(const Json& d, bool finishing) {
+    losing_ = d["decision"].str() == "game_over";
     phase_mark("fight: the client's");
     unfocus_creatures(); /* the creatures may change */
     phase_mark("fight: unfocus");
@@ -2890,6 +2899,7 @@ bool CombatScreen::apply_state(const Json& ch) {
         return true;
     }
     if (type == "card_create") { create_at_pile(ch); return true; }
+    if (type == "card_transform") { transform_in_hand(ch); return true; }
     if (type == "held_card") {
         if (c) hold_card(*c, ch["card"]);
         return true;
@@ -3322,6 +3332,95 @@ void CombatScreen::update_cost_rolls(double dt) {
             }
         }
         if (done || !label) cost_rolls_.erase(cost_rolls_.begin() + (long)i);
+    }
+}
+
+/* CardCmd.Transform on a card in the hand: NCardTransformShineVfx on its
+ * node, which becomes the new card once the overlay is up (UpdateCard).
+ * The holder takes the new card's id and view now, so the moves that come
+ * with it (the new card into the hand, the old one out to nowhere) find it
+ * in place: Primal Force's Giant Rocks left their Strikes standing in the
+ * play pile's place. */
+void CombatScreen::transform_in_hand(const Json& ch) {
+    int from = ch["card"].i(-1), to = ch["to"].i(-1);
+    const Json& view = ch["view"];
+    if (!view.is_object()) return;
+    for (size_t i = 0; i < holders_.size(); ++i) {
+        Holder& h = holders_[i];
+        if (h.id != from) continue;
+        h.id = to;
+        h.data = view;
+        h.text = view["description_bbcode"].str();
+        h.text_multi = view["description_multi"].is_string() ? view["description_multi"].str() : h.text;
+        h.text_by_target.clear();
+        const Json& by = view["description_by_target"];
+        for (size_t k = 0; k < by.size(); ++k) h.text_by_target.push_back(by[k].str());
+        Json hand = Json::make_array();
+        for (size_t k = 0; k < hand_.size(); ++k) hand.append(hand_[k]["instance_id"].i(-1) == from ? view : hand_[k]);
+        hand_ = hand;
+        HandShine s;
+        s.id = to;
+        s.shine = new CardShine(lib_, h.card_node);
+        shines_.push_back(s);
+        return;
+    }
+}
+
+bool CombatScreen::shining(int id) const {
+    for (size_t i = 0; i < shines_.size(); ++i)
+        if (shines_[i].id == id) return true;
+    return false;
+}
+
+/* The shines' frames; a card played or gone meanwhile keeps its own (the
+ * node it shines on goes with it). */
+void CombatScreen::update_shines(double dt) {
+    for (size_t i = shines_.size(); i-- > 0;) {
+        HandShine& s = shines_[i];
+        Holder* h = NULL;
+        for (size_t k = 0; k < holders_.size(); ++k)
+            if (holders_[k].id == s.id) h = &holders_[k];
+        for (size_t k = 0; !h && k < moving_cards_.size(); ++k)
+            if (moving_cards_[k].holder.id == s.id) h = &moving_cards_[k].holder;
+        if (!h || !h->card_node || h->card_node != s.shine->card()) {
+            /* its node went with the card (or was replaced) */
+            s.shine->release();
+            delete s.shine;
+            shines_.erase(shines_.begin() + (long)i);
+            continue;
+        }
+        float scale = 1;
+        int r = s.shine->step((float)dt, &scale);
+        if (r == 1) {
+            Node* fresh = make_card(lib_, h->data);
+            if (fresh && h->node) {
+                /* the shine first: it goes with the old card's node */
+                h->node->add_child_before(fresh, h->card_node);
+                s.shine->move_to(fresh);
+                h->node->remove_child(h->card_node);
+                delete h->card_node;
+                h->card_node = fresh;
+                s.built = h->data;
+            } else {
+                delete fresh;
+            }
+        }
+        if (h->card_node->is_control()) ((Control*)h->card_node)->scale = Vec2(scale, scale);
+        if (r == 2) {
+            /* an update during the shine: its card made again */
+            bool changed = h->node && h->data != s.built;
+            delete s.shine;
+            shines_.erase(shines_.begin() + (long)i);
+            if (changed) {
+                Node* fresh = make_card(lib_, h->data);
+                if (fresh) {
+                    h->node->add_child_before(fresh, h->card_node);
+                    h->node->remove_child(h->card_node);
+                    delete h->card_node;
+                    h->card_node = fresh;
+                }
+            }
+        }
     }
 }
 
@@ -3985,6 +4084,9 @@ void CombatScreen::fire(const Cue& c) {
     }
     if (c.kind == CUE_ANIM) {
         if (c.name == "Dead" && lib_->audio()) lib_->audio()->stop_room_loops(c.who);
+        /* the run lost: the music stops and game_over plays as the player
+         * falls (CreatureCmd.Kill), not when the screen comes after */
+        if (c.name == "Dead" && c.who == "player" && losing_ && lib_->audio()) lib_->audio()->game_over();
         Creature* cr = creature_for(c.who);
         SpineSprite* s = cr ? first_spine(cr->visuals) : NULL;
         const char* name = trigger_animation(c.name);

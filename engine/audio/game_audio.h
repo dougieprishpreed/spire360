@@ -28,6 +28,10 @@ public:
     void cue(const Json& cue);
     void steps(const Json& steps);
     void decision(const Json& decision);
+    /* CreatureCmd.Kill once every player is dead: StopMusic, the
+     * game_over stinger; at the player's death in the fight's last steps
+     * (the game_over decision after them plays nothing more). */
+    void game_over();
     void menu();
     /* NRunMusicController.ToggleMerchantTrack (NMerchantRoom, the map
      * screen opened or closed over it): Progress MerchantEnd or Merchant */
@@ -36,6 +40,9 @@ public:
     /* A sound read ahead of its first play (a debug_audio name or a pack
      * path; not an event's). */
     void prefetch(const std::string& path);
+    /* A fight's monsters' sounds read ahead as it starts (AudioEvents::
+     * warm_monsters): ids as the logic names them (MONSTER.X or X). */
+    void warm_monsters(const std::vector<std::string>& ids);
     /* Cues run on the clock as ever but nothing is decoded or mixed (a tool
      * sweeping traces: spire_gaps --fast). */
     void set_dry(bool dry) { dry_ = dry; }
@@ -59,6 +66,7 @@ private:
     std::string track_, ambience_, act_track_;
     u32 music_id_, ambience_id_, rng_;
     int floor_, context_progress_;
+    bool game_over_; /* game_over() played, until the next run's decision */
     double clock_, remainder_;
     FILE* recording_;
     u32 recorded_frames_;

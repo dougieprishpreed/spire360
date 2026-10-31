@@ -1,5 +1,6 @@
 #include "ftue.h"
 #include "loc.h"
+#include "ui_util.h"
 
 #include "../audio/game_audio.h"
 #include "../scene/controls.h"
@@ -149,6 +150,9 @@ Node* FtuePopup::build(const std::string& id, const std::vector<CanvasItem*>& sp
         }
         /* NFtueConfirmButton: "Got it!", the outline pulsing 1 <-> 0.25 */
         set_label(confirm ? confirm->find_unique("Label") : NULL, Loc::get("ftues", "CONFIRM_BUTTON"));
+        /* its HotkeyIcon: the controller's A (ui_accept), not the scene's
+         * keyboard key */
+        show_glyph(lib_, confirm ? find_named(confirm, "HotkeyIcon") : NULL, "a");
         Node* outline = confirm ? confirm->get_node("Outline") : NULL;
         outline_ = outline && outline->is_control() ? (Control*)outline : NULL;
         /* NRelicRewardFtue: %Arrow's top left at the relic's bottom centre */

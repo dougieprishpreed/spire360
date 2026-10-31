@@ -460,9 +460,14 @@ public:
               std::vector<float>& out_pos, std::vector<float>& out_uv, std::vector<int>& out_tris);
 
 private:
+    struct Vert {
+        float x, y, u, v;
+    };
     bool active_;
     int end_slot_;
     std::vector<float> triangles_; /* the clip polygon as triangles, 6 floats each, counter-clockwise */
+    std::vector<float> bounds_;    /* each triangle's x0, y0, x1, y1 */
+    std::vector<Vert> a_, b_;      /* clip's polygons, kept between calls */
 };
 
 } /* namespace spire */

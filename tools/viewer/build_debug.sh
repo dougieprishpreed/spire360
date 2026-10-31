@@ -12,7 +12,7 @@ if [ -z "${PYTHON:-}" ]; then
 fi
 FLAGS="-std=c++98 -pedantic -D_DEFAULT_SOURCE -D_LARGEFILE_SOURCE -Wall -Wextra -Wno-long-long -O0 -g -fno-omit-frame-pointer -DSPIRE_DEBUG_HEAP"
 LIBS=""
-case "$(uname -s)" in MSYS*|CYGWIN*) FLAGS="$FLAGS -I/usr/include/w32api"; LIBS="-lole32" ;; esac
+case "$(uname -s)" in MSYS*|CYGWIN*) FLAGS="$FLAGS -I/usr/include/w32api"; LIBS="-lole32 -lwinmm" ;; esac
 stamp=out/engine-dbg/compiler-flags
 if [ ! -f "$stamp" ] || [ "$(cat "$stamp")" != "$CXX $FLAGS" ]; then
     printf '%s\n' "$CXX $FLAGS" > "$stamp"

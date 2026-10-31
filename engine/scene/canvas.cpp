@@ -192,6 +192,12 @@ Texture* Canvas::cache_texture(const std::string& key, const TextureData& data) 
     ++stats_.created;
     entry.touched = ++texture_clock_;
     entry.frame = frame_;
+    /* The atlases and the fonts' pages every screen draws from stay as the
+     * warm-up's do (no release for being idle; over the budget they go as
+     * any other): the card atlases, unused on the map and in the shop for
+     * a minute, came back with the next fight's first hand (370 ms of its
+     * first frame, the deal's sounds on time and the cards not). */
+    entry.kept = key.compare(0, 20, "pack:images/atlases/") == 0 || key.compare(0, 11, "pack:fonts/") == 0;
     textures_[key] = entry;
     texture_bytes_ += entry.bytes;
     return entry.texture;

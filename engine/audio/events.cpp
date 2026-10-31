@@ -1,8 +1,10 @@
 #include "events.h"
+#include "decoder.h"
 #include "mixer.h"
 #include "../core/pack.h"
 #include "../core/thread.h"
 #include <math.h>
+#include <set>
 #include <string.h>
 
 namespace spire {
@@ -763,6 +765,70 @@ void AudioEvents::preload_for(const std::string& path) {
     }
     preload(bank);
 }
+/* The samples a definition reaches: its own, and those of the nodes its
+ * strings name (an event's tracks, instruments, nested events). */
+static void collect_samples(const Json& doc, const Json& n, std::vector<std::string>& out, std::set<std::string>& seen,
+                            int depth) {
+    if (depth > 16) return;
+    if (n.is_array()) {
+        for (size_t i = 0; i < n.size(); ++i) collect_samples(doc, n[i], out, seen, depth + 1);
+        return;
+    }
+    if (!n.is_object()) return;
+    const Json& sample = n["sample"];
+    if (sample.is_object() && sample["path"].is_string() && seen.insert(sample["path"].str()).second)
+        out.push_back(sample["path"].str());
+    const std::vector<std::string>& keys = n.keys();
+    for (size_t k = 0; k < keys.size(); ++k) {
+        const Json& v = n.get(keys[k]);
+        if (v.is_string()) {
+            const Json& node = doc["nodes"].get(v.str());
+            if (node.is_object() && seen.insert(v.str()).second) collect_samples(doc, node, out, seen, depth + 1);
+        } else if (v.is_object() || v.is_array()) {
+            collect_samples(doc, v, out, seen, depth + 1);
+        }
+    }
+}
+
+void AudioEvents::warm(const std::string& path) {
+    std::vector<std::string> samples;
+    {
+        ScopedLock lock(impl_->lock);
+        Impl::Bank* bank = impl_->bank_for(path);
+        if (!bank || !impl_->pack) return;
+        std::string guid = path;
+        const Json& choices = impl_->index["events"].get(path);
+        for (size_t i = 0; i < choices.size(); ++i)
+            if (choices[i][(size_t)0].str() == bank->name) guid = choices[i][1].str();
+        std::set<std::string> seen;
+        collect_samples(bank->doc, bank->doc["events"].get(guid), samples, seen, 0);
+    }
+    for (size_t i = 0; i < samples.size(); ++i) AudioDecoder::prefetch(*impl_->pack, samples[i]);
+}
+
+void AudioEvents::warm_monsters(const std::vector<std::string>& ids) {
+    static const std::string root = "event:/sfx/enemy/enemy_attacks/";
+    std::vector<std::string> events;
+    {
+        ScopedLock lock(impl_->lock);
+        const Json& all = impl_->index["events"];
+        const std::vector<std::string>& names = all.keys();
+        for (size_t i = 0; i < names.size(); ++i) {
+            const std::string& name = names[i];
+            if (name.compare(0, root.size(), root) != 0) continue;
+            size_t slash = name.find('/', root.size());
+            if (slash == std::string::npos || slash == root.size()) continue;
+            std::string folder = name.substr(root.size(), slash - root.size());
+            for (size_t k = 0; k < ids.size(); ++k)
+                if (ids[k].compare(0, folder.size(), folder) == 0) {
+                    events.push_back(name);
+                    break;
+                }
+        }
+    }
+    for (size_t i = 0; i < events.size(); ++i) warm(events[i]);
+}
+
 void AudioEvents::prefer_bank(const std::string& bank) {
     ScopedLock lock(impl_->lock);
     impl_->preferred = bank;

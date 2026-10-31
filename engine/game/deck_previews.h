@@ -69,6 +69,44 @@ private:
 /* The card VFX scripts the previews use (NCardRemoveVfx,
  * NCardTransformShineVfx). */
 void install_deck_preview_scripts();
+
+class CanvasItem;
+class Control;
+class ScriptBehavior;
+class TweenSet;
+
+/* NCardTransformShineVfx on a card in the hand (CardCmd.Transform's): the
+ * overlay comes up over the old card as it swells
+ * (_anticipationScaleCurve); then the new card's node takes its place
+ * (move_to), the overlay goes, the border glows out and the particles
+ * burst (_revealScaleCurve). */
+class CardShine {
+public:
+    CardShine(SceneLibrary* lib, Node* card);
+    ~CardShine();
+    /* dt on; *scale the card's (by the curves). 1 once: the new card is due
+     * (move_to it); 2: done (delete it); else 0. */
+    int step(float dt, float* scale);
+    /* The shine onto the new card's node. */
+    void move_to(Node* card);
+    /* Its node went with the card it was on: not freed again. */
+    void release() { shine_ = NULL; }
+    /* the card node it is on */
+    Node* card() const { return card_; }
+
+private:
+    CardShine(const CardShine&);
+    CardShine& operator=(const CardShine&);
+    TweenSet* tweens_;
+    Node* card_;
+    Node* shine_;
+    ScriptBehavior* data_; /* NCardTransformShineVfx's */
+    CanvasItem* overlay_;
+    Control* glow_;
+    int stage_; /* 1 overlay in, 2 revealed, 3 done */
+    float t_, swap_at_;
+    bool shined_;
+};
 /* NCard.FlashRelicOnCard: NRelicFlashVfx at twice its size in the card's
  * middle (its CardContainer), rising as its three icons grow and fade;
  * icon: the relic's (NULL: none). */

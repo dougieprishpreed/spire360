@@ -97,6 +97,37 @@ struct ProfileCost {
 };
 static LoadClock g_profile_clock = NULL;
 static std::map<std::string, ProfileCost> g_profile;
+/* the particle systems drawn, by parent and name (one left behind each
+ * turn: the count grows) */
+static std::map<std::string, unsigned> g_particle_names;
+/* the draws' parts their code timed (profile_part, profile_by): by the
+ * part's literal, no allocation once a name is in */
+static std::map<const char*, double> g_parts;
+static std::map<const char*, std::map<std::string, double> > g_parts_by;
+
+bool SceneTree::profiling() { return g_profile_clock != NULL; }
+
+double SceneTree::profile_ms() { return g_profile_clock ? g_profile_clock() : 0; }
+
+void SceneTree::profile_part(const char* part, double ms) {
+    if (g_profile_clock) g_parts[part] += ms;
+}
+
+void SceneTree::profile_by(const char* part, const std::string& name, double ms) {
+    if (!g_profile_clock) return;
+    std::map<std::string, double>& by = g_parts_by[part];
+    std::map<std::string, double>::iterator it = by.find(name);
+    if (it == by.end()) it = by.insert(std::make_pair(name, 0.0)).first;
+    it->second += ms;
+}
+
+/* a file's name without its directories and extension */
+static std::string short_name(const std::string& path) {
+    size_t s = path.find_last_of('/');
+    std::string n = s == std::string::npos ? path : path.substr(s + 1);
+    size_t dot = n.find_last_of('.');
+    return dot == std::string::npos ? n : n.substr(0, dot);
+}
 
 static ProfileCost& profile_of(const Node* n, bool behavior) {
     if (behavior) {
@@ -143,6 +174,33 @@ void SceneTree::log_profile(int frames) {
                  c.process_ms / frames, c.processed / frames, c.draw_ms / frames, c.drawn / frames);
     }
     g_profile.clear();
+    std::vector<std::pair<unsigned, std::string> > ps;
+    for (std::map<std::string, unsigned>::const_iterator it = g_particle_names.begin(); it != g_particle_names.end(); ++it)
+        ps.push_back(std::make_pair(it->second, it->first));
+    std::sort(ps.rbegin(), ps.rend());
+    std::string line;
+    for (size_t i = 0; i < ps.size() && i < 8; ++i)
+        line += format("%s%s %.1f", i ? ", " : "", ps[i].second.c_str(), (double)ps[i].first / frames);
+    if (!line.empty()) log_info("profile: particle systems drawn a frame, by name: %s", line.c_str());
+    g_particle_names.clear();
+    line.clear();
+    for (std::map<const char*, double>::iterator it = g_parts.begin(); it != g_parts.end(); ++it) {
+        if (it->second > 0) line += format("%s%s %.2f", line.empty() ? "" : ", ", it->first, it->second / frames);
+        it->second = 0;
+    }
+    if (!line.empty()) log_info("profile: draw parts a frame (ms): %s", line.c_str());
+    for (std::map<const char*, std::map<std::string, double> >::iterator it = g_parts_by.begin(); it != g_parts_by.end();
+         ++it) {
+        std::vector<std::pair<double, std::string> > by;
+        for (std::map<std::string, double>::iterator b = it->second.begin(); b != it->second.end(); ++b)
+            if (b->second > 0) by.push_back(std::make_pair(b->second, b->first));
+        std::sort(by.rbegin(), by.rend());
+        line.clear();
+        for (size_t i = 0; i < by.size() && i < 8; ++i)
+            line += format("%s%s %.2f", i ? ", " : "", short_name(by[i].second).c_str(), by[i].first / frames);
+        if (!line.empty()) log_info("profile: %s a frame (ms): %s", it->first, line.c_str());
+        it->second.clear();
+    }
 }
 
 std::string SceneTree::take_frame_profile(bool want) {
@@ -548,6 +606,8 @@ void SceneTree::draw_items(Canvas& canvas, std::vector<DrawItem>& items) {
             double ms = g_profile_clock() - t0;
             c.draw_ms += ms;
             c.frame_ms += ms;
+            if (d.ci->type == "GPUParticles2D" || d.ci->type == "CPUParticles2D")
+                ++g_particle_names[(d.ci->parent ? d.ci->parent->name + "/" : std::string()) + d.ci->name];
             ++c.drawn;
         } else {
             d.ci->draw(canvas);
