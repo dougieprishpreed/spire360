@@ -155,6 +155,8 @@
       <TextBlock x:Name="SpaceText" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource Dim}"
                  TextWrapping="Wrap" Margin="0,0,16,0"/>
       <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <Button x:Name="ResetButton" Content="Reset..." Style="{StaticResource QuietButton}" Margin="0,0,10,0"
+                ToolTip="Remove everything Setup made in this folder and start again" Click="Reset_Click"/>
         <Button x:Name="OpenButton" Content="Open the output folder" Style="{StaticResource QuietButton}"
                 Margin="0,0,10,0" Click="Open_Click"/>
         <Button x:Name="UpdateButton" Content="Check for updates" Style="{StaticResource QuietButton}"

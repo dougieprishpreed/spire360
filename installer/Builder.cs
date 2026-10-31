@@ -227,8 +227,47 @@ namespace Spire360Installer
                 return BitConverter.ToString(h.ComputeHash(f)).Replace("-", "");
         }
 
-        /// <summary>The removal of the instance (its disk goes with it).</summary>
-        public Task<int> RemoveDistro() => Exec("wsl.exe", $"--unregister {Distro}");
+        /// <summary>Where WSL keeps the instance's disk (its registration), or
+        /// null when there's none.</summary>
+        public static string DistroLocation()
+        {
+            using (var lxss = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss"))
+            {
+                if (lxss == null) return null;
+                foreach (string id in lxss.GetSubKeyNames())
+                    using (var k = lxss.OpenSubKey(id))
+                        if (k != null && string.Equals(k.GetValue("DistributionName") as string, Distro, StringComparison.OrdinalIgnoreCase))
+                            return k.GetValue("BasePath") as string;
+            }
+            return null;
+        }
+
+        /// <summary>Everything Setup made here, gone: the instance (unregistered,
+        /// its disk with it) when it lives in this folder's wsl\, then wsl\,
+        /// spire360\ and state\. Nothing else in the folder is touched (Setup may
+        /// sit in Downloads). Returns what it couldn't remove, or null.</summary>
+        public async Task<string> Reset()
+        {
+            string where = DistroLocation();
+            if (where != null)
+            {
+                string mine = Path.GetFullPath(DistroDir).TrimEnd('\\');
+                string theirs = Path.GetFullPath(where.StartsWith(@"\\?\") ? where.Substring(4) : where).TrimEnd('\\');
+                if (!string.Equals(mine, theirs, StringComparison.OrdinalIgnoreCase))
+                    return $"A WSL instance named {Distro} lives in {theirs}, not in this folder: it was left alone.";
+                await Exec("wsl.exe", $"--terminate {Distro}", quiet: true);
+                if (await Exec("wsl.exe", $"--unregister {Distro}") != 0)
+                    return "WSL couldn't remove the build environment: close anything using it and try again.";
+            }
+            var left = new List<string>();
+            foreach (var dir in new[] { DistroDir, OutDir, StateDir })
+            {
+                if (!Directory.Exists(dir)) continue;
+                try { Directory.Delete(dir, true); }
+                catch (Exception e) { left.Add(Path.GetFileName(dir) + " (" + e.Message + ")"); }
+            }
+            return left.Count == 0 ? null : "Couldn't remove: " + string.Join(", ", left);
+        }
 
         // ---- the source ----
 

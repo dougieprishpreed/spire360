@@ -48,7 +48,8 @@ Run **Spire360Setup.exe** again. It lists what has changed since your build; **U
 latest. Copy the new `spire360` folder over the old one: your saves (`spire\data\user`) and your `spire360.ini`
 are kept.
 
-To remove everything, run `wsl --unregister Spire360` in a command prompt and delete the folder.
+To start again from nothing, or to free the space, click **Reset...** in Setup: it removes the build environment
+and everything else Setup made in its folder, and leaves Spire360Setup.exe.
 
 ## Controls
 

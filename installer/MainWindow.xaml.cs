@@ -192,6 +192,7 @@ namespace Spire360Installer
             busy = on;
             BrowseButton.IsEnabled = !on;
             UpdateButton.IsEnabled = !on;
+            ResetButton.IsEnabled = !on;
             ShowGame();
         }
 
@@ -314,6 +315,39 @@ namespace Spire360Installer
         }
 
         // ---- the rest ----
+
+        async void Reset_Click(object sender, RoutedEventArgs e)
+        {
+            if (busy) return;
+            var r = MessageBox.Show(this,
+                "This removes everything Setup made in this folder, to start again from nothing:\n\n" +
+                "  • the build environment (the WSL instance \"" + Builder.Distro + "\" and its disk, in wsl\\)\n" +
+                "  • the spire360 folder (copy it to your console first if you want to keep it)\n" +
+                "  • Setup's own state and logs (state\\)\n\n" +
+                "Spire360Setup.exe and anything else in the folder stay. Your saves on the console aren't touched.\n\n" +
+                "Remove them?", "Spire360 Setup", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (r != MessageBoxResult.Yes) return;
+            SetBusy(true);
+            ResetStages();
+            StatusText.Text = "Removing...";
+            logFile?.Dispose();
+            logFile = null;
+            string problem = null;
+            try { problem = await builder.Reset(); }
+            catch (Exception ex) { problem = ex.Message; }
+            Directory.CreateDirectory(builder.StateDir);
+            try { logFile = new StreamWriter(Path.Combine(builder.StateDir, "setup.log"), true, new UTF8Encoding(false)) { AutoFlush = true }; }
+            catch { }
+            if (problem != null) AddLog(problem);
+            if (!File.Exists(SettingsPath) && gameDir != null) File.WriteAllText(SettingsPath, gameDir);
+            StatusText.Text = problem ?? "Everything Setup made here is removed. Build starts again from nothing.";
+            UpdateText.Text = "The first build fetches the latest source.";
+            ChangeList.ItemsSource = null;
+            updatePending = false;
+            BuildButton.Content = "Build";
+            SetBusy(false);
+            ShowSpace();
+        }
 
         void Open_Click(object sender, RoutedEventArgs e)
         {
