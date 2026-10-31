@@ -20,7 +20,8 @@ installer in the [README](../README.md) instead.
   Fusion), or Lima or OrbStack. On Apple Silicon, give it x86-64 with Rosetta (OrbStack's and Lima's `--arch x86_64`
   with Rosetta enabled); emulation without Rosetta works but is many times slower. Then follow the Linux steps inside
   it. macOS has not been tested: report what happens in an issue.
-- About **30 GB free** for the first build, 8 GB of RAM or more, and an internet connection.
+- About **20 GB free** for the first build (it ends at about 13 GB, the output folder about 1 GB of it), 8 GB of RAM
+  or more, and an internet connection.
 - The game: the Slay the Spire 2 folder holding `SlayTheSpire2.pck`, wherever the user keeps it. Ask the user for it;
   don't search the disk. Inside a VM, the user copies or shares that folder in. Version **v0.111.0** is the only one
   tested (its `release_info.json` says so); with another, tell the user it's untested before going on.
@@ -63,10 +64,11 @@ It prints each stage as it starts:
 ##spire done /home/<user>/spire360-out
 ```
 
-The first run takes one to a few hours, mostly the compiler (stage 3) and the logic (stages 9 and 10). The system
+The first run takes about an hour, mostly the compiler (stage 3) and the logic (stages 9 and 10). The system
 packages stage runs `sudo apt-get`: pass `--no-packages` if they're installed already (the list is in
 `stage_packages`). Other options: `--home DIR` puts the toolchain and the work elsewhere (default
-`~/spire360-build`), `--jobs N` limits the compilers run at once (default: by cores and memory, 1 GB each).
+`~/spire360-build`), `--jobs N` sets the compilers and workers run at once (default 2, so the machine stays usable;
+more is quicker if it has the cores and 1 GB of memory for each).
 
 **Success** is the `##spire done` line and, in the output folder:
 
@@ -85,7 +87,7 @@ pass through (the compiler, .NET and wasi-sdk stay installed). Known causes:
 | Stage | Cause | Fix |
 |---|---|---|
 | packages | no `sudo` rights | ask the user to install the packages, then `--no-packages` |
-| toolchain | out of disk or memory | free space (7 GB while it builds); `--jobs 2` |
+| toolchain | out of disk or memory | free space (7 GB while it builds); `--jobs 1` |
 | dotnet, wasi, sources | no network, or a proxy | check `curl -I https://github.com` |
 | pack | the `.pck` isn't the game's | check `$GAME`; the game must be a supported version |
 | logic | "BUILD_LOGIC FAILED in stage ..." | the log names the stage; a game update can need a new Spire360 version (`git pull`) |

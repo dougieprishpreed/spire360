@@ -49,7 +49,6 @@ namespace Spire360Installer
         readonly Builder builder;
         readonly ObservableCollection<StageItem> stages = new ObservableCollection<StageItem>();
         readonly DispatcherTimer clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        readonly StringBuilder log = new StringBuilder();
         StreamWriter logFile;
         StageItem active;
         DateTime activeSince;
@@ -178,13 +177,38 @@ namespace Spire360Installer
 
         static string Elapsed(TimeSpan t) => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
 
+        /// <summary>A line to the log file and the log panel. The panel follows
+        /// the newest line unless it was scrolled up to read (setting its whole
+        /// text each line sent it back to the top); past 4000 lines its oldest
+        /// half goes (the file keeps them all).</summary>
         void AddLog(string line)
         {
             logFile?.WriteLine(line);
-            log.AppendLine(line);
-            if (log.Length > 200000) log.Remove(0, log.Length - 150000);
-            LogBox.Text = log.ToString();
-            LogBox.ScrollToEnd();
+            var sv = LogScroll();
+            bool atEnd = sv == null || sv.VerticalOffset >= sv.ScrollableHeight - 2;
+            LogBox.AppendText(line + "\n");
+            if (LogBox.LineCount > 4000)
+            {
+                int cut = LogBox.GetCharacterIndexFromLineIndex(2000);
+                if (cut > 0) LogBox.Text = LogBox.Text.Substring(cut);
+            }
+            if (atEnd) LogBox.ScrollToEnd();
+        }
+
+        ScrollViewer logScroll;
+        ScrollViewer LogScroll()
+        {
+            if (logScroll != null) return logScroll;
+            DependencyObject d = LogBox;
+            var queue = new Queue<DependencyObject>();
+            queue.Enqueue(d);
+            while (queue.Count > 0)
+            {
+                d = queue.Dequeue();
+                if (d is ScrollViewer s) return logScroll = s;
+                for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++) queue.Enqueue(VisualTreeHelper.GetChild(d, i));
+            }
+            return null;
         }
 
         void SetBusy(bool on)

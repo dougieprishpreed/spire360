@@ -12,7 +12,8 @@
 #                   (default $SPIRE_HOME, else ~/spire360-build)
 #   --assets-only   convert the game's files and place them beside the
 #                   default.xex already in --out (the XEX of the same source)
-#   --jobs N        compilers at once (default: by cores and memory, 1 GB each)
+#   --jobs N        compilers and workers at once (default 2, so the PC stays
+#                   usable; each compiler takes about 1 GB)
 #   --no-packages   don't install the system packages (they are there)
 #
 # Every stage can run again: what is built stays built (the toolchain, the
@@ -54,13 +55,9 @@ done
 [ -n "$OUT" ] || { echo "--out is needed: where the console folder goes" >&2; exit 2; }
 [ -f "$GAME/SlayTheSpire2.pck" ] || { echo "No SlayTheSpire2.pck in $GAME" >&2; exit 2; }
 
-if [ -z "$JOBS" ]; then
-  # GCC takes about 1 GB on each of the logic's large files
-  mem_gb=$(awk '/MemAvailable/ { print int($2 / 1048576) }' /proc/meminfo)
-  JOBS=$(nproc)
-  [ "$JOBS" -gt "$mem_gb" ] && JOBS=$mem_gb
-  [ "$JOBS" -lt 1 ] && JOBS=1
-fi
+# Two at once by default, so a slower PC stays usable while it builds (GCC
+# takes about 1 GB on each of the logic's large files)
+[ -n "$JOBS" ] || JOBS=2
 
 SRC="$HOME_DIR/src"           # xsdk, vulkan4xenon, glslang-xenon
 TC="$HOME_DIR/toolchain"      # xsdk's GCC (and glslang beside it)
@@ -138,7 +135,7 @@ stage_packages() {
   $sudo env DEBIAN_FRONTEND=noninteractive apt-get update
   $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential bison flex texinfo libgmp-dev \
     libmpfr-dev libmpc-dev curl xz-utils patch python3 python3-venv python3-dev cmake ninja-build git ca-certificates \
-    unzip libicu-dev zlib1g-dev
+    unzip libicu-dev zlib1g-dev ffmpeg
 }
 
 stage_sources() {
@@ -191,7 +188,8 @@ stage_wasi() {
 stage_pack() {
   # Godot 4.5.1 renders the game's fonts; downloaded once
   ls "$ROOT"/converter/.cache/godot/Godot_v* > /dev/null 2>&1 || python "$ROOT/converter/convert.py" fetch-godot
-  python "$ROOT/converter/convert.py" build "$GAME/SlayTheSpire2.pck" "$WORK/pack"
+  # (ffmpeg converts the game's loose MP3 sounds: card_deal, card_smith, ...)
+  python "$ROOT/converter/convert.py" build "$GAME/SlayTheSpire2.pck" "$WORK/pack" --jobs "$JOBS"
 }
 
 stage_logic() {
@@ -199,7 +197,7 @@ stage_logic() {
   rm -rf "$WORK/data/localization"
   python "$ROOT/converter/pck_tool.py" extract "$GAME/SlayTheSpire2.pck" "$WORK/data" "localization/*"
   SPIRE_DATA="$WORK/data" python "$ROOT/tools/build_logic.py" --game-dir "$GAME" \
-    --stage copy,patch,jit,smoke,wasm,c
+    --stage copy,patch,jit,smoke,wasm,c --jobs "$JOBS"
 }
 
 stage_xex() {

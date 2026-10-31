@@ -5,6 +5,15 @@ An unofficial Xbox 360 port of **Slay the Spire 2**, built on your PC from your 
 The game's rules, cards and monsters are your copy's own code, translated for the Xbox 360's processor; the art,
 sound and text are converted from your copy's files.
 
+> **Built with [xSDK](https://github.com/xenosworks/xsdk) and [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon).**
+> Building a game for the Xbox 360 used to mean Microsoft's XDK, licensed only to registered developers and not
+> yours to share; Spire360's own first builds used it. xSDK is a new, open-source Xbox 360 SDK written from scratch
+> from public reverse engineering, with no Microsoft tooling and no leaked SDK material. Its own GCC toolchain builds
+> titles that run on the console's retail kernel and dashboard, and its GPU layer drives the console's Xenos GPU
+> directly. vulkan4xenon puts the Vulkan graphics API on top of it, which Spire360's renderer is written in. Together
+> they make a full modern game buildable for the Xbox 360 by anyone, from source, on their own PC: that's what makes
+> the one-click Setup below possible.
+
 ## Status
 
 **Fully playable** on an Xbox 360 that runs homebrew, with a controller: whole runs from the main menu to the last
@@ -19,10 +28,11 @@ multiplayer, custom and daily runs.
 - Slay the Spire 2 **v0.111.0**, installed on a Windows 10 or 11 PC (64-bit). It's the only version tested so far;
   later game updates will get matching Spire360 updates.
 - An Xbox 360 that runs homebrew (such as with ABadAvatar), and a way to copy files to it (USB drive or FTP).
-- About **30 GB free** on the PC's drive you build on (the Windows drive holding Spire360Setup's folder, not the
-  console's), for the first build. The finished folder for the console is about **1 GB**; the rest is the build
-  environment, which you can keep to build future updates (or delete).
-- An internet connection, and an hour or two for the first build (later ones are much quicker).
+- About **20 GB free** on the PC's drive you build on (the Windows drive holding the Spire360Setup folder, not the
+  console's). The Spire360Setup folder ends up at about **14 GB**: the folder for the console, about **1 GB**, and
+  the build environment, which you can keep to build future updates (or remove with **Reset...**).
+- An internet connection, and about an hour for the first build. Setup compiles with two CPU threads so the PC stays
+  usable meanwhile; later builds only redo what changed and are much quicker.
 
 ## Building it (Windows)
 
@@ -78,3 +88,18 @@ The build is made from your copy of the game: `default.xex` holds the game's own
 art, sound and text. That's why nothing from the game is in this repository and why everyone builds their own:
 don't share your `spire360` folder or anything the build makes. This project is not affiliated with or endorsed by
 Mega Crit.
+
+## Acknowledgements
+
+- **Mena**, for [xSDK](https://github.com/xenosworks/xsdk), [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon)
+  and [glslang-xenon](https://github.com/xenosworks/glslang-xenon), and the console research behind them: Spire360
+  runs on them.
+- **Mega Crit**, for Slay the Spire 2.
+- The projects xSDK builds on: Xenia, libxenon and xost.
+- **Hao Wu**, for sts2-cli, which the headless driver of the game's logic started from.
+- **Bastian Mueller**, for w2c2, which translates the game's logic to C.
+- The **Godot Engine** contributors, whose layout, text, particle and shader code the engine reproduces.
+- The .NET team's NativeAOT-LLVM and the WebAssembly community's wasi-sdk, which compile the game's logic.
+- **Sean Barrett**, for stb_vorbis, which plays the game's music and sound.
+
+Everything else Spire360 uses is listed in [THIRD_PARTY.md](THIRD_PARTY.md).
