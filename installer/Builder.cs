@@ -259,7 +259,7 @@ namespace Spire360Installer
         public async Task<bool> HasSource()
         {
             var sb = new StringBuilder();
-            int rc = await Bash($"test -d {LinuxSource}/.git && echo yes", l => sb.AppendLine(l));
+            int rc = await Bash($"test -d {LinuxSource}/.git && echo yes", l => sb.AppendLine(l), quiet: true);
             return rc == 0 && sb.ToString().Contains("yes");
         }
 
@@ -267,7 +267,8 @@ namespace Spire360Installer
         public async Task<string> SourceCommit()
         {
             string commit = null;
-            await Bash($"git -C {LinuxSource} rev-parse --short HEAD", l => { if (l.Trim().Length >= 7) commit = l.Trim(); });
+            await Bash($"git -C {LinuxSource} rev-parse --short HEAD", l => { if (l.Trim().Length >= 7) commit = l.Trim(); },
+                       quiet: true);
             return commit;
         }
 
