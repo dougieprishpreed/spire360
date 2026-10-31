@@ -72,22 +72,34 @@ bool GameAudio::start_thread(int hw_thread, int loader_hw_thread) {
     return thread_.start(thread_main, this, hw_thread);
 }
 void GameAudio::mix_times(double* worst_ms, double* average_ms, int* count) {
-    ScopedLock lock(lock_);
+    /* as the game's thread: a plain lock waited while the mix, behind,
+     * never let go (the frame loop stood at every 600th frame, rp105) */
+    GameLock lock(this);
     *worst_ms = mix_worst_;
     *average_ms = mix_count_ ? mix_total_ / mix_count_ : 0;
     *count = mix_count_;
     mix_worst_ = mix_total_ = 0;
     mix_count_ = 0;
 }
+/* the chunks (5.3 ms each) the mix renders before it lets the lock go
+ * and sleeps */
+enum { MIX_RUN = 4 };
 void GameAudio::thread_main(void* self) {
     GameAudio* a = (GameAudio*)self;
     float samples[512];
     while (!a->stopping_) {
         g_trace_audio = "locking";
+        /* At most MIX_RUN chunks a turn, then a sleep: a mix behind the
+         * output (more than 5.3 ms a chunk) ran on without one, at the
+         * feeder's priority, and the loader under it on its hardware thread
+         * never ran again; the sounds it was decoding stayed silent, the
+         * crackle never ended (rp105). */
+        int run = 0;
         {
             ScopedLock lock(a->lock_);
             g_trace_audio = "mixing";
-            while (a->output_.demand()) {
+            while (run < MIX_RUN && a->output_.demand()) {
+                ++run;
                 double t0 = clock_ms();
                 a->render(samples, 256);
                 double t = clock_ms() - t0;
@@ -106,7 +118,7 @@ void GameAudio::thread_main(void* self) {
             }
         }
         g_trace_audio = "sleeping";
-        sleep_ms(2);
+        sleep_ms(run >= MIX_RUN ? 1 : 2);
     }
 }
 bool GameAudio::record(const char* path) {

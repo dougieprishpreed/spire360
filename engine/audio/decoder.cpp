@@ -337,6 +337,10 @@ static void loader_main(void*) {
             double now = clock_ms(), least = LEAD_MS;
             for (size_t i = 0; i < g_decoding.size(); ++i) {
                 KeptSound* k = g_decoding[i];
+                /* only a sound a voice reads (one it was asked for and
+                 * dropped, or ended, went ahead of every new load: the waits
+                 * for the loader of 400-600 ms, rp105) */
+                if (!k->users) continue;
                 /* the voices' furthest frame by now, a little faster than
                  * the sound (their pitch) */
                 double lead = k->decoded * 1000.0 / k->rate - (now - k->ready_at) * 1.1;

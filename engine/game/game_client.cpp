@@ -55,8 +55,7 @@ static std::string anim_path(const std::string& parent, Node* n, size_t index);
 class RoomTransition : public Control {
 public:
     explicit RoomTransition(SceneLibrary* lib)
-        : phase(0), elapsed(0), held(0), last_ms(0), drawn(0), library(lib), share(-1), fast(false), initial_y(-2564),
-          gradient_height(2280) {
+        : phase(0), elapsed(0), held(0), last_ms(0), drawn(0), fast(false), initial_y(-2564), gradient_height(2280) {
         flags |= NF_PROCESS;
         name = "RoomTransition";
         z_index = 4096;
@@ -81,8 +80,6 @@ public:
     double held;    /* the reveal held for the new room (s, the frames' dt) */
     double last_ms; /* clock_ms() at the last process */
     int drawn;      /* the new room's frames before its reveal */
-    SceneLibrary* library;
-    double share;   /* the warm-up's share per frame while held (-1: not raised) */
     bool fast;
     float initial_y, gradient_height;
     Vec2 fill_from, fill_to;
@@ -92,33 +89,22 @@ public:
     bool ready() const { return phase == 1 && elapsed >= (fast ? 0.6 : 1.1); }
     virtual void process(double dt) {
         if (phase == 0) return;
-        /* The new room stays black (1.5 s at most) until it draws a frame
-         * in time with nothing of it waiting for room in the GPU's memory,
-         * and while the run's or the act's assets are read (the logic's
-         * preload, at a run's first room and an act's: read faster in the
-         * black): the merchant stood in the black till his room's
-         * background came, and the first fight after Continue hitched as it
-         * faded in, its intents' and cards' atlases read (rp104). Its first
-         * draw (its textures' reads) comes after this frame's process: two
-         * frames at least. A long frame is the clock's (dt is capped); the
-         * hold counts dt (tools run frames faster than the clock, and draw
-         * nothing: their warm-up never ends). */
+        /* The new room stays black (0.5 s at most) until it draws a frame
+         * in time with nothing of it waiting for room in the GPU's memory:
+         * the merchant stood in the black till his room's background came
+         * (rp104). Its first draw (its textures' reads) comes after this
+         * frame's process: two frames at least. Not for the run's or act's
+         * preload: the room's own sounds (Neow's) began in a black that
+         * lasted a second and more, the warm-up's reads holding the drive
+         * from the music's (rp105). A long frame is the clock's (dt is
+         * capped); the hold counts dt (tools run frames faster than the
+         * clock). */
         double now = clock_ms(), gap = now - last_ms;
         last_ms = now;
-        bool reading = library->warming();
-        if (phase == 2 && elapsed == 0 && held < 1.5 &&
-            (drawn < 2 || Canvas::textures_waiting() || gap > 70 || reading)) {
-            if (reading && share < 0) {
-                share = library->warm_share();
-                library->set_warm_share(40);
-            }
+        if (phase == 2 && elapsed == 0 && held < 0.5 && (drawn < 2 || Canvas::textures_waiting() || gap > 70)) {
             ++drawn;
             held += dt;
             return;
-        }
-        if (share >= 0) {
-            library->set_warm_share(share);
-            share = -1;
         }
         elapsed += dt;
         if (phase == 2 && elapsed >= (fast ? 0.3 : 0.8)) { phase = 0; visible = false; }

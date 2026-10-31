@@ -19,12 +19,14 @@ struct AudioMixer::Voice {
     /* its sound still being read (AudioDecoder::pending): where and how it
      * was asked to start, the output frames since */
     bool pending, follow;
+    /* its samples not decoded yet (this chunk): it waits, silent, where it is */
+    bool stalled;
     u32 offset, start, end;
     int loop_count;
     double waited;
     Voice() : buffer(4096), id(0), cursor(0), loop_start(0), loop_end(0), loops(0), used(0), count(0),
         left(0), right(0), next_left(0), next_right(0), gain(1), gain_step(0), pitch(1), gain_frames(0),
-        fraction(0), next_valid(false), alive(true), stop_after_ramp(false), pending(false), follow(false), offset(0), start(0),
+        fraction(0), next_valid(false), alive(true), stop_after_ramp(false), pending(false), follow(false), stalled(false), offset(0), start(0),
         end(0), loop_count(0), waited(0) {}
     /* From frame `at` of its open sound, looping start..end loop_count
      * times; false and why if it cannot. */
@@ -56,8 +58,11 @@ struct AudioMixer::Voice {
             count = decoder.read(&buffer[0], frames);
             used = 0;
             if (!count && decoder.waiting()) {
-                /* its samples not decoded yet: silence, the same frame next */
+                /* its samples not decoded yet: silence, the same frame next
+                 * chunk (asked again each frame, the loader's lock taken
+                 * each time: the mix fell behind for good, rp105) */
                 l = r = 0;
+                stalled = true;
                 return true;
             }
             if (!count) {
@@ -238,9 +243,10 @@ void AudioMixer::render(float* out, int frames) {
     if (paused_) return;
     for (size_t i = 0; i < voices_.size(); ++i) {
         Voice& v = *voices_[i];
+        v.stalled = false;
         if (v.pending && !start_pending(v, frames)) continue;
         double step = (double)v.decoder.rate() * v.pitch / rate_;
-        for (int f = 0; f < frames && v.alive; ++f) {
+        for (int f = 0; f < frames && v.alive && !v.stalled; ++f) {
             float fraction = (float)v.fraction;
             out[f * 2] += (v.left + (v.next_left - v.left) * fraction) * v.gain;
             out[f * 2 + 1] += (v.right + (v.next_right - v.right) * fraction) * v.gain;
@@ -249,7 +255,7 @@ void AudioMixer::render(float* out, int frames) {
                 if (!--v.gain_frames && v.stop_after_ramp) v.alive = false;
             }
             v.fraction += step;
-            while (v.fraction >= 1 && v.alive) {
+            while (v.fraction >= 1 && v.alive && !v.stalled) {
                 v.fraction -= 1;
                 if (!v.next_valid) { v.alive = false; break; }
                 v.left = v.next_left; v.right = v.next_right;

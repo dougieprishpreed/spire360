@@ -58,6 +58,11 @@ bool read_json(const Pack* pack, const std::string& path, Json& out) {
 }
 }
 
+/* The events' update: every TICK_FRAMES output frames at most (an
+ * instrument's start, release or cutoff still splits a chunk where it
+ * falls; levels ramp across it). Each 64 frames, the ticks were 60% of the
+ * mix on the PC (rp105), more on the console, where the mix fell behind. */
+enum { TICK_FRAMES = 256 };
 struct AudioEvents::Impl {
     struct Bank { std::string name; Json doc; std::map<std::string, Json> streams; int references; Bank() : references(0) {} };
     struct Player;
@@ -616,7 +621,7 @@ struct AudioEvents::Impl {
             for (size_t i = 0; i < children.size(); ++i) children[i].player->ramp_levels(seconds);
         }
         double boundary() const {
-            double next = 64.0 / system->mixer.rate();
+            double next = (double)TICK_FRAMES / system->mixer.rate();
             if (delay > age + EPS) next = mind(next, delay - age);
             if (releasing && release_at + release_time > age + EPS) next = mind(next, release_at + release_time - age);
             if (cutoff > age + EPS) next = mind(next, cutoff - age);
@@ -846,7 +851,7 @@ void AudioEvents::render(float* out, int frames) {
     int cursor = 0;
     while (cursor < frames) {
         int count = frames - cursor;
-        if (count > 64) count = 64;
+        if (count > TICK_FRAMES) count = TICK_FRAMES;
         for (std::map<u32, Impl::Player*>::iterator i = impl_->roots.begin(); i != impl_->roots.end();) {
             Impl::Player* p = i->second; p->tick();
             if (p->done) { delete p; impl_->roots.erase(i++); }

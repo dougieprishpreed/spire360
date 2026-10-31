@@ -11,6 +11,81 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The eighth xSDK hardware run (2026-10-31): the mix's spiral and the freeze, the Underdocks' rectangles
+
+The run (work/rp105, build 202e3e5): a new Necrobinder run to floor 9 (the
+Haunted Ship), where the sound crackled without end and the game froze for
+tens of seconds at a time, a button press letting it go on for a moment.
+Other reports: Neow's sound in the black before its room, the music
+stopping and starting there and on the map; dark see-through rectangles
+over the Underdocks' mist (shot 01; Back + X only hid the mist or kept
+them); the hand's focus after a draw with a shuffle; Doom's kills cutting an
+attack short (floor 4) and two slugs' deaths rushed (floor 5); two quick
+rewards' sounds; lower frame rates as cards fly.
+
+The spiral (the log: "mix 5.62 ms a frame of 5.3", "0 sounds read", the
+watchdog's frames 35400, 36000, 36600 standing still):
+
+- A voice whose samples the loader had not decoded yet asked again at
+  every output frame (AudioDecoder::read, the kept sounds' lock each time):
+  a few such voices took the mix past its 5.3 ms. Behind, the mix thread
+  rendered without a pause at the feeder's priority, and the loader under
+  it on hardware thread 4 never ran again: the voices stayed starved, the
+  crackle never ended. A starved voice now waits, silent, for the rest of
+  the chunk (Voice::stalled); the mix renders at most 4 chunks a turn
+  (MIX_RUN), then sleeps.
+- The freeze: GameAudio::mix_times (the 600-frame log's) took the lock
+  without the waiting count the mix gives way to (GameLock): the frame loop
+  stood at every 600th frame while the mix ran on.
+- The loader went to a decoding sound before a new load when it was short
+  of samples, whether or not a voice read it (one dropped or ended): the
+  loads' 400-600 ms waits for the loader. Only a sound a voice reads is
+  urgent.
+- The mix's cost (1.3-2.5 ms of each 5.3 ms on the console): the events'
+  ticks, every 64 frames, were 60% of it on the PC (1,864 ms ticking and
+  515 ramping against 1,572 mixing over the session). They tick every 256
+  frames now (TICK_FRAMES; an instrument's start, release or cutoff still
+  splits a chunk where it falls): the PC's mix 0.404 to 0.293 ms a frame.
+
+The rectangles (shot 01; the software renderer and the host's Vulkan the
+same, fainter): Underdocks' layers are clip_children TextureRects with
+additive children (the water reflections: vfx_stepped_shader_fire_add on
+light.png, a DXT1 with its alpha whole). Godot builds a clip group on a
+copy of the screen, where light only adds; ours starts clear and goes over
+the screen by its alpha, so an additive child's alpha darkened its quad. In
+a group an additive draw now leaves the alpha (vk: BLEND_ADD_GROUP, alpha
+factors 0 and 1; sw: the layer's alpha kept): the room behind shows (its
+barrels were under one).
+
+The reports:
+
+- Neow's sound in the black, the music stopping and starting: last round's
+  reveal held the black while the run's preload was read (1.5 s, the
+  warm-up at 40 ms a frame): the room's own sounds began in it, and the
+  warm-up's reads held the drive from the music's stems. The reveal holds
+  only for the first frames' draws, a texture waiting for memory, or a long
+  frame (0.5 s at most).
+- The hand's focus over a shuffle: the game's (NPlayerHand.AnimEnable gives
+  the empty hand the focus, the first card added takes it, and keeps it
+  through a shuffle mid-draw); the session's two such turns on the PC focus
+  the first card drawn. A console capture if it looks otherwise.
+- Doom: DoomPower.BeforeSideTurnEnd kills at the enemies' turn's end, after
+  each move's waits; its StartDoomAnim sets Hit (an any-state trigger: the
+  attack is cut) and freezes the hurt pose. The profile plays in Fast mode
+  (prefs.save "fast_mode": "fast"): CustomScaledWait's fast values (0.1 s
+  where Normal waits 0.2 and 0.4) end the turn before the attack's last
+  frames. At Normal speed the attack plays out first. Floor 5: the first
+  slug's Doom waits 0.25 s (others alive), the second devours (Strength)
+  and its own Doom follows 0.35 s on: the game's order.
+- Two quick rewards: nothing in the log; asked what was cut.
+
+Checks (work/check105.sh, the response checker again with the final
+build): seeded traces the same 3 differences (transform_options); 35
+scenarios ok; spire_check 2357 responses, 0 failures, audio 21951 voices,
+10 absent event calls, 0 decoder failures; the audio fixtures, the music and
+the events 0 failures (with the 256-frame tick); PC build without warnings.
+The logic is unchanged (the console's as last round's).
+
 ## The seventh xSDK hardware run (2026-10-30): the sounds' waits, the reports, the sweep
 
 The run (work/rp104, build 35f8b8e): the Regent run from floor 19 (a

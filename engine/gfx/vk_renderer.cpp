@@ -100,7 +100,9 @@ const char* const VARIANT_FILES[V_EFFECT] = { "plain.frag",          "text.frag"
 
 /* Blend states: the D3D9 renderer's (one set of factors for colour and
  * alpha), and none (the passes that replace what they draw over). */
-enum { BLEND_NONE = 5, BLEND_KINDS = 6 };
+/* BLEND_ADD_GROUP: an additive draw into a canvas group, the target's
+ * alpha left as it is (the software renderer's add in its layer) */
+enum { BLEND_NONE = 5, BLEND_ADD_GROUP = 6, BLEND_KINDS = 7 };
 /* the extra samplers' sets a frame's pool holds */
 enum { EXTRA_SETS = 1024 };
 /* Time stamps: two a frame in flight (its first command and its last), then
@@ -1069,6 +1071,10 @@ VkPipeline Impl::pipeline(int v, int blend) {
     switch (blend) {
     case BLEND_ADD:
         ba.dstColorBlendFactor = ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        break;
+    case BLEND_ADD_GROUP:
+        ba.dstColorBlendFactor = ba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        ba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         break;
     case BLEND_SUB:
         ba.colorBlendOp = ba.alphaBlendOp = VK_BLEND_OP_REVERSE_SUBTRACT;
@@ -2342,7 +2348,10 @@ void Impl::apply_state() {
     VkCommandBuffer cmd = frames_[frame_].cmd;
     bool group = (flags_ & DRAW_GROUP) && group_ && !in_group_ && !cap_w_;
     int v = variant();
-    VkPipeline p = pipeline(v, blend_ == BLEND_PREMULT_ALPHA ? (int)BLEND_MIX : (int)blend_);
+    int kind = blend_ == BLEND_PREMULT_ALPHA ? (int)BLEND_MIX : (int)blend_;
+    /* additive into a canvas group: its alpha stays (BLEND_ADD_GROUP) */
+    if (kind == BLEND_ADD && in_group_) kind = BLEND_ADD_GROUP;
+    VkPipeline p = pipeline(v, kind);
     if (p != bound_pipe_ && p) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
         bound_pipe_ = p;

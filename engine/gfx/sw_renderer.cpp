@@ -1546,7 +1546,12 @@ void SwRenderer::triangle(SwTexture* tex, const Vertex& A, const Vertex& B, cons
             float r, g, b, a;
             switch (blend) {
             case BLEND_ADD:
-                r = dr + sr; g = dg + sg; b = db + sb; a = da + sa * (1 - da);
+                /* In a canvas group the target's alpha stays: Godot builds a
+                 * clip group on a copy of the screen, where light only adds;
+                 * ours starts clear and goes over the screen by its alpha,
+                 * and an additive child's alpha (the Underdocks' water
+                 * reflections, light.png) darkened its whole quad (rp105). */
+                r = dr + sr; g = dg + sg; b = db + sb; a = target_ == &layer_ ? da : da + sa * (1 - da);
                 break;
             case BLEND_SUB:
                 /* alpha too, as D3D9's REVSUBTRACT and Godot's blend_sub
