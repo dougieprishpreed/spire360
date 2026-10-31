@@ -16,10 +16,12 @@ multiplayer, custom and daily runs.
 
 ## What you need
 
-- Slay the Spire 2 installed on a Windows 10 or 11 PC (64-bit).
+- Slay the Spire 2 **v0.111.0**, installed on a Windows 10 or 11 PC (64-bit). It's the only version tested so far;
+  later game updates will get matching Spire360 updates.
 - An Xbox 360 that runs homebrew (such as with ABadAvatar), and a way to copy files to it (USB drive or FTP).
-- About **30 GB free** on the drive you build on, for the first build. The finished folder for the console is
-  about **1 GB**; the rest is the build environment, which you can keep to build future updates (or delete).
+- About **30 GB free** on the PC's drive you build on (the Windows drive holding Spire360Setup's folder, not the
+  console's), for the first build. The finished folder for the console is about **1 GB**; the rest is the build
+  environment, which you can keep to build future updates (or delete).
 - An internet connection, and an hour or two for the first build (later ones are much quicker).
 
 ## Building it (Windows)

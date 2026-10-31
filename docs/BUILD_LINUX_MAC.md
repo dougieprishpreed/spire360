@@ -22,7 +22,8 @@ installer in the [README](../README.md) instead.
   it. macOS has not been tested: report what happens in an issue.
 - About **30 GB free** for the first build, 8 GB of RAM or more, and an internet connection.
 - The game: the Slay the Spire 2 folder holding `SlayTheSpire2.pck`, wherever the user keeps it. Ask the user for it;
-  don't search the disk. Inside a VM, the user copies or shares that folder in.
+  don't search the disk. Inside a VM, the user copies or shares that folder in. Version **v0.111.0** is the only one
+  tested (its `release_info.json` says so); with another, tell the user it's untested before going on.
 
 ## 1. Get the source
 
