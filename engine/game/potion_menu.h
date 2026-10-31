@@ -25,6 +25,8 @@ public:
     void attach(Node* screen, const Json& player);
     void detach();
     bool active() const { return mode_ != NONE; }
+    /* Along the potion slots or the relic row (no popup, nothing aimed). */
+    bool browsing() const { return mode_ == SLOTS || mode_ == RELICS; }
     /* X: the first slot takes the focus; false with no top bar. */
     bool open();
     void close();

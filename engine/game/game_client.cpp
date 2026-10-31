@@ -54,7 +54,9 @@ static std::string anim_path(const std::string& parent, Node* n, size_t index);
  * 0.3 s (Quad Out), the room back in 0.3 s. */
 class RoomTransition : public Control {
 public:
-    explicit RoomTransition(SceneLibrary* lib) : phase(0), elapsed(0), fast(false), initial_y(-2564), gradient_height(2280) {
+    explicit RoomTransition(SceneLibrary* lib)
+        : phase(0), elapsed(0), held(0), last_ms(0), drawn(0), library(lib), share(-1), fast(false), initial_y(-2564),
+          gradient_height(2280) {
         flags |= NF_PROCESS;
         name = "RoomTransition";
         z_index = 4096;
@@ -76,15 +78,48 @@ public:
     }
     int phase; /* 0 idle, 1 waiting to exchange rooms, 2 revealing the new room */
     double elapsed;
+    double held;    /* the reveal held for the new room (s, the frames' dt) */
+    double last_ms; /* clock_ms() at the last process */
+    int drawn;      /* the new room's frames before its reveal */
+    SceneLibrary* library;
+    double share;   /* the warm-up's share per frame while held (-1: not raised) */
     bool fast;
     float initial_y, gradient_height;
     Vec2 fill_from, fill_to;
     GradientData gradient;
     void start_out() { phase = 1; elapsed = 0; visible = true; fast = fast_mode(); }
-    void start_in() { phase = 2; elapsed = 0; visible = true; fast = fast_mode(); }
+    void start_in() { phase = 2; elapsed = 0; held = 0; last_ms = clock_ms(); drawn = 0; visible = true; fast = fast_mode(); }
     bool ready() const { return phase == 1 && elapsed >= (fast ? 0.6 : 1.1); }
     virtual void process(double dt) {
         if (phase == 0) return;
+        /* The new room stays black (1.5 s at most) until it draws a frame
+         * in time with nothing of it waiting for room in the GPU's memory,
+         * and while the run's or the act's assets are read (the logic's
+         * preload, at a run's first room and an act's: read faster in the
+         * black): the merchant stood in the black till his room's
+         * background came, and the first fight after Continue hitched as it
+         * faded in, its intents' and cards' atlases read (rp104). Its first
+         * draw (its textures' reads) comes after this frame's process: two
+         * frames at least. A long frame is the clock's (dt is capped); the
+         * hold counts dt (tools run frames faster than the clock, and draw
+         * nothing: their warm-up never ends). */
+        double now = clock_ms(), gap = now - last_ms;
+        last_ms = now;
+        bool reading = library->warming();
+        if (phase == 2 && elapsed == 0 && held < 1.5 &&
+            (drawn < 2 || Canvas::textures_waiting() || gap > 70 || reading)) {
+            if (reading && share < 0) {
+                share = library->warm_share();
+                library->set_warm_share(40);
+            }
+            ++drawn;
+            held += dt;
+            return;
+        }
+        if (share >= 0) {
+            library->set_warm_share(share);
+            share = -1;
+        }
         elapsed += dt;
         if (phase == 2 && elapsed >= (fast ? 0.3 : 0.8)) { phase = 0; visible = false; }
     }
@@ -328,7 +363,7 @@ std::vector<Choice> GameClient::choices(const Json& d) {
 
 GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
     : lib_(lib), tree_(tree), link_(link), potions_(lib), screen_(NULL), combat_(NULL), ported_(NULL), room_(NULL), behind_(NULL), reward_focus_(0), shop_open_(false), shop_index_(0), hand_focus_(-1), hand_focus_floor_(-1), target_(-1), last_target_(-1), script_at_(0), focus_(0), waiting_(true), ready_(false), auto_(false), auto_until_(0), menu_requested_(false),
-      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), fade_after_finishing_(false), shop_auto_(false),
+      rng_(1), decisions_(0), errors_(0), want_characters_(false), characters_version_(0), transition_(NULL), wipe_(NULL), deck_previews_(NULL), event_finishing_(false), reward_press_(false), fade_after_finishing_(false), shop_auto_(false),
       answers_(0), pause_(NULL), pause_node_(NULL), piles_(NULL), piles_node_(NULL), map_view_(NULL),
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
@@ -679,7 +714,13 @@ void GameClient::update(const PadState& pad) {
         show(d);
         return;
     }
-    if (waiting_ || decision_.is_null()) return;
+    if (waiting_ || decision_.is_null()) {
+        /* A reward taken while the last one's answer comes: taken once it
+         * has (each press takes one, as NRewardButton's: the second of two
+         * quick golds was lost, rp104) */
+        if (waiting_ && (pad.pressed & PadState::A) && decision_["decision"].str() == "rewards") reward_press_ = true;
+        return;
+    }
     if (combat_ && combat_->take_end_turn_long_press()) {
         if (!ftue_instead(action("end_turn"))) send(action("end_turn"));
         return;
@@ -691,7 +732,12 @@ void GameClient::update(const PadState& pad) {
     if (!queue && (check_ftues(pad) || ftue_)) return;
     g_trace_step = "client: input";
     if (!queue && auto_ && (auto_until_ <= 0 || decisions_ < auto_until_)) choose_automatically();
-    else handle_input(pad);
+    else {
+        PadState now = pad;
+        if (reward_press_ && decision_["decision"].str() == "rewards") now.pressed |= PadState::A;
+        reward_press_ = false;
+        handle_input(now);
+    }
 }
 
 /* NCardPlayQueue: while the last command's steps still play, the hand
@@ -821,21 +867,59 @@ Node* GameClient::overlay_background(const Json& d, bool aftermath) {
     return NULL;
 }
 
-/* A new player turn that began with the hand empty: the decision before's
- * hand less the cards that left it before the turn's round cue (the end of
- * the turn's discards, Ethereal's exhausts); false without a new turn. */
-static bool turn_began_empty(const Json& before, const Json& d) {
-    int left = (int)before["hand"].size();
+/* NPlayerHand's focus through a response that starts a player turn, its
+ * holders as the cues take them out and add them: a focused card that
+ * leaves gives the focus to the one at its index (DefaultFocusedControl,
+ * _lastFocusedHolderIdx), an emptied hand to the first card added
+ * (AddCardHolder with the container focused), and it stays on its card as
+ * others come (Bolas back before the draw; a retained card, where the last
+ * turn's index put it anywhere). The focused card's index in the new hand
+ * (-1: none); -2 without a new turn. */
+static int focus_through_turn(const Json& before, const Json& d, int focus) {
+    std::vector<int> hand;
+    for (size_t i = 0; i < before["hand"].size(); ++i) hand.push_back(before["hand"][i]["instance_id"].i(-1));
+    int last = focus;
+    int focused = focus >= 0 && focus < (int)hand.size() ? hand[(size_t)focus] : -1;
+    bool turn = false;
     const Json& steps = d["steps"];
     for (size_t i = 0; i < steps.size(); ++i)
         for (size_t k = 0; k < steps[i].size(); ++k) {
             const Json& c = steps[i][k];
-            if (c["t"].str() == "round") return left <= 0;
-            if (c["t"].str() != "card") continue;
-            if (c["from"].str() == "hand") --left;
-            else if (c["to"].str() == "hand") ++left;
+            const std::string& t = c["t"].str();
+            if (t == "round") turn = true;
+            else if (t == "hand") {
+                hand.clear();
+                for (size_t j = 0; j < c["cards"].size(); ++j) hand.push_back(c["cards"][j].i(-1));
+            } else if (t == "card") {
+                int id = c["card"].i(-1);
+                if (c["from"].str() == "hand") {
+                    for (size_t j = 0; j < hand.size(); ++j)
+                        if (hand[j] == id) {
+                            hand.erase(hand.begin() + (long)j);
+                            break;
+                        }
+                    if (id == focused) {
+                        if (hand.empty()) focused = -1;
+                        else {
+                            last = last < 0 ? 0 : last >= (int)hand.size() ? (int)hand.size() - 1 : last;
+                            focused = hand[(size_t)last];
+                        }
+                    }
+                } else if (c["to"].str() == "hand") {
+                    hand.push_back(id);
+                    if (focused < 0) {
+                        focused = id;
+                        last = (int)hand.size() - 1;
+                    }
+                }
+            }
         }
-    return false;
+    if (!turn) return -2;
+    const Json& now = d["hand"];
+    for (size_t i = 0; i < now.size(); ++i)
+        if (now[i]["instance_id"].i(-2) == focused) return (int)i;
+    if (now.size() == 0) return -1;
+    return last < 0 ? 0 : last >= (int)now.size() ? (int)now.size() - 1 : last;
 }
 
 /* The first cue of that type in the decision's steps; NULL: none. */
@@ -1339,10 +1423,11 @@ void GameClient::show(const Json& d) {
         Json before = prev_kind == "combat_play" ? last_combat_ : Json();
         /* each turn the same: CombatManager.StartTurn enables the hand
          * (AnimEnable) before its draw, and an empty hand's container gives
-         * the first card drawn the focus; cards kept from the turn before
-         * keep the index (DefaultFocusedControl). The index kept from the
-         * last turn's moves put it anywhere, mid-draw over a reshuffle too. */
-        if (turn_began_empty(before, d)) hand_focus_ = 0;
+         * the first card drawn the focus; a card kept from the turn before
+         * keeps it (focus_through_turn). The index kept from the last turn's
+         * moves put it anywhere, mid-draw over a reshuffle too. */
+        int turn_focus = focus_through_turn(before, d, hand_focus_);
+        if (turn_focus != -2) hand_focus_ = turn_focus < 0 ? 0 : turn_focus;
         last_combat_ = d;
         if (continuing) {
             combat_ = room_;
@@ -1391,8 +1476,11 @@ void GameClient::show(const Json& d) {
     /* The room's screen shake target, unless a fight's room holds it. */
     if (ported_ && ported_->shake_target() && !ScreenShake::get().target())
         screen_->add_child(make_shake_driver(ported_->shake_target()));
-    /* What the choice did outside a fight (the fights play their own). */
-    if (!in_fight && kind != "game_over") play_room_cues(lib_, screen_, d);
+    /* What the choice did outside a fight (the fights play their own): the
+     * rewards after one too, which no fight plays (Lucky Fysh's flash as a
+     * card was taken). */
+    bool fight_plays = in_fight && (kind == "combat_play" || kind == "card_select");
+    if (!fight_plays && kind != "game_over") play_room_cues(lib_, screen_, d);
     /* NEventRoom's own effects (OnRoomEnter) stay for all its pages. */
     if (kind == "event_choice")
         for (size_t i = 0; i < room_vfx_.size(); ++i) add_room_vfx(lib_, screen_, room_vfx_[i]);
@@ -1536,6 +1624,7 @@ void GameClient::clear_screen() {
     finishing_ = Json();
     event_finishing_ = false;
     fade_after_finishing_ = false;
+    reward_press_ = false;
     enemy_places_.clear();
 }
 
@@ -2018,6 +2107,12 @@ void GameClient::handle_input(const PadState& pad) {
         if (pad.pressed & (PadState::UP | PadState::DOWN | PadState::LEFT | PadState::RIGHT)) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
         if (pad.pressed & PadState::A) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
         if (pad.pressed & PadState::B) lib_->audio()->ui("event:/sfx/ui/clicks/ui_back");
+    }
+    /* The end turn button's hotkey (Y) from the potion slots or the relic
+     * row too: they give the focus back and the fight takes it. */
+    if (potions_.browsing() && combat_ && kind == "combat_play" && (pad.pressed & PadState::Y)) {
+        potions_.close();
+        combat_->set_hand_unfocused(false);
     }
     /* The potions (X) on any screen with the top bar. */
     if (potions_.active()) {

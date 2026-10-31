@@ -83,6 +83,9 @@ private:
 };
 
 void sleep_ms(int ms);
+/* The calling thread a step below the others on its hardware thread (the
+ * console's: they run first whenever they are ready); elsewhere nothing. */
+void lower_priority();
 /* A monotonic clock in milliseconds (the start is arbitrary). */
 double clock_ms();
 

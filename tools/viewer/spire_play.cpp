@@ -118,6 +118,7 @@
 #include <algorithm>
 #include <deque>
 #include <new>
+#include <set>
 #include <fstream>
 #include <signal.h>
 #include <stdio.h>
@@ -342,6 +343,17 @@ static void apply_pad(unsigned entry, PadState& pad) {
 
 /* A --pad list ("A,RIGHT,WAIT,...", "A+RIGHT*40": pressed together, then
  * held 40 frames). */
+/* --frames-after: whether this frame of the screen shown is one to save
+ * (each screen after one of `after` counts its own frames). */
+static bool capture_frame(const std::set<int>& after, int shown, int every, int& screen, int& n) {
+    if (!after.count(shown - 1)) return false;
+    if (screen != shown) {
+        screen = shown;
+        n = 0;
+    }
+    return (++n) % every == 0 && n <= 900;
+}
+
 static void parse_pad(const std::string& list, std::vector<unsigned>& out) {
     static const struct {
         const char* name;
@@ -546,7 +558,8 @@ int main(int argc, char** argv) {
     int mem_every = 50;  /* --mem-every N: the memory line every N screens */
     int monkey_minutes = 20;
     std::vector<int> shots_at;
-    int frames_after = -1, frames_every = 10; /* screen after which every so many frames are saved */
+    std::set<int> frames_after; /* screens after which every so many frames are saved */
+    int frames_every = 10, capture_screen = -1;
     for (int i = 3; i < argc; ++i) {
         if (strcmp(argv[i], "--logic") == 0 && i + 1 < argc) logic_cmd = argv[++i];
         else if (strcmp(argv[i], "--audio") == 0) audio_device = true;
@@ -590,9 +603,14 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
         else if (strcmp(argv[i], "--pad-after") == 0 && i + 1 < argc) pad_after = atoi(argv[++i]);
         else if (strcmp(argv[i], "--frames-after") == 0 && i + 1 < argc) {
-            /* N[:EVERY] */
+            /* N[,N...][:EVERY] */
             const char* a = argv[++i];
-            frames_after = atoi(a);
+            for (const char* p = a; *p;) {
+                frames_after.insert(atoi(p));
+                while (*p && *p != ',' && *p != ':') ++p;
+                if (*p != ',') break;
+                ++p;
+            }
             if (strchr(a, ':')) frames_every = atoi(strchr(a, ':') + 1);
             if (frames_every < 1) frames_every = 1;
         }
@@ -1020,7 +1038,7 @@ int main(int argc, char** argv) {
                 double f0 = now_ms();
                 run_frame(tree, audio, frame_times);
                 if (load_trace) trace_frame(tree, sw, canvas, scale, f == 0 ? update_ms : 0, f0);
-                if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
+                if (capture_frame(frames_after, shown, frames_every, capture_screen, frame_n)) {
                     /* the steps after that screen as they play */
                     if (frame_n == dump_draws_shot) canvas.dump_next_frame();
                     sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -1067,7 +1085,7 @@ int main(int argc, char** argv) {
             double f0 = now_ms();
             run_frame(tree, audio, frame_times);
             if (load_trace) trace_frame(tree, sw, canvas, scale, update_ms, f0);
-            if (frames_after >= 0 && shown == frames_after + 1 && (++frame_n) % frames_every == 0 && frame_n <= 900) {
+            if (capture_frame(frames_after, shown, frames_every, capture_screen, frame_n)) {
                 /* the steps after that screen as they play */
                 if (frame_n == dump_draws_shot) canvas.dump_next_frame();
                 sw.begin((int)(1920 * scale + 0.5f), (int)(1080 * scale + 0.5f), Color(0.0923724f, 0.122398f, 0.116929f, 1.0f));
@@ -1096,9 +1114,10 @@ int main(int argc, char** argv) {
         int mixes;
         audio.mix_times(&mix_worst, &mix_average, &mixes);
         AudioDecoder::LoadStats loads = AudioDecoder::load_stats();
-        printf("audio thread: %d sounds read (%.1f MB, the longest waited %.0f ms), %.1f MB kept; mix %.3f ms a frame "
-               "of 5.3 (worst %.2f)\n", loads.loads, loads.bytes / 1048576.0, loads.longest_ms, loads.kept / 1048576.0,
-               mix_average, mix_worst);
+        printf("audio thread: %d sounds read (%.1f MB, the longest waited %.0f ms: %.0f for the loader, %.0f reading, "
+               "%s), %.1f MB kept; mix %.3f ms a frame of 5.3 (worst %.2f)\n", loads.loads, loads.bytes / 1048576.0,
+               loads.longest_ms, loads.longest_queue_ms, loads.longest_read_ms,
+               loads.longest && *loads.longest ? loads.longest : "-", loads.kept / 1048576.0, mix_average, mix_worst);
     }
     return 0;
 }

@@ -47,6 +47,9 @@ public:
     /* read, ahead of the others: their next pieces wait while it runs (a
      * sound a voice waits on goes before the textures being read) */
     bool read_urgent(const PackEntry* e, std::vector<u8>& out) const;
+    /* n bytes of an entry from `at` into buf (a long sound read in pieces,
+     * the short ones read between them) */
+    bool read_part(const PackEntry* e, u32 at, u32 n, void* buf, bool urgent) const;
     /* A texture entry read straight into out's levels (no second copy of a
      * 10 MB background in the heap, as parse_texture of read's makes). */
     bool read_texture(const char* name, TextureData& out) const;

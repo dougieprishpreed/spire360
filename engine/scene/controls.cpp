@@ -2,6 +2,7 @@
 
 #include "canvas.h"
 #include "shaders.h"
+#include "spine_sprite.h"
 #include "value.h"
 #include "viewport.h"
 
@@ -753,7 +754,9 @@ static bool mask_material(const MaterialRes* m) {
  * limb by limb). */
 void CanvasGroup::refresh() { clip_children = mask_material(material) || self_modulate.a < 0.999f ? 1 : 0; }
 
-/* The visible children's rects in its coordinates, grown by fit_margin. */
+/* The visible children's rects in its coordinates, grown by fit_margin (a
+ * skeleton's by its attachments: the Test Subject's body, invisible in an
+ * empty group while Intangible). */
 Rect2 CanvasGroup::item_rect() const {
     bool any = false;
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -761,7 +764,7 @@ Rect2 CanvasGroup::item_rect() const {
         Node* ch = children[i];
         if (!ch->is_canvas_item() || !((CanvasItem*)ch)->visible) continue;
         CanvasItem* ci = (CanvasItem*)ch;
-        Rect2 r = ci->item_rect();
+        Rect2 r = ch->type == "SpineSprite" ? ((SpineSprite*)ch)->bounds() : ci->item_rect();
         if (r.size.x <= 0 || r.size.y <= 0) continue;
         Xform2D xf = ci->get_transform();
         Vec2 p[4] = { xf.xform(r.pos), xf.xform(Vec2(r.pos.x + r.size.x, r.pos.y)), xf.xform(r.end()),

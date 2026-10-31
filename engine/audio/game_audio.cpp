@@ -127,16 +127,24 @@ std::string GameAudio::stream(const std::string& path) {
     return "debug_audio/" + path;
 }
 void GameAudio::ui(const std::string& path, float volume) { GameLock lock(this); events_.play(stream(path), volume); }
+void GameAudio::prefetch(const std::string& path) {
+    if (pack_) AudioDecoder::prefetch(*pack_, stream(path));
+}
 /* Each change of track in the log (a console session's music, for reports
  * of a room's wrong or missing track; a track started again is one that
  * stopped by itself). */
 void GameAudio::music(const std::string& path) {
-    if (track_ == path && events_.playing(music_id_)) return;
+    /* The same track goes on, even once it has ended (NRunMusicController
+     * plays a track as it changes: a boss's ends after its victory, and was
+     * started over as the rewards' first was taken, rp104); one that did not
+     * start is tried again. */
+    if (track_ == path && (music_id_ || path.empty())) return;
     log_info("music: %s%s", path.empty() ? "(none)" : path.c_str(), track_ == path && !path.empty() ? " (again)" : "");
     events_.stop(music_id_, 0.4); track_ = path; music_id_ = path.empty() ? 0 : events_.play(path);
 }
 void GameAudio::ambience(const std::string& path) {
-    if (ambience_ == path && events_.playing(ambience_id_)) return;
+    /* as music(): the same ambience is not started over once it ended */
+    if (ambience_ == path && (ambience_id_ || path.empty())) return;
     log_info("ambience: %s%s", path.empty() ? "(none)" : path.c_str(),
              ambience_ == path && !path.empty() ? " (again)" : "");
     events_.stop(ambience_id_, 0.5); ambience_ = path; ambience_id_ = path.empty() ? 0 : events_.play(path);

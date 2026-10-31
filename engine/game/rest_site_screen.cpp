@@ -134,6 +134,12 @@ Node* RestSiteScreen::build(const Json& d, std::string* error) {
     smoke_ = NULL;
     focus_ = -1;
     chosen_ = false;
+    /* The rest's jingles (1.2 MB each, read as the rest was chosen: late
+     * on the console, rp104) and its blanket, read while the options show */
+    if (lib_->audio()) {
+        for (const char* v = "abc"; *v; ++v) lib_->audio()->prefetch(format("STS_SleepJingle_1%c_NewMix_v1.mp3", *v));
+        lib_->audio()->prefetch("SOTE_SFX_SleepBlanket_v1.mp3");
+    }
     Node* room = instance(lib_, "scenes/rooms/rest_site_room.tscn");
     if (!room) {
         if (error) *error = "no rest_site_room.tscn";

@@ -1029,6 +1029,11 @@ internal sealed class Patcher
         {
             var i = ins[k];
             var flow = i.OpCode.FlowControl;
+            // In an if / else-if chain the statement ends with the jump past
+            // the other branches, to the join its null case takes too
+            // (CreatureCmd.Damage's weak and medium ScreenShake: only the
+            // last branch's, the strong one, was recorded).
+            if (Is(i, OpCodes.Br, OpCodes.Br_S) && i.Operand == end) return stack.Count == 0;
             if (flow is FlowControl.Branch or FlowControl.Cond_Branch or FlowControl.Return or FlowControl.Throw)
                 return false;
             if (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt || i.OpCode == OpCodes.Newobj)

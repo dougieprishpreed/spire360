@@ -166,6 +166,11 @@ bool Pack::read_urgent(const PackEntry* e, std::vector<u8>& out) const {
     return e->size == 0 || read_span(e->offset, &out[0], e->size, true);
 }
 
+bool Pack::read_part(const PackEntry* e, u32 at, u32 n, void* buf, bool urgent) const {
+    if (!e || !f_ || at > e->size || n > e->size - at) return false;
+    return n == 0 || read_span(e->offset + at, buf, n, urgent);
+}
+
 bool Pack::read_head(const PackEntry* e, u32 len, std::vector<u8>& out) const {
     if (!e || !f_) return false;
     if (len > e->size) len = e->size;

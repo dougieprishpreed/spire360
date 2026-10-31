@@ -9,8 +9,8 @@
 
 namespace spire {
 
-/* NRewardButton: the background's hsv v. */
-static const float HSV_DEFAULT = 0.9f, HSV_HOVER = 1.1f;
+/* NRewardButton: the background's hsv v (_hsvDown: pressed). */
+static const float HSV_DEFAULT = 0.9f, HSV_HOVER = 1.1f, HSV_DOWN = 0.7f;
 /* StsColors.cream / gold, rewardLabelOutline / rewardLabelGoldOutline. */
 static const unsigned CREAM = 0xFFF6E2, GOLD = 0xEFC851, OUTLINE = 0x225157, GOLD_OUTLINE = 0x4B4511;
 
@@ -220,6 +220,10 @@ std::string RewardsScreen::input(const PadState& pad) {
     if (focus_ != was && lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_hover");
     if ((pad.pressed & PadState::A) && focus_ >= 0 && focus_ < n) {
         if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/clicks/ui_click");
+        /* NRewardButton.OnPress: the button darkens (0.5 s, Expo Out) until
+         * the reward is taken */
+        Row& r = rows_[(size_t)focus_];
+        if (r.background) tweens_.tween(&r.background->shader_params["v"], HSV_DOWN, 0.5f, TRANS_EXPO, EASE_OUT);
         return protocol_action("take_reward", format("\"reward_index\":%d", rows_[(size_t)focus_].index));
     }
     if ((pad.pressed & PadState::Y) && proceed_.enabled()) return protocol_action("proceed");

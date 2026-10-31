@@ -259,6 +259,7 @@ private:
     EmbarkWipe* wipe_;
     DeckPreviews* deck_previews_; /* NRun.GlobalUi's card previews (over the screens) */
     bool event_finishing_;        /* finishing_ waits for the event's room */
+    bool reward_press_;           /* A on the rewards while the last take's answer came */
     /* finishing_ (an event's fight's last steps) then the fade back to
      * the event */
     bool fade_after_finishing_;

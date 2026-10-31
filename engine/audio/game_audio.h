@@ -33,6 +33,9 @@ public:
      * screen opened or closed over it): Progress MerchantEnd or Merchant */
     void merchant_map(bool open);
     void ui(const std::string& path, float volume = 1);
+    /* A sound read ahead of its first play (a debug_audio name or a pack
+     * path; not an event's). */
+    void prefetch(const std::string& path);
     /* Cues run on the clock as ever but nothing is decoded or mixed (a tool
      * sweeping traces: spire_gaps --fast). */
     void set_dry(bool dry) { dry_ = dry; }

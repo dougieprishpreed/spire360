@@ -119,13 +119,14 @@ struct AudioEvents::Impl {
         std::vector<BusStep> chain;
         bool chain_ready;
         bool untriggered; /* its conditions stopped holding (untrigger) */
+        bool locked;      /* in a timeline's box (or under one): its long sounds keep to it */
         Player(Impl* s, Bank* b, const Json* d, bool e, Player* ctx, const std::string& k)
             : system(s), bank(b), def(d), context(ctx), event(e), started(false), done(false), first(true), releasing(false),
               voice(0), age(0), pos(0), delay(0), cutoff(-1), release_at(0), release_time(0), next_spawn(0), volume(1), pitch(1),
               gain_db(0), pitch_st(0), bridge_start(0), fade_in(0), bridge(NULL), fade_curves(NULL), fade_owner(NULL),
               fade_start(0), source_timeline(-1), destination_started(false), transition_release(false),
               repeats(0), selected(-1), spawn_count(0), key(k), kind(K_OTHER), def_props(false), end_at(0),
-              chain_ready(false), untriggered(false) {
+              chain_ready(false), untriggered(false), locked(false) {
             ++bank->references;
             if (event) {
                 end_at = (*def)["end"].num();
@@ -322,7 +323,9 @@ struct AudioEvents::Impl {
         }
         void add_instrument(const std::string& id, int box, double offset = 0) {
             Player* p = instrument(id, offset);
-            if (p) children.push_back(Child(p, box, id));
+            if (!p) return;
+            p->locked = locked || (event && box >= 0);
+            children.push_back(Child(p, box, id));
         }
         /* Untriggered: an envelope's release, else a loop plays out (a
          * sound to its end, a multi's or a scatterer's last one) */
@@ -526,7 +529,7 @@ struct AudioEvents::Impl {
                     double offset = (*def)["offset"].num() + (*def)["seek"].num() + pos;
                     u32 frame = (u32)(offset * sample["rate"].num() + sample["frames"].num() * (*def)["seek_percent"].num() / 100);
                     voice = system->mixer.play(sample["path"].str(), gain, ratio, (u32)sample["loop_start"].num(),
-                            (u32)sample["loop_end"].num(), repeats, frame);
+                            (u32)sample["loop_end"].num(), repeats, frame, locked);
                     if (!voice) {
                         ++system->errors;
                         done = true;
@@ -549,6 +552,7 @@ struct AudioEvents::Impl {
                     if (e->is_null()) { b = system->bank_for(id); e = b ? &b->doc["events"].get(id) : NULL; }
                     if (e && !e->is_null()) {
                         Player* p = new Player(system, b, e, true, this, id);
+                        p->locked = locked;
                         const Json& params = (*def)["params"];
                         for (size_t i = 0; i < params.keys().size(); ++i) p->values[params.keys()[i]] = params.get(params.keys()[i]).f();
                         children.push_back(Child(p, -1, id));

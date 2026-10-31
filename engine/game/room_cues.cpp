@@ -149,6 +149,26 @@ void heal_vfx(SceneLibrary* lib, Node* screen, const Json& player, double amount
     add_under_bar(screen, fx);
 }
 
+/* NAncientEventLayout.PlayHealVfxAfterFadeIn: the heal 0.2 s after the
+ * layout's first show (on the screen's root). */
+class HealLater : public ScriptBehavior {
+public:
+    HealLater(SceneLibrary* lib, const Json& player, double amount) : lib_(lib), player_(player), amount_(amount), left_(0.2) {}
+    virtual void process(Node* n, double dt) {
+        if (n->queued_for_deletion()) return;
+        left_ -= dt;
+        if (left_ > 0) return;
+        if (n->parent) heal_vfx(lib_, n->parent, player_, amount_);
+        n->queue_free();
+    }
+
+private:
+    SceneLibrary* lib_;
+    Json player_;
+    double amount_;
+    double left_;
+};
+
 } /* namespace */
 
 bool add_room_vfx(SceneLibrary* lib, Node* screen, const std::string& call) {
@@ -266,6 +286,13 @@ void play_room_cues(SceneLibrary* lib, Node* screen, const Json& d) {
     const Json& steps = d["steps"];
     /* an event's combat room plays its own cues (EventScreen) */
     bool room = d["layout"].str() == "Combat";
+    /* an ancient's heal as its room opens (the logic sends it once) */
+    if (d["ancient"]["healed"].num() >= 1) {
+        Node* later = SceneLibrary::create_node("Node");
+        later->name = "HealLater";
+        later->behavior = new HealLater(lib, d["player"], d["ancient"]["healed"].num());
+        screen->add_child(later);
+    }
     NoCreatures anchors;
     double at = 0; /* the steps' time: their waits */
     for (size_t i = 0; i < steps.size(); ++i)

@@ -11,6 +11,151 @@ and 2026-10-20 (coverage and screen-texture checkpoint below; alpha push
 parts 2 and 3 above it); since then each session adds its section at the
 top (the newest first).
 
+## The seventh xSDK hardware run (2026-10-30): the sounds' waits, the reports, the sweep
+
+The run (work/rp104, build 35f8b8e): the Regent run from floor 19 (a
+continued save) to its death at the Test Subject (floor 48). The log's sound
+lines: 13 frames of silence in all (the mix kept up), but sounds waited
+200-900 ms to start and 17 were dropped (over a second late). The user's
+reports: card sounds late (Falling Star, from floor 23 on), the rest site's
+jingle late and its start cut, abrupt sound at rest sites and into floor 29,
+crackle during a shuffle, two quick golds not overlapping, The Insatiable's
+death silent and its music started again as the first reward was taken, a
+music layer restarting (The Insatiable, the Test Subject), the death music
+late; the Test Subject invisible while Intangible (shot 01); no heal effect
+at the act's Ancient; Pael's Tooth's card shown twice; End Turn not from the
+potion or relic row; Lucky Fysh without a flash; the merchant in the black
+after the Crystal Sphere. Questions: the reward buttons' press, a coin
+effect for gold, Toxic's sound, Omnislice, Bolas and the hand's focus, the
+fight music on the rewards. The user floated a loading screen for the
+moments a pause cannot be avoided.
+
+The sound (audio/decoder.cpp, mixer.cpp, events.cpp):
+
+- Where the waits came from: the loader shared hardware thread 5 with a
+  particle worker, the textures' reads and the answers' parse, threads of
+  one priority taking 20 ms turns (xSDK's GUIDE); and it decoded each short
+  sound whole before its voices could start: Vorbis costs the console about
+  35 ms a second of sound (the act's music alone 1.4 ms of each 5.3 ms
+  mix), a 2 s effect 70 ms, the rest site's jingle more, and a card's
+  effects waited on each other's. The 32 MB kept churned (2,087 reads for
+  4,324 voices over the session on the PC).
+- The loader runs on hardware thread 4 under the mix (lower_priority: the
+  feeder runs at +1, ahead of it). A short sound is decoded in parts of 8192
+  frames: its voices start on the first, the rest decoded ahead of them, the
+  part of a sound 120 ms from running out first; a voice that catches up
+  waits, silent, where it is (AudioDecoder::waiting). A long sound is read
+  in pieces of 256 KB (Pack::read_part), the short ones read between them.
+- A stream's decoder is opened on the loader at the frame its voice starts
+  from (OpenJob: at, follow): a timeline's stem from where it is by then
+  less 0.1 s, the mix decoding up to it (AudioDecoder::seek decodes up to
+  half a second ahead): no seek in the mix (three stems starting at once
+  took a mix 45 ms at the rest site). Only a timeline's long sounds keep to
+  it (events: Player::locked, any box); the rest site's jingle (a 1.2 MB
+  WAV, "big") lost its start as it skipped ahead; it starts late but whole.
+- The console's log: the slowest load each 600 frames with its time for the
+  loader and reading, and its name; "memory: N MB free, the textures'
+  budget, the kept sounds'" as the valve below moves.
+
+The reports:
+
+- The boss's track started again on the rewards: music() started the same
+  track again once it had ended (The Insatiable's ends after its victory).
+  The same track goes on; one that never started is tried again; ambience
+  the same.
+- The Test Subject invisible while Intangible: the group's rect came from
+  its children's, and a skeleton had none (an empty group drew nothing).
+  CanvasGroup::item_rect takes a SpineSprite's bounds.
+- The Ancient's heal: NAncientEventLayout.InitializeVisuals plays
+  PlayerFullscreenHealVfx 0.2 s after the layout shows when the ancient
+  healed (HealedAmount). The logic sends ancient.healed with its first page;
+  play_room_cues plays it (HealLater).
+- Pael's Tooth's card twice: GameClient::show plays a response's deck
+  changes (DeckPreviews::play) and the fight played the same cue as its
+  steps went; the fight plays only those to its piles (pile set).
+- Lucky Fysh's flash: the rewards after a fight are in the fight's room, and
+  play_room_cues skipped them, though no fight plays their cues: only the
+  fight's own decisions (combat_play, card_select) skip them now.
+- End Turn (Y) from the potion slots or the relic row: they give the focus
+  back and the fight takes the press (PotionMenu::browsing).
+- The hand's focus: NPlayerHand follows the focused card, not an index
+  (focus_through_turn: a card that leaves gives it to the one at its index,
+  an emptied hand to the first card added). Bolas, back before the draw, is
+  focused as the game does; a retained card keeps it (it was the last
+  turn's index).
+- The reward buttons: NRewardButton.OnPress darkens the button (v 0.7, 0.5 s)
+  until it is taken; a press while the last take's answer comes is taken
+  after it (GameClient::reward_press_: the second of two quick golds was
+  lost).
+- Screen shakes under 11 damage were never recorded: the patcher's
+  IsStatementUiChain saw NGame.Instance?.ScreenShake(...) as a statement
+  only in the last branch of CreatureCmd.Damage's if / else-if (the others
+  end with a jump past the rest, to the join their null case takes): 125
+  shakes in the session's replay, 289 now. Every ?. statement in such a
+  chain is recorded now (NCombatRoom.Create, NRun.SetCurrentRoom new too;
+  the client has no use for them).
+- The merchant in the black: the console's memory was down to 27 MB after
+  the Crystal Sphere, the merchant's backdrop had no room in the GPU's
+  memory and was read again (535 ms) after the idle textures went. A
+  texture read but not made is kept for its retry (Canvas::no_room_data_),
+  and a new room stays black while one waits (RoomTransition).
+- The loading screen (the user's idea, for the pauses that cannot be
+  avoided): a room's reveal waits, black (1.5 s at most), until it has
+  drawn a frame in under 70 ms with nothing waiting for memory, and while
+  the logic's preload is read (only at a run's first room, Continue
+  included, and an act's: the first fight after Continue hitched as its
+  intents' and cards' atlases were read), the warm-up's share 40 ms a frame
+  meanwhile. No screen of our own.
+- The rest's jingle: the three (1.2 MB WAVs, the client's pick) and the
+  blanket are read as the rest site opens (GameAudio::prefetch).
+- The memory valve (xsdk main): free memory fell to 13 MB at the act 3
+  boss (the heap held 123 MB, parsed scenes 34 MB, never let go): under 28
+  MB the textures' budget is 72 MB and the kept sounds' 24 MB, under 18 MB
+  60 and 16; back over 44 MB free (acts 2 and 3 sat at 35-45 MB: a higher
+  mark would have cut the textures most of the time).
+- Not changed (the game's): Toxic's damage is the player's own (dealer: the
+  card's owner): no hurt animation, no sound; Omnislice deals its damage
+  with CreatureCmd.Damage, no attack of its own (its hit spark, number,
+  the enemy's death); a gold reward has no coin effect (the counter counts,
+  "+N"); the act's track plays on through the rewards (Progress 7 its
+  post-fight mix); the act track's jumps have no fades in the banks (the
+  rest site's, floor 29's), its stems nested events that play on across
+  them.
+- Not reproduced here: a music layer restarting (likely the late starts of
+  stems and the churn: both changed); the crackle in a shuffle (13 frames
+  of silence in the session, at decisions 86, 118, 158).
+
+The sweep (the last four runs' causes, rp101-rp104):
+
+- UI calls the logic records: the patcher's chains (above); the Nodes
+  methods with sounds of their own that the logic calls (StartDeathAnim,
+  FoulPotionThrown, ShowScreen, the map's, the card flights', the Kin
+  Priest's): all played by the client.
+- Effects the game's screens start from the model (rooms, layouts, screens):
+  only NAncientEventLayout's heal was missing.
+- Cues played twice or by no screen: deck_card (fixed); the others each have
+  one handler.
+- Index for identity: the rewards' focus is the game's (the button now at
+  the index); the hand's fixed.
+- Threads at one priority on a hardware thread: the loader moved; the rest
+  on 5 are short (the parse, the writer) or wait on the drive.
+- A same-track restart: music and ambience.
+
+Checks (work/check104.sh): seeded traces (traces/new104 against base6): the
+same 3 differences (the transform_options base6 lacks); 35 scenarios ok;
+spire_check 2357 responses, 0 failures (78 while the reveal's hold counted
+the clock: the checker runs frames faster and draws nothing, so its
+warm-up never ends; it counts dt now), audio 21962 voices, 10 absent event
+calls (as before), 0 decoder failures; the audio fixtures, the music and
+the events 0 failures; PC build without warnings. spire_play over the
+session (work/rp104): 4,321 voices, none not started; captures of Pael's
+Tooth's card (one), Lucky Fysh's flash, the hand at Bolas's turn (the
+retained Astral Pulse focused), Nonupeipe's heal, the Test Subject seen
+through while Intangible; Y from the potion row ends the turn (a pad run).
+The console's logic (work/logic104w.cmd, patch to native): the 15 seeded
+runs 14 identical to the JIT's (the other a monster's random skin), 35
+scenarios ok, no trap or [ERROR].
+
 ## The sixth xSDK hardware run (2026-10-30): the sound's stalls, the reports
 
 The run (work/rp103, build d3e49de): the Necrobinder run's end (floor 45 to

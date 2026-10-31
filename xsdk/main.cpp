@@ -476,8 +476,11 @@ int main() {
     lib->set_audio(&audio);
     if (!audio.open_output()) logf("audio: xsdk's audio output unavailable");
     /* The mix on hardware thread 4 (core 2): the frame loop keeps core 0,
-     * the logic core 1; the sounds read on 5 */
-    else if (!audio.start_thread(4, 5)) logf("audio: no audio thread (mixed in the frame loop)");
+     * the logic core 1. The sounds read and decoded on 4 as well, under the
+     * mix (the feeder runs at +1, ahead of it): on 5 the loader took 20 ms
+     * turns with a particle worker, the textures' reads and the answers'
+     * parse, and the effects of a card waited up to a second (rp104). */
+    else if (!audio.start_thread(4, 4)) logf("audio: no audio thread (mixed in the frame loop)");
     Thread watchdog;
     watchdog_open();
     watchdog.start(watchdog_main, NULL, 5);
@@ -527,6 +530,7 @@ int main() {
     std::vector<HeldLoad> frame_loads;
     bool low_logged = false, logic_ended = false;
     unsigned silent_logged = 0;
+    int pressure = 0; /* the memory valve's level (0 none) */
     double silent_at = -1e9;
     for (;;) {
         /* Any controller plays: on a console the pad can be signed in to
@@ -669,6 +673,22 @@ int main() {
         if (work > 16.7) ++slow;
         /* the output played silence (the mix behind): when, at once, at
          * most once a second */
+        /* The memory valve: late in a run the console's memory all but
+         * gone (13 MB free at the act 3 boss, the merchant's backdrop with
+         * no room for it: rp104), the textures' and the kept sounds' budgets
+         * shrink and their idle ones go; back as it recovers. */
+        if (g_frame % 60 == 0) {
+            unsigned free_mb = free_memory_mb();
+            int level = free_mb < 18 ? 2 : free_mb < 28 ? 1 : 0;
+            if (level < pressure && free_mb < 44) level = pressure;
+            if (level != pressure) {
+                pressure = level;
+                int textures = level == 2 ? 60 : level == 1 ? 72 : 80, sounds = level == 2 ? 16 : level == 1 ? 24 : 32;
+                canvas->set_texture_budget((size_t)textures * 1024 * 1024);
+                AudioDecoder::set_budget((size_t)sounds * 1024 * 1024);
+                logf("memory: %u MB free, the textures' budget %d MB, the kept sounds' %d MB", free_mb, textures, sounds);
+            }
+        }
         AudioOutput::Stats as;
         if (audio.output_stats(&as) && as.silent > silent_logged && f3 - silent_at > 1000) {
             logf("audio: %u frames of silence (the mix behind) by frame %u, decision %d", as.silent - silent_logged,
@@ -684,10 +704,10 @@ int main() {
                  acc_update / frames, acc_ms / frames, acc_draw / frames, acc_present / frames, renderer->draw_calls(),
                  worst, slow, frames, paced30, free_mb, spire_logic_memory_kb() / 1024);
             Canvas::TextureStats ts = canvas->take_texture_stats();
-            logf("textures: %u held, %.1f MB (peak %.1f MB of 80), %u created, %u evicted, "
+            logf("textures: %u held, %.1f MB (peak %.1f MB of %.0f), %u created, %u evicted, "
                  "%u frames over the budget (%u by their own)",
                  (unsigned)canvas->texture_count(), canvas->texture_bytes() / 1048576.0, ts.peak_bytes / 1048576.0,
-                 ts.created, ts.evicted, ts.over_frames, ts.starved);
+                 canvas->texture_budget() / 1048576.0, ts.created, ts.evicted, ts.over_frames, ts.starved);
             logf("process + layout: %.2f ms process, %.2f ms layout", acc_process / frames, acc_layout / frames);
             double mix_worst, mix_average;
             int mixes;
@@ -695,9 +715,12 @@ int main() {
             AudioDecoder::LoadStats loads = AudioDecoder::load_stats();
             if (audio.output_stats(&as))
                 logf("audio: %u frames of silence in all, fewest queued %u of %u; mix %.2f ms a frame of 5.3 (worst %.2f, "
-                     "%d frames); %d sounds read (%.1f MB, the longest waited %.0f ms), %.1f MB kept",
+                     "%d frames); %d sounds read (%.1f MB, the longest waited %.0f ms: %.0f for the loader, %.0f "
+                     "reading, %s), %.1f MB kept",
                      as.silent, as.fewest_queued, as.queue, mix_average, mix_worst, mixes, loads.loads,
-                     loads.bytes / 1048576.0, loads.longest_ms, loads.kept / 1048576.0);
+                     loads.bytes / 1048576.0, loads.longest_ms, loads.longest_queue_ms, loads.longest_read_ms,
+                     loads.longest && *loads.longest ? loads.longest + (strrchr(loads.longest, '/') ? strrchr(loads.longest, '/') - loads.longest + 1 : 0) : "-",
+                     loads.kept / 1048576.0);
             SceneLibrary::MemoryStats ms = lib->memory_stats();
             logf("heap: %.1f MB in use of %.1f MB held, big blocks %.1f MB; parsed scenes %.1f MB (%u files), "
                  "skeletons %.1f MB (%u, %u in use, %u let go), particle preprocesses kept %.1f MB",

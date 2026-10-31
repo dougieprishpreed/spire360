@@ -11,9 +11,12 @@ public:
     explicit AudioMixer(const Pack* pack, u32 rate = 48000);
     ~AudioMixer();
     /* loop_count: -1 forever, 0 once, >0 additional loop-region repeats.
-     * After the last repeat, playback continues through the sample's tail. */
+     * After the last repeat, playback continues through the sample's tail.
+     * follow: a timeline's (a music stem in its box), which, its long sound
+     * still being read, starts from where it would be by then; any other
+     * starts late but whole. */
     u32 play(const std::string& path, float volume = 1, float pitch = 1,
-             u32 loop_start = 0, u32 loop_end = 0, int loop_count = 0, u32 offset = 0);
+             u32 loop_start = 0, u32 loop_end = 0, int loop_count = 0, u32 offset = 0, bool follow = false);
     void stop(u32 voice, double fade = 0);
     /* No more loops: the voice plays to the end of its sound */
     void finish(u32 voice);

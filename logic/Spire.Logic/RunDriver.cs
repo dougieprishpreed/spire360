@@ -3155,6 +3155,9 @@ public partial class RunDriver
                 // ancient talks only while its first page is open.
                 if (!_ancientDialogueShown.Contains(eventRoom))
                 {
+                    // NAncientEventLayout.InitializeVisuals: the heal's
+                    // fullscreen effect as the layout first shows
+                    if (ancientModel.HealedAmount > 0) ancient["healed"] = ancientModel.HealedAmount;
                     var lines = new List<Dictionary<string, object?>>();
                     var dialogue = ancientModel.DialogueSet.GetValidDialogues(character.Id, 0, 0,
                         !ancientModel.AnyCharacterDialogueBlacklist.Contains(character)).FirstOrDefault();

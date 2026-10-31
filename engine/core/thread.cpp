@@ -83,6 +83,8 @@ void Thread::join() {
 
 void sleep_ms(int ms) { Sleep((DWORD)ms); }
 
+void lower_priority() {}
+
 double clock_ms() {
     LARGE_INTEGER t, f;
     QueryPerformanceCounter(&t);
@@ -244,6 +246,12 @@ void Thread::join() {
     pthread_join(s->thread, 0);
     delete s;
     impl_ = 0;
+}
+
+void lower_priority() {
+#if defined(__XSDK__)
+    xsdk_thread_set_priority(XSDK_CURRENT_THREAD, -1, NULL);
+#endif
 }
 
 void sleep_ms(int ms) {

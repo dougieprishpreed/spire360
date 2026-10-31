@@ -18,13 +18,13 @@ struct AudioMixer::Voice {
     bool next_valid, alive, stop_after_ramp;
     /* its sound still being read (AudioDecoder::pending): where and how it
      * was asked to start, the output frames since */
-    bool pending;
+    bool pending, follow;
     u32 offset, start, end;
     int loop_count;
     double waited;
     Voice() : buffer(4096), id(0), cursor(0), loop_start(0), loop_end(0), loops(0), used(0), count(0),
         left(0), right(0), next_left(0), next_right(0), gain(1), gain_step(0), pitch(1), gain_frames(0),
-        fraction(0), next_valid(false), alive(true), stop_after_ramp(false), pending(false), offset(0), start(0),
+        fraction(0), next_valid(false), alive(true), stop_after_ramp(false), pending(false), follow(false), offset(0), start(0),
         end(0), loop_count(0), waited(0) {}
     /* From frame `at` of its open sound, looping start..end loop_count
      * times; false and why if it cannot. */
@@ -55,6 +55,11 @@ struct AudioMixer::Voice {
             if (frames > 2048) frames = 2048;
             count = decoder.read(&buffer[0], frames);
             used = 0;
+            if (!count && decoder.waiting()) {
+                /* its samples not decoded yet: silence, the same frame next */
+                l = r = 0;
+                return true;
+            }
             if (!count) {
                 /* a read that failed well before the end (an Ogg's length
                  * may count a few frames more than it decodes): the voice
@@ -76,7 +81,8 @@ AudioMixer::AudioMixer(const Pack* pack, u32 rate)
     : pack_(pack), rate_(rate ? rate : 48000), next_id_(1), paused_(false), failure_("") {}
 AudioMixer::~AudioMixer() { stop_all(); }
 
-u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start, u32 end, int loops, u32 offset) {
+u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start, u32 end, int loops, u32 offset,
+                     bool follow) {
     failure_ = "";
     if (!pack_) return 0;
     if (voices_.size() >= 64) {
@@ -99,7 +105,8 @@ u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start
     v->loop_count = loops;
     v->gain = maxf(gain, 0);
     v->pitch = clampf(ratio, 0.125f, 8);
-    if (!v->decoder.open(*pack_, path)) failure_ = "cannot open";
+    v->follow = follow;
+    if (!v->decoder.open(*pack_, path, offset, follow)) failure_ = "cannot open";
     else if (v->decoder.pending()) v->pending = true;
     else v->begin(offset, &failure_);
     if (*failure_) {
@@ -178,8 +185,10 @@ void AudioMixer::stop_all(double seconds) {
     }
 }
 /* A voice whose sound was being read: started once it is (false: not this
- * time). A stream (music, ambience) keeps to its timeline, from where it
- * would be by now; a sound effect starts late, but not a second late. */
+ * time). A timeline's long sound (a music stem) keeps to it, from where it
+ * would be by now (its decoder opened short of that: no seek here); any
+ * other starts late but whole (the rest site's jingle, a 1.2 MB WAV, lost
+ * its start), a short one not a second late. */
 bool AudioMixer::start_pending(Voice& v, int frames) {
     if (v.stop_after_ramp) {
         v.alive = false;
@@ -201,7 +210,7 @@ bool AudioMixer::start_pending(Voice& v, int frames) {
     }
     v.pending = false;
     double at = v.offset;
-    if (v.decoder.big()) {
+    if (v.follow && v.decoder.big()) {
         at += v.waited * v.decoder.rate() * v.pitch / rate_;
         u32 e = v.loop_count != 0 && v.end ? v.end : v.decoder.frames();
         while (v.loop_count != 0 && at >= e && e > v.start) {

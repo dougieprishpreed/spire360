@@ -81,6 +81,13 @@ void Canvas::end_frame() {
         dumping_ = false;
     }
     if (texture_bytes_ > stats_.peak_bytes) stats_.peak_bytes = texture_bytes_;
+    /* a texture kept for its retry that no draw asked for again goes (2 s on) */
+    for (std::map<std::string, TextureData>::iterator k = no_room_data_.begin(); k != no_room_data_.end();) {
+        std::map<std::string, CachedTexture>::iterator e = textures_.find(k->first);
+        if (e == textures_.end() || e->second.texture || frame_ > e->second.retry_at + 120) no_room_data_.erase(k++);
+        else ++k;
+    }
+    waiting_textures_ = (int)no_room_data_.size();
     /* Over the budget the least recently drawn go first, but never one this
      * frame drew: a frame that needs more than the budget keeps it all
      * (evicting what was just drawn made it load again each frame, and the
@@ -324,21 +331,49 @@ Texture* Canvas::gpu_texture(ImageTextureRes* img) {
  * was all but gone after a long session): read again a few frames on, not
  * every frame (the main menu's top layer, 3 MB, was read 25 times in 4 s
  * after a run's save and quit). */
-void Canvas::no_room(const std::string& key, const std::string& path) {
+int Canvas::waiting_textures_ = 0;
+
+void Canvas::no_room(const std::string& key, const std::string& path, TextureData& data) {
     CachedTexture& e = textures_[key];
     e = CachedTexture();
     e.retry_at = frame_ + 4;
+    TextureData& kept = no_room_data_[key];
+    kept.format = data.format;
+    kept.flags = data.flags;
+    kept.width = data.width;
+    kept.height = data.height;
+    kept.orig_width = data.orig_width;
+    kept.orig_height = data.orig_height;
+    kept.levels.swap(data.levels);
+    waiting_textures_ = (int)no_room_data_.size();
     log_warn("texture %s: no room in the GPU's memory; idle textures go, then it is made again", path.c_str());
 }
 
 Texture* Canvas::load_gpu_texture(ImageTextureRes* img, const std::string& key) {
     TextureData td;
     double started = load_trace_start();
+    std::map<std::string, TextureData>::iterator kept = no_room_data_.find(key);
+    if (kept != no_room_data_.end()) {
+        /* read before, made now there is room */
+        td = TextureData();
+        td.format = kept->second.format;
+        td.flags = kept->second.flags;
+        td.width = kept->second.width;
+        td.height = kept->second.height;
+        td.orig_width = kept->second.orig_width;
+        td.orig_height = kept->second.orig_height;
+        td.levels.swap(kept->second.levels);
+        no_room_data_.erase(kept);
+        waiting_textures_ = (int)no_room_data_.size();
+        Texture* t = cache_texture(key, td);
+        if (!t) no_room(key, img->path, td);
+        return t;
+    }
     if (img->derived) {
         if (derive(*img->derived, td)) {
             Texture* t = cache_texture(key, td);
             load_traced("texture", img->path, started);
-            if (!t) no_room(key, img->path);
+            if (!t) no_room(key, img->path, td);
             return t;
         }
         log_warn("texture %s: could not be made", img->path.c_str());
@@ -350,7 +385,7 @@ Texture* Canvas::load_gpu_texture(ImageTextureRes* img, const std::string& key) 
     if (ahead || (pack_ && pack_->read_texture(img->path.c_str(), td))) {
         Texture* t = cache_texture(key, td);
         load_traced(ahead ? "texture (read ahead)" : "texture", img->path, started);
-        if (!t) no_room(key, img->path);
+        if (!t) no_room(key, img->path, td);
         return t;
     }
     log_warn("texture %s: not in the pack", img->path.c_str());

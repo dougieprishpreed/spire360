@@ -3031,8 +3031,12 @@ bool CombatScreen::apply_state(const Json& ch) {
     }
     if (type == "deck_card") {
         /* CardCmd.PreviewCardPileAdd in the fight (a status card an enemy
-         * gives): shown in NCombatRoom.Ui's preview row, then to its pile */
-        if (DeckPreviews::current()) DeckPreviews::current()->play_cue(ch, player_.data["character"].str());
+         * gives): shown in NCombatRoom.Ui's preview row, then to its pile.
+         * One to the deck (Pael's Tooth's card as the fight ends) the
+         * client's previews showed as the response came (GameClient::show):
+         * it was two cards side by side. */
+        if (ch["pile"].is_string() && DeckPreviews::current())
+            DeckPreviews::current()->play_cue(ch, player_.data["character"].str());
         return true;
     }
     if (type == "orb_activate") { activate_orb(ch); return true; }

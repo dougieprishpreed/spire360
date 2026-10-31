@@ -25,6 +25,7 @@ public:
     void begin_frame();
     void end_frame();
     void set_texture_budget(size_t bytes) { texture_budget_ = bytes; }
+    size_t texture_budget() const { return texture_budget_; }
     size_t texture_bytes() const { return texture_bytes_; }
     size_t texture_count() const;
     /* The cache's traffic since the last call (created, evicted, the
@@ -134,6 +135,9 @@ public:
      * b, offset). */
     static void hsv_matrix(float h, float s, float v, float out[12]);
     Renderer* renderer() const { return r_; }
+    /* Textures a screen draws that wait for room in the GPU's memory (a new
+     * room holds its fade-in while one does). */
+    static bool textures_waiting() { return waiting_textures_ > 0; }
     long draw_calls() const { return calls_; }
     /* Count the draws without sending them (does an item draw anything?). */
     void set_count_only(bool on) { count_only_ = on; }
@@ -195,7 +199,12 @@ private:
     bool wind_on_;
     float wind_, wind_height_;
     Texture* load_gpu_texture(ImageTextureRes* img, const std::string& key);
-    void no_room(const std::string& key, const std::string& path);
+    void no_room(const std::string& key, const std::string& path, TextureData& data);
+    /* textures read that the GPU's memory had no room for, kept for the
+     * retry (read again, the merchant's room waited 0.5 s more on its
+     * floor's) */
+    std::map<std::string, TextureData> no_room_data_;
+    static int waiting_textures_;
     void put_triangles(Texture* tex, const std::vector<Vec2>& v, const std::vector<Vec2>* uv,
                        const std::vector<Color>* colors, const std::vector<int>& idx, int flags);
     Vec2 sway(const Vec2& p, const Vec2& uv) const {
