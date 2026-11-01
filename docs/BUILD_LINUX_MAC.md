@@ -20,6 +20,11 @@ installer in the [README](../README.md) instead.
   Fusion), or Lima or OrbStack. On Apple Silicon, give it x86-64 with Rosetta (OrbStack's and Lima's `--arch x86_64`
   with Rosetta enabled); emulation without Rosetta works but is many times slower. Then follow the Linux steps inside
   it. macOS has not been tested: report what happens in an issue.
+- **Windows without Setup**: the Linux steps work inside a WSL 2 instance of Debian or Ubuntu (`wsl --install -d
+  Debian`, or one already there). The game's folder is under `/mnt/c/...` (for Steam's default library,
+  `/mnt/c/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2`); give `--out` a Windows folder such as
+  `/mnt/c/spire360-out` to find the output in Explorer. Keep the build home in Linux's own disk (the default), which
+  is many times quicker than `/mnt/c`.
 - About **20 GB free** for the first build (it ends at about 13 GB, the output folder about 1 GB of it), 8 GB of RAM
   or more, and an internet connection.
 - The game: the Slay the Spire 2 folder holding `SlayTheSpire2.pck`, wherever the user keeps it. Ask the user for it;

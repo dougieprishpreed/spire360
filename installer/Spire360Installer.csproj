@@ -14,7 +14,7 @@
     <AssemblyName>Spire360Setup</AssemblyName>
     <RootNamespace>Spire360Installer</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Product>Spire360 Setup</Product>
     <Description>Builds Spire360 from your copy of Slay the Spire 2</Description>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

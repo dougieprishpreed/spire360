@@ -340,6 +340,20 @@ namespace Spire360Installer
         {
             StartStage("wsl", "Checking WSL");
             var v = await builder.WslVersion();
+            if (v == null && Builder.WslExeExists)
+            {
+                // the WSL built into Windows 10 alone: no --version, no .wsl
+                // images; wsl --update brings the current one
+                FinishStages(false);
+                var r = MessageBox.Show(this, "This PC has the older WSL built into Windows. Spire360 needs the current " +
+                                              "Windows Subsystem for Linux from Microsoft. Update it now? Windows asks for " +
+                                              "permission; your Linux installs stay as they are. Then open this again.",
+                                        "Spire360 Setup", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (r == MessageBoxResult.Yes) builder.UpdateWsl();
+                StatusText.Text = "Update WSL (wsl --update in a terminal, or \"Windows Subsystem for Linux\" in the " +
+                                  "Microsoft Store), then open this again.";
+                return false;
+            }
             if (v == null)
             {
                 FinishStages(false);

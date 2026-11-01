@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Spire360Installer
@@ -129,20 +130,31 @@ namespace Spire360Installer
 
         // ---- WSL and the instance ----
 
-        /// <summary>WSL's version, or null when it isn't installed.</summary>
+        /// <summary>Whether Windows has a wsl.exe at all (the one built into
+        /// Windows 10 too).</summary>
+        public static bool WslExeExists =>
+            File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe"));
+
+        /// <summary>WSL's version, or null when there's none, or only the older
+        /// WSL built into Windows 10, which has no --version (WslExeExists tells
+        /// which). --version's first line names it in Windows' language ("WSL
+        /// version: 2.3.26.0", "Versión de WSL: ...", "WSL 版本： ..."): the version
+        /// is the first number there. When there's none, what it said goes to
+        /// the log.</summary>
         public async Task<Version> WslVersion()
         {
-            string wsl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "wsl.exe");
-            if (!File.Exists(wsl)) return null;
-            string text;
-            try { text = await Capture("wsl.exe", "--version"); }
-            catch { return null; }
-            foreach (var line in text.Split('\n'))
+            if (!WslExeExists) return null;
+            var lines = new List<string>();
+            int rc;
+            try { rc = await Exec("wsl.exe", "--version", l => { if (l.Trim().Length > 0) lines.Add(l.Trim()); }, quiet: true); }
+            catch (Exception e)
             {
-                int colon = line.IndexOf(':');
-                if (colon < 0 || !line.StartsWith("WSL")) continue;
-                if (Version.TryParse(line.Substring(colon + 1).Trim(), out var v)) return v;
+                Log("wsl --version: " + e.Message);
+                return null;
             }
+            var m = Regex.Match(lines.FirstOrDefault() ?? "", @"\d+(\.\d+){1,3}");
+            if (rc == 0 && m.Success && Version.TryParse(m.Value, out var v)) return v;
+            Log($"wsl --version ({rc}): " + string.Join(" | ", lines.Take(3)));
             return null;
         }
 
@@ -150,6 +162,13 @@ namespace Spire360Installer
         public void InstallWsl()
         {
             Process.Start(new ProcessStartInfo("wsl.exe", "--install --no-distribution") { UseShellExecute = true, Verb = "runas" });
+        }
+
+        /// <summary>wsl --update, as administrator: the WSL built into Windows 10
+        /// replaced by the current one (the installed Linux instances stay).</summary>
+        public void UpdateWsl()
+        {
+            Process.Start(new ProcessStartInfo("wsl.exe", "--update") { UseShellExecute = true, Verb = "runas" });
         }
 
         public async Task<bool> DistroExists()
