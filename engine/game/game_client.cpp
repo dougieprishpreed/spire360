@@ -497,6 +497,26 @@ void GameClient::end_embark_wipe() {
     transition_->start_in();
 }
 
+/* No embark wipe or room transition hiding the screen: the room's reveal
+ * has begun (its hold for the first frames over) or there is none. The
+ * wipe's black stays while the run's first screen is read (MenuFlow), the
+ * wipe itself done. */
+bool GameClient::room_showing() const {
+    if (wipe_) return false;
+    return !transition_ || transition_->phase == 0 || (transition_->phase == 2 && transition_->elapsed > 0);
+}
+
+/* A decision's step sounds, now or at its room's reveal. */
+void GameClient::play_step_sounds(const Json& steps) {
+    if (!lib_->audio() || steps.size() == 0) return;
+    if (room_showing() && held_sounds_.is_null()) {
+        lib_->audio()->steps(steps);
+        return;
+    }
+    if (held_sounds_.is_null()) held_sounds_ = Json::make_array();
+    for (size_t i = 0; i < steps.size(); ++i) held_sounds_.append(steps[i]);
+}
+
 void GameClient::start_room_transition() {
     if (!transition_) transition_ = new RoomTransition(lib_);
     if (!transition_->parent) tree_->root()->add_child(transition_);
@@ -521,6 +541,10 @@ void GameClient::phase(const char* what) {
 }
 
 void GameClient::update(const PadState& pad) {
+    if (!held_sounds_.is_null() && room_showing()) {
+        if (lib_->audio()) lib_->audio()->steps(held_sounds_);
+        held_sounds_ = Json();
+    }
     std::string line;
     g_trace_step = "client: logic answers";
     update_profile_.clear();
@@ -1157,7 +1181,7 @@ void GameClient::show(const Json& d) {
     }
     if (lib_->audio()) {
         lib_->audio()->decision(d);
-        if (kind != "combat_play") lib_->audio()->steps(d["steps"]);
+        if (kind != "combat_play") play_step_sounds(d["steps"]);
         if (kind == "map_select" && prev_kind != "map_select") lib_->audio()->ui("event:/sfx/ui/map/map_open");
     }
     potions_.detach();

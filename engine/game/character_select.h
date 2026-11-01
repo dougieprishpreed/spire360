@@ -39,6 +39,9 @@ public:
     void set_data(const Json& characters);
     /* The profile's characters and ascensions (main_menu answer). */
     void set_progress(const Json& menu);
+    /* What selecting the character `id` shows, for the warm-up: its
+     * portrait scene, its icon and the info panel's starting relic. */
+    static std::vector<std::string> shown_paths(const Json& characters, const std::string& id);
     /* The ascension to embark at. */
     int ascension() const { return ascension_; }
     Action input(const PadState& pad);

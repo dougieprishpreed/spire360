@@ -296,6 +296,12 @@ public:
 private:
     void drop_held_particles();
     Json transition_pending_;
+    /* A new room's step sounds (Neow's heal) until its reveal begins: the
+     * game's start as its room fades in, and ours took longer to build
+     * (rp107: the heal in the black before Neow showed). */
+    Json held_sounds_;
+    bool room_showing() const;
+    void play_step_sounds(const Json& steps);
     std::vector<std::string> queued_; /* sent after the logic's "ready" */
     Json answer_;
     int answers_;

@@ -4681,3 +4681,43 @@ game's code; nothing made from the game is shared). The pieces:
 
 Not tried yet: a run of the installer from an empty folder (the user's
 test), build_all.sh from scratch, macOS.
+
+## The tenth run (2026-10-31, work/rp107): the first hand unseen, Neow's heal in the black, the unlock's stop
+
+A short console test of 034d897 (work/rp107, profile=1): the main menu
+with the Silent's unlock pending, a Silent run to its first fight. The
+user's reports:
+
+- The first fight's first hand was unseen while it was drawn, then stood
+  in the hand at once. CombatScreen::play_steps finds a drawn card in
+  pending_["hand"], the decision the steps lead to; update_decision sets
+  pending_, but a fight's first decision builds the screen fresh
+  (before_steps: an empty hand) and calls play_steps(steps, d) without
+  it, so each draw found nothing and the hand came with the sync. The
+  rp106 "deal's sounds before the cards" was the same. play_steps now
+  sets pending_ from sync_to. Seen on PC (work/cap107.sh: the cards fly
+  from the draw pile one by one, its count going down). The other
+  play_steps callers build their screen from the decision already.
+- Neow's heal sounded in the black before Neow showed: the run's first
+  decision's steps (sfx event:/sfx/heal) played as the decision came, and
+  it comes while the embark's black is up (the wipe done, MenuFlow
+  holding it while the first screen is read). GameClient::
+  play_step_sounds holds a decision's step sounds while room_showing() is
+  false (the wipe node there, or a room transition before its reveal
+  begins) and plays them in update() once it is true.
+- A stop as the Silent was unlocked: frame 1182, 1181 ms, at the unlock's
+  end (select and the info panel back): the relic atlases (188, 141 ms),
+  spectral_bold's pages (162, 128 ms) and the Silent's portrait (139,
+  109 ms), 14 reads. The character select's warm-up queues the portraits
+  after the run's first screen (warm_first), so 1.3 s on the Silent's had
+  not been read. Now the logo's warm-up has the info panel's atlases and
+  pages (kept once read), and when the main_menu answer has a
+  pending_unlock, what that character shows (CharacterSelectScreen::
+  shown_paths: portrait scene, icon, starting relic's sprites, and the
+  unlocked lock) is warmed at once, and again first when the screen opens.
+  On PC (work/menu107.sh, --menu with session_start) all of it is read
+  during the logo; nothing loads at the unlock's end.
+
+Checks: the PC tools build without warnings; the menu monkey (work/
+monkey107b.sh, g107c) matches g107b report for report (the known
+card_reward potion refusal twice).

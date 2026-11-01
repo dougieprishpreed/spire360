@@ -4373,6 +4373,12 @@ void CombatScreen::show_start_banner(bool turn_banner) {
  * impact; VFX, damage numbers and state changes at that impact are parallel.
  * Cmd.Wait supplies the remaining pacing without an extra per-step delay. */
 void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finishing) {
+    /* the cards the steps bring in are looked up in the decision they lead
+     * to: a fight's first turn (its screen built fresh, update_decision
+     * never ran) had none, its draws made nothing and the hand came all at
+     * once with the sync (rp106: the deal's sounds before the cards; rp107:
+     * the cards unseen until they stood in the hand) */
+    if (!sync_to.is_null()) pending_ = sync_to;
     double t = 0;
     if (next_cue_ < cues_.size()) {
         /* NCardPlayQueue: after the actions still playing (not after the

@@ -22,6 +22,20 @@ namespace spire {
 /* the warm-up's share of each frame behind the embark's black (ms) */
 const double MenuFlow::EMBARK_WARM_MS = 40.0;
 
+/* a character's portrait scene on the character select */
+static std::string char_select_bg(const std::string& id) {
+    return "scenes/screens/char_select/char_select_bg_" + lower(id) + ".tscn";
+}
+
+/* what the character the timeline just unlocked shows at its unlock's end
+ * (none without one) */
+static std::vector<std::string> unlock_paths(const Json& characters, const Json& menu) {
+    if (!menu["pending_unlock"].is_string()) return std::vector<std::string>();
+    std::vector<std::string> out = CharacterSelectScreen::shown_paths(characters, menu["pending_unlock"].str());
+    out.push_back("images/packed/character_select/char_select_lock3_unlocked.png");
+    return out;
+}
+
 MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const std::string& version)
     : lib_(lib), tree_(tree), game_(game), version_(version), logo_(NULL), logo_node_(NULL), title_(new TitleScreen(lib)), title_node_(NULL),
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
@@ -58,6 +72,12 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
     first.append(Json::make_string("scenes/screens/character_select_screen.tscn"));
     first.append(Json::make_string("scenes/screens/char_select/char_select_button.tscn"));
     first.append(Json::make_string("scenes/screens/char_select/char_select_bg_ironclad.tscn"));
+    /* the character select's info panel: its starting relic's atlases and
+     * its text's pages (kept once read; the run's top bar uses them too) */
+    first.append(Json::make_string("images/atlases/relic_atlas.png"));
+    first.append(Json::make_string("images/atlases/relic_outline_atlas.png"));
+    first.append(Json::make_string("fonts/spectral_bold.ttf#page0"));
+    first.append(Json::make_string("fonts/spectral_bold.ttf#page1"));
     lib_->warm(first);
     /* The game data loads while the logo plays; the last profile is read
      * as the game does at start-up, before the menu shows. */
@@ -225,6 +245,15 @@ void MenuFlow::handle_answer(const Json& a) {
     if (type == "main_menu") {
         menu_ready_ = true;
         menu_ = a;
+        /* the character the timeline just unlocked: what its unlock's end
+         * shows read while the title shows (its portrait, icon and relic at
+         * once were 1.2 s of reads on the console: rp107) */
+        std::vector<std::string> unlock = unlock_paths(game_->characters(), menu_);
+        if (!unlock.empty()) {
+            Json paths = Json::make_array();
+            for (size_t i = 0; i < unlock.size(); ++i) paths.append(Json::make_string(unlock[i]));
+            lib_->warm(paths);
+        }
         title_->set_menu(menu_);
         chars_->set_progress(menu_);
         if (screen_ == ABANDON) close_screen();
@@ -344,9 +373,11 @@ bool MenuFlow::update(const PadState& in) {
                     Json bgs = Json::make_array();
                     const Json& cs = game_->characters()["characters"];
                     for (size_t i = 0; i < cs.size(); ++i)
-                        bgs.append(Json::make_string("scenes/screens/char_select/char_select_bg_" +
-                                                     lower(cs[i]["id"].str()) + ".tscn"));
+                        bgs.append(Json::make_string(char_select_bg(cs[i]["id"].str())));
                     lib_->warm(bgs);
+                    /* a character just unlocked shows 1.3 s on, at the
+                     * unlock's end: before the run's first screen */
+                    lib_->warm_first(unlock_paths(game_->characters(), menu_));
                     game_->warm_run_start();
                     screen_ = CHARACTERS;
                     chars_->set_progress(menu_);

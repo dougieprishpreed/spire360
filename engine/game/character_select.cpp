@@ -153,6 +153,20 @@ void CharacterSelectScreen::set_progress(const Json& menu) {
             if (buttons_[k].id == menu["pending_unlock"].str()) start_unlock((int)k);
 }
 
+std::vector<std::string> CharacterSelectScreen::shown_paths(const Json& characters, const std::string& id) {
+    std::vector<std::string> out;
+    out.push_back("scenes/screens/char_select/char_select_bg_" + lower(id) + ".tscn");
+    out.push_back("images/packed/character_select/char_select_" + lower(id) + ".png");
+    const Json& cs = characters["characters"];
+    for (size_t i = 0; i < cs.size(); ++i) {
+        if (cs[i]["id"].str() != id || !cs[i]["relic"].is_object()) continue;
+        std::string rid = lower(relic_icon_base(cs[i]["relic"]));
+        out.push_back("images/atlases/relic_atlas.sprites/" + rid + ".tres");
+        out.push_back("images/atlases/relic_outline_atlas.sprites/" + rid + ".tres");
+    }
+    return out;
+}
+
 /* LockForAnimation: the locked icon and the lock (white) over the button
  * raised; the info panel hidden behind the backstop; 0.3 s, then
  * AnimateUnlock. */
