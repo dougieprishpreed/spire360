@@ -87,10 +87,34 @@ namespace Spire360Installer
             if (last != null && last.TryGetValue("source", out var src))
                 StatusText.Text = $"The spire360 folder here was built from source {src}" +
                                   (last.TryGetValue("game_version", out var gv) && gv != null ? $" and game version {gv}." : ".");
+            var checkSetup = CheckSetup();
             if (await builder.DistroExists() && await builder.HasSource())
                 await CheckUpdates(false);
             else
                 UpdateText.Text = "The first build fetches the latest source.";
+            await checkSetup;
+        }
+
+        // ---- Setup's own updates ----
+
+        string setupPage;
+
+        /// <summary>A newer Setup in the repository's Releases: Setup's changes
+        /// come that way (they're no source update to rebuild for).</summary>
+        async Task CheckSetup()
+        {
+            var latest = await builder.LatestSetup();
+            if (latest == null || latest.Value.Item1 <= Builder.SetupVersion) return;
+            setupPage = latest.Value.Item2;
+            SetupNoticeText.Text = $"Setup {latest.Value.Item1} is out (this is {Builder.SetupVersion}): download it from ";
+            SetupNotice.Visibility = Visibility.Visible;
+            AddLog($"Setup {latest.Value.Item1} is in Releases: {setupPage}");
+        }
+
+        void SetupNotice_Click(object sender, RoutedEventArgs e)
+        {
+            if (setupPage != null && setupPage.StartsWith("https://"))
+                Process.Start(new ProcessStartInfo(setupPage) { UseShellExecute = true });
         }
 
         /// <summary>What the window shows from this PC alone (no WSL): the game's
@@ -429,12 +453,18 @@ namespace Spire360Installer
             SetBusy(true);
             try
             {
-                var changes = await builder.PendingChanges();
+                var (changes, other) = await builder.PendingChanges();
                 ChangeList.ItemsSource = changes;
                 updatePending = changes.Count > 0;
                 UpdateText.Text = changes.Count == 0 ? "Your source is the latest."
                                 : $"{changes.Count} change{(changes.Count == 1 ? "" : "s")} since your build:";
+                // Setup's and the docs' changes: nothing to rebuild for (they
+                // come along with the next update that is)
+                if (changes.Count == 0 && other > 0)
+                    UpdateText.Text += $" ({other} later change{(other == 1 ? " is" : "s are")} to Setup or the " +
+                                       "docs only: nothing to rebuild.)";
                 BuildButton.Content = updatePending ? "Update and rebuild" : "Build";
+                if (asked) await CheckSetup();
             }
             catch (Exception ex)
             {

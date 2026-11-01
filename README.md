@@ -62,7 +62,8 @@ Copy the whole `spire360` folder to the console, for example to `Hdd1:\Games\spi
 
 Run **Spire360Setup.exe** again. It lists what has changed since your build; **Update and rebuild** builds the
 latest. Copy the new `spire360` folder over the old one: your saves (`spire\data\user`) and your `spire360.ini`
-are kept.
+are kept. When a newer Setup is out, it says so: download it from [Releases](../../releases) and put it in place of
+the old Spire360Setup.exe (in the same folder, so it keeps your build environment).
 
 To start again from nothing, or to free the space, click **Reset...** in Setup: it removes the build environment
 and everything else Setup made in its folder, and leaves Spire360Setup.exe.

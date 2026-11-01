@@ -141,6 +141,11 @@
           <StackPanel>
             <TextBlock Text="Updates" FontFamily="{StaticResource Ornate}" FontSize="26" Foreground="{StaticResource Gold}"
                        Margin="0,-6,0,0"/>
+            <TextBlock x:Name="SetupNotice" TextWrapping="Wrap" FontSize="13" Foreground="{StaticResource Gold}"
+                       Margin="0,0,0,4" Visibility="Collapsed">
+              <Run x:Name="SetupNoticeText"/>
+              <Hyperlink x:Name="SetupNoticeLink" Foreground="{StaticResource Ink}" Click="SetupNotice_Click">Releases</Hyperlink>
+            </TextBlock>
             <TextBlock x:Name="UpdateText" Text="Not checked yet." TextWrapping="Wrap" FontSize="13"
                        Foreground="{StaticResource Dim}"/>
             <ItemsControl x:Name="ChangeList" Margin="0,6,0,0" MaxHeight="150">

@@ -330,15 +330,64 @@ namespace Spire360Installer
             return commit;
         }
 
-        /// <summary>The commits on the branch since the checkout ("hash  subject").</summary>
-        public async Task<List<string>> PendingChanges()
+        /// <summary>What the build doesn't read: commits touching only these are
+        /// no reason to rebuild (Setup's own changes come as a new Setup in
+        /// Releases).</summary>
+        static readonly string[] NotBuilt = { "installer", "docs", "README.md", "THIRD_PARTY.md", "LICENSE", ".gitignore" };
+
+        /// <summary>The commits on the branch since the checkout that change the
+        /// build ("hash  subject"), and how many others there are (Setup's, the
+        /// docs').</summary>
+        public async Task<(List<string> build, int other)> PendingChanges()
         {
             var list = new List<string>();
+            int all = 0;
+            string exclude = string.Join(" ", NotBuilt.Select(p => Quote(":(exclude)" + p)));
             int rc = await Bash($"git -C {LinuxSource} fetch -q origin {Quote(Branch)}\n" +
-                                $"git -C {LinuxSource} log --format='@@ %h  %s' HEAD..FETCH_HEAD",
-                                l => { if (l.StartsWith("@@ ")) list.Add(l.Substring(3)); });
+                                $"git -C {LinuxSource} log --format='@@ %h  %s' HEAD..FETCH_HEAD -- . {exclude}\n" +
+                                $"echo \"@all $(git -C {LinuxSource} rev-list --count HEAD..FETCH_HEAD)\"",
+                                l =>
+                                {
+                                    if (l.StartsWith("@@ ")) list.Add(l.Substring(3));
+                                    else if (l.StartsWith("@all ")) int.TryParse(l.Substring(5).Trim(), out all);
+                                });
             if (rc != 0) throw new Exception("Couldn't reach the source repository");
-            return list;
+            return (list, Math.Max(0, all - list.Count));
+        }
+
+        /// <summary>The latest Setup in the repository's Releases (its version and
+        /// page), or null when there's none or GitHub can't be reached.</summary>
+        public async Task<(Version, string)?> LatestSetup()
+        {
+            var m = Regex.Match(SourceUrl, @"github\.com[/:]([^/]+)/([^/]+?)(\.git)?/?$");
+            if (!m.Success) return null;
+            try
+            {
+                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                string json;
+                using (var wc = new WebClient())
+                {
+                    wc.Headers[HttpRequestHeader.UserAgent] = "Spire360Setup";
+                    wc.Headers[HttpRequestHeader.Accept] = "application/vnd.github+json";
+                    json = await wc.DownloadStringTaskAsync(
+                        $"https://api.github.com/repos/{m.Groups[1].Value}/{m.Groups[2].Value}/releases/latest");
+                }
+                var r = (Dictionary<string, object>)MiniJson.Parse(json);
+                var tag = Regex.Match(r.TryGetValue("tag_name", out var t) ? t as string ?? "" : "", @"\d+(\.\d+){1,3}");
+                if (!tag.Success || !Version.TryParse(tag.Value, out var v)) return null;
+                return (v, r.TryGetValue("html_url", out var u) ? u as string : null);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>This Setup's version (1.0.1 for 1.0.1.0).</summary>
+        public static Version SetupVersion
+        {
+            get
+            {
+                var v = typeof(Builder).Assembly.GetName().Version;
+                return new Version(v.Major, v.Minor, Math.Max(0, v.Build));
+            }
         }
 
         public Task<int> ApplyChanges() =>
