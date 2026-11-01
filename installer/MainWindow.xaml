@@ -40,24 +40,49 @@
       </Rectangle>
     </StackPanel>
 
-    <!-- the game's folder -->
-    <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
-            CornerRadius="8" Padding="16,12" Margin="0,4,0,12">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="Auto"/>
-        </Grid.ColumnDefinitions>
-        <StackPanel>
-          <TextBlock Text="Your game" FontFamily="{StaticResource Ornate}" FontSize="26" Foreground="{StaticResource Gold}"
-                     Margin="0,-6,0,-4"/>
-          <TextBlock x:Name="GamePath" Text="Choose the Slay the Spire 2 folder (the one holding SlayTheSpire2.pck)"
-                     TextTrimming="CharacterEllipsis" Foreground="{StaticResource Dim}" FontSize="13"/>
-        </StackPanel>
-        <Button Grid.Column="1" x:Name="BrowseButton" Content="Choose folder..." Style="{StaticResource QuietButton}"
-                VerticalAlignment="Center" Click="Browse_Click"/>
-      </Grid>
-    </Border>
+    <!-- the game's folder and the PC's saves -->
+    <Grid Grid.Row="1" Margin="0,4,0,12">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="1.05*"/>
+        <ColumnDefinition Width="14"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+              CornerRadius="8" Padding="16,12">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Margin="0,0,10,0">
+            <TextBlock Text="Your game" FontFamily="{StaticResource Ornate}" FontSize="26" Foreground="{StaticResource Gold}"
+                       Margin="0,-6,0,-4"/>
+            <TextBlock x:Name="GamePath" Text="Choose the Slay the Spire 2 folder (the one holding SlayTheSpire2.pck)"
+                       TextWrapping="Wrap" Foreground="{StaticResource Dim}" FontSize="13"/>
+          </StackPanel>
+          <Button Grid.Column="1" x:Name="BrowseButton" Content="Choose folder..." Style="{StaticResource QuietButton}"
+                  VerticalAlignment="Center" Click="Browse_Click"/>
+        </Grid>
+      </Border>
+      <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+              CornerRadius="8" Padding="16,12">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Margin="0,0,10,0">
+            <TextBlock Text="Your saves" FontFamily="{StaticResource Ornate}" FontSize="26" Foreground="{StaticResource Gold}"
+                       Margin="0,-6,0,-4"/>
+            <TextBlock x:Name="SavesText" Text="Looking for your saves..." TextWrapping="Wrap"
+                       Foreground="{StaticResource Dim}" FontSize="13"/>
+          </StackPanel>
+          <Button Grid.Column="1" x:Name="ImportButton" Content="Import..." Style="{StaticResource QuietButton}"
+                  VerticalAlignment="Center" IsEnabled="False" Click="Import_Click"
+                  ToolTip="Copy your PC progress into the spire360 folder"/>
+        </Grid>
+      </Border>
+    </Grid>
 
     <!-- the stages and the log -->
     <Grid Grid.Row="2">
@@ -152,8 +177,14 @@
         <ColumnDefinition Width="*"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
-      <TextBlock x:Name="SpaceText" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource Dim}"
-                 TextWrapping="Wrap" Margin="0,0,16,0"/>
+      <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+        <CheckBox x:Name="LowCpu" IsChecked="True" Foreground="{StaticResource Ink}" FontSize="13" Margin="0,0,0,4"
+                  Checked="LowCpu_Changed" Unchecked="LowCpu_Changed">
+          <TextBlock x:Name="LowCpuText" TextWrapping="Wrap"
+                     Text="Low CPU use: 2 build threads, so the PC stays usable"/>
+        </CheckBox>
+        <TextBlock x:Name="SpaceText" FontSize="12.5" Foreground="{StaticResource Dim}" TextWrapping="Wrap"/>
+      </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal">
         <Button x:Name="ResetButton" Content="Reset..." Style="{StaticResource QuietButton}" Margin="0,0,10,0"
                 ToolTip="Remove everything Setup made in this folder and start again" Click="Reset_Click"/>

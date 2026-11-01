@@ -68,7 +68,7 @@ The first run takes about an hour, mostly the compiler (stage 3) and the logic (
 packages stage runs `sudo apt-get`: pass `--no-packages` if they're installed already (the list is in
 `stage_packages`). Other options: `--home DIR` puts the toolchain and the work elsewhere (default
 `~/spire360-build`), `--jobs N` sets the compilers and workers run at once (default 2, so the machine stays usable;
-more is quicker if it has the cores and 1 GB of memory for each).
+more is quicker if it has the cores: it keeps to 1 GB of memory for each).
 
 **Success** is the `##spire done` line and, in the output folder:
 

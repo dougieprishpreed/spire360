@@ -328,11 +328,12 @@ namespace Spire360Installer
 
         // ---- the build ----
 
-        /// <summary>build_all.sh for the game's folder into spire360\; its stage
-        /// lines to Stage. 0 when the folder is ready.</summary>
-        public Task<int> Build(string gameDir, bool assetsOnly)
+        /// <summary>build_all.sh for the game's folder into spire360\, jobs
+        /// compilers at once (the script keeps them to what memory holds); its
+        /// stage lines to Stage. 0 when the folder is ready.</summary>
+        public Task<int> Build(string gameDir, bool assetsOnly, int jobs)
         {
-            string args = $"--game {Quote(LinuxPath(gameDir))} --out {Quote(LinuxPath(OutDir))} --home {LinuxHome}";
+            string args = $"--game {Quote(LinuxPath(gameDir))} --out {Quote(LinuxPath(OutDir))} --home {LinuxHome} --jobs {jobs}";
             if (assetsOnly) args += " --assets-only";
             return Bash($"bash {LinuxSource}/tools/install/build_all.sh {args}", l =>
             {

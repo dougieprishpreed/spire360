@@ -33,8 +33,9 @@ multiplayer, custom and daily runs.
 - About **20 GB free** on the PC's drive you build on (the Windows drive holding the Spire360Setup folder, not the
   console's). The Spire360Setup folder ends up at about **14 GB**: the folder for the console, about **1 GB**, and
   the build environment, which you can keep to build future updates (or remove with **Reset...**).
-- An internet connection, and about an hour for the first build. Setup compiles with two CPU threads so the PC stays
-  usable meanwhile; later builds only redo what changed and are much quicker.
+- An internet connection, and about an hour for the first build. With **Low CPU use** ticked (the default) Setup
+  compiles with two CPU threads so the PC stays usable meanwhile; untick it to use every core, which is quicker. Later
+  builds only redo what changed and are much quicker.
 
 ## Building it (Windows)
 
@@ -46,6 +47,11 @@ multiplayer, custom and daily runs.
    offers to install it; restart the PC when it asks, then run Setup again.
 
 When it finishes, the `spire360` folder next to Setup is ready for the console.
+
+To carry on from your progress on PC, click **Import...** under *Your saves* once the build is done: Setup finds the
+game's saves on this PC (choose the account if there's more than one) and copies them into the `spire360` folder.
+Copying that folder to the console then replaces Spire360's saves there. The next build takes the imported saves out
+of the folder again, so copying an update onto the console never puts them back over what you've played since.
 
 Building on Linux or macOS instead: [docs/BUILD_LINUX_MAC.md](docs/BUILD_LINUX_MAC.md).
 

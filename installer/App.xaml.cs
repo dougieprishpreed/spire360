@@ -16,6 +16,7 @@ namespace Spire360Installer
             if (e.Args.Length == 2 && e.Args[0] == "--snapshot")
             {
                 var w = new MainWindow();
+                w.ShowLocal();
                 var size = new Size(w.Width, w.Height);
                 var content = (FrameworkElement)w.Content;
                 w.Content = null;

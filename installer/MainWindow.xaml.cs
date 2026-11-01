@@ -44,7 +44,7 @@ namespace Spire360Installer
     {
         // a first build: the instance, the toolchain while it builds (7 GB,
         // deleted after), .NET's packages, the pack and the logic's objects
-        const double NeedGb = 30;
+        const double NeedGb = 20;
 
         readonly Builder builder;
         readonly ObservableCollection<StageItem> stages = new ObservableCollection<StageItem>();
@@ -53,6 +53,7 @@ namespace Spire360Installer
         StageItem active;
         DateTime activeSince;
         string gameDir;
+        List<PcSaves> pcSaves = new List<PcSaves>();
         bool busy, updatePending;
 
         public MainWindow()
@@ -71,14 +72,17 @@ namespace Spire360Installer
         }
 
         string SettingsPath => Path.Combine(builder.StateDir, "game.txt");
+        string CpuPath => Path.Combine(builder.StateDir, "cpu.txt");
+        // when and from where saves were imported into spire360\spire\data\user
+        string ImportedPath => Path.Combine(builder.StateDir, "saves-imported.txt");
+        string UserDir => Path.Combine(builder.OutDir, "spire", "data", "user");
+        int Jobs => LowCpu.IsChecked == true ? 2 : Environment.ProcessorCount;
 
         async Task Startup()
         {
             try { logFile = new StreamWriter(Path.Combine(builder.StateDir, "setup.log"), true, new UTF8Encoding(false)) { AutoFlush = true }; }
             catch { }
-            gameDir = File.Exists(SettingsPath) ? File.ReadAllText(SettingsPath).Trim() : null;
-            ShowGame();
-            ShowSpace();
+            ShowLocal();
             var last = builder.LastBuild();
             if (last != null && last.TryGetValue("source", out var src))
                 StatusText.Text = $"The spire360 folder here was built from source {src}" +
@@ -87,6 +91,20 @@ namespace Spire360Installer
                 await CheckUpdates(false);
             else
                 UpdateText.Text = "The first build fetches the latest source.";
+        }
+
+        /// <summary>What the window shows from this PC alone (no WSL): the game's
+        /// folder, the free space, the CPU choice, the saves (--snapshot too).</summary>
+        public void ShowLocal()
+        {
+            gameDir = File.Exists(SettingsPath) ? File.ReadAllText(SettingsPath).Trim() : null;
+            ShowGame();
+            ShowSpace();
+            LowCpuText.Text = $"Low CPU use: 2 build threads, so the PC stays usable (off: all {Environment.ProcessorCount})";
+            loadingCpu = true;
+            LowCpu.IsChecked = !File.Exists(CpuPath) || File.ReadAllText(CpuPath).Trim() != "all";
+            loadingCpu = false;
+            ShowSaves();
         }
 
         // ---- the game's folder ----
@@ -130,6 +148,75 @@ namespace Spire360Installer
             SpaceText.Text = $"Free on {drive.Name.TrimEnd('\\')} {free:0} GB. A first build needs about {NeedGb:0} GB here; " +
                              "the finished spire360 folder is about 1 GB.";
             SpaceText.Foreground = (Brush)FindResource(free < NeedGb ? "Ember" : "Dim");
+        }
+
+        // ---- the CPU ----
+
+        bool loadingCpu;
+
+        void LowCpu_Changed(object sender, RoutedEventArgs e)
+        {
+            if (loadingCpu || builder == null) return;
+            try { File.WriteAllText(CpuPath, LowCpu.IsChecked == true ? "low" : "all"); }
+            catch { }
+        }
+
+        // ---- the PC's saves ----
+
+        void ShowSaves()
+        {
+            try { pcSaves = PcSaves.Find(); }
+            catch (Exception ex) { pcSaves = new List<PcSaves>(); AddLog("Couldn't read the saves' folder: " + ex.Message); }
+            bool built = builder.LastBuild() != null;
+            string imported = File.Exists(ImportedPath) && Directory.Exists(UserDir) ? File.ReadAllLines(ImportedPath)[0] : null;
+            if (pcSaves.Count == 0)
+                SavesText.Text = "No Slay the Spire 2 saves on this PC. Spire360 starts with new ones.";
+            else if (imported != null)
+                SavesText.Text = $"Imported into the spire360 folder ({imported}). Copying it to the console replaces the " +
+                                 "console's saves with these; the next build takes them out of the folder again.";
+            else
+                SavesText.Text = (pcSaves.Count == 1 ? $"{pcSaves[0].Name}: {pcSaves[0].Summary}."
+                                                     : $"{pcSaves.Count} accounts with saves on this PC.") +
+                                 (built ? " Import copies them into the spire360 folder." : " Import once the build is done.");
+            ImportButton.IsEnabled = pcSaves.Count > 0 && built && !busy;
+        }
+
+        void Import_Click(object sender, RoutedEventArgs e)
+        {
+            if (busy || pcSaves.Count == 0) return;
+            var pick = SavesDialog.Ask(this, pcSaves);
+            if (pick == null) return;
+            try
+            {
+                string keep = Path.Combine(builder.StateDir, "saves-kept-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+                bool wasImported = File.Exists(ImportedPath);
+                if (Directory.Exists(UserDir) && !wasImported)
+                    AddLog("The saves already in the spire360 folder moved to " + keep);
+                int n = pick.CopyTo(UserDir, wasImported, keep);
+                File.WriteAllLines(ImportedPath, new[] { $"{pick.Name}, {DateTime.Now:d MMM yyyy HH:mm}", pick.Dir });
+                AddLog($"Imported {n} save files from {pick.Dir} into {UserDir}");
+                StatusText.Text = "Your saves are in the spire360 folder: copy it to your console to play on from them.";
+            }
+            catch (Exception ex)
+            {
+                AddLog("Import: " + ex.Message);
+                StatusText.Text = "Couldn't import the saves: " + ex.Message;
+            }
+            ShowSaves();
+        }
+
+        /// <summary>Imported saves leave the spire360 folder with the next build:
+        /// a copy of the new folder onto the console must not put them back over
+        /// what was played since. Returns whether there were some.</summary>
+        bool TakeOutImport()
+        {
+            if (!File.Exists(ImportedPath)) return false;
+            bool had = Directory.Exists(UserDir);
+            if (had) Directory.Delete(UserDir, true);
+            File.Delete(ImportedPath);
+            if (had) AddLog("The imported saves were taken out of the spire360 folder (the console keeps its own); " +
+                            "import them again to replace the console's.");
+            return had;
         }
 
         // ---- the stages ----
@@ -217,7 +304,9 @@ namespace Spire360Installer
             BrowseButton.IsEnabled = !on;
             UpdateButton.IsEnabled = !on;
             ResetButton.IsEnabled = !on;
+            LowCpu.IsEnabled = !on;
             ShowGame();
+            ShowSaves();
         }
 
         // ---- the build ----
@@ -227,8 +316,8 @@ namespace Spire360Installer
             if (busy || gameDir == null) return;
             SetBusy(true);
             ResetStages();
-            bool ok = false;
-            try { ok = await RunBuild(); }
+            bool ok = false, tookOut = false;
+            try { tookOut = TakeOutImport(); ok = await RunBuild(); }
             catch (Exception ex)
             {
                 AddLog("error: " + ex.Message);
@@ -240,7 +329,8 @@ namespace Spire360Installer
             if (ok)
             {
                 StatusText.Text = "Done. Copy the spire360 folder to your console's drive (as Games\\spire360) and start " +
-                                  "default.xex from the dashboard.";
+                                  "default.xex from the dashboard." +
+                                  (tookOut ? " (The imported saves were taken out of it: import them again to replace the console's.)" : "");
                 updatePending = false;
                 BuildButton.Content = "Build again";
             }
@@ -298,7 +388,8 @@ namespace Spire360Installer
                               last.TryGetValue("game_version", out var g) && (g as string) == gameVersion && gameVersion != null;
             if (assetsOnly) AddLog("default.xex is current (source " + commit + "): converting the game's files only");
 
-            int rc = await builder.Build(gameDir, assetsOnly);
+            AddLog($"Compilers at once: {Jobs}" + (LowCpu.IsChecked == true ? " (low CPU use)" : ""));
+            int rc = await builder.Build(gameDir, assetsOnly, Jobs);
             if (rc != 0)
             {
                 StatusText.Text = "The build stopped: the log says where. Its full logs are in the build environment's " +
@@ -387,6 +478,59 @@ namespace Spire360Installer
             if (r != MessageBoxResult.Yes) e.Cancel = true;
             else System.Diagnostics.Process.Start(new ProcessStartInfo("wsl.exe", "--terminate " + Builder.Distro)
             { CreateNoWindow = true, UseShellExecute = false });
+        }
+    }
+
+    /// <summary>Which account's saves to import, after what an import does.</summary>
+    static class SavesDialog
+    {
+        public static PcSaves Ask(Window owner, List<PcSaves> accounts)
+        {
+            var ok = new Button { Content = "Import", Style = (Style)owner.FindResource("GoldButton"), IsDefault = true };
+            var cancel = new Button
+            {
+                Content = "Cancel", Style = (Style)owner.FindResource("QuietButton"), IsCancel = true,
+                Margin = new Thickness(0, 0, 10, 0),
+            };
+            var w = new Window
+            {
+                Title = "Spire360 Setup", Owner = owner, Width = 520, SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize,
+                Background = (Brush)owner.FindResource("Panel"), Foreground = (Brush)owner.FindResource("Ink"),
+            };
+            ok.Click += (s, e) => w.DialogResult = true;
+            var panel = new StackPanel { Margin = new Thickness(18) };
+            panel.Children.Add(new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12),
+                Text = "Copy your Slay the Spire 2 progress from this PC into the spire360 folder? When you copy that " +
+                       "folder to your console, these saves replace the ones Spire360 has there. Your PC's saves are " +
+                       "only read.",
+            });
+            var choices = new List<RadioButton>();
+            foreach (var a in accounts)
+            {
+                var rb = new RadioButton
+                {
+                    GroupName = "account", IsChecked = choices.Count == 0, Margin = new Thickness(0, 0, 0, 8),
+                    Foreground = (Brush)owner.FindResource("Ink"),
+                    Content = new TextBlock { TextWrapping = TextWrapping.Wrap, Text = $"{a.Name}: {a.Summary}" },
+                };
+                choices.Add(rb);
+                panel.Children.Add(rb);
+            }
+            var buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            buttons.Children.Add(cancel);
+            buttons.Children.Add(ok);
+            panel.Children.Add(buttons);
+            w.Content = panel;
+            if (w.ShowDialog() != true) return null;
+            int i = choices.FindIndex(c => c.IsChecked == true);
+            return i < 0 ? null : accounts[i];
         }
     }
 

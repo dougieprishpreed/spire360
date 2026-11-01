@@ -13,7 +13,8 @@
 #   --assets-only   convert the game's files and place them beside the
 #                   default.xex already in --out (the XEX of the same source)
 #   --jobs N        compilers and workers at once (default 2, so the PC stays
-#                   usable; each compiler takes about 1 GB)
+#                   usable; each compiler takes about 1 GB, so no more than
+#                   the memory holds)
 #   --no-packages   don't install the system packages (they are there)
 #
 # Every stage can run again: what is built stays built (the toolchain, the
@@ -55,9 +56,19 @@ done
 [ -n "$OUT" ] || { echo "--out is needed: where the console folder goes" >&2; exit 2; }
 [ -f "$GAME/SlayTheSpire2.pck" ] || { echo "No SlayTheSpire2.pck in $GAME" >&2; exit 2; }
 
-# Two at once by default, so a slower PC stays usable while it builds (GCC
-# takes about 1 GB on each of the logic's large files)
+# Two at once by default, so a slower PC stays usable while it builds. GCC
+# takes about 1 GB on each of the logic's large files: no more than the
+# memory holds (WSL gives its instances half the PC's) nor the processors
 [ -n "$JOBS" ] || JOBS=2
+case "$JOBS" in ''|*[!0-9]*) echo "--jobs takes a number" >&2; exit 2 ;; esac
+MEM_GB=$(awk '/^MemTotal:/ { print int($2 / 1048576) }' /proc/meminfo)
+MAX_JOBS=$(( MEM_GB > 2 ? MEM_GB - 1 : 1 ))
+[ "$MAX_JOBS" -le "$(nproc)" ] || MAX_JOBS=$(nproc)
+if [ "$JOBS" -gt "$MAX_JOBS" ]; then
+  echo "$JOBS compilers at once asked; $MAX_JOBS fit ($MEM_GB GB of memory, $(nproc) processors)"
+  JOBS=$MAX_JOBS
+fi
+[ "$JOBS" -ge 1 ] || JOBS=1
 
 SRC="$HOME_DIR/src"           # xsdk, vulkan4xenon, glslang-xenon
 TC="$HOME_DIR/toolchain"      # xsdk's GCC (and glslang beside it)
