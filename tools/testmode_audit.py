@@ -42,7 +42,10 @@ def patch_answers():
 
 def verdicts():
     rows = []
-    for line in open(os.path.join(ROOT, "notes", "presentation_verdicts.tsv"), encoding="utf-8"):
+    path = os.path.join(ROOT, "notes", "presentation_verdicts.tsv")
+    if not os.path.exists(path):  # a local file, none in a fresh checkout
+        return rows
+    for line in open(path, encoding="utf-8"):
         parts = line.rstrip("\n").split("\t")
         if len(parts) >= 3 and parts[0] in ("testmode", "godot"):
             rows.append((parts[1], parts[2]))

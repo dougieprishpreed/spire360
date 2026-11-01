@@ -58,6 +58,8 @@ def flashing_relics():
 def verdicts():
     rows = []
     path = os.path.join(ROOT, "notes", "presentation_verdicts.tsv")
+    if not os.path.exists(path):  # a local file, none in a fresh checkout
+        return rows
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             parts = line.rstrip("\r\n").split("\t")

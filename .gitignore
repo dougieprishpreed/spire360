@@ -51,3 +51,5 @@ work/
 # the Windows installer's build
 installer/bin/
 installer/obj/
+# working notes (kept locally, not in the repository)
+notes/

@@ -76,9 +76,11 @@ def main():
         for c in cs:
             if c.startswith("logic:") and c not in via:
                 via[c] = not reached_outside_ui(c.split(".")[-1])
-    # hook verdicts (notes/presentation_verdicts.tsv: hook, its name, n/a)
+    # hook verdicts (notes/presentation_verdicts.tsv: hook, its name, n/a;
+    # a local file, none in a fresh checkout)
     reviewed = {}
-    for line in open(os.path.join(ROOT, "notes", "presentation_verdicts.tsv"), encoding="utf-8"):
+    path = os.path.join(ROOT, "notes", "presentation_verdicts.tsv")
+    for line in open(path, encoding="utf-8") if os.path.exists(path) else []:
         p = line.rstrip("\n").split("\t")
         if len(p) >= 3 and p[0] == "hook":
             reviewed[p[1]] = p[2]

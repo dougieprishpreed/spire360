@@ -75,7 +75,10 @@ def reached(runs):
 
 def verdicts():
     rows = []
-    for line in open(os.path.join(ROOT, "notes", "presentation_verdicts.tsv"), encoding="utf-8"):
+    path = os.path.join(ROOT, "notes", "presentation_verdicts.tsv")
+    if not os.path.exists(path):  # a local file, none in a fresh checkout
+        return rows
+    for line in open(path, encoding="utf-8"):
         p = line.rstrip("\n").split("\t")
         if len(p) >= 3 and p[0] == "reach":
             rows.append((p[1], p[2], p[3] if len(p) > 3 else ""))
