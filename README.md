@@ -97,15 +97,14 @@ Mega Crit.
 
 ## Acknowledgements
 
-- **Mena**, for [xSDK](https://github.com/xenosworks/xsdk), [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon)
+- The authors of [xSDK](https://github.com/xenosworks/xsdk), [vulkan4xenon](https://github.com/xenosworks/vulkan4xenon)
   and [glslang-xenon](https://github.com/xenosworks/glslang-xenon), and the console research behind them: Spire360
   runs on them.
-- **Mega Crit**, for Slay the Spire 2.
+- Mega Crit, for Slay the Spire 2.
 - The projects xSDK builds on: Xenia, libxenon and xost.
-- **Hao Wu**, for sts2-cli, which the headless driver of the game's logic started from.
-- **Bastian Mueller**, for w2c2, which translates the game's logic to C.
-- The **Godot Engine** contributors, whose layout, text, particle and shader code the engine reproduces.
-- The .NET team's NativeAOT-LLVM and the WebAssembly community's wasi-sdk, which compile the game's logic.
-- **Sean Barrett**, for stb_vorbis, which plays the game's music and sound.
+- The authors of sts2-cli, which the headless driver of the game's logic started from, and of w2c2, which translates
+  the game's logic to C.
+- The Godot Engine's contributors, whose layout, text, particle and shader code the engine reproduces.
+- NativeAOT-LLVM and wasi-sdk, which compile the game's logic, and stb_vorbis, which plays its music and sound.
 
 Everything else Spire360 uses is listed in [THIRD_PARTY.md](THIRD_PARTY.md).
