@@ -4721,3 +4721,32 @@ user's reports:
 Checks: the PC tools build without warnings; the menu monkey (work/
 monkey107b.sh, g107c) matches g107b report for report (the known
 card_reward potion refusal twice).
+
+## Setup v1.0.0: the saves, the CPU, updates that keep the compiler (2026-10-31)
+
+The installer's second from-scratch run (9443980) and its first Update and
+rebuild (to c2ba68f) worked end to end; the XEX differs from the local
+builds only by the toolchain (Setup builds GCC from the xsdk head; the
+shared /opt/ctr360-xsdk toolchain dates from Oct 20) and .NET 10.0.403
+against 10.0.401 (the logic patch reports match). Then:
+
+- build_all.sh's toolchain stage deleted xsdk's work folder after each
+  build, and with it the steps' .done stamps, so each update built GCC
+  again (about 30 minutes). The compiler is now kept while
+  $TC/.xsdk-toolchain-tree matches `git rev-parse HEAD:tools/toolchain`
+  (works in the shallow clone).
+- Your saves (installer/PcSaves.cs): the PC game's saves in their own
+  place only (%APPDATA%\SlayTheSpire2\steam|default\<account>), the
+  account chosen in a dialog, copied (import_save.py's files: profile.save,
+  each profile's saves and history; not settings.save) into
+  spire360\spire\data\user once a build exists. state\saves-imported.txt
+  marks it; the next build deletes that folder, so copying an update onto
+  the console never puts an old import back over newer progress. A folder
+  there that Setup didn't import moves to state\saves-kept-<time>.
+- Low CPU use (state\cpu.txt, on by default): 2 compilers, or every core;
+  build_all.sh keeps --jobs to MemTotal - 1 GB and nproc.
+- --snapshot shows what the window has from the PC alone (ShowLocal: the
+  game, the space, the CPU, the saves), no WSL.
+- The release zip is written with Python's zipfile: PowerShell 5's
+  Compress-Archive (and .NET Framework's ZipFile there) write backslashes
+  into the entries' names.
