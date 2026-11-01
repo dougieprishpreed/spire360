@@ -145,10 +145,20 @@ stage_sources() {
 }
 
 stage_toolchain() {
-  # skips what it has built; its sources are checked by SHA-256 (through
-  # bash: xsdk's repository has it without the executable bit)
-  (cd "$SRC/xsdk" && PREFIX="$TC" WORK="$HOME_DIR/tmp/toolchain" JOBS="$JOBS" bash tools/toolchain/build.sh)
-  rm -rf "$HOME_DIR/tmp/toolchain"
+  # xsdk's script skips the steps it has built by stamps in its work folder,
+  # which goes once the compiler is installed (gigabytes): so the compiler
+  # stays while xsdk's toolchain folder (the script, its patches) is the one
+  # it was built from (its git tree), and an update didn't build it all again
+  local want stamp="$TC/.xsdk-toolchain-tree"
+  want=$(git -C "$SRC/xsdk" rev-parse HEAD:tools/toolchain)
+  if [ -x "$TC/bin/powerpc-xsdk-elf-gcc" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$want" ]; then
+    echo "The compiler is built from these sources already ($want)"
+  else
+    # (through bash: xsdk's repository has it without the executable bit)
+    (cd "$SRC/xsdk" && PREFIX="$TC" WORK="$HOME_DIR/tmp/toolchain" JOBS="$JOBS" bash tools/toolchain/build.sh)
+    rm -rf "$HOME_DIR/tmp/toolchain"
+    echo "$want" >"$stamp"
+  fi
   "$TC/bin/powerpc-xsdk-elf-gcc" --version
 }
 
