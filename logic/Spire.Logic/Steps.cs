@@ -46,6 +46,20 @@ internal static class Steps
     }
 
     private static readonly List<Dictionary<string, object?>> _pendingUi = new();
+
+    // A type's name, read once: NativeAOT decodes Type.Name from the
+    // metadata at every call (16% of a frame in Cuphead360's logging), and
+    // every UI call's receivers come through here.
+    private static readonly Dictionary<Type, string> _typeNames = new();
+
+    private static string TypeName(Type t)
+    {
+        lock (_typeNames)
+        {
+            if (!_typeNames.TryGetValue(t, out var name)) _typeNames[t] = name = t.Name;
+            return name;
+        }
+    }
     public static bool RecordUi = Environment.GetEnvironmentVariable("SPIRE_UI_EVENTS") != "0";
 
     /// <summary>
@@ -114,16 +128,15 @@ internal static class Steps
                         if (StandIns.TryCreature(x, out var cx)) whos.Add(Who(cx));
                     outArgs.Add(whos);
                     break;
-                default:
-                    var tn = a.GetType().Name;
-                    if (tn == "Color" && a.GetType().Namespace == "Godot")
+                case Godot.Color col:
                     {
                         // PlaySplashVfx(target, color): the colour as #rrggbbaa.
-                        float F(string f) => Convert.ToSingle(a.GetType().GetField(f)?.GetValue(a) ?? 1f);
-                        int B(float v) => (int)Math.Round(Math.Clamp(v, 0f, 1f) * 255f);
-                        outArgs.Add($"#{B(F("R")):x2}{B(F("G")):x2}{B(F("B")):x2}{B(F("A")):x2}");
+                        static int B(float v) => (int)Math.Round(Math.Clamp(v, 0f, 1f) * 255f);
+                        outArgs.Add($"#{B(col.R):x2}{B(col.G):x2}{B(col.B):x2}{B(col.A):x2}");
                         break;
                     }
+                default:
+                    var tn = TypeName(a.GetType());
                     if (tn.StartsWith("N", StringComparison.Ordinal)) continue; // UI node receivers
                     outArgs.Add(tn);
                     break;

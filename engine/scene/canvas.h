@@ -28,6 +28,9 @@ public:
     size_t texture_budget() const { return texture_budget_; }
     size_t texture_bytes() const { return texture_bytes_; }
     size_t texture_count() const;
+    /* The textures the GPU's memory had no room for, since the start (the
+     * console's memory valve tightens at once on a new one). */
+    unsigned no_room_count() const { return no_room_count_; }
     /* The cache's traffic since the last call (created, evicted, the
      * frames over the budget, the most bytes held), then reset. */
     struct TextureStats {
@@ -204,6 +207,7 @@ private:
      * retry (read again, the merchant's room waited 0.5 s more on its
      * floor's) */
     std::map<std::string, TextureData> no_room_data_;
+    unsigned no_room_count_;
     static int waiting_textures_;
     void put_triangles(Texture* tex, const std::vector<Vec2>& v, const std::vector<Vec2>* uv,
                        const std::vector<Color>* colors, const std::vector<int>& idx, int flags);

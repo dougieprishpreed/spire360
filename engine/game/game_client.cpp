@@ -541,6 +541,10 @@ void GameClient::phase(const char* what) {
 }
 
 void GameClient::update(const PadState& pad) {
+    if (!held_audio_.is_null() && room_showing()) {
+        if (lib_->audio()) lib_->audio()->decision(held_audio_);
+        held_audio_ = Json();
+    }
     if (!held_sounds_.is_null() && room_showing()) {
         if (lib_->audio()) lib_->audio()->steps(held_sounds_);
         held_sounds_ = Json();
@@ -1175,16 +1179,42 @@ void GameClient::show(const Json& d) {
         return;
     }
     if (combat_ && prev_kind == "combat_play" && kind == "card_select" && d["steps"].size() > 0) {
-        combat_->play_steps(d["steps"]);
+        /* toward the fight the selection is made in: its draws find their
+         * cards in its hand (without it they found none, and the hand to
+         * choose from lacked them: Dagger Throw's discard before its draw,
+         * Tools of the Trade's discard at a turn's start from an empty hand,
+         * stuck: GitHub #4) */
+        combat_->play_steps(d["steps"], d["fight"].is_object() ? d["fight"] : Json());
         finishing_ = d;
         return;
     }
     if (lib_->audio()) {
-        lib_->audio()->decision(d);
+        /* the room's music with the room (its banks parsed now); the run's
+         * end at once */
+        if (kind == "game_over" || (room_showing() && held_audio_.is_null())) {
+            lib_->audio()->decision(d);
+            held_audio_ = Json();
+        } else {
+            lib_->audio()->prepare(d);
+            held_audio_ = d;
+        }
         if (kind != "combat_play") play_step_sounds(d["steps"]);
         if (kind == "map_select" && prev_kind != "map_select") lib_->audio()->ui("event:/sfx/ui/map/map_open");
     }
     potions_.detach();
+    /* NOverlayStack keeps the run's top bar as the rewards' screens follow
+     * each other: a potion's flight into its slot and its flash went with
+     * the bar when the next reward was taken quickly (set3). The bar goes
+     * on when only its HP, relic counters, gold or deck count changed. */
+    Node* carried_bar = NULL;
+    if ((prev_kind == "rewards" || prev_kind == "card_reward") && (kind == "rewards" || kind == "card_reward") &&
+        screen_ && d["player"].is_object()) {
+        Node* old_bar = screen_->get_node("TopBarLayer");
+        if (old_bar && carry_top_bar(old_bar, top_bar_key(d), top_bar_key(decision_))) {
+            screen_->remove_child(old_bar);
+            carried_bar = old_bar;
+        }
+    }
     /* NOverlayStack keeps the current combat room behind rewards and
      * selections. Detach it before deleting the old overlay, then reparent
      * that same room into the next screen. */
@@ -1466,6 +1496,7 @@ void GameClient::show(const Json& d) {
             /* CombatManager.StartCombat: the first turn's start (its waits,
              * energy, draws, relics) plays from the room's entry; the combat
              * rules FTUE first, its close the start banner */
+            combat_->hide_revealed_intents(d["steps"]);
             combat_->play_steps(d["steps"], d);
             if (ftue_pending("combat_rules_ftue")) combat_rules_wait_ = true;
             else combat_->show_start_banner();
@@ -1477,7 +1508,8 @@ void GameClient::show(const Json& d) {
     /* The top bar over every screen of the run. */
     bar_made_from_ = Json();
     if (d["player"].is_object() && kind != "game_over") {
-        Node* bar = make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
+        Node* bar = carried_bar ? carried_bar : make_top_bar(lib_, d, d["context"]["room_type"].str() == "Map", prev_player);
+        carried_bar = NULL;
         if (bar) screen_->add_child(bar);
         /* Player.AddPotionFailed: NPotionContainer.PlayAddFailedAnim */
         if (bar && has_cue(d, "potion_full")) top_bar_potions_full(bar);

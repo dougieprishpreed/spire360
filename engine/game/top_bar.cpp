@@ -397,7 +397,7 @@ static const Json* potion_in_slot(const Json& potions, int slot) {
 }
 
 /* NPotion (potion.tscn) in a holder: at (-30, -30) from its centre, 0.9. */
-static Control* holder_potion(SceneLibrary* lib, Node* holder, const std::string& id) {
+Control* holder_potion(SceneLibrary* lib, Node* holder, const std::string& id) {
     Node* p = make_potion(lib, id);
     if (!p) return NULL;
     Control* pc = (Control*)p;
@@ -576,8 +576,9 @@ static Json fixed_part(const Json& key) {
     return k;
 }
 
-bool refresh_top_bar(Node* root, const Json& now, const Json& was) {
-    if (!root || fixed_part(now) != fixed_part(was)) return false;
+/* HP and the relics' counters and status set in place; *bar_out the bar's
+ * top_bar.tscn node. */
+static bool set_in_place(Node* root, const Json& now, const Json& was, Node** bar_out) {
     Node* row = NULL;
     Node* bar = NULL;
     for (size_t i = 0; i < root->children.size(); ++i) {
@@ -591,6 +592,41 @@ bool refresh_top_bar(Node* root, const Json& now, const Json& was) {
         set_label(bar->find_unique("HpLabel"), format("%d/%d", player["hp"].i(), player["max_hp"].i()));
     for (size_t i = 0; i < relics.size(); ++i)
         if (relics[i] != was["player"]["relics"][i]) relic_state(row->children[i], relics[i]);
+    if (bar_out) *bar_out = bar;
+    return true;
+}
+
+bool refresh_top_bar(Node* root, const Json& now, const Json& was) {
+    return root && fixed_part(now) == fixed_part(was) && set_in_place(root, now, was, NULL);
+}
+
+/* A key without what carry_top_bar changes in place. */
+static Json carried_part(const Json& key) {
+    Json k = fixed_part(key);
+    Json player = k["player"];
+    player.set("gold", Json());
+    player.set("deck_size", Json());
+    k.set("player", player);
+    return k;
+}
+
+bool carry_top_bar(Node* root, const Json& now, const Json& was) {
+    Node* bar = NULL;
+    if (!root || carried_part(now) != carried_part(was) || !set_in_place(root, now, was, &bar)) return false;
+    const Json& player = now["player"];
+    if (player["gold"] != was["player"]["gold"]) set_top_bar_gold(bar, player["gold"].i());
+    if (player["deck_size"] != was["player"]["deck_size"]) {
+        Node* count = find_named(find_named(bar, "Deck"), "DeckCardCount");
+        set_label(count, format("%d", player["deck_size"].i()));
+        /* make_top_bar's bump (NTopBarDeckButton.OnPileContentsChanged); the
+         * bar's behavior is only ever its BarAnimations, made when there was
+         * a decision before */
+        if (count && count->is_control() && bar->behavior && player["deck_size"].i() > was["player"]["deck_size"].i()) {
+            Control* c = (Control*)count;
+            c->pivot_offset = Vec2(c->offset[SIDE_RIGHT] - c->offset[SIDE_LEFT], c->offset[SIDE_BOTTOM] - c->offset[SIDE_TOP]) * 0.5f;
+            ((BarAnimations*)bar->behavior)->tweens.tween_from(&c->scale, Vec2(1.5f, 1.5f), Vec2(1, 1), 0.5f, TRANS_EXPO, EASE_OUT);
+        }
+    }
     return true;
 }
 

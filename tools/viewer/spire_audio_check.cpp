@@ -251,12 +251,51 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
-    if (argc < 2 || argc > 3) { fprintf(stderr, "usage: spire_audio_check <pack.s3p> [--mix-only] | --device-check\n"); return 2; }
+    if (argc < 2 || (argc > 3 && !(argc == 6 && !strcmp(argv[2], "--music-hold")))) {
+        fprintf(stderr, "usage: spire_audio_check <pack.s3p> [--mix-only] | --device-check\n");
+        return 2;
+    }
     bool mix_only = argc == 3 && !strcmp(argv[2], "--mix-only");
     Pack pack;
     std::string error;
     if (!pack.open(argv[1], &error)) { fprintf(stderr, "%s\n", error.c_str()); return 2; }
     if (argc == 3 && !strcmp(argv[2], "--fixtures")) return fixture_cases(pack) ? 1 : 0;
+    /* --music-hold <event> <progress> <seconds>: a music event held at one
+     * Progress (a room left as it is), its timeline and voices every five
+     * seconds: where a layer stops, starts again or jumps */
+    if (argc == 6 && !strcmp(argv[2], "--music-hold")) {
+        /* as the console plays it: the loader's thread, at the mix's pace */
+        setvbuf(stdout, NULL, _IOLBF, 0);
+        AudioDecoder::start_loader(&pack, -1, 32u << 20);
+        AudioEvents audio(&pack);
+        float samples[512];
+        audio.global_parameter("Progress", (float)atof(argv[4]));
+        u32 id = audio.play(argv[3]);
+        int seconds = atoi(argv[5]);
+        u64 started = audio.started_voices();
+        std::string last;
+        for (int s = 0; s < seconds; ++s) {
+            /* a second in eighths, each slept (Windows sleeps in 15.6 ms ticks) */
+            for (int part = 0; part < 8; ++part) {
+                for (int k = 0; k < 48000 / 256 / 8; ++k) audio.render(samples, 256);
+                usleep(120000);
+            }
+            if (s % 30 == 29) {
+                AudioDecoder::LoadStats ls = AudioDecoder::load_stats();
+                printf("%4d s: %d music decoders set up ahead, %d taken\n", s + 1, ls.prepared, ls.prepared_taken);
+            }
+            std::string now = audio.describe_voices();
+            bool changed = now != last || audio.started_voices() != started;
+            if (s % 5 == 4 || changed)
+                printf("%4d s: timeline %.2f s, %llu voices started, %s%s\n", s + 1, audio.timeline(id),
+                       (unsigned long long)audio.started_voices(), now.c_str(), changed ? "  (changed)" : "");
+            last = now;
+            started = audio.started_voices();
+        }
+        int failed = audio.failures();
+        AudioDecoder::stop_loader();
+        return failed ? 1 : 0;
+    }
     if (argc == 3 && !strcmp(argv[2], "--events")) return event_cases(pack);
     if (argc == 3 && !strcmp(argv[2], "--music")) return music_cases(pack);
     int checked = 0, failures = 0;

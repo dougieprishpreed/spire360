@@ -99,6 +99,11 @@ void TitleScreen::detach() {
     tweens_.clear();
 }
 
+void TitleScreen::forget_menu() {
+    menu_known_ = false;
+    set_visible(buttons_box_, false);
+}
+
 void TitleScreen::set_menu(const Json& m) {
     if (!menu_) return;
     menu_known_ = true;
@@ -278,7 +283,7 @@ void TitleScreen::set_covered(bool covered) {
 }
 
 TitleScreen::Action TitleScreen::input(const PadState& pad) {
-    if (covered_) return NONE;
+    if (covered_ || !menu_known_) return NONE;
     int n = (int)buttons_.size();
     int first = -1;
     for (int i = 0; i < n && first < 0; ++i)

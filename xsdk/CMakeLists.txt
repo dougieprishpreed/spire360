@@ -17,6 +17,12 @@ set(SPIRE_TITLE_ID "0x53333630" CACHE STRING "The XEX's title ID ('S360')")
 
 get_filename_component(ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
+# A title runs in 32-bit mode, where a record form sets CR0 from its result's
+# low word: GCC's record forms of 64-bit values get a 64-bit compare after
+# them (record_forms.py; a change to it needs a clean build).
+set(CMAKE_C_COMPILER_LAUNCHER python3 "${CMAKE_CURRENT_LIST_DIR}/record_forms.py")
+set(CMAKE_CXX_COMPILER_LAUNCHER python3 "${CMAKE_CURRENT_LIST_DIR}/record_forms.py")
+
 # char is signed, as with the XDK; no strict aliasing, as with the XDK's
 # compiler; no fused multiply-adds, which would change the logic's floats
 # against the PC's (the seeded traces).

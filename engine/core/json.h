@@ -9,46 +9,28 @@
 
 namespace spire {
 
-/* A Json object's key: compared with a C string as it is, so a lookup
- * makes no std::string (C++03's map::find takes only its key type, and the
- * string made for each lookup was an allocation past 15 characters: the
- * audio's ids, the materials' property names, every frame). A key kept in
- * the map owns its text; one made from a char* for a lookup points at it. */
-class JsonKey {
-public:
-    JsonKey(const char* text) : ref_(text) {}
-    JsonKey(const std::string& text) : own_(text), ref_(NULL) {}
-    JsonKey(const JsonKey& o) : own_(o.ref_ ? std::string(o.ref_) : o.own_), ref_(NULL) {}
-    JsonKey& operator=(const JsonKey& o) {
-        own_ = o.ref_ ? std::string(o.ref_) : o.own_;
-        ref_ = NULL;
-        return *this;
-    }
-    const char* c_str() const { return ref_ ? ref_ : own_.c_str(); }
-    bool operator<(const JsonKey& o) const { return strcmp(c_str(), o.c_str()) < 0; }
-    bool operator==(const JsonKey& o) const { return strcmp(c_str(), o.c_str()) == 0; }
-
-private:
-    std::string own_;
-    const char* ref_;
-};
-
-/* A value. An array's or object's contents are shared by its copies and
- * copied (one level: the children shared in turn) at the first write to
- * one of them, so a copy costs one count: the client copied each fight
- * decision's whole tree five times a card played, thousands of
- * allocations each, the console's longest part of a decision. */
+/* A value. A string's text and an array's or object's contents are shared
+ * by its copies, the contents copied (one level: the children shared in
+ * turn) at the first write to one of them, so a copy costs one count: the
+ * client copied each fight decision's whole tree five times a card played,
+ * thousands of allocations each, the console's longest part of a decision.
+ *
+ * 16 bytes a value, an object's members as its keys and values in file
+ * order with an index sorted by key: a parsed scene file took 13 times its
+ * text (a value 48 bytes, a member a map node of its own with its key held
+ * twice), and the files a run had used held 40 MB of the console's memory
+ * by act 3 (rp108). */
 class Json {
 public:
     enum Type { NUL, BOOL, NUMBER, STRING, ARRAY, OBJECT };
 
-    Json() : type_(NUL), num_(0), bool_(false), body_(NULL) {}
+    Json() : type_(NUL), bool_(false) { u_.num = 0; }
     Json(const Json& o);
     Json& operator=(const Json& o);
     ~Json();
     static Json parse(const char* text, size_t len, std::string* error);
 
-    Type type() const { return type_; }
+    Type type() const { return (Type)type_; }
     bool is_null() const { return type_ == NUL; }
     bool is_number() const { return type_ == NUMBER; }
     bool is_string() const { return type_ == STRING; }
@@ -56,11 +38,14 @@ public:
     bool is_object() const { return type_ == OBJECT; }
     bool is_bool() const { return type_ == BOOL; }
 
-    double num(double fallback = 0) const { return type_ == NUMBER ? num_ : (type_ == BOOL ? (bool_ ? 1 : 0) : fallback); }
+    double num(double fallback = 0) const {
+        return type_ == NUMBER ? u_.num : (type_ == BOOL ? (bool_ ? 1 : 0) : fallback);
+    }
     float f(float fallback = 0) const { return (float)num(fallback); }
     int i(int fallback = 0) const { return (int)num(fallback); }
-    bool b(bool fallback = false) const { return type_ == BOOL ? bool_ : (type_ == NUMBER ? num_ != 0 : fallback); }
-    const std::string& str() const { return str_; }
+    bool b(bool fallback = false) const { return type_ == BOOL ? bool_ : (type_ == NUMBER ? u_.num != 0 : fallback); }
+    /* the text ("" for a value that is no string) */
+    const std::string& str() const;
 
     size_t size() const;
     const Json& operator[](size_t idx) const;
@@ -71,8 +56,8 @@ public:
     const std::vector<std::string>& keys() const;
 
     /* Building (for the protocol). */
-    static Json make_string(const std::string& s) { Json j; j.type_ = STRING; j.str_ = s; return j; }
-    static Json make_number(double v) { Json j; j.type_ = NUMBER; j.num_ = v; return j; }
+    static Json make_string(const std::string& s);
+    static Json make_number(double v) { Json j; j.type_ = NUMBER; j.u_.num = v; return j; }
     static Json make_bool(bool v) { Json j; j.type_ = BOOL; j.bool_ = v; return j; }
     static Json make_array() { Json j; j.type_ = ARRAY; return j; }
     void set(const std::string& key, const Json& value);
@@ -86,24 +71,40 @@ public:
 private:
     friend class JsonParser;
     struct Body;
-    /* body_ for a write: made, or copied from the copies sharing it */
+    struct Text;
+    /* body for a write: made, or copied from the copies sharing it */
     Body* own();
+    /* the member slot of key in an object's body, or -1 */
+    static int find(const Body* b, const char* key);
+    static void index_members(Body* b);
     static void release(Body* b);
-    Type type_;
-    double num_;
+    static void release(Text* t);
+    void drop();
+    unsigned char type_;
     bool bool_;
-    std::string str_;
-    Body* body_; /* ARRAY, OBJECT: their elements (NULL: none yet) */
+    union {
+        double num;
+        Text* text; /* STRING (never NULL) */
+        Body* body; /* ARRAY, OBJECT: their elements (NULL: none yet) */
+    } u_;
 };
 
-/* An array's elements; an object's keys in file order and its members. */
+/* A string's text, shared by the copies of its value. */
+struct Json::Text {
+    volatile long refs;
+    std::string s;
+    explicit Text(const std::string& v) : refs(1), s(v) {}
+};
+
+/* An array's elements, or an object's values with its keys, in file order;
+ * order: the members' places sorted by key (none for a few members). */
 struct Json::Body {
     volatile long refs;
     std::vector<Json> arr;
     std::vector<std::string> keys;
-    std::map<JsonKey, Json> obj;
+    std::vector<unsigned> order;
     Body() : refs(1) {}
-    Body(const Body& o) : refs(1), arr(o.arr), keys(o.keys), obj(o.obj) {}
+    Body(const Body& o) : refs(1), arr(o.arr), keys(o.keys), order(o.order) {}
 
 private:
     Body& operator=(const Body&);

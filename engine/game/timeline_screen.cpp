@@ -728,40 +728,55 @@ void TimelineScreen::next_unlock() {
         set_label(ctl(n, "ExplanationText"), "[center]" + Loc::get("timeline", text) + "[/center]");
         Control* row = ctl(n, kind == "cards" ? "CardRow" : kind == "relics" ? "RelicRow" : "PotionRow");
         const Json& items = u[kind == "cards" ? "cards" : kind == "relics" ? "relics" : "potions"];
-        float step = kind == "cards" ? 350.0f : 200.0f;
-        float x0 = -(float)(items.size() - 1) * step * 0.5f;
+        float x0 = -(float)(items.size() - 1) * 350.0f * 0.5f;
         for (size_t i = 0; row && i < items.size(); ++i) {
-            Node* item = NULL;
+            /* Open: each holder from the row's middle to its place (0.5 s,
+             * Expo Out), 350 px apart, fading in over 1 s (Cubic Out): the
+             * cards from black (NGridCardHolder at its SmallScale), the
+             * relics and potions from transparent black (NRelicBasicHolder,
+             * NPotionHolder at 3x; the potions' count starts one step left). */
+            Control* holder = NULL;
+            float x = x0 + 350.0f * (float)i, size = 0;
             if (kind == "cards") {
-                item = make_card(lib_, items[i]);
-                card_reward_glow(lib_, item, items[i]["rarity"].str());
+                Node* card = make_card(lib_, items[i]);
+                if (!card) continue;
+                card_reward_glow(lib_, card, items[i]["rarity"].str());
+                holder = full_rect_control("Holder");
+                for (int k = 0; k < 4; ++k) holder->anchor[k] = 0.5f;
+                holder->add_child(card);
+                holder->scale = Vec2(0.8f, 0.8f);
             } else {
-                TextureRect* t = new TextureRect();
-                t->name = "Icon";
-                std::string id = lower(kind == "relics" ? relic_icon_base(items[i]) : items[i]["id"].str());
-                set_texture(lib_, t, kind == "relics" ? "images/atlases/relic_atlas.sprites/" + id + ".tres"
-                                                     : "images/atlases/potion_atlas.sprites/" + id + ".tres");
-                place(t, -64, -64, 128, 128);
-                t->expand_mode = 1;
-                t->stretch_mode = 5;
-                item = t;
+                Node* h = instance(lib_, kind == "relics" ? "scenes/relics/relic_basic_holder.tscn"
+                                                          : "scenes/potions/potion_holder.tscn");
+                if (!h || !h->is_control()) {
+                    delete h;
+                    continue;
+                }
+                holder = (Control*)h;
+                for (int k = 0; k < 4; ++k) holder->anchor[k] = 0;
+                if (kind == "relics") {
+                    Node* relic = holder->find_unique("Relic");
+                    set_relic_icon(lib_, relic ? relic->find_unique("Icon") : NULL, relic_icon_base(items[i]));
+                    size = 68;
+                } else {
+                    hide(holder->find_unique("SelectionReticle"));
+                    Node* empty = holder->find_unique("EmptyIcon");
+                    if (empty && empty->is_canvas_item()) ((CanvasItem*)empty)->modulate.a = 0;
+                    holder_potion(lib_, holder, items[i]["id"].str());
+                    x = 350.0f * ((float)i - 1);
+                    size = 60;
+                }
+                holder->scale = Vec2(3, 3);
             }
-            if (!item) continue;
-            Control* holder = full_rect_control("Holder");
-            holder->anchor[SIDE_RIGHT] = holder->anchor[SIDE_BOTTOM] = 0;
-            holder->anchor[SIDE_LEFT] = holder->anchor[SIDE_TOP] = 0.5f;
-            holder->anchor[SIDE_RIGHT] = holder->anchor[SIDE_BOTTOM] = 0.5f;
-            holder->add_child(item);
             row->add_child(holder);
-            /* Open: each slides out from the middle (0.5 s, Expo Out),
-             * from black to white over 1 s. */
-            holder->offset[SIDE_LEFT] = holder->offset[SIDE_RIGHT] = 0;
-            tweens_.tween(&holder->offset[SIDE_LEFT], x0 + step * (float)i, 0.5f, TRANS_EXPO, EASE_OUT);
-            tweens_.tween(&holder->offset[SIDE_RIGHT], x0 + step * (float)i, 0.5f, TRANS_EXPO, EASE_OUT);
-            holder->modulate = Color(0, 0, 0, 1);
+            place(holder, 0, 0, size, size);
+            tweens_.tween(&holder->offset[SIDE_LEFT], x, 0.5f, TRANS_EXPO, EASE_OUT);
+            tweens_.tween(&holder->offset[SIDE_RIGHT], x + size, 0.5f, TRANS_EXPO, EASE_OUT);
+            holder->modulate = Color(0, 0, 0, kind == "cards" ? 1.0f : 0.0f);
             tweens_.tween(&holder->modulate.r, 1, 1.0f, TRANS_CUBIC, EASE_OUT);
             tweens_.tween(&holder->modulate.g, 1, 1.0f, TRANS_CUBIC, EASE_OUT);
             tweens_.tween(&holder->modulate.b, 1, 1.0f, TRANS_CUBIC, EASE_OUT);
+            tweens_.tween(&holder->modulate.a, 1, 1.0f, TRANS_CUBIC, EASE_OUT);
         }
     } else if (kind == "character") {
         set_label(ctl(n, "TopLabel"), u["top_text"].str());

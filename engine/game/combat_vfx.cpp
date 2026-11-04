@@ -862,7 +862,7 @@ private:
  * later). */
 class Sleeping : public Effect {
 public:
-    Sleeping() : right_(true), stop_at_(-1) {}
+    Sleeping() : right_(true), stop_at_(-1), quiet_(false) {}
     void setup(bool right, const std::string& who) {
         right_ = right;
         who_ = who;
@@ -885,13 +885,19 @@ public:
         if (!right_ && z && z->is_node2d()) ((Node2D*)z)->scale.x = -((Node2D*)z)->scale.x;
     }
     virtual void tick(Node* n, double) {
-        if (stop_at_ >= 0 && stop_at_ + 1e-6 >= t_ - 0.0001 && stop_at_ <= t_) emitting_list(n, "_continuousParticles", false);
+        /* the first tick after Stop (one only at its own instant: a Stop
+         * after the frame's tick left the Zs coming until the end) */
+        if (stop_at_ >= 0 && !quiet_) {
+            emitting_list(n, "_continuousParticles", false);
+            quiet_ = true;
+        }
         if (stop_at_ >= 0 && t_ >= stop_at_ + 5 && !n->queued_for_deletion()) n->queue_free();
     }
 
 private:
     bool right_;
     double stop_at_;
+    bool quiet_; /* its emitting stopped */
     std::string who_; /* the sleeper */
 };
 

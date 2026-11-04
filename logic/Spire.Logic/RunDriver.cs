@@ -1819,6 +1819,7 @@ public partial class RunDriver
                     ["inspect_upgrade"] = _cardSelector.PendingKind is "upgrade" or "hand_upgrade" ? null : UpgradePreviewView(card),
                     ["transform_preview"] = transform.preview,
                     ["transform_options"] = transform.options,
+                    ["enchant_preview"] = _cardSelector.PendingKind == "enchant" ? EnchantPreviewView(card) : null,
                 });
             }).ToList();
 
@@ -3639,6 +3640,35 @@ public partial class RunDriver
         }
     }
 
+    // NEnchantPreview.Init: the card cloned (CardScope.CloneCard, without the
+    // scope's AddCard: a preview, not a card of the run), enchanted at the
+    // amount (EnchantInternal, IsEnchantmentPreview, ModifyCard) and shown out
+    // of any pile.
+    private Dictionary<string, object?>? EnchantPreviewView(CardModel card)
+    {
+        if (_cardSelector.PendingEnchantment is not { } pending || !card.IsMutable) return null;
+        try
+        {
+            var clone = (CardModel)card.ClonePreservingMutability();
+            var e = pending.model.ToMutable();
+            clone.EnchantInternal(e, pending.amount);
+            clone.IsEnchantmentPreview = true;
+            e.ModifyCard();
+            var d = new Dictionary<string, object?>
+            {
+                ["type"] = clone.Type.ToString(),
+                ["rarity"] = clone.Rarity.ToString(),
+            };
+            AddCardView(d, clone, PileType.None);
+            return d;
+        }
+        catch (Exception ex)
+        {
+            Spire.Logic.Log.Warn($"enchant preview {card.Id}: {ex.Message}");
+            return null;
+        }
+    }
+
     // NTransformPreview.Initialize: the card a pick becomes (its
     // CardTransformation's Replacement: Claws' Maul), else some of what it
     // may become (ReplacementOptions or CardFactory.GetDefaultTransformation-
@@ -3949,7 +3979,7 @@ public partial class RunDriver
         Deferred.RunAll();
         try
         {
-            if (Directory.Exists(to)) Directory.Delete(to, recursive: true);
+            DeleteTree(to);
             Directory.CreateDirectory(to);
             if (!Directory.Exists(from)) return;
             foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
@@ -3960,6 +3990,23 @@ public partial class RunDriver
                 File.WriteAllBytes(Path.Combine(to, Path.GetRelativePath(from, file)), File.ReadAllBytes(file));
         }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] copy {from} -> {to}: {ex.Message}"); }
+    }
+
+    // A folder and what it holds, gone: each file from a whole listing taken
+    // first, then the folders deepest first, a few passes. Directory.Delete's
+    // own walk deletes as it reads the folder, and the console's runtime then
+    // skips entries: a history of 553 runs stopped it at "Directory not
+    // empty", and session_start was left empty (rp108).
+    private static void DeleteTree(string dir)
+    {
+        for (int pass = 0; pass < 4 && Directory.Exists(dir); pass++)
+        {
+            foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            foreach (var sub in Directory.GetDirectories(dir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+                try { Directory.Delete(sub); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            try { Directory.Delete(dir); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     /// <summary>

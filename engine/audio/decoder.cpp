@@ -64,6 +64,7 @@ struct KeptSound {
     u32 read_pos;         /* a long one's bytes read so far */
     void* decoding;       /* (pcm) the loader's decoder until all are */
     void* spare;          /* the decoder the loader opened to measure it: the first voice's */
+    std::vector<OpenJob*> prepared; /* decoders set up ahead (prepare), no voice's yet */
     KeptSound()
         : users(0), used(0), state(KEPT_READY), entry(NULL), asked(0), ready_at(0), bytes(0), pcm(false), channels(0),
           rate(0), frames(0), decoded(0), read_pos(0), decoding(NULL), spare(NULL) {}
@@ -152,6 +153,48 @@ static KeptSound* kept_sound(const Pack& pack, const PackEntry* entry, const std
 static void unkeep(KeptSound* k) {
     ScopedLock lock(g_kept_lock);
     --k->users;
+}
+
+/* A prepared decoder let go (unused, or its sound's voice took another):
+ * the loader frees one it is still opening; under g_kept_lock. */
+static void drop_prepared(OpenJob* j) {
+    if (j->state == KEPT_LOADING) {
+        j->abandoned = true;
+        return;
+    }
+    if (j->vorbis) stb_vorbis_close((stb_vorbis*)j->vorbis);
+    --j->kept->users;
+    delete j;
+}
+
+/* the prepared decoders asked for 30 s ago and still unused go */
+static void expire_prepared(KeptSound* k, double now) {
+    for (size_t i = 0; i < k->prepared.size();) {
+        if (now - k->prepared[i]->asked > 30000) {
+            drop_prepared(k->prepared[i]);
+            k->prepared.erase(k->prepared.begin() + (long)i);
+        } else ++i;
+    }
+}
+
+void AudioDecoder::prepare(const Pack& pack, const std::string& path, u32 frame) {
+    if (!g_loader.started()) return;
+    const PackEntry* entry = pack.find(path.c_str());
+    if (!entry || entry->type != PACK_AUDIO) return;
+    /* the job holds the sound as one of its users (kept_sound's count) */
+    KeptSound* k = kept_sound(pack, entry, path);
+    if (!k) return;
+    ScopedLock lock(g_kept_lock);
+    expire_prepared(k, clock_ms());
+    for (size_t i = 0; i < k->prepared.size(); ++i)
+        if (k->prepared[i]->at == frame) {
+            --k->users;
+            return;
+        }
+    OpenJob* j = new OpenJob(k, frame, false, clock_ms());
+    k->prepared.push_back(j);
+    g_open_queue.push_back(j);
+    ++g_load_stats.prepared;
 }
 
 /* Up to CHUNK frames more of a short sound's samples, outside the lock: the
@@ -439,6 +482,7 @@ AudioDecoder::LoadStats AudioDecoder::load_stats() {
     g_load_stats.longest_ms = 0;
     g_load_stats.longest_queue_ms = g_load_stats.longest_read_ms = 0;
     g_load_stats.longest = "";
+    g_load_stats.prepared = g_load_stats.prepared_taken = 0;
     return s;
 }
 
@@ -507,6 +551,33 @@ int AudioDecoder::take_kept(KeptSound* k) {
         return 1;
     }
     if (memcmp(&k->data[0], "OggS", 4)) return open_kept(k->data) ? 1 : -1;
+    /* one prepared at this frame: taken now, or waited for (it is under
+     * way already) */
+    for (size_t i = 0; i < k->prepared.size(); ++i) {
+        OpenJob* j = k->prepared[i];
+        if (j->at != start_ || j->abandoned) continue;
+        k->prepared.erase(k->prepared.begin() + (long)i);
+        if (j->state == KEPT_READY && j->vorbis) {
+            vorbis_ = (stb_vorbis*)j->vorbis;
+            kept_ = &k->data[0];
+            kept_size_ = (u32)k->data.size();
+            channels_ = k->channels;
+            rate_ = k->rate;
+            frames_ = k->frames;
+            position_ = j->position;
+            --k->users; /* the job's: the decoder holds its own */
+            delete j;
+            ++g_load_stats.prepared_taken;
+            return 1;
+        }
+        if (j->state == KEPT_LOADING) {
+            job_ = j;
+            ++g_load_stats.prepared_taken;
+            return 0;
+        }
+        drop_prepared(j);
+        break;
+    }
     job_ = new OpenJob(k, start_, follow_, asked_);
     ++k->users;
     g_open_queue.push_back(job_);

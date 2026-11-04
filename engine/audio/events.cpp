@@ -65,6 +65,9 @@ bool read_json(const Pack* pack, const std::string& path, Json& out) {
  * falls; levels ramp across it). Each 64 frames, the ticks were 60% of the
  * mix on the PC (rp105), more on the console, where the mix fell behind. */
 enum { TICK_FRAMES = 256 };
+/* how long before a timeline's jump its destination's decoders are set up
+ * (the console's loader takes tens of ms a seek, more when it is busy) */
+const double PREPARE_AHEAD = 3.0;
 struct AudioEvents::Impl {
     struct Bank { std::string name; Json doc; std::map<std::string, Json> streams; int references; Bank() : references(0) {} };
     struct Player;
@@ -116,6 +119,7 @@ struct AudioEvents::Impl {
         std::vector<std::string> box_keys;
         std::vector<double> tr_at, tr_end;
         std::vector<std::string> tr_keys;
+        std::vector<char> tr_prepared; /* its destination's decoders set up ahead */
         struct BusStep {
             const Json* bus;
             std::string id;
@@ -150,6 +154,7 @@ struct AudioEvents::Impl {
                     tr_at.push_back(trans[i]["at"].num());
                     tr_end.push_back(trans[i]["end"].num());
                     tr_keys.push_back(format("%u", (unsigned)i));
+                    tr_prepared.push_back(0);
                 }
                 const Json& params = (*def)["parameters"];
                 for (size_t i = 0; i < params.size(); ++i) {
@@ -397,9 +402,39 @@ struct AudioEvents::Impl {
             if (interval <= 0) return pos;
             return origin + ceil((pos - origin - EPS) / interval) * interval;
         }
+        /* A jump at a point of the timeline (a loop's end) whose conditions
+         * hold: the destination's stems (the locked boxes' sounds there)
+         * get their decoders set up PREPARE_AHEAD before it, at the frames
+         * they will start from. Opened at the jump, their voices waited for
+         * the console's loader and then skipped what went by: the music
+         * stopped and jumped after a few minutes in a room (rp108). */
+        void prepare_jumps() {
+            const Json& trans = (*def)["transitions"];
+            const Json& boxes = (*def)["boxes"];
+            for (size_t i = 0; i < trans.size(); ++i) {
+                double ahead = tr_at[i] - pos;
+                if (ahead < -EPS || ahead > PREPARE_AHEAD || tr_end[i] - tr_at[i] > EPS) {
+                    tr_prepared[i] = 0;
+                    continue;
+                }
+                if (tr_prepared[i] || !matches(trans[i]["conditions"])) continue;
+                tr_prepared[i] = 1;
+                double destination = trans[i]["to"].num();
+                for (size_t b = 0; b < boxes.size(); ++b) {
+                    if (!box_locked[b] || destination + EPS < box_at[b] || destination >= box_end[b] - EPS) continue;
+                    const Json& node = bank->doc["nodes"].get(boxes[b]["id"].str());
+                    if (node["kind"].str() != "waveform" || !matches(node["conditions"])) continue;
+                    const Json& sample = node["sample"];
+                    double offset = node["offset"].num() + node["seek"].num() + (destination - box_at[b]);
+                    u32 frame = (u32)(offset * sample["rate"].num() + sample["frames"].num() * node["seek_percent"].num() / 100);
+                    system->mixer.prepare(sample["path"].str(), frame);
+                }
+            }
+        }
         void event_tick() {
             const Json& trans = (*def)["transitions"];
             bool allow_transitions = bridge == NULL;
+            prepare_jumps();
             if (bridge) {
                 double elapsed = age - bridge_start;
                 double destination_at = (*bridge)["length"].num() - (*bridge)["lead_out"].num();

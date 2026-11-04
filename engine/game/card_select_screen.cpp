@@ -173,7 +173,8 @@ Node* CardSelectScreen::build(const Json& d, std::string* error) {
             single = "UpgradeSinglePreviewContainer";
             multi = "UpgradeMultiPreviewContainer";
         } else if (kind_ == "enchant") {
-            single = multi = "EnchantMultiPreviewContainer";
+            single = "EnchantSinglePreviewContainer";
+            multi = "EnchantMultiPreviewContainer";
         } else if (kind_ == "combat_pile" || kind_ == "simple_grid") {
             single = multi = "";
         }
@@ -346,11 +347,12 @@ void CardSelectScreen::toggle(int i) {
     show_button(confirm_, (min_ != max_ || manual_confirm_ || max_ == 0) && (int)order_.size() >= min_);
 }
 
-/* PreviewSelection: the picked cards over the dimmed grid, or (one card to
- * upgrade) the card before and after. */
+/* PreviewSelection: the picked cards over the dimmed grid, or (a single
+ * selection to upgrade or enchant: UseSingleSelection, MaxSelect 1) the card
+ * before and after. */
 void CardSelectScreen::open_preview() {
     tips_.hide();
-    Control* box = order_.size() == 1 && single_box_ ? single_box_ : multi_box_;
+    Control* box = max_ == 1 && single_box_ ? single_box_ : multi_box_;
     if (!box) return;
     preview_ = true;
     preview_box_ = box;
@@ -382,11 +384,11 @@ void CardSelectScreen::open_preview() {
     Node* before = find_named(box, "Before");
     Node* after = find_named(box, "After");
     if (order_.size() == 1 && before) {
-        /* NUpgradePreview / the transform's: before, arrows, after. */
+        /* NUpgradePreview / NEnchantPreview: before, arrows, after. */
         const Json& c = cs[(size_t)order_[0]];
         Node* card = make_card(lib_, c);
         if (card) before->add_child(card);
-        const Json& up = c["upgrade_preview"];
+        const Json& up = kind_ == "enchant" ? c["enchant_preview"] : c["upgrade_preview"];
         bool shows_after = after && up.is_object();
         if (shows_after) {
             Node* card2 = make_card(lib_, up);

@@ -31,6 +31,11 @@ public:
     /* The profile's menu (the logic's main_menu answer); null: only
      * Singleplayer and Quit, as before a profile is read. */
     void set_menu(const Json& menu);
+    /* Back from a run: the buttons hide (and take no input) until the
+     * profile's menu comes again (the last one's Continue and Abandon Run
+     * showed for a second: set2). */
+    void forget_menu();
+    bool menu_known() const { return menu_known_; }
     Action input(const PadState& pad);
     /* While another screen is over it (character select, a run starting):
      * no input, no carets. */

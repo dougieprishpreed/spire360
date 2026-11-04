@@ -38,7 +38,12 @@ public:
 private:
     PackReader(const PackReader&);
     PackReader& operator=(const PackReader&);
-    enum { AHEAD = 32 * 1024 * 1024 };
+    /* The reads held for the canvas to take: a few textures past the one
+     * being made keep the drive busy. 32 MB of them (a warm-up's hundreds
+     * of small textures, newlib's heap) raised the heap to a peak it kept
+     * for the rest of the run, and the console's memory ran out in act 3's
+     * shops (rp108). */
+    enum { AHEAD = 6 * 1024 * 1024 };
     struct Entry {
         State state;
         TextureData data;

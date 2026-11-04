@@ -17,7 +17,7 @@ Canvas::Canvas(Renderer* r, const Pack* pack)
       dump_pending_(false), dumping_(false), dump_draws_(0), dump_glyphs_(0), dump_what_(NULL),
       decoded_w_(0), decoded_h_(0), glyphs_held_(false),
       r_(r), pack_(pack), reader_(NULL), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false), wind_on_(false), wind_(0),
-      wind_height_(0) {
+      wind_height_(0), no_room_count_(0) {
     stats_.created = stats_.evicted = stats_.over_frames = stats_.starved = 0;
     stats_.peak_bytes = 0;
 }
@@ -370,6 +370,7 @@ void Canvas::no_room(const std::string& key, const std::string& path, TextureDat
     kept.orig_height = data.orig_height;
     kept.levels.swap(data.levels);
     waiting_textures_ = (int)no_room_data_.size();
+    ++no_room_count_;
     log_warn("texture %s: no room in the GPU's memory; idle textures go, then it is made again", path.c_str());
 }
 

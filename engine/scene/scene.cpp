@@ -68,7 +68,8 @@ SceneLibrary* SceneLibrary::current() { return g_library; }
 SceneLibrary::SceneLibrary(const Pack* pack)
     : pack_(pack), audio_(NULL), warm_enabled_(true), warm_clock_(NULL), warm_share_(0), warm_spent_(0), warm_files_(0),
       warm_textures_(0), warm_frames_(0), scene_bytes_(0), skeleton_bytes_(0), skeleton_budget_(12u << 20),
-      skeletons_evicted_(0), default_theme_(NULL), default_font_(NULL) {
+      warm_scene_bytes_(0), warm_scene_budget_(8u << 20), scenes_evicted_(0), skeletons_evicted_(0),
+      default_theme_(NULL), default_font_(NULL) {
     g_library = this;
     default_font_ = new FontRes("FontFile");
     default_font_->file = DEFAULT_FONT_NAME;
@@ -119,9 +120,19 @@ void SceneLibrary::init_default_theme() {
     default_theme_ = t;
 }
 
-const SceneFile* SceneLibrary::file(const std::string& name) {
+const SceneFile* SceneLibrary::file(const std::string& name) { return load_file(name, false); }
+
+const SceneFile* SceneLibrary::load_file(const std::string& name, bool warm) {
     std::map<std::string, SceneFile*>::iterator it = files_.find(name);
-    if (it != files_.end()) return it->second;
+    if (it != files_.end()) {
+        /* used now: kept from here on (its nodes and resources point into it) */
+        SceneFile* had = it->second;
+        if (!warm && had && had->warm_only) {
+            had->warm_only = false;
+            warm_scene_bytes_ -= had->bytes < warm_scene_bytes_ ? had->bytes : warm_scene_bytes_;
+        }
+        return had;
+    }
     SceneFile* f = NULL;
     double started = load_trace_start();
     const PackEntry* e = pack_ ? pack_->find(name.c_str()) : NULL;
@@ -137,11 +148,17 @@ const SceneFile* SceneLibrary::file(const std::string& name) {
         /* swapped in: assigning copied the whole parsed tree */
         Json::parse(data.empty() ? "" : (const char*)&data[0], data.size(), &err).swap(f->doc);
         size_t heap_after = heap_in_use();
-        if (heap_after > heap_before) scene_bytes_ += heap_after - heap_before;
+        f->bytes = heap_after > heap_before ? heap_after - heap_before : 0;
+        scene_bytes_ += f->bytes;
         if (!err.empty()) {
             log_warn("%s: %s", name.c_str(), err.c_str());
+            scene_bytes_ -= f->bytes;
             delete f;
             f = NULL;
+        } else if (warm) {
+            f->warm_only = true;
+            warm_scene_bytes_ += f->bytes;
+            warm_scenes_.push_back(name);
         }
     }
     files_[name] = f;
@@ -485,9 +502,32 @@ void SceneLibrary::warm(const Json& paths) {
     }
 }
 
+/* The warm-up's parses that nothing has used, past their budget: the oldest
+ * go (a whole act's sets read at its start held 20 MB of parsed files that
+ * stayed for the run, and the console's memory ran out in act 3's shops:
+ * rp108); one used later is read again then. */
+void SceneLibrary::trim_warm_scenes() {
+    while (warm_scene_bytes_ > warm_scene_budget_ && !warm_scenes_.empty()) {
+        std::string name = warm_scenes_.front();
+        warm_scenes_.pop_front();
+        std::map<std::string, SceneFile*>::iterator it = files_.find(name);
+        if (it == files_.end() || !it->second || !it->second->warm_only) continue;
+        SceneFile* f = it->second;
+        warm_scene_bytes_ -= f->bytes < warm_scene_bytes_ ? f->bytes : warm_scene_bytes_;
+        scene_bytes_ -= f->bytes < scene_bytes_ ? f->bytes : scene_bytes_;
+        files_.erase(it);
+        delete f;
+        ++scenes_evicted_;
+    }
+    /* the order's names of files used since go with the next trims */
+    if (warm_scenes_.size() > 4096) warm_scenes_.erase(warm_scenes_.begin(), warm_scenes_.begin() + 1024);
+}
+
 SceneLibrary::MemoryStats SceneLibrary::memory_stats() const {
     MemoryStats m;
     m.scene_bytes = scene_bytes_;
+    m.warm_scene_bytes = warm_scene_bytes_;
+    m.scenes_evicted = scenes_evicted_;
     m.skeleton_bytes = skeleton_bytes_;
     m.scene_files = 0;
     for (std::map<std::string, SceneFile*>::const_iterator it = files_.begin(); it != files_.end(); ++it)
@@ -531,6 +571,7 @@ void SceneLibrary::warm_first(const std::vector<std::string>& paths) {
 
 void SceneLibrary::warm_step(Canvas& canvas) {
     if (skeleton_bytes_ > skeleton_budget_) trim_skeletons();
+    if (warm_scene_bytes_ > warm_scene_budget_) trim_warm_scenes();
     if (warm_queue_.empty() && warm_first_.empty() && warm_reading_.empty()) return;
     /* a frame's share: a time with a clock (the console reads a texture in
      * tens of ms), else 24 files and 4 textures */
@@ -564,7 +605,7 @@ void SceneLibrary::warm_step(Canvas& canvas) {
             if (got > 0) warm_reading_.push_back(p);
             else if (got == 0) ++textures;
         } else if (e->type == PACK_SCENE) {
-            const SceneFile* f = file(p);
+            const SceneFile* f = load_file(p, true);
             ++files;
             if (!f) continue;
             ext_refs(f->doc, queue);

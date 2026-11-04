@@ -70,6 +70,12 @@ if [ "$JOBS" -gt "$MAX_JOBS" ]; then
 fi
 [ "$JOBS" -ge 1 ] || JOBS=1
 
+# The languages whose characters the fonts get (the settings' language
+# picker offers these): every one the game has but Chinese, Japanese and
+# Korean, whose thousands of glyphs would take 100-220 MB each of the
+# console's memory (the twelve here take 81 MB of font pages in all)
+LANGUAGES="eng,deu,esp,fra,ind,ita,pol,ptb,rus,spa,tha,tur"
+
 SRC="$HOME_DIR/src"           # xsdk, vulkan4xenon, glslang-xenon
 TC="$HOME_DIR/toolchain"      # xsdk's GCC (and glslang beside it)
 TOOLS="$HOME_DIR/tools"       # .NET, wasi-sdk, Python's packages
@@ -210,7 +216,8 @@ stage_pack() {
   # Godot 4.5.1 renders the game's fonts; downloaded once
   ls "$ROOT"/converter/.cache/godot/Godot_v* > /dev/null 2>&1 || python "$ROOT/converter/convert.py" fetch-godot
   # (ffmpeg converts the game's loose MP3 sounds: card_deal, card_smith, ...)
-  python "$ROOT/converter/convert.py" build "$GAME/SlayTheSpire2.pck" "$WORK/pack" --jobs "$JOBS"
+  python "$ROOT/converter/convert.py" build "$GAME/SlayTheSpire2.pck" "$WORK/pack" --jobs "$JOBS" \
+    --languages "$LANGUAGES"
 }
 
 stage_logic() {

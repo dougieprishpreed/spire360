@@ -531,6 +531,7 @@ int main() {
     bool low_logged = false, logic_ended = false;
     unsigned silent_logged = 0;
     int pressure = 0; /* the memory valve's level (0 none) */
+    unsigned no_room_seen = 0; /* the canvas's no-room count the valve has seen */
     double silent_at = -1e9;
     for (;;) {
         /* Any controller plays: on a console the pad can be signed in to
@@ -678,18 +679,31 @@ int main() {
          * most once a second */
         /* The memory valve: late in a run the console's memory all but
          * gone (13 MB free at the act 3 boss, the merchant's backdrop with
-         * no room for it: rp104), the textures' and the kept sounds' budgets
-         * shrink and their idle ones go; back as it recovers. */
-        if (g_frame % 60 == 0) {
+         * no room for it: rp104), the textures', the kept sounds', the
+         * skeletons' and the warm-up's parsed files' budgets shrink and
+         * their idle ones go; back as it recovers. A quarter second apart,
+         * and at once a step tighter when a texture finds no room (a shop's
+         * textures came in one frame at 22 MB free, and the next
+         * allocation took the console to the dashboard: rp108). */
+        if (g_frame % 15 == 0) {
             unsigned free_mb = free_memory_mb();
             int level = free_mb < 18 ? 2 : free_mb < 28 ? 1 : 0;
             if (level < pressure && free_mb < 44) level = pressure;
+            if (canvas->no_room_count() != no_room_seen) {
+                no_room_seen = canvas->no_room_count();
+                if (level <= pressure && pressure < 2) level = pressure + 1;
+            }
             if (level != pressure) {
                 pressure = level;
                 int textures = level == 2 ? 60 : level == 1 ? 72 : 80, sounds = level == 2 ? 16 : level == 1 ? 24 : 32;
+                int skeletons = level == 2 ? 6 : level == 1 ? 9 : 12, scenes = level == 2 ? 2 : level == 1 ? 4 : 8;
                 canvas->set_texture_budget((size_t)textures * 1024 * 1024);
                 AudioDecoder::set_budget((size_t)sounds * 1024 * 1024);
-                logf("memory: %u MB free, the textures' budget %d MB, the kept sounds' %d MB", free_mb, textures, sounds);
+                lib->set_skeleton_budget((size_t)skeletons * 1024 * 1024);
+                lib->set_warm_scene_budget((size_t)scenes * 1024 * 1024);
+                logf("memory: %u MB free, the textures' budget %d MB, the kept sounds' %d MB, the skeletons' %d MB, "
+                     "the warm-up's parsed files' %d MB",
+                     free_mb, textures, sounds, skeletons, scenes);
             }
         }
         AudioOutput::Stats as;
@@ -719,16 +733,17 @@ int main() {
             if (audio.output_stats(&as))
                 logf("audio: %u frames of silence in all, fewest queued %u of %u; mix %.2f ms a frame of 5.3 (worst %.2f, "
                      "%d frames); %d sounds read (%.1f MB, the longest waited %.0f ms: %.0f for the loader, %.0f "
-                     "reading, %s), %.1f MB kept",
+                     "reading, %s), %.1f MB kept, %d music decoders set up ahead (%d taken)",
                      as.silent, as.fewest_queued, as.queue, mix_average, mix_worst, mixes, loads.loads,
                      loads.bytes / 1048576.0, loads.longest_ms, loads.longest_queue_ms, loads.longest_read_ms,
                      loads.longest && *loads.longest ? loads.longest + (strrchr(loads.longest, '/') ? strrchr(loads.longest, '/') - loads.longest + 1 : 0) : "-",
-                     loads.kept / 1048576.0);
+                     loads.kept / 1048576.0, loads.prepared, loads.prepared_taken);
             SceneLibrary::MemoryStats ms = lib->memory_stats();
-            logf("heap: %.1f MB in use of %.1f MB held, big blocks %.1f MB; parsed scenes %.1f MB (%u files), "
+            logf("heap: %.1f MB in use of %.1f MB held, big blocks %.1f MB; parsed scenes %.1f MB (%u files; "
+                 "%.1f MB the warm-up's alone, %u let go), "
                  "skeletons %.1f MB (%u, %u in use, %u let go), particle preprocesses kept %.1f MB",
                  heap_in_use() / 1048576.0, heap_held() / 1048576.0, spire_big_bytes() / 1048576.0,
-                 ms.scene_bytes / 1048576.0, ms.scene_files,
+                 ms.scene_bytes / 1048576.0, ms.scene_files, ms.warm_scene_bytes / 1048576.0, ms.scenes_evicted,
                  ms.skeleton_bytes / 1048576.0, ms.skeletons, ms.skeletons_used, ms.skeletons_evicted,
                  Particles2D::preprocess_cache_bytes() / 1048576.0);
             double state_ms, submit_ms;

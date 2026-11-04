@@ -30,6 +30,10 @@ Json top_bar_key(const Json& decision);
  * (most of a fight's cards: Tuning Fork's, Ink Bottle's counts); false
  * otherwise (the caller makes a new bar). */
 bool refresh_top_bar(Node* bar, const Json& now, const Json& was);
+/* refresh_top_bar's, the gold (counted) and the deck's count too: the bar
+ * one reward screen hands the next (NOverlayStack keeps the run's bar, so
+ * a potion's flight and flash go on as the next reward is taken). */
+bool carry_top_bar(Node* bar, const Json& now, const Json& was);
 /* AnimateRelic / AnimatePotion(startPosition): the next bar's new relic or
  * potion of that id ("relic", "potion") comes from that global position and
  * scale (a shop's slot) instead of rising into place. */
@@ -41,6 +45,9 @@ void set_top_bar_gold(Node* bar, int gold);
 /* NPotion (scenes/potions/potion.tscn, 60x60, pivot at its centre) showing
  * a potion's atlas image and outline; NULL without the scene. */
 Node* make_potion(SceneLibrary* lib, const std::string& potion_id);
+/* NPotionHolder.AddPotion: make_potion at 0.9 in a holder's middle
+ * (potion_holder.tscn); NULL without the scene. */
+Control* holder_potion(SceneLibrary* lib, Node* holder, const std::string& id);
 /* A relic's atlas icon and outline on relic.tscn's %Icon (or any
  * TextureRect with an %Outline child). */
 void set_relic_icon(SceneLibrary* lib, Node* icon, const std::string& relic_id);

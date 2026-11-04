@@ -116,7 +116,7 @@ void MenuFlow::show_title() {
         if (title_node_) tree_->root()->add_child(title_node_);
         else event_ = "main menu: " + err;
     }
-    title_->set_menu(menu_);
+    if (menu_ready_) title_->set_menu(menu_);
     title_->set_covered(false);
     if (lib_->audio()) lib_->audio()->menu();
     tree_->layout();
@@ -267,8 +267,9 @@ void MenuFlow::handle_answer(const Json& a) {
     } else if (type == "error") {
         menu_ready_ = true;
         note("logic: " + a["message"].str());
-        /* No profile could be read: the menu without one. */
-        if (menu_.is_null()) title_->set_menu(menu_);
+        /* No profile could be read: the menu without one (or the last one,
+         * the buttons waiting for it after a run). */
+        if (menu_.is_null() || !title_->menu_known()) title_->set_menu(menu_);
         if (starting_) {
             /* The run could not start (a bad save): back to the menu. */
             starting_ = false;
@@ -333,6 +334,10 @@ bool MenuFlow::update(const PadState& in) {
             in_run_ = false;
             if (over) game_->request("{\"cmd\":\"return_to_menu\"}");
             close_screen();
+            /* the profile's menu comes again (return_to_menu's answer, or
+             * Save and Quit's, read next): the buttons wait for it */
+            menu_ready_ = false;
+            if (title_node_) title_->forget_menu();
             show_title();
             note("main menu");
             if (timeline) open_timeline();

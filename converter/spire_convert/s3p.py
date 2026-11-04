@@ -77,6 +77,10 @@ def parse_texture_payload(data):
             "levels": [data[o:e] for o, e in zip(offsets, ends)]}
 
 
+# the console's file reads stop at 2 GB (xsdk's lseek takes a 32-bit off_t)
+MAX_FILE_END = 0x7FFFFFFF
+
+
 class Writer:
     """Streams payloads to disk, writes the directory at the end."""
 
@@ -102,6 +106,11 @@ class Writer:
         if pad:
             self.f.write(b"\0" * pad)
             pos += pad
+        if pos + len(payload) > MAX_FILE_END:
+            # the console reads nothing past 2 GB of a file (xsdk's 32-bit
+            # off_t): a pack that big would load its last entries empty
+            raise ValueError(f"the pack passes 2 GB at {name} ({pos + len(payload)} bytes): "
+                             "the console cannot read past 2 GB of a file")
         self.f.write(payload)
         self.entries.append((h, pos, len(payload), type_, flags, name, zlib.crc32(payload)))
 

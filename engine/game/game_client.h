@@ -100,6 +100,8 @@ public:
         script_at_ = 0;
     }
     size_t script_left() const { return script_.size() - script_at_; }
+    /* A command sent, its answer not yet come. */
+    bool waiting() const { return waiting_; }
     /* Auto play answers only the decisions before the until-th (0: all). */
     void set_auto_play_until(int until) { auto_until_ = until; }
     bool auto_playing() const { return auto_ && (auto_until_ <= 0 || decisions_ < auto_until_); }
@@ -300,6 +302,10 @@ private:
      * game's start as its room fades in, and ours took longer to build
      * (rp107: the heal in the black before Neow showed). */
     Json held_sounds_;
+    /* the latest decision's music and ambience (GameAudio::decision), held
+     * the same way: Neow's track and the shop's began in the black before
+     * their rooms showed (rp108) */
+    Json held_audio_;
     bool room_showing() const;
     void play_step_sounds(const Json& steps);
     std::vector<std::string> queued_; /* sent after the logic's "ready" */

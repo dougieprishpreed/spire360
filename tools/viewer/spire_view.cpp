@@ -421,6 +421,24 @@ int main(int argc, char** argv) {
     }
     printf("%s: %d items, %ld draw calls, %ld triangles\n", argv[3], tree.items_drawn, canvas.draw_calls(),
            sw.triangles_drawn());
+    /* SPIRE_DUMP_BONES: each bone-following node's transform as drawn
+     * (against the scene's own, the editor's at the setup pose) */
+    if (getenv("SPIRE_DUMP_BONES")) {
+        std::vector<Node*> todo(1, tree.root());
+        while (!todo.empty()) {
+            Node* n = todo.back();
+            todo.pop_back();
+            for (size_t i = 0; i < n->children.size(); ++i) todo.push_back(n->children[i]);
+            if (!strcmp(getenv("SPIRE_DUMP_BONES"), "2")) printf("node %s (%s)\n", n->name.c_str(), n->type.c_str());
+            if (n->type != "SpineBoneNode" || !n->is_node2d()) continue;
+            Node2D* b = (Node2D*)n;
+            Xform2D g = b->global_transform();
+            printf("bone node %s: position %.1f %.1f, rotation %.4f, scale %.4f %.4f, skew %.4f; global x (%.3f %.3f) "
+                   "y (%.3f %.3f)\n",
+                   n->name.c_str(), b->position.x, b->position.y, b->rotation, b->scale.x, b->scale.y, b->skew, g.x.x,
+                   g.x.y, g.y.x, g.y.y);
+        }
+    }
     for (std::map<std::string, int>::iterator it = tree.skipped.begin(); it != tree.skipped.end(); ++it)
         printf("  not drawn: %s x%d\n", it->first.c_str(), it->second);
     for (std::map<std::string, int>::iterator it = lib.unsupported.begin(); it != lib.unsupported.end(); ++it)

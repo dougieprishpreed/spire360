@@ -21,6 +21,9 @@ struct SceneFile {
     std::string name; /* pack name */
     Json doc;
     std::map<std::string, Resource*> subs;
+    size_t bytes;    /* the heap its parse took */
+    bool warm_only;  /* parsed by the warm-up alone: nothing points into it */
+    SceneFile() : bytes(0), warm_only(false) {}
 };
 
 class SceneLibrary {
@@ -91,24 +94,30 @@ public:
     void set_warm_share(double ms_per_frame) { warm_share_ = ms_per_frame; }
 
     /* What the library holds on the heap (the console's memory): the
-     * parsed scene files (kept: their resources point into them) and the
-     * Spine skeletons' data, which the unused ones give back past a budget
-     * (trim_skeletons, each frame from warm_step: the oldest unused first;
-     * a skeleton used again is read again). */
+     * parsed scene files (kept once used: their nodes and resources point
+     * into them; the ones only the warm-up has read for their references
+     * go past a budget, the oldest first, and are read again when used)
+     * and the Spine skeletons' data, which the unused ones give back past a
+     * budget (trim_skeletons, each frame from warm_step: the oldest unused
+     * first; a skeleton used again is read again). */
     struct MemoryStats {
-        size_t scene_bytes, skeleton_bytes;
-        unsigned scene_files, skeletons, skeletons_used, skeletons_evicted;
+        size_t scene_bytes, warm_scene_bytes, skeleton_bytes;
+        unsigned scene_files, scenes_evicted, skeletons, skeletons_used, skeletons_evicted;
     };
     MemoryStats memory_stats() const;
     void skeleton_loaded(SpineDataRes* r);
     void set_skeleton_budget(size_t bytes) { skeleton_budget_ = bytes; }
     void trim_skeletons();
+    void set_warm_scene_budget(size_t bytes) { warm_scene_budget_ = bytes; }
 
 private:
     Resource* build(const std::string& cls, const Json& props, const SceneFile* ctx, const std::string& path);
     ThemeRes* build_theme(const Json& props, const SceneFile* ctx);
     Node* instantiate_file(const SceneFile* f, int depth, std::string* error);
     void init_default_theme();
+    /* file(), or for the warm-up's scan (warm: nothing pins it) */
+    const SceneFile* load_file(const std::string& name, bool warm);
+    void trim_warm_scenes();
 
     const Pack* pack_;
     GameAudio* audio_; /* service owned by the application */
@@ -126,6 +135,10 @@ private:
     double warm_share_, warm_spent_;
     int warm_files_, warm_textures_, warm_frames_;
     size_t scene_bytes_, skeleton_bytes_, skeleton_budget_;
+    /* the warm-up's own parses, the oldest first, and what they hold */
+    std::deque<std::string> warm_scenes_;
+    size_t warm_scene_bytes_, warm_scene_budget_;
+    unsigned scenes_evicted_;
     std::vector<SpineDataRes*> skeletons_; /* the parsed ones */
     unsigned skeletons_evicted_;
     Json default_theme_doc_;

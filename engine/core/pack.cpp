@@ -44,7 +44,14 @@ static bool seek64(FILE* f, u64 off) {
  * refill a request of the USB drive: the console read the pack at 3.9 MB/s
  * whatever the entry, the Neow room's 12 MB background in 3.2 s. read()
  * asks the kernel for all of it at once. */
+/* xsdk's lseek and pread take newlib's 32-bit signed off_t (there is no
+ * lseek64): nothing past 2 GB of a file can be read on the console. Every
+ * platform refuses it, so a pack grown past it fails the PC's checks as it
+ * would the console (Cuphead360's textures past 2 GB came in black). */
+static const u64 MAX_FILE_END = 0x7FFFFFFFu;
+
 static bool read_at(FILE* f, u64 off, void* buf, size_t n) {
+    if (off > MAX_FILE_END || n > MAX_FILE_END - off) return false;
 #if defined(__XSDK__)
     int fd = fileno(f);
     if (lseek(fd, (off_t)off, SEEK_SET) != (off_t)off) return false;
@@ -107,6 +114,12 @@ bool Pack::open(const char* path, std::string* error) {
         e.flags = be16(p + 22);
         e.name_offset = be32(p + 24);
         e.crc = be32(p + 28);
+        if (e.offset > MAX_FILE_END || e.size > MAX_FILE_END - e.offset) {
+            if (error) *error = format("pack entry %u ends past 2 GB (at %llu): the console reads no further", i,
+                                       (unsigned long long)(e.offset + e.size));
+            close();
+            return false;
+        }
     }
     return true;
 }
@@ -205,7 +218,7 @@ FILE* Pack::open_stream(const PackEntry* e) const {
     if (!f_ || !e) return NULL;
     FILE* stream = fopen(path_.c_str(), "rb");
     if (stream) setvbuf(stream, NULL, _IOFBF, STREAM_BUFFER);
-    if (stream && !seek64(stream, e->offset)) { fclose(stream); stream = NULL; }
+    if (stream && (e->offset > MAX_FILE_END || !seek64(stream, e->offset))) { fclose(stream); stream = NULL; }
     return stream;
 }
 

@@ -292,6 +292,11 @@ static float patch_margin(Control* c, int side) {
     return c && c->type == "NinePatchRect" ? ((NinePatchRect*)c)->margin[side] : 0.0f;
 }
 
+static const std::string& infinite_display() {
+    static const std::string s = "InfiniteWithoutNumbers";
+    return s;
+}
+
 /* NHealthBar.RefreshValues (RefreshBlockUi, RefreshForeground,
  * RefreshMiddleground, RefreshText) at rest: the tweens' end values.
  * e: the creature's decision data; powers: its power list. */
@@ -320,7 +325,11 @@ void CombatScreen::refresh_health_bar(Creature& c, const Json& e, const Json& po
     float max_w = c.max_fg_width;
     /* GetFgWidth */
     float fg_w = max_hp <= 0 ? 0.0f : maxf((float)hp / (float)max_hp * max_w, hp > 0 ? 12.0f : 0.0f);
-    const std::string& hp_display = e["hp_display"].str();
+    /* an HP no creature has (the Waterfall Giant about to blow: 999999999,
+     * then HpDisplay.InfiniteWithoutNumbers, a step later): infinite from
+     * the first (its number showed for a moment: rp108) */
+    const std::string& hp_display =
+        max_hp >= 99999999 && e["hp_display"].str().compare(0, 8, "Infinite") != 0 ? infinite_display() : e["hp_display"].str();
     bool infinite = hp_display.compare(0, 8, "Infinite") == 0;
     bool shows_numbers = hp_display != "InfiniteWithoutNumbers";
     const Json* poison_power = find_power(powers, "POISON_POWER");
@@ -3127,7 +3136,9 @@ bool CombatScreen::apply_state(const Json& ch) {
         }
         c->powers = next;
         make_powers(*c, next);
-        refresh_state(*c, true);
+        /* a creature dying of its poison keeps the bar it died with (it
+         * turned plain red as the poison went with the death: rp108) */
+        if (!(ch["removed"].b() && c != &player_ && c->data["hp"].i() <= 0)) refresh_state(*c, true);
         /* NPower.OnDisplayAmountChanged: its flash */
         if (exists && !ch["removed"].b() && ch["to"].i() != ch["from"].i()) power_row_flash(ch["who"].str(), ch["power"].str());
         /* NOrbVfx.OnPowerApplied / Increased / Decreased: the orbs' focused
@@ -4372,6 +4383,17 @@ void CombatScreen::show_start_banner(bool turn_banner) {
 /* The steps as a timeline. CreatureCmd.TriggerAnim's pause precedes its
  * impact; VFX, damage numbers and state changes at that impact are parallel.
  * Cmd.Wait supplies the remaining pacing without an extra per-step delay. */
+void CombatScreen::hide_revealed_intents(const Json& steps) {
+    for (size_t i = 0; i < steps.size(); ++i)
+        for (size_t k = 0; k < steps[i].size(); ++k) {
+            const Json& ch = steps[i][k];
+            if (ch["t"].str() != "ui" || ch["call"].str() != "NCreature.RefreshIntents") continue;
+            Creature* c = creature_for(ch["args"][(size_t)0].str());
+            Control* row = c && c->node ? ctl(c->node, "Intents") : NULL;
+            if (row) row->modulate.a = 0;
+        }
+}
+
 void CombatScreen::play_steps(const Json& steps, const Json& sync_to, bool finishing) {
     /* the cards the steps bring in are looked up in the decision they lead
      * to: a fight's first turn (its screen built fresh, update_decision

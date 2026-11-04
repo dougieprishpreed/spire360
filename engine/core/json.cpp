@@ -2,6 +2,7 @@
 #include "base.h"
 #include "thread.h"
 
+#include <algorithm>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,39 +19,65 @@ static const Json& null_json() {
     return n;
 }
 
-Json::Json(const Json& o) : type_(o.type_), num_(o.num_), bool_(o.bool_), str_(o.str_), body_(o.body_) {
-    if (body_) atomic_add(&body_->refs, 1);
+static const std::string& empty_string() {
+    static std::string none;
+    return none;
+}
+
+Json::Json(const Json& o) : type_(o.type_), bool_(o.bool_) {
+    u_ = o.u_;
+    if (type_ == STRING) atomic_add(&u_.text->refs, 1);
+    else if ((type_ == ARRAY || type_ == OBJECT) && u_.body) atomic_add(&u_.body->refs, 1);
 }
 
 Json& Json::operator=(const Json& o) {
-    if (o.body_) atomic_add(&o.body_->refs, 1);
-    Body* old = body_;
-    type_ = o.type_;
-    num_ = o.num_;
-    bool_ = o.bool_;
-    str_ = o.str_;
-    body_ = o.body_;
-    if (old) release(old);
+    /* o read (and counted) before this value's contents go: it may be one
+     * of them (x = x["child"]) */
+    unsigned char type = o.type_;
+    bool flag = o.bool_;
+    Json copy_of = o;
+    drop();
+    type_ = type;
+    bool_ = flag;
+    u_ = copy_of.u_;
+    copy_of.type_ = NUL; /* its count is this value's now */
     return *this;
 }
 
-Json::~Json() {
-    if (body_) release(body_);
+Json::~Json() { drop(); }
+
+/* what this value holds let go (its type and contents are then stale) */
+void Json::drop() {
+    if (type_ == STRING) release(u_.text);
+    else if ((type_ == ARRAY || type_ == OBJECT) && u_.body) release(u_.body);
 }
 
 void Json::release(Body* b) {
     if (atomic_add(&b->refs, -1) == 0) delete b;
 }
 
+void Json::release(Text* t) {
+    if (atomic_add(&t->refs, -1) == 0) delete t;
+}
+
+Json Json::make_string(const std::string& s) {
+    Json j;
+    j.type_ = STRING;
+    j.u_.text = new Text(s);
+    return j;
+}
+
+const std::string& Json::str() const { return type_ == STRING ? u_.text->s : empty_string(); }
+
 Json::Body* Json::own() {
-    if (!body_) {
-        body_ = new Body();
-    } else if (body_->refs > 1) {
-        Body* mine = new Body(*body_);
-        release(body_);
-        body_ = mine;
+    if (!u_.body) {
+        u_.body = new Body();
+    } else if (u_.body->refs > 1) {
+        Body* mine = new Body(*u_.body);
+        release(u_.body);
+        u_.body = mine;
     }
-    return body_;
+    return u_.body;
 }
 
 static const std::vector<std::string>& no_keys() {
@@ -59,78 +86,152 @@ static const std::vector<std::string>& no_keys() {
 }
 
 size_t Json::size() const {
-    if (!body_) return 0;
-    return type_ == ARRAY ? body_->arr.size() : (type_ == OBJECT ? body_->keys.size() : 0);
+    if ((type_ != ARRAY && type_ != OBJECT) || !u_.body) return 0;
+    return u_.body->arr.size();
 }
 
 const std::vector<std::string>& Json::keys() const {
-    return type_ == OBJECT && body_ ? body_->keys : no_keys();
+    return type_ == OBJECT && u_.body ? u_.body->keys : no_keys();
 }
 
 const Json& Json::operator[](size_t idx) const {
-    if (type_ != ARRAY || !body_ || idx >= body_->arr.size()) return null_json();
-    return body_->arr[idx];
+    if (type_ != ARRAY || !u_.body || idx >= u_.body->arr.size()) return null_json();
+    return u_.body->arr[idx];
+}
+
+/* An object's index past this many members (fewer: its keys looked
+ * through, no index made: most objects are a few members). */
+static const size_t INDEXED = 8;
+
+/* the keys looked through, or a binary search of the sorted places */
+int Json::find(const Body* b, const char* key) {
+    if (b->order.empty()) {
+        for (size_t i = 0; i < b->keys.size(); ++i)
+            if (strcmp(b->keys[i].c_str(), key) == 0) return (int)i;
+        return -1;
+    }
+    size_t lo = 0, hi = b->order.size();
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        int c = strcmp(b->keys[b->order[mid]].c_str(), key);
+        if (c == 0) return (int)b->order[mid];
+        if (c < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return -1;
 }
 
 const Json& Json::operator[](const char* key) const {
-    if (type_ != OBJECT || !body_) return null_json();
-    std::map<JsonKey, Json>::const_iterator it = body_->obj.find(key);
-    return it == body_->obj.end() ? null_json() : it->second;
+    if (type_ != OBJECT || !u_.body) return null_json();
+    int at = find(u_.body, key);
+    return at < 0 ? null_json() : u_.body->arr[(size_t)at];
 }
 
-bool Json::has(const char* key) const {
-    return type_ == OBJECT && body_ && body_->obj.find(key) != body_->obj.end();
+bool Json::has(const char* key) const { return type_ == OBJECT && u_.body && find(u_.body, key) >= 0; }
+
+struct KeyLess {
+    const std::vector<std::string>* keys;
+    bool operator()(unsigned a, unsigned b) const {
+        int c = strcmp((*keys)[a].c_str(), (*keys)[b].c_str());
+        return c < 0 || (c == 0 && a < b);
+    }
+};
+
+/* an object's places sorted by key (past INDEXED members) */
+static void sort_places(const std::vector<std::string>& keys, std::vector<unsigned>& order) {
+    order.resize(keys.size());
+    for (size_t i = 0; i < keys.size(); ++i) order[i] = (unsigned)i;
+    KeyLess less;
+    less.keys = &keys;
+    std::sort(order.begin(), order.end(), less);
+}
+
+void Json::index_members(Body* b) { sort_places(b->keys, b->order); }
+
+/* the place a new key takes in the sorted order */
+static size_t insert_at(const std::vector<std::string>& keys, const std::vector<unsigned>& order, const char* key) {
+    size_t lo = 0, hi = order.size();
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (strcmp(keys[order[mid]].c_str(), key) < 0) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
 }
 
 void Json::set(const std::string& key, const Json& value) {
     /* value may be one of this value's own members (or below them): held
      * before the write copies or replaces them */
     Json keep(value);
-    if (type_ != OBJECT) { *this = Json(); type_ = OBJECT; }
-    Body* b = own();
-    std::map<JsonKey, Json>::iterator it = b->obj.find(key.c_str());
-    if (it == b->obj.end()) {
-        b->keys.push_back(key);
-        b->obj.insert(std::make_pair(JsonKey(key), keep));
-    } else {
-        it->second = keep;
+    if (type_ != OBJECT) {
+        *this = Json();
+        type_ = OBJECT;
     }
+    Body* b = own();
+    int at = find(b, key.c_str());
+    if (at >= 0) {
+        b->arr[(size_t)at] = keep;
+        return;
+    }
+    b->keys.push_back(key);
+    b->arr.push_back(keep);
+    if (b->keys.size() <= INDEXED) return;
+    if (b->order.empty()) {
+        index_members(b);
+        return;
+    }
+    size_t place = insert_at(b->keys, b->order, key.c_str());
+    b->order.insert(b->order.begin() + (long)place, (unsigned)(b->keys.size() - 1));
 }
 
 void Json::append(const Json& value) {
     Json keep(value);
-    if (type_ != ARRAY) { *this = Json(); type_ = ARRAY; }
+    if (type_ != ARRAY) {
+        *this = Json();
+        type_ = ARRAY;
+    }
     own()->arr.push_back(keep);
 }
 
 void Json::swap(Json& other) {
-    Type t = type_;
+    unsigned char t = type_;
     type_ = other.type_;
     other.type_ = t;
-    double n = num_;
-    num_ = other.num_;
-    other.num_ = n;
     bool b = bool_;
     bool_ = other.bool_;
     other.bool_ = b;
-    str_.swap(other.str_);
-    Body* body = body_;
-    body_ = other.body_;
-    other.body_ = body;
+    std::swap(u_, other.u_);
 }
 
 bool Json::operator==(const Json& other) const {
     if (type_ != other.type_) return false;
     switch (type_) {
     case BOOL: return bool_ == other.bool_;
-    case NUMBER: return num_ == other.num_;
-    case STRING: return str_ == other.str_;
+    case NUMBER: return u_.num == other.u_.num;
+    case STRING: return u_.text == other.u_.text || u_.text->s == other.u_.text->s;
     case ARRAY:
     case OBJECT: {
-        if (body_ == other.body_) return true;
+        if (u_.body == other.u_.body) return true;
         if (size() != other.size()) return false;
-        if (!body_ || !other.body_) return true; /* both empty */
-        return type_ == ARRAY ? body_->arr == other.body_->arr : body_->obj == other.body_->obj;
+        if (!u_.body || !other.u_.body) return true; /* both empty */
+        if (type_ == ARRAY) return u_.body->arr == other.u_.body->arr;
+        /* the same keys with the same values, in whichever order: up to
+         * INDEXED members (no sorted index) each looked up in the other */
+        const Body* a = u_.body;
+        const Body* o = other.u_.body;
+        if (a->order.empty() || o->order.empty()) {
+            for (size_t i = 0; i < a->keys.size(); ++i) {
+                int at = find(o, a->keys[i].c_str());
+                if (at < 0 || a->arr[i] != o->arr[(size_t)at]) return false;
+            }
+            return true;
+        }
+        for (size_t i = 0; i < a->order.size(); ++i) {
+            const std::string& ka = a->keys[a->order[i]];
+            if (ka != o->keys[o->order[i]]) return false;
+            if (a->arr[a->order[i]] != o->arr[o->order[i]]) return false;
+        }
+        return true;
     }
     default: return true;
     }
@@ -159,8 +260,15 @@ private:
         if (err_.empty()) err_ = format("%s at offset %d", msg, (int)(p_ - s_));
         return false;
     }
+    /* grown by swapping the parsed elements over (a vector's growth copied
+     * every element and counted its contents up and down) */
     static void grow(std::vector<Json>& v, size_t capacity) {
         std::vector<Json> bigger(capacity);
+        for (size_t i = 0; i < v.size(); ++i) bigger[i].swap(v[i]);
+        v.swap(bigger);
+    }
+    static void grow(std::vector<std::string>& v, size_t capacity) {
+        std::vector<std::string> bigger(capacity);
         for (size_t i = 0; i < v.size(); ++i) bigger[i].swap(v[i]);
         v.swap(bigger);
     }
@@ -194,6 +302,10 @@ private:
     }
     bool string(std::string& o) {
         ++p_; /* opening quote */
+        /* the run up to the first escape or the closing quote at once */
+        const char* run = p_;
+        while (p_ < end_ && *p_ != '"' && *p_ != '\\') ++p_;
+        o.assign(run, (size_t)(p_ - run));
         while (p_ < end_ && *p_ != '"') {
             char c = *p_++;
             if (c != '\\') { o += c; continue; }
@@ -224,49 +336,95 @@ private:
         ++p_;
         return true;
     }
+    /* an object's members parsed, in file order: its index sorted (past
+     * INDEXED members), and a key given twice kept at its first place with
+     * its last value (as a map took it) */
+    static void index(Json::Body* b) {
+        size_t n = b->keys.size();
+        std::vector<unsigned> order;
+        sort_places(b->keys, order);
+        bool twice = false;
+        for (size_t i = 1; i < n && !twice; ++i)
+            twice = b->keys[order[i]] == b->keys[order[i - 1]];
+        if (!twice) {
+            if (n > INDEXED) b->order.swap(order);
+            return;
+        }
+        std::vector<std::string> keys;
+        std::vector<Json> vals;
+        for (size_t i = 0; i < n; ++i) {
+            size_t at = keys.size();
+            for (size_t k = 0; k < keys.size(); ++k)
+                if (keys[k] == b->keys[i]) at = k;
+            if (at == keys.size()) {
+                keys.push_back(b->keys[i]);
+                vals.push_back(b->arr[i]);
+            } else {
+                vals[at] = b->arr[i];
+            }
+        }
+        b->keys.swap(keys);
+        b->arr.swap(vals);
+        index(b);
+    }
     bool value(Json& o, int depth) {
         if (depth > 200) return fail("nesting too deep");
         if (p_ >= end_) return fail("unexpected end");
         char c = *p_;
-        if (c == '"') { o.type_ = Json::STRING; return string(o.str_); }
+        if (c == '"') {
+            o.drop();
+            o.type_ = Json::STRING;
+            o.u_.text = new Json::Text(std::string());
+            return string(o.u_.text->s);
+        }
         if (c == '{') {
+            o.drop();
             o.type_ = Json::OBJECT;
+            o.u_.body = NULL;
             ++p_;
             ws();
             if (p_ < end_ && *p_ == '}') { ++p_; return true; }
+            Json::Body* b = o.own();
+            size_t n = 0;
             for (;;) {
                 ws();
                 if (p_ >= end_ || *p_ != '"') return fail("expected key");
-                std::string key;
-                if (!string(key)) return false;
+                /* parsed into its place: assigning a parsed value copied
+                 * its whole subtree, at every level of the tree */
+                if (n == b->keys.size()) {
+                    size_t cap = n ? n * 2 : 4;
+                    grow(b->keys, cap);
+                    grow(b->arr, cap);
+                }
+                if (!string(b->keys[n])) return false;
                 ws();
                 if (p_ >= end_ || *p_ != ':') return fail("expected ':'");
                 ++p_;
                 ws();
-                /* parsed into its place: assigning a parsed value copied
-                 * its whole subtree, at every level of the tree */
-                Json::Body* b = o.own();
-                std::map<JsonKey, Json>::iterator slot = b->obj.find(key.c_str());
-                if (slot == b->obj.end()) {
-                    b->keys.push_back(key);
-                    slot = b->obj.insert(std::make_pair(JsonKey(key), Json())).first;
-                } else {
-                    Json().swap(slot->second);
-                }
-                if (!value(slot->second, depth + 1)) return false;
+                if (!value(b->arr[n], depth + 1)) return false;
+                ++n;
                 ws();
                 if (p_ < end_ && *p_ == ',') { ++p_; continue; }
-                if (p_ < end_ && *p_ == '}') { ++p_; return true; }
+                if (p_ < end_ && *p_ == '}') {
+                    ++p_;
+                    b->keys.resize(n);
+                    b->arr.resize(n);
+                    /* the room the doubling left over goes */
+                    trim(b->keys);
+                    trim(b->arr);
+                    index(b);
+                    return true;
+                }
                 return fail("expected ',' or '}'");
             }
         }
         if (c == '[') {
+            o.drop();
             o.type_ = Json::ARRAY;
+            o.u_.body = NULL;
             ++p_;
             ws();
             if (p_ < end_ && *p_ == ']') { ++p_; return true; }
-            /* grown by swapping the parsed elements over (a vector's
-             * growth copied every element and its subtree) */
             size_t n = 0;
             std::vector<Json>& arr = o.own()->arr;
             for (;;) {
@@ -279,14 +437,15 @@ private:
                 if (p_ < end_ && *p_ == ']') {
                     ++p_;
                     arr.resize(n);
+                    trim(arr);
                     return true;
                 }
                 return fail("expected ',' or ']'");
             }
         }
-        if (c == 't') { o.type_ = Json::BOOL; o.bool_ = true; return lit("true"); }
-        if (c == 'f') { o.type_ = Json::BOOL; o.bool_ = false; return lit("false"); }
-        if (c == 'n') { o.type_ = Json::NUL; return lit("null"); }
+        if (c == 't') { o.drop(); o.type_ = Json::BOOL; o.bool_ = true; return lit("true"); }
+        if (c == 'f') { o.drop(); o.type_ = Json::BOOL; o.bool_ = false; return lit("false"); }
+        if (c == 'n') { o.drop(); o.type_ = Json::NUL; o.u_.num = 0; return lit("null"); }
         if (c == '-' || (c >= '0' && c <= '9')) {
             char buf[64];
             size_t n = 0;
@@ -294,11 +453,20 @@ private:
                    (*p_ == '-' || *p_ == '+' || *p_ == '.' || *p_ == 'e' || *p_ == 'E' || (*p_ >= '0' && *p_ <= '9')))
                 buf[n++] = *p_++;
             buf[n] = 0;
+            o.drop();
             o.type_ = Json::NUMBER;
-            o.num_ = strtod(buf, NULL);
+            o.u_.num = strtod(buf, NULL);
             return true;
         }
         return fail("unexpected character");
+    }
+    /* a parsed array's or object's room left over by the doubling given
+     * back (the elements swapped over, not copied) */
+    template <class T> static void trim(std::vector<T>& v) {
+        if (v.capacity() == v.size()) return;
+        std::vector<T> exact(v.size());
+        for (size_t i = 0; i < v.size(); ++i) exact[i].swap(v[i]);
+        v.swap(exact);
     }
 };
 

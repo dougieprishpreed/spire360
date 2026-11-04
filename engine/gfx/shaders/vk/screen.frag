@@ -56,12 +56,14 @@ void main() {
     float a = saturate(f.a * texture(g_tex, v_uv).a * m.a);
     o_color = vec4(saturate(f.rgb) * a, a);
 #elif defined(MODE_RADIAL)
-    // radial_blur: the mean of count reads toward the centre; the count is
-    // the block's int, the one data loop xost counts exactly
+    // radial_blur: the mean of 12 reads toward the centre (the combat
+    // room's sampling_count, the only one the game has). A loop to the
+    // block's count drew the screen black for the blur's second on the
+    // console (the Ceremonial Beast's and Bygone Effigy's blows: GitHub #2)
     vec2 dir = v_screen - g_scr2.xy;
     vec3 acc = vec3(0.0);
-    for (int r = 0; r < P.count; r += 1) acc += textureLod(g_scrA, v_screen - g_scr.z * dir * float(r), 0.0).rgb;
-    o_color = vec4(acc / max(g_scr.y, 1.0), 1.0);
+    for (int r = 0; r < 12; r += 1) acc += textureLod(g_scrA, v_screen - g_scr.z * dir * float(r), 0.0).rgb;
+    o_color = vec4(acc / 12.0, 1.0);
 #elif defined(MODE_LEVEL)
     // a level of the screen copy: the 7-tap Gaussian across and down of
     // the bilinear reads of the level above (Godot's back buffer mipmaps)

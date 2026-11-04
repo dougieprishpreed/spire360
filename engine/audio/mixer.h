@@ -17,6 +17,9 @@ public:
      * starts late but whole. */
     u32 play(const std::string& path, float volume = 1, float pitch = 1,
              u32 loop_start = 0, u32 loop_end = 0, int loop_count = 0, u32 offset = 0, bool follow = false);
+    /* A voice's decoder for path set up ahead at offset (AudioDecoder::
+     * prepare): a play() there soon starts at once. */
+    void prepare(const std::string& path, u32 offset);
     void stop(u32 voice, double fade = 0);
     /* No more loops: the voice plays to the end of its sound */
     void finish(u32 voice);

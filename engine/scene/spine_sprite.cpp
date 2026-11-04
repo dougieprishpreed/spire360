@@ -336,12 +336,14 @@ void SpineSprite::follow_bones() {
         SpineFollowNode* f = follow_node(children[i]);
         if (!f || f->drive) continue;
         const SpBone& b = skel_->bones[f->index];
+        /* spine-godot's SpineBone.get_global_transform: the world rotation
+         * and the scales' sizes, no skew. The y-down root's mirror, kept as
+         * a half-turn skew, turned what hangs off a bone upside down (the
+         * Thieving Hopper's stolen card showed its text box: rp108). */
         f->position = Vec2(b.world_x, b.world_y);
         f->rotation = atan2f(b.c, b.a);
         f->scale = Vec2(sqrtf(b.a * b.a + b.c * b.c), sqrtf(b.b * b.b + b.d * b.d));
-        f->skew = atan2f(b.d, b.b) - f->rotation - 1.57079633f;
-        while (f->skew > 3.14159265f) f->skew -= 6.28318531f;
-        while (f->skew < -3.14159265f) f->skew += 6.28318531f;
+        f->skew = 0;
     }
 }
 

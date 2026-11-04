@@ -28,6 +28,9 @@ public:
     void cue(const Json& cue);
     void steps(const Json& steps);
     void decision(const Json& decision);
+    /* A decision's banks parsed (its tracks' and ambience's) without
+     * playing them: decision() follows once the room shows. */
+    void prepare(const Json& decision);
     /* CreatureCmd.Kill once every player is dead: StopMusic, the
      * game_over stinger; at the player's death in the fight's last steps
      * (the game_over decision after them plays nothing more). */

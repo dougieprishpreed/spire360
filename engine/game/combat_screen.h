@@ -164,6 +164,10 @@ public:
      * queue) follows it on the same timeline. sync_to: the state the room
      * shows once these steps are done (finishing: the fight's end). */
     void play_steps(const Json& steps, const Json& sync_to = Json(), bool finishing = false);
+    /* A fight built fresh: the intents its steps reveal (NCreature.
+     * RefreshIntents at the first turn's start) start out unseen, as the
+     * game's do, rather than shown, blanked and faded in (rp108). */
+    void hide_revealed_intents(const Json& steps);
     /* The fight's first turn: "Battle Start", then the player's turn
      * banner (NCombatStartBanner); without the turn banner after the
      * combat rules FTUE (NCombatRulesFtue closes into NCombatStartBanner). */

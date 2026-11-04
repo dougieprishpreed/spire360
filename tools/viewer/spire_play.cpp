@@ -45,6 +45,9 @@
  * action start it (select_profile, set_setting, start_game_run with its
  * seed...), then auto play answers each screen with the next one.
  * --script-tail N: frames played after the last command's answer (600).
+ * --pad-at-end: auto play stops at the last command's answer, and the
+ * --pad presses play on that screen (a session cut where it is to be
+ * looked at: a selection's preview).
  * --workers N: worker threads for the particles' simulation (3, as the
  * console; 0 none).
  *
@@ -559,6 +562,8 @@ int main(int argc, char** argv) {
     int worker_count = 3;
     int steps = 40;
     int pad_after = 0; /* --pad-after N: auto play up to screen N (as printed), then the --pad script */
+    bool pad_at_end = false; /* --pad-at-end: the --pad script on the --commands' last answer */
+    int pad_end_at = 0;      /* ... the decision count it waits for */
     int hp = 0;
     bool fast = false;
     bool no_shots = false; /* --no-shots: no PNGs (soaks keep the log only) */ /* --hp: the player's max HP and HP after the start (soaks reach the end) */
@@ -617,6 +622,7 @@ int main(int argc, char** argv) {
         else if (strcmp(argv[i], "--dump-draws-at") == 0 && i + 1 < argc) dump_draws_at = atol(argv[++i]);
         else if (strcmp(argv[i], "--dump-draws-shot") == 0 && i + 1 < argc) dump_draws_shot = atoi(argv[++i]);
         else if (strcmp(argv[i], "--script-tail") == 0 && i + 1 < argc) script_tail = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--pad-at-end") == 0) pad_at_end = true;
         else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) worker_count = atoi(argv[++i]);
         else if (strcmp(argv[i], "--alloc-sites") == 0) g_alloc_sites = true;
         else if (strcmp(argv[i], "--fast") == 0) fast = true;
@@ -932,7 +938,7 @@ int main(int argc, char** argv) {
         if (monkey) printf("monkey: %d reports, resident %ld MB at the end\n", m_reports, resident_mb());
         return 0;
     }
-    if (pad_script.empty() || pad_after > 0) game.set_auto_play(auto_seed);
+    if (pad_script.empty() || pad_after > 0 || pad_at_end) game.set_auto_play(auto_seed);
     size_t pad_at = 0;
     FrameTimes frame_times;
     if (fast && !replay) game.request("{\"cmd\":\"set_setting\",\"name\":\"fast_mode\",\"value\":true}");
@@ -1019,8 +1025,16 @@ int main(int argc, char** argv) {
         /* --commands: the session's last command answered and played out */
         if (commands_path && game.script_left() == 0 && ++after_script > script_tail) break;
         PadState pad;
-        if (pad_at < pad_script.size() && !game.busy() &&
-            (pad_after == 0 ? game.decision_count() > 0 : shown > pad_after)) {
+        if (pad_at_end && commands_path && !pad_end_at && game.script_left() == 0) {
+            /* the last command sent: its answer (come already, or to come)
+             * is the pad's */
+            pad_end_at = game.decision_count() + (game.waiting() ? 1 : 0);
+            game.set_auto_play_until(pad_end_at);
+            printf("pad-at-end: the commands' last answer is decision %d (screen %d)\n", pad_end_at, shown);
+        }
+        bool pad_now = pad_at_end ? pad_end_at > 0 && game.decision_count() >= pad_end_at
+                                  : (pad_after == 0 ? game.decision_count() > 0 : shown > pad_after);
+        if (pad_at < pad_script.size() && !game.busy() && pad_now) {
             /* WAIT: a second with no press */
             if (pad_script[pad_at] != 0 || ++waited >= 60) {
                 waited = 0;
@@ -1082,10 +1096,12 @@ int main(int argc, char** argv) {
                 std::vector<std::string> scenes;
                 lib.loaded_scenes(scenes);
                 SceneLibrary::MemoryStats ms = lib.memory_stats();
-                printf("memory: %ld MB resident, %lu MB of textures, %u scene files cached; heap %.1f MB, parsed "
-                       "scenes %.1f MB, skeletons %.1f MB (%u, %u in use, %u let go)\n",
+                printf("memory: %ld MB resident, %lu MB of textures, %u scene files cached; heap %.1f MB (held %.1f), "
+                       "parsed scenes %.1f MB (%.1f MB the warm-up's alone, %u let go), skeletons %.1f MB (%u, %u in "
+                       "use, %u let go)\n",
                        resident_mb(), (unsigned long)(canvas.texture_bytes() >> 20), (unsigned)scenes.size(),
-                       heap_in_use() / 1048576.0, ms.scene_bytes / 1048576.0, ms.skeleton_bytes / 1048576.0,
+                       heap_in_use() / 1048576.0, heap_held() / 1048576.0, ms.scene_bytes / 1048576.0,
+                       ms.warm_scene_bytes / 1048576.0, ms.scenes_evicted, ms.skeleton_bytes / 1048576.0,
                        ms.skeletons, ms.skeletons_used, ms.skeletons_evicted);
             }
             /* the screen before the pad's: auto play answers it, not the next */

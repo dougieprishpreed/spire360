@@ -124,6 +124,10 @@ u32 AudioMixer::play(const std::string& path, float gain, float ratio, u32 start
     return v->id;
 }
 
+void AudioMixer::prepare(const std::string& path, u32 offset) {
+    if (pack_) AudioDecoder::prepare(*pack_, path, offset);
+}
+
 std::string AudioMixer::describe() const {
     std::map<std::string, int> count;
     int looping = 0;

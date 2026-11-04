@@ -57,6 +57,11 @@ public:
     /* A sound read ahead of its first play (kept, as recently played as
      * any); nothing without the loader. */
     static void prefetch(const Pack& pack, const std::string& path);
+    /* A Vorbis decoder set up on the loader's thread at the frame a voice
+     * of the sound will start from (a music timeline's jump, known ahead):
+     * that voice takes it at once, neither waiting for the loader nor
+     * skipping what went by meanwhile. Unused, it goes after 30 s. */
+    static void prepare(const Pack& pack, const std::string& path, u32 frame);
     static void stop_loader();
     struct LoadStats {
         int loads;            /* read since the last call */
@@ -65,6 +70,7 @@ public:
         double longest_queue_ms, longest_read_ms; /* of it: waiting for the loader, reading */
         const char* longest;  /* its pack name ("" none) */
         size_t kept;          /* bytes kept now */
+        int prepared, prepared_taken; /* decoders set up ahead (prepare), and taken by their voice */
     };
     static LoadStats load_stats();
 private:

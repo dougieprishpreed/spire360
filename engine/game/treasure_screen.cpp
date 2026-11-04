@@ -166,6 +166,23 @@ Node* TreasureScreen::build(const Json& d, std::string* error) {
         if (opening) {
             collection->modulate = Color(0, 0, 0, 0);
             tween_color(tweens_, &collection->modulate, Color(1, 1, 1, 1), 0.4f);
+            /* NTreasureRoomRelicCollection.SpawnEmptyChestVfx (no relic in
+             * it: a relic emptied the chest): "Empty" in (0.25 s) as it rises
+             * the 64 px to its place (1 s, Spring Out), 1 s, out (1 s); a
+             * puff of smoke */
+            if (relics.size() == 0 && empty) {
+                set_label(empty, Loc::get("gameplay_ui", "TREASURE_EMPTY"));
+                empty->visible = true;
+                empty->self_modulate.a = 0;
+                tweens_.tween(&empty->self_modulate.a, 1.0f, 0.25f);
+                float top = empty->offset[SIDE_TOP], bottom = empty->offset[SIDE_BOTTOM];
+                tweens_.tween_from(&empty->offset[SIDE_TOP], top + 64, top, 1.0f, TRANS_SPRING, EASE_OUT);
+                tweens_.tween_from(&empty->offset[SIDE_BOTTOM], bottom + 64, bottom, 1.0f, TRANS_SPRING, EASE_OUT);
+                tweens_.tween(&empty->self_modulate.a, 0.0f, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 2.0f);
+                Node* smoke = room->find_unique("SmokePuffVfx");
+                if (smoke && (smoke->type == "GPUParticles2D" || smoke->type == "CPUParticles2D"))
+                    ((Particles2D*)smoke)->emitting = true;
+            }
         } else if (finishing) {
             if (holder_) holder_->visible = false;
             tweens_.tween_from(&collection->modulate.a, 1.0f, 0.0f, 0.3f);

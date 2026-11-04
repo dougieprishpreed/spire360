@@ -309,14 +309,7 @@ void GameAudio::game_over() {
     ui("event:/temp/sfx/game_over");
 }
 
-void GameAudio::decision(const Json& d) {
-    /* the run's end: at once if the death before it did not play it (the
-     * act's track must not start again) */
-    if (d["decision"].str() == "game_over") {
-        game_over();
-        return;
-    }
-    game_over_ = false;
+void GameAudio::prepare(const Json& d) {
     const Json& a = d["context"]["audio"];
     if (a.is_null()) return;
     std::string bank = a["bank"].str();
@@ -328,6 +321,19 @@ void GameAudio::decision(const Json& d) {
     events_.preload(bank);
     events_.preload_for(a["custom"].str().empty() ? a["track"].str() : a["custom"].str());
     events_.preload_for(a["ambience"].str());
+}
+
+void GameAudio::decision(const Json& d) {
+    /* the run's end: at once if the death before it did not play it (the
+     * act's track must not start again) */
+    if (d["decision"].str() == "game_over") {
+        game_over();
+        return;
+    }
+    game_over_ = false;
+    const Json& a = d["context"]["audio"];
+    if (a.is_null()) return;
+    prepare(d);
     GameLock lock(this);
     int floor = d["context"]["total_floor"].i();
     if (floor_ != floor) { stop_room_loops(); floor_ = floor; }
