@@ -52,8 +52,9 @@ public:
     /* Transfer the visual-only room across event pages or into the fight. */
     CombatScreen* take_combat();
     /* What a choice did to the event's room, before the screen after it;
-     * true while that plays. */
-    void play_room_steps(const Json& steps);
+     * true while that plays. losing: it leads to the game over (The
+     * Architect's end: its sound as the player falls). */
+    void play_room_steps(const Json& steps, bool losing = false);
     bool room_playing() const;
 
 private:

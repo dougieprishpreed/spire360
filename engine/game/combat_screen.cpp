@@ -5228,7 +5228,14 @@ void CombatScreen::sel_pick(int i) {
     if (i < 0 || i >= (int)holders_.size() || !sel_box_) return;
     int max = sel_["max_select"].i(1);
     if (sel_mode_ == 2 || (int)selected_.size() >= max) {
+        /* the last pick back into the hand at its place first: the pressed
+         * card found again by its id (by index the card put back came
+         * before it, and was picked again: Survivor's discard could not
+         * take a card right of the one picked) */
+        int id = holders_[(size_t)i].id;
         if (!selected_.empty()) sel_unpick((int)selected_.size() - 1);
+        for (size_t k = 0; k < holders_.size(); ++k)
+            if (holders_[k].id == id) i = (int)k;
         if (i >= (int)holders_.size()) i = (int)holders_.size() - 1;
     }
     Holder h = holders_[(size_t)i];

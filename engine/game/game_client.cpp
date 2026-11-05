@@ -1173,7 +1173,7 @@ void GameClient::show(const Json& d) {
         kind != "event_choice" && kind != "combat_play") {
         /* The event's room plays what the choice did (The Architect's last
          * exchange), then the screen after it. */
-        ((EventScreen*)ported_)->play_room_steps(d["steps"]);
+        ((EventScreen*)ported_)->play_room_steps(d["steps"], kind == "game_over");
         event_finishing_ = true;
         finishing_ = d;
         return;
@@ -1223,6 +1223,11 @@ void GameClient::show(const Json& d) {
         ((kind == "event_choice" && d["event_id"].str() == decision_["event_id"].str()) ||
          (kind == "combat_play" && d["view"]["encounter"] == decision_["combat_visuals"]["view"]["encounter"]));
     if (event_room) kept_room = ((EventScreen*)ported_)->take_combat();
+    /* The Architect's end: the game over over the event's room as its last
+     * steps left it (the player fallen); the event built again from its
+     * last page stood the player back up beside its Proceed */
+    bool keep_event = kind == "game_over" && prev_kind == "event_choice" && decision_["layout"].str() == "Combat" &&
+                      ported_ && screen_;
     const std::string& room_type = d["context"]["room_type"].str();
     bool in_fight = room_type == "Monster" || room_type == "Elite" || room_type == "Boss";
     /* the last fight's state is for its own aftermath only: the next fight's
@@ -1264,6 +1269,20 @@ void GameClient::show(const Json& d) {
     focus_ = 0;
     ++decisions_;
     phase("loops");
+    RunScreen* kept_event = NULL;
+    Node* kept_event_node = NULL;
+    if (keep_event) {
+        kept_event = ported_;
+        kept_event_node = screen_;
+        ported_ = NULL;
+        screen_ = NULL;
+        if (kept_event_node->parent) kept_event_node->parent->remove_child(kept_event_node);
+        Node* bar = kept_event_node->get_node("TopBarLayer");
+        if (bar) {
+            kept_event_node->remove_child(bar);
+            delete bar;
+        }
+    }
     if (screen_) {
         screen_->parent->remove_child(screen_);
         delete screen_;
@@ -1438,7 +1457,8 @@ void GameClient::show(const Json& d) {
     }
     if (kind == "game_over") {
         GameOverScreen* s = new GameOverScreen(lib_);
-        s->set_background(overlay_background(d, true));
+        if (kept_event) behind_ = kept_event; /* its nodes go with the screen's */
+        s->set_background(kept_event_node ? kept_event_node : overlay_background(d, true));
         ported_ = s;
         screen_ = s->build(d, &err);
         if (!screen_) {

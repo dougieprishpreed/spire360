@@ -9,7 +9,10 @@
 #include "../../engine/core/pack.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <utility>
+#include <vector>
 #include <unistd.h>
 
 using namespace spire;
@@ -269,25 +272,53 @@ int main(int argc, char** argv) {
         AudioDecoder::start_loader(&pack, -1, 32u << 20);
         AudioEvents audio(&pack);
         float samples[512];
-        audio.global_parameter("Progress", (float)atof(argv[4]));
+        /* <progress> may be a sequence, "9:20,3:40": 20 s at the map's,
+         * then 40 s at a rest site's (the room's change as it plays) */
+        std::vector<std::pair<float, int> > seq;
+        for (const char* p = argv[4]; *p;) {
+            float value = (float)atof(p);
+            const char* colon = strchr(p, ':');
+            const char* comma = strchr(p, ',');
+            int at = colon && (!comma || colon < comma) ? atoi(colon + 1) : 0;
+            seq.push_back(std::make_pair(value, at));
+            if (!comma) break;
+            p = comma + 1;
+        }
+        audio.global_parameter("Progress", seq[0].first);
         u32 id = audio.play(argv[3]);
         int seconds = atoi(argv[5]);
+        size_t seq_at = 0;
+        int seq_until = seq[0].second;
         u64 started = audio.started_voices();
         std::string last;
         for (int s = 0; s < seconds; ++s) {
+            if (seq_until > 0 && s >= seq_until && seq_at + 1 < seq.size()) {
+                seq_until += seq[++seq_at].second;
+                audio.global_parameter("Progress", seq[seq_at].first);
+                printf("%4d s: Progress %.0f\n", s, seq[seq_at].first);
+            }
             /* a second in eighths, each slept (Windows sleeps in 15.6 ms ticks) */
+            double energy = 0;
+            int counted = 0;
             for (int part = 0; part < 8; ++part) {
-                for (int k = 0; k < 48000 / 256 / 8; ++k) audio.render(samples, 256);
+                for (int k = 0; k < 48000 / 256 / 8; ++k) {
+                    audio.render(samples, 256);
+                    for (int j = 0; j < 512; ++j) energy += (double)samples[j] * samples[j];
+                    counted += 512;
+                }
                 usleep(120000);
             }
+            /* the second's loudness (dB of its RMS): a fade shows here */
+            double rms = counted ? sqrt(energy / counted) : 0;
+            double db = rms > 1e-6 ? 20 * log10(rms) : -120;
             if (s % 30 == 29) {
                 AudioDecoder::LoadStats ls = AudioDecoder::load_stats();
                 printf("%4d s: %d music decoders set up ahead, %d taken\n", s + 1, ls.prepared, ls.prepared_taken);
             }
             std::string now = audio.describe_voices();
             bool changed = now != last || audio.started_voices() != started;
-            if (s % 5 == 4 || changed)
-                printf("%4d s: timeline %.2f s, %llu voices started, %s%s\n", s + 1, audio.timeline(id),
+            if (s % 2 == 1 || changed || seq.size() > 1)
+                printf("%4d s: timeline %.2f s, %.0f dB, %llu voices started, %s%s\n", s + 1, audio.timeline(id), db,
                        (unsigned long long)audio.started_voices(), now.c_str(), changed ? "  (changed)" : "");
             last = now;
             started = audio.started_voices();

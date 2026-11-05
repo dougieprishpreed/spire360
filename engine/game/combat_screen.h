@@ -164,6 +164,9 @@ public:
      * queue) follows it on the same timeline. sync_to: the state the room
      * shows once these steps are done (finishing: the fight's end). */
     void play_steps(const Json& steps, const Json& sync_to = Json(), bool finishing = false);
+    /* The steps to play lead to the game over (update_decision's, for an
+     * event's room that has no decision of its own). */
+    void set_losing(bool losing) { losing_ = losing; }
     /* A fight built fresh: the intents its steps reveal (NCreature.
      * RefreshIntents at the first turn's start) start out unseen, as the
      * game's do, rather than shown, blanked and faded in (rp108). */

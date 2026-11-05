@@ -66,9 +66,11 @@ static void play_sfx_cue(SceneLibrary* lib, const char* op, const Json& path) {
     lib->audio()->cue(cue);
 }
 
-void EventScreen::play_room_steps(const Json& steps) {
+void EventScreen::play_room_steps(const Json& steps, bool losing) {
     sparring_ = false;
-    if (combat_) combat_->play_steps(steps);
+    if (!combat_) return;
+    combat_->set_losing(losing);
+    combat_->play_steps(steps);
 }
 
 bool EventScreen::room_playing() const { return combat_ && combat_->busy(); }

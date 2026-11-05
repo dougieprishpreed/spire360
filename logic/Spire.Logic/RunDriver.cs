@@ -189,6 +189,7 @@ public partial class RunDriver
         _runState = null;
         GameFlow = false;
         _endedVictory = null;
+        _endDeathCued = false;
         _endedRun = null;
         _gameOverProgress = null;
         _turnStarted = _combatEnded = _eventOptionChosen = false;
@@ -1677,6 +1678,28 @@ public partial class RunDriver
 
     public bool HasRun => _runState != null;
 
+    // WinRun's GuaranteeKillAllPlayers (The Architect) kills the player in
+    // the event's room, where the game's NCombatRoom has the player's node:
+    // StartDeathAnim, the fall and its sound. The stand-ins give nodes in a
+    // fight only, so the fall was lost (the player stood through the game
+    // over sound): the death, its Dead animation and sound as a fight's.
+    private bool _endDeathCued;
+
+    private void CueEndDeath(Creature cr)
+    {
+        if (_endDeathCued) return;
+        _endDeathCued = true;
+        try
+        {
+            Steps.Cue(new Dictionary<string, object?> { ["t"] = "death", ["who"] = Steps.Who(cr) });
+            if (!AnimLengths.HasSkeleton(cr)) return;
+            var ops = Animators.Trigger(cr, "Dead");
+            if (ops != null) Steps.AttachDeathAnimation(Steps.Who(cr), ops);
+            if (cr.Player != null) SfxCmd.PlayDeath(cr.Player);
+        }
+        catch (Exception ex) { Log($"end death: {ex.Message}"); }
+    }
+
     private Dictionary<string, object?> DetectDecisionPoint()
     {
         if (_runState == null)
@@ -1687,7 +1710,10 @@ public partial class RunDriver
         // The game's flow ended the run (WinRun at The Architect, then the
         // player is killed): its outcome.
         if (_endedVictory != null && player.Creature != null && player.Creature.IsDead)
+        {
+            CueEndDeath(player.Creature);
             return GameOverState(_endedVictory.Value);
+        }
 
         // Check game over (death)
         if (player.Creature != null && player.Creature.IsDead)
