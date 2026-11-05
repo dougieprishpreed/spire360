@@ -24,6 +24,16 @@ static const Color OUTLINE_DEFAULT(0x70 / 255.0f, 0xA0 / 255.0f, 1.0f, 0x18 / 25
 /* NTimelineScreen.GrowTimelineAndAddEraIcons: the line per era. */
 static const float LINE_PER_ERA = 226.0f;
 
+/* EpochModel.ResolvedPortraitPath: the real portrait, else its placeholder
+ * (timeline/epoch_portraits/placeholder/: Underdocks, Potion 1, Event 3...
+ * have only that one; their inspect screen showed no picture). */
+static std::string resolved_portrait(SceneLibrary* lib, const std::string& real) {
+    if (real.empty() || lib->ext(real)) return real;
+    size_t slash = real.rfind('/');
+    std::string placeholder = real.substr(0, slash + 1) + "placeholder/" + real.substr(slash + 1);
+    return lib->ext(placeholder) ? placeholder : real;
+}
+
 TimelineScreen::TimelineScreen(SceneLibrary* lib)
     : lib_(lib), root_(NULL), slots_box_(NULL), line_(NULL), moved_(NULL), inspect_(NULL), holder_(NULL),
       backstop_(NULL), reminder_(NULL), tutorial_(NULL), tip_(NULL), unlock_(NULL), queue_at_(0), mode_(LOADING),
@@ -457,18 +467,27 @@ void TimelineScreen::focus(int i) {
     /* The hover tip beside the slot (left of it past 70% of the screen). */
     tip_ = make_hover_tip(lib_, s.data["title"].str(),
                           s.data[s.state == "Complete" ? "unlock_info_revealed" : "unlock_info"].str());
-    if (tip_) {
-        root_->add_child(tip_);
-        Vec2 at = s.node->global_transform().xform(Vec2(0, 0));
-        float half = s.node->size.x * 0.5f + 6.0f;
-        float right = at.x + half;
-        tip_->set_position(at.x > 1920 * 0.7f ? Vec2(right - half - 360.0f, at.y) : Vec2(right + half, at.y));
-    }
+    if (tip_) root_->add_child(tip_);
     /* NSlotsContainer.LerpToSlot: the focused slot towards the middle. */
     if (s.node->parent) {
         Vec2 at = s.node->global_transform().xform(Vec2(0, 0)) + s.node->size * 0.5f;
         pan_target_ = pan_ + (960.0f - at.x);
     }
+    place_tip();
+}
+
+/* The hover tip beside the focused slot, left of it past 70% of the screen
+ * (judged where the pan leaves the slot); placed each frame, as the slot
+ * pans to the middle (placed once, it stayed where the slot had been, or
+ * where it was before the first layout). */
+void TimelineScreen::place_tip() {
+    if (!tip_ || focus_ < 0 || focus_ >= (int)slots_.size()) return;
+    Slot& s = slots_[(size_t)focus_];
+    Vec2 at = s.node->global_transform().xform(Vec2(0, 0));
+    float half = s.node->size.x * 0.5f + 6.0f;
+    float right = at.x + half;
+    bool left = at.x + (pan_target_ - pan_) > 1920 * 0.7f;
+    tip_->set_position(left ? Vec2(right - half - 360.0f, at.y) : Vec2(right + half, at.y));
 }
 
 /* The slot a direction leads to: the next column with the row nearest to
@@ -478,9 +497,19 @@ int TimelineScreen::neighbour(int dx, int dy) const {
     const Slot& f = slots_[(size_t)focus_];
     int best = -1;
     if (dy) {
-        /* Up: the slot above (a higher era position). */
-        for (size_t i = 0; i < slots_.size(); ++i)
-            if (slots_[i].era == f.era && slots_[i].position == (dy < 0 ? f.position + 1 : f.position - 1)) best = (int)i;
+        /* Up: the nearest slot above (the next higher era position), down
+         * the nearest below. A column's positions have gaps where an epoch
+         * has no slot yet (REGENT2 at 0, Underdocks at 4): the next one up
+         * was never position + 1, and the focus could not leave the
+         * bottom slot (GitHub #4: an epoch to reveal out of reach, so
+         * Singleplayer stayed disabled). */
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            if (slots_[i].era != f.era) continue;
+            int p = slots_[i].position;
+            if (dy < 0 ? p > f.position && (best < 0 || p < slots_[(size_t)best].position)
+                       : p < f.position && (best < 0 || p > slots_[(size_t)best].position))
+                best = (int)i;
+        }
         return best < 0 ? focus_ : best;
     }
     int col = -1, best_era = 0;
@@ -528,7 +557,7 @@ void TimelineScreen::open_inspect(const Json& e, bool revealed) {
     set_visible(inspect_, true);
     inspect_->modulate = Color(1, 1, 1, 1);
     Control* portrait = ctl(inspect_, "Portrait");
-    set_texture(lib_, portrait, e["real_portrait"].str());
+    set_texture(lib_, portrait, resolved_portrait(lib_, e["real_portrait"].str()));
     if (portrait && !portrait->visible) set_visible(portrait, true);
     hide(ctl(inspect_, "PlaceholderLabel"));
     /* the chapter fades in after 0.2 s and the story after 0.4 s (0.5 s) */
@@ -643,7 +672,7 @@ void TimelineScreen::paginate(int side) {
     Control* b = ctl(inspect_, side ? "NextChapterButton" : "PrevChapterButton");
     Control* arrow = b ? ctl(b, "TextureRect") : NULL;
     if (arrow) arrow->shader_params["v"] = 0.7f;
-    set_texture(lib_, ctl(inspect_, "Portrait"), e["real_portrait"].str());
+    set_texture(lib_, ctl(inspect_, "Portrait"), resolved_portrait(lib_, e["real_portrait"].str()));
     Control* chapter = ctl(inspect_, "ChapterLabel");
     Control* story = ctl(inspect_, "StoryLabel");
     set_label(chapter, e["chapter_text"].str());
@@ -939,6 +968,7 @@ void TimelineScreen::frame(double dt) {
         moved_->offset[SIDE_LEFT] += step;
         moved_->offset[SIDE_RIGHT] = moved_->offset[SIDE_LEFT] + w;
     }
+    place_tip();
     if (info_text_at_ >= 0 && unlock_t_ >= info_text_at_) {
         info_text_at_ = -1;
         Control* info = inspect_ ? ctl(inspect_, "UnlockInfo") : NULL;

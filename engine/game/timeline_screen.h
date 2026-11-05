@@ -75,6 +75,7 @@ private:
     void show_name_and_year(Column& c);
     void sync_slots(const Json& slots, bool animated);
     void focus(int i);
+    void place_tip();
     int neighbour(int dx, int dy) const;
     void clear_tip();
     void open_inspect(const Json& epoch, bool revealed);
