@@ -319,11 +319,11 @@ def build_w2c2():
 
 def stage_c(a):
     w2c2 = a.w2c2 or shutil.which("w2c2") or build_w2c2()
-    cdir = os.path.join(OUT, "c")
+    cdir = a.c_dir or os.path.join(OUT, "c")
     # Translated into a fresh folder, then only the files whose contents
     # changed are copied over: the others keep their dates, so the XDK build
     # (an hour for everything) compiles only what changed.
-    fresh = os.path.join(OUT, "c.new")
+    fresh = cdir.rstrip("/\\") + ".new"
     shutil.rmtree(fresh, ignore_errors=True)
     os.makedirs(fresh)
     # Module name "logic" -> symbols m5_logic*; 2000 functions per file keeps
@@ -334,6 +334,15 @@ def stage_c(a):
     run([sys.executable, os.path.join(ROOT, "tools", "w2c2_fix_tables.py"), os.path.join(fresh, "logic.c")])
     run([sys.executable, os.path.join(ROOT, "tools", "w2c2_imports.py"), os.path.join(fresh, "logic.h"),
          "--stubs", os.path.join(fresh, "logic_stubs.c")], check=False)
+    data_segments_out(os.path.join(fresh, "logic.c"))
+    if a.no_hoist:
+        print("the memory base is not hoisted (--no-hoist)")
+    else:
+        hoist_memory_base(fresh)
+    if a.no_cold_os:
+        print("the -Os split is off (--no-cold-os): every function -O2")
+    else:
+        split_cold(fresh, LINKMAP, HOT_LIST)
     os.makedirs(cdir, exist_ok=True)
     changed = 0
     for name in sorted(os.listdir(fresh)):
@@ -350,11 +359,217 @@ def stage_c(a):
     print(f"{n} C files in {cdir} ({changed} files changed)")
 
 
+def data_segments_out(path):
+    """The module's large data segments (its initial memory, 17 MB) to logic.dat beside the C, as LZ4 blocks,
+    read back while the module is instantiated (srt_data_load, runtime/src/srt_data.c): the console keeps the
+    whole XEX image in memory, where they were held for the session and read once. logic.dat goes beside
+    default.xex (tools/xsdk/build.sh, tools/install/stage.py) and beside logic_host. The C gets
+    spire_logic_data_table (count, then each segment's stored size, size and FNV-1a of the stored bytes), which
+    the host holds the file to before it instantiates anything. The file: 'SPLD' u32 version (1) u32 count
+    u32 0; count entries of u32 offset, stored, size, fnv; the blocks. A block as large as its segment is the
+    segment as it is (no lz4 module: pip install lz4)."""
+    import re
+    import struct
+    try:
+        import lz4.block
+    except ImportError:
+        lz4 = None
+        print("WARNING: no lz4 module (pip install lz4): logic.dat holds the segments uncompressed")
+    with open(path, "rb") as f:
+        text = f.read().decode("utf-8")
+    loads = re.findall(r"LOAD_DATA\(\(\*i->m0\), (\d+)U, (m5_logicData\d+), (\d+)\);", text)
+    out, at, blobs, calls, before = [], 0, [], {}, 0
+    for offset, name, size in loads:
+        offset, size = int(offset), int(size)
+        if size < 65536:
+            continue
+        head = "const U8 %s[]={" % name
+        start = text.index(head, at)
+        end = text.index("};", start)
+        data = bytes(int(v, 0) for v in text[start + len(head):end].split(",") if v.strip())   # w2c2 writes 7 or 0x45
+        if len(data) != size:
+            sys.exit("data segment %s: %d bytes, LOAD_DATA says %d" % (name, len(data), size))
+        stored = data
+        if lz4 is not None:
+            packed = lz4.block.compress(data, mode="high_compression", compression=12, store_size=False)
+            if len(packed) < size:
+                stored = packed
+        fnv = 0x811c9dc5
+        for b in stored:
+            fnv = ((fnv ^ b) * 0x01000193) & 0xffffffff
+        out.append(text[at:start])
+        out.append("/* %s: in logic.dat */\n" % name)
+        at = end + 2
+        calls[name] = (len(blobs), offset, size, len(stored), fnv)
+        blobs.append((stored, size, fnv))
+        before += size
+    if not blobs:
+        sys.exit("no data segments of 64 KB or more in %s: has w2c2's output changed?" % path)
+    out.append(text[at:])
+    text = "".join(out)
+    for name, (index, offset, size, stored, fnv) in calls.items():
+        call = "LOAD_DATA((*i->m0), %dU, %s, %d);" % (offset, name, size)
+        if text.count(call) != 1:
+            sys.exit("data segment %s: its LOAD_DATA call not found once" % name)
+        text = text.replace(call, "wasmMemoryCheckRange(i->m0, %dU, %d);\nif (srt_data_load(%d, %d, 0x%08xu, i->m0->data + %dU, %d) != 0) abort();"
+                            % (offset, size, index, stored, fnv, offset, size))
+    table = ",".join("%d,%d,0x%08xu" % (len(s), size, fnv) for s, size, fnv in blobs)
+    decl = ("int srt_data_load(unsigned index, unsigned stored, unsigned fnv, unsigned char* dst, unsigned size);\n"
+            "const unsigned spire_logic_data_table[] = {%d,%s};\n" % (len(blobs), table))
+    if text.count("static void m5_logicInitDataSegments(") != 1:
+        sys.exit("m5_logicInitDataSegments not found once in " + path)
+    text = text.replace("static void m5_logicInitDataSegments(", decl + "static void m5_logicInitDataSegments(", 1)
+    with open(path, "wb") as f:
+        f.write(text.encode("utf-8"))
+    entries, pos = b"", 16 + 16 * len(blobs)
+    for stored, size, fnv in blobs:
+        entries += struct.pack("<IIII", pos, len(stored), size, fnv)
+        pos += len(stored)
+    with open(os.path.join(os.path.dirname(path), "logic.dat"), "wb") as f:
+        f.write(struct.pack("<4sIII", b"SPLD", 1, len(blobs), 0) + entries + b"".join(s for s, _, _ in blobs))
+    print("data segments: %d KB as %d KB in logic.dat" % (before // 1024, (pos - 16 - 16 * len(blobs)) // 1024))
+
+
+# The wasm link map of the logic's build (the IL compiler's wasm-ld), which names each translated function, and
+# the list of those that run often (tools/hot_functions.py), by the hash of that name.
+LINKMAP = os.path.join(LOGIC, "Spire.Logic", "obj", "Release", "net10.0", "wasi-wasm", "native", "Spire.Logic.linkmap")
+HOT_LIST = os.path.join(LOGIC, "hot_functions.txt")
+
+
+def function_names(linkmap, header):
+    """fN -> its method's name (wasm-ld's map: the CODE section's functions in index order, after the module's
+    imports, which the C numbers first). A name met again gets #2, #3..."""
+    import re
+    sec = re.compile(r"^\s+-\s+[0-9a-f]+\s+[0-9a-f]+ ([A-Z_]+)$")
+    fn = re.compile(r"^\s+-\s+[0-9a-f]+\s+[0-9a-f]+\s+\S.*?:\((.*)\)$")
+    names, inside = [], False
+    with open(linkmap, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip()
+            m = sec.match(line)
+            if m:
+                if inside:
+                    break
+                inside = m.group(1) == "CODE"
+                continue
+            if inside:
+                m = fn.match(line)
+                if m:
+                    names.append(m.group(1))
+    with open(header, encoding="utf-8", errors="replace") as f:
+        imports = len(set(re.findall(r"\b(i\d+_\w+)\(", f.read())))
+    seen, out = {}, {}
+    for k, n in enumerate(names):
+        seen[n] = seen.get(n, 0) + 1
+        out["f%d" % (imports + k)] = n if seen[n] == 1 else "%s#%d" % (n, seen[n])
+    return out
+
+
+def name_hash(name):
+    """FNV-1a 64 of a function's name, as the hot list keeps it."""
+    h = 0xcbf29ce484222325
+    for b in name.encode("utf-8"):
+        h = ((h ^ b) * 0x100000001b3) & 0xffffffffffffffff
+    return "%016x" % h
+
+
+def split_cold(cdir, linkmap, hot_list):
+    """Each logic file's functions that ran rarely when sampled go to a twin, <file>_cold.c, which the console
+    compiles for size (-Os, xsdk/CMakeLists.txt): smaller than -O2 and slower, and the console keeps all code
+    resident. The list (tools/hot_functions.py) names the functions that ran often, by the hash of their name
+    in the wasm link map; the others are rare, functions new since the sampling among them. Without the list
+    or the map every function stays -O2."""
+    import re
+    if not os.path.exists(hot_list) or not os.path.exists(linkmap):
+        print("no hot list or link map (%s, %s): every function -O2" % (hot_list, linkmap))
+        return
+    with open(hot_list, encoding="utf-8") as f:
+        hot = set(line.strip() for line in f if line.strip() and not line.startswith("#"))
+    names = function_names(linkmap, os.path.join(cdir, "logic.h"))
+    sig = re.compile(r"^\w+ (f\d+)\(wasmModuleInstance\* instance")
+    n_hot = n_cold = n_unnamed = 0
+    for name in sorted(os.listdir(cdir)):
+        if not re.match(r"m5_logic\.s\d+\.c$", name):
+            continue
+        path = os.path.join(cdir, name)
+        with open(path, "rb") as f:
+            text = f.read().decode("utf-8")
+        eol = "\r\n" if "\r\n" in text else "\n"
+        head, keep, rare = [], [], []
+        cur, depth, fname, opened = None, 0, None, False
+        for ln in text.split(eol):
+            if cur is None:
+                m = sig.match(ln)
+                if not m:
+                    (keep if keep or rare else head).append(ln)
+                    continue
+                cur, fname, depth, opened = [], m.group(1), 0, False
+            cur.append(ln)
+            depth += ln.count("{") - ln.count("}")
+            opened = opened or "{" in ln
+            if depth == 0 and opened:
+                method = names.get(fname)
+                if method is None:
+                    n_unnamed += 1
+                if method is not None and name_hash(method) not in hot:
+                    rare.extend(cur)
+                    n_cold += 1
+                else:
+                    keep.extend(cur)
+                    n_hot += 1
+                cur = None
+        if cur is not None:
+            sys.exit("%s: a function without its end" % name)
+        with open(path, "wb") as f:
+            f.write(eol.join(head + keep).encode("utf-8"))
+        with open(path[:-2] + "_cold.c", "wb") as f:
+            f.write(eol.join(head + rare).encode("utf-8"))
+    if n_unnamed:
+        print("WARNING: %d functions the link map does not name (kept -O2): is the map this build's?" % n_unnamed)
+    print("hot list: %d functions -O2, %d to the -Os files" % (n_hot, n_cold))
+
+
+ACCESS = r"\b((?:i32|i64|f32|f64)_(?:load|store)(?:8|16|32)?(?:_[su])?)\(i->m0,"
+INSTANCE = r"(m5_logicInstance\* i = \(m5_logicInstance\*\)instance;(\r?\n))"
+
+
+def hoist_memory_base(cdir):
+    """Each function that reads or writes the linear memory loads its base once (mb) and goes through the
+    accessors' base-pointer twins (name_b, third_party/w2c2/w2c2/w2c2_base.h). Through i->m0 every access
+    loaded the memory struct and its data pointer again, since a store might have changed them (the C is
+    compiled without strict aliasing): two dependent loads per access. The hosts never move the block
+    (W2C2_HOST_MEMORY: reserved whole, committed in place as it grows), so the base holds for the memory's
+    life; the PC's logic_host compiles this same C."""
+    import re
+    access, instance = re.compile(ACCESS), re.compile(INSTANCE)
+    funcs = accesses = 0
+    for name in sorted(os.listdir(cdir)):
+        if not name.endswith(".c"):
+            continue
+        path = os.path.join(cdir, name)
+        with open(path, "rb") as f:
+            text = f.read().decode("utf-8")
+        parts = instance.split(text)   # [before, line, eol, body, line, eol, body, ...]
+        if len(parts) == 1:
+            continue
+        out = [parts[0]]
+        for k in range(1, len(parts), 3):
+            line, eol, body = parts[k], parts[k + 1], parts[k + 2]
+            body, n = access.subn(r"\1_b(mb,", body)
+            out.append(line + ("U8* const mb = i->m0->data;" + eol if n else "") + body)
+            if n:
+                funcs += 1
+                accesses += n
+        with open(path, "wb") as f:
+            f.write("".join(out).encode("utf-8"))
+    print("memory base hoisted: %d functions, %d accesses" % (funcs, accesses))
+
+
 def stage_native(a):
     """The translated logic as a PC program, built from the same C the console
     compiles: tools/random_runs.py --cmd out/logic/native/logic_host."""
     import concurrent.futures
-    cdir = os.path.join(OUT, "c")
+    cdir = a.c_dir or os.path.join(OUT, "c")
     if not os.path.isdir(cdir):
         sys.exit("run the c stage first")
     wasm = os.path.join(OUT, "logic.wasm")
@@ -369,7 +584,7 @@ def stage_native(a):
     rt = os.path.join(ROOT, "runtime")
     plat = "srt_plat_win32.c" if os.name == "nt" else "srt_plat_posix.c"
     sources = sorted(os.path.join(cdir, f) for f in os.listdir(cdir) if f.endswith(".c"))
-    sources += [os.path.join(rt, "src", f) for f in ("srt_core.c", "srt_wasi.c", "srt_wasi_p2.c", plat)]
+    sources += [os.path.join(rt, "src", f) for f in ("srt_core.c", "srt_wasi.c", "srt_wasi_p2.c", "srt_data.c", plat)]
     sources.append(os.path.join(rt, "hosts", "logic_host.c"))
     incs = [os.path.join(rt, "include"), os.path.join(rt, "src"), os.path.join(ROOT, "third_party", "w2c2", "w2c2"), cdir]
     cl = shutil.which("cl") if os.name == "nt" and not a.native_cc else None
@@ -377,6 +592,7 @@ def stage_native(a):
     if not cl and not cc:
         sys.exit("no C compiler: run from a Visual Studio x64 command prompt, or install gcc/clang")
     opt = a.native_opt
+    extra = a.native_flags.split() if a.native_flags else []
     exe = os.path.join(build, "logic_host" + (".exe" if os.name == "nt" else ""))
 
     def compile_one(src):
@@ -385,10 +601,10 @@ def stage_native(a):
             return obj
         if cl:
             cmd = [cl, "/nologo", "/c", "/O" + opt, "/w", "/bigobj", "/DW2C2_HOST_MEMORY", "/D_CRT_SECURE_NO_WARNINGS"] + \
-                  ["/I" + i for i in incs] + ["/Fo" + obj, src]
+                  extra + ["/I" + i for i in incs] + ["/Fo" + obj, src]
         else:
             cmd = [cc, "-c", "-O" + opt, "-w", "-DW2C2_HOST_MEMORY", "-fno-strict-aliasing"] + \
-                  ["-I" + i for i in incs] + ["-o", obj, src]
+                  extra + ["-I" + i for i in incs] + ["-o", obj, src]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"{os.path.basename(src)}:\n{r.stdout}{r.stderr}")
@@ -408,9 +624,12 @@ def stage_native(a):
         rsp = os.path.join(build, "link.rsp")
         with open(rsp, "w") as f:
             f.write("\n".join('"%s"' % o for o in objs))
-        run([link, "/nologo", "/STACK:16777216", "/OUT:" + exe, "@" + rsp])
+        run([link, "/nologo", "/STACK:16777216", "/OUT:" + exe, "@" + rsp] +
+            (["/MAP:" + os.path.join(build, "logic_host.map")] if a.native_map else []))
     else:
         run([cc, "-o", exe] + objs + ["-lm", "-lpthread"] + (["-static"] if a.native_cc else []))
+    # the module's data segments, which logic_host reads from beside itself
+    shutil.copyfile(os.path.join(cdir, "logic.dat"), os.path.join(build, "logic.dat"))
     print(f"{exe} ({os.path.getsize(exe) // 1024} KB), {__import__('time').time() - t0:.0f} s")
 
 
@@ -424,10 +643,17 @@ def main():
     ap.add_argument("--ilc-version", help="pin Microsoft.DotNet.ILCompiler.LLVM version")
     ap.add_argument("--w2c2", help="path to a built w2c2")
     ap.add_argument("--funcs-per-file", type=int, default=2000)
+    ap.add_argument("--c-dir", help="c and native stages: the C's folder (default out/logic/c)")
+    ap.add_argument("--no-cold-os", action="store_true",
+                    help="c stage: no -Os files (logic/hot_functions.txt unused): every function -O2")
+    ap.add_argument("--no-hoist", action="store_true",
+                    help="c stage: every memory access through i->m0, as w2c2 writes it (a console test)")
     ap.add_argument("--native-opt", default="1", help="optimisation level for the native stage (0, 1, 2)")
     ap.add_argument("--native-cc", help="native stage: another C compiler, e.g. powerpc-linux-gnu-gcc "
                     "(big-endian check under qemu-ppc; links statically)")
     ap.add_argument("--native-tag", help="native stage: output to out/logic/native-<tag>")
+    ap.add_argument("--native-flags", help="native stage: more compiler options (the sampling build: /Ob0, no inlining)")
+    ap.add_argument("--native-map", action="store_true", help="native stage: the linker's map (logic_host.map) beside it")
     ap.add_argument("--jobs", type=int, default=2,
                     help="parallel work: MSBuild nodes, the IL compiler, the native stage's compiles (default: 2)")
     a = ap.parse_args()

@@ -449,12 +449,17 @@ int main() {
     double t0 = now_ms();
     int rc = spire_logic_start("game:/spire", debug_ptrs.empty() ? NULL : &debug_ptrs[0], (int)debug_ptrs.size());
     if (rc != 0) {
-        logf("logic: could not start (%d)", rc);
+        if (rc == 3)
+            logf("logic: could not start: game:\\logic.dat is missing or from another build (default.xex and "
+                 "logic.dat go together; spire360_logic.txt says which)");
+        else
+            logf("logic: could not start (%d)", rc);
         flush_log();
         return 1;
     }
     logf("logic: started in %.1f ms", now_ms() - t0);
     log_memory("with the logic");
+    const unsigned free_with_logic = free_memory_mb();
     /* trace_loads logs each load; profile keeps them for the long frames'
      * lines */
     if (g_trace_loads) set_load_trace(now_ms);
@@ -532,6 +537,23 @@ int main() {
     unsigned silent_logged = 0;
     int pressure = 0; /* the memory valve's level (0 none) */
     unsigned no_room_seen = 0; /* the canvas's no-room count the valve has seen */
+    /* The caches' budgets grow with what the start leaves free: 80 MB of
+     * textures, 32 of kept sounds and 12 of skeletons were set with 252 MB
+     * free once the logic had started (2026-11-05, the textures' budget
+     * full most of a run). The image the console keeps resident shrank
+     * (rp110: the logic's data in logic.dat, no unwind tables for it, its
+     * memory base loaded once, its rarely run code for size): of what that
+     * left, three quarters to the textures, an eighth to the kept sounds, a
+     * sixteenth to the skeletons. The valve's steps stay as they were. */
+    const unsigned spare = free_with_logic > 252 ? free_with_logic - 252 : 0;
+    const int tex_budget = 80 + (int)(spare * 3 / 4 < 48 ? spare * 3 / 4 : 48);
+    const int snd_budget = 32 + (int)(spare / 8 < 8 ? spare / 8 : 8);
+    const int skel_budget = 12 + (int)(spare / 16 < 4 ? spare / 16 : 4);
+    canvas->set_texture_budget((size_t)tex_budget * 1024 * 1024);
+    AudioDecoder::set_budget((size_t)snd_budget * 1024 * 1024);
+    lib->set_skeleton_budget((size_t)skel_budget * 1024 * 1024);
+    logf("memory: %u MB free with the logic: the textures' budget %d MB, the kept sounds' %d MB, the skeletons' %d MB",
+         free_with_logic, tex_budget, snd_budget, skel_budget);
     double silent_at = -1e9;
     for (;;) {
         /* Any controller plays: on a console the pad can be signed in to
@@ -695,8 +717,12 @@ int main() {
             }
             if (level != pressure) {
                 pressure = level;
-                int textures = level == 2 ? 60 : level == 1 ? 72 : 80, sounds = level == 2 ? 16 : level == 1 ? 24 : 32;
-                int skeletons = level == 2 ? 6 : level == 1 ? 9 : 12, scenes = level == 2 ? 2 : level == 1 ? 4 : 8;
+                /* short of memory, the steps the valve was tuned with (the
+                 * grown budgets only while there is room) */
+                int textures = level == 2 ? 60 : level == 1 ? 72 : tex_budget;
+                int sounds = level == 2 ? 16 : level == 1 ? 24 : snd_budget;
+                int skeletons = level == 2 ? 6 : level == 1 ? 9 : skel_budget;
+                int scenes = level == 2 ? 2 : level == 1 ? 4 : 8;
                 canvas->set_texture_budget((size_t)textures * 1024 * 1024);
                 AudioDecoder::set_budget((size_t)sounds * 1024 * 1024);
                 lib->set_skeleton_budget((size_t)skeletons * 1024 * 1024);

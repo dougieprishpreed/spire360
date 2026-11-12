@@ -400,7 +400,16 @@ struct AudioEvents::Impl {
             double beats = unit == "Bar" ? 4 : unit == "HalfNote" ? 2 : unit == "EighthNote" ? 0.5 : unit == "SixteenthNote" ? 0.25 : 1;
             double interval = 60 / bpm * beats * q["multiplier"].num(1);
             if (interval <= 0) return pos;
-            return origin + ceil((pos - origin - EPS) / interval) * interval;
+            /* Within an output frame of a point counts as on it: the
+             * cursor moves in whole frames (render rounds each step up to
+             * the next frame), so it lands up to a frame past the point it
+             * stepped to, where a tolerance of EPS took the point after:
+             * a quantized transition went only when a step happened to end
+             * on its point, and the Ceremonial Beast's music never reached
+             * its second phase, then took it after the beast died, its
+             * victory cut short (rp110). */
+            double frame = 1.0 / system->mixer.rate();
+            return origin + ceil((pos - origin - frame) / interval) * interval;
         }
         /* A jump at a point of the timeline (a loop's end) whose conditions
          * hold: the destination's stems (the locked boxes' sounds there)

@@ -549,6 +549,7 @@ void GameClient::update(const PadState& pad) {
         if (lib_->audio()) lib_->audio()->steps(held_sounds_);
         held_sounds_ = Json();
     }
+    if (ported_ && room_showing()) ported_->room_shown();
     std::string line;
     g_trace_step = "client: logic answers";
     update_profile_.clear();
@@ -1378,6 +1379,7 @@ void GameClient::show(const Json& d) {
         EventScreen* event = new EventScreen(lib_);
         event->set_room_portrait(event_portrait_);
         event->set_continued(prev_kind == "event_choice" && !prev_event.empty() && prev_event == d["event_id"].str());
+        if (!room_showing()) event->hold_entry_sfx();
         if (event_room) { event->set_combat(room_); room_ = NULL; }
         ported_ = event;
         screen_ = ported_->build(d, &err);

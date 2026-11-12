@@ -39,6 +39,12 @@ public:
     /* The same event's next page (NEventRoom.RefreshEventState keeps the
      * layout): an ancient's banner as it settled, not its entrance. */
     void set_continued(bool on) { continued_ = on; }
+    /* Before build, for a new room behind a black: the ancient's first
+     * line's sound waits for the room to show (Neow's welcome, which the
+     * game plays as his room fades in, sounded behind the embark's black
+     * a second before him: rp110). */
+    void hold_entry_sfx() { hold_sfx_ = true; }
+    virtual void room_shown();
     /* Under an overlay (the rewards or the card choice an option gave): the
      * page as it stands, its entrance over (an ancient's last line, its
      * banner settled), its steps not played again, and no focus (the
@@ -108,6 +114,8 @@ private:
     bool laid_out_; /* a layout pass has measured the content */
     bool continued_;
     bool behind_;
+    bool hold_sfx_;
+    Json held_sfx_;
     Control* content_container_;
     Control* content_;
     Control* options_box_;

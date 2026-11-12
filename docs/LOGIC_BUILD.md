@@ -70,12 +70,39 @@ Stages, in order (`--stage a,b,...` runs a subset):
 | smoke | - | a decision comes back |
 | aot | `out/logic/aot-<rid>/` | builds (ILC warnings list members that will throw); opt-in, needs the platform's native linker (VS 2022 C++ tools on Windows) |
 | wasm | `out/logic/logic.wasm` | builds |
-| c | `out/logic/c/*.c` + `logic_stubs.c` | import audit prints 0 missing, or the list to implement |
+| c | `out/logic/c/*.c` + `logic_stubs.c` + `logic.dat` | import audit prints 0 missing, or the list to implement; `data segments: ... in logic.dat`, `memory base hoisted: ...`, `hot list: ...` |
 | native | `out/logic/native/logic_host` | the translated C as a PC program; drive it with `random_runs.py --cmd` |
 
 `stubs` and `aot` (not in the default list) are opt-in: `stubs`
 regenerates `logic/Spire.GodotStubs/Generated/` from the game's real
 `GodotSharp.dll` (run it after a game update, before `patch`).
+
+The C stage shapes w2c2's output for the console, which keeps the whole XEX
+image in memory:
+
+- **logic.dat**: the module's data segments (its initial memory, 17 MB) go to
+  `logic.dat` as LZ4 blocks (`pip install lz4`), read back while the module is
+  instantiated (`runtime/src/srt_data.c`). The C holds what the file must be
+  (`spire_logic_data_table`): an XEX and a `logic.dat` of different builds
+  stop at start with a line in the log. `logic.dat` goes beside `default.xex`
+  and beside `logic_host`.
+- **The memory base, loaded once**: each function loads the linear memory's
+  base once and goes through the accessors' base-pointer twins (`name_b` in
+  `third_party/w2c2/w2c2/w2c2_base.h`), where each access loaded the memory
+  struct and its data pointer again. Valid because the hosts never move the
+  memory (W2C2_HOST_MEMORY). `--no-hoist` turns it off.
+- **Rarely run code for size**: the functions `logic/hot_functions.txt` does
+  not name go to `<file>_cold.c`, which the console compiles `-Os`
+  (`--no-cold-os`: none). The list names the functions that ran often, by an
+  FNV-1a 64 hash of their names in the wasm link map, so it carries nothing
+  of the game. Make it again after large changes to the logic: build a
+  sampling host (`--stage native --native-tag prof --native-flags /Ob0
+  --native-map`), give the drivers `--cmd "python tools/sample_logic.py
+  --exe-map out/logic/native-prof/logic_host.map --out-dir work/prof/<name>
+  -- out/logic/native-prof/logic_host.exe"` (`random_runs.py` with `--tank`
+  and with `--game`, `presentation_scenarios.py`, `content_coverage.py`, and
+  spire_play's `--menu --monkey` for the menus), then
+  `python tools/hot_functions.py work/prof/*`.
 
 ## The translated logic on PC
 

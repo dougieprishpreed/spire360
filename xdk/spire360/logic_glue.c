@@ -7,7 +7,11 @@
 #include <string.h>
 #include "srt.h"
 #include "srt_plat.h"
+#include "srt_data.h"
 #include "logic.h"
+
+/* the C stage's: what logic.dat must hold (tools/build_logic.py) */
+extern const unsigned spire_logic_data_table[];
 
 static m5_logicInstance instance;
 
@@ -44,7 +48,12 @@ int spire_logic_start(const char* root, const char* const* extra, int extra_coun
     cfg.virtual_timers = 1;
     cfg.memory_limit = (srt_u64)384 * 1024 * 1024; /* reserved; committed as it grows */
     if (srt_init(&cfg) != 0) return 1;
+    /* The module's data segments, out of the XEX (the console keeps its
+     * whole image in memory): game:\logic.dat, from the same build. */
+    srt_data_path("game:/logic.dat");
+    if (srt_data_check(spire_logic_data_table) != 0) return 3;
     m5_logicInstantiate(&instance, NULL);
+    srt_data_close();
     srt_set_memory(m5_logicExport6_memory(&instance));
     /* Hardware thread 2 (core 1): the frame loop keeps core 0. */
     return srt_guest_start(run_start, &instance, (size_t)16 * 1024 * 1024, 2) != 0 ? 2 : 0;

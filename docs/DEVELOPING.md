@@ -50,6 +50,7 @@ The console folder:
 
 ```
 spire360\default.xex
+spire360\logic.dat
 spire360\spire360.ini
 spire360\spire\pack.s3p
 spire360\spire\data\...

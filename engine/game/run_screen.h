@@ -45,6 +45,9 @@ public:
      * points, the proceed button... play other or none); false: the
      * client's NButton defaults for any move, A and B. */
     virtual bool own_ui_sounds() const { return false; }
+    /* Each frame the room shows (no embark black or room transition over
+     * it, the transition's hold for the first frames over). */
+    virtual void room_shown() {}
     /* What the room gives NGame.SetScreenShakeTarget (NEventRoom's event
      * container, NMerchantRoom, NRestSiteRoom, NTreasureRoom); NULL for
      * none. Set by build. */

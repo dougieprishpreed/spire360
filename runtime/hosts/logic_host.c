@@ -14,7 +14,9 @@
  * either, the SPIRE_DATA of our environment is that folder when set (the
  * tools give each case its own copy that way). SPIRE_INVINCIBLE,
  * SPIRE_GODMODE, SPIRE_STEPS, SPIRE_UI_EVENTS and SPIRE_LOG_COMMANDS pass
- * through.
+ * through. The module's data segments come from logic.dat beside this
+ * program (the C stage's, which the native stage copies here), or from
+ * SPIRE_LOGIC_DAT.
  * Build: tools/build_logic.py --stage native.
  */
 #include "w2c2_base.h"
@@ -23,6 +25,7 @@
 #include <string.h>
 #include "srt.h"
 #include "srt_plat.h"
+#include "srt_data.h"
 
 #ifndef SRT_MODULE
 #define SRT_MODULE m5_logic
@@ -36,8 +39,33 @@
 #define MOD_INSTANTIATE SRT_CAT(SRT_MODULE, Instantiate)
 #define MOD_MEMORY SRT_CAT(SRT_MODULE, Export6_memory)
 #define MOD_START SRT_CAT(SRT_MODULE, Export6_X5Fstart)
+#ifndef SRT_DATA_TABLE
+#define SRT_DATA_TABLE spire_logic_data_table
+#endif
+extern const unsigned SRT_DATA_TABLE[];
 
 static MOD_INSTANCE instance;
+
+/* logic.dat beside this program (argv[0]'s folder), or SPIRE_LOGIC_DAT. */
+static void set_data_path(const char* argv0) {
+    static char path[512];
+    const char* env = getenv("SPIRE_LOGIC_DAT");
+    const char* slash = NULL;
+    const char* p;
+    if (env != NULL && env[0] != '\0') {
+        srt_data_path(env);
+        return;
+    }
+    for (p = argv0; *p; p++) {
+        if (*p == '/' || *p == '\\') slash = p;
+    }
+    if (slash == NULL || (size_t)(slash - argv0) + 11 >= sizeof(path)) {
+        srt_data_path("logic.dat");
+        return;
+    }
+    sprintf(path, "%.*s/logic.dat", (int)(slash - argv0), argv0);
+    srt_data_path(path);
+}
 
 static void run_start(void* p) {
     MOD_START((MOD_INSTANCE*)p);
@@ -129,7 +157,13 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    set_data_path(argv[0]);
+    if (srt_data_check(SRT_DATA_TABLE) != 0) {
+        fprintf(stderr, "[logic_host] the module's data: %s does not fit this program\n", srt_data_where());
+        return 3;
+    }
     MOD_INSTANTIATE(&instance, NULL);
+    srt_data_close();
     srt_set_memory(MOD_MEMORY(&instance));
     /* Deep async chains: give the native stack room (the wasm shadow stack is
      * separate, inside linear memory). */

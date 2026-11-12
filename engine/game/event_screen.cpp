@@ -50,7 +50,7 @@ static std::string option_text(const Json& o) {
 EventScreen::EventScreen(SceneLibrary* lib)
     : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), sparring_(false), spar_at_(0),
       steps_options_(NULL), root_(NULL), combat_layout_(false), ancient_(false), line_(0), laid_out_(false),
-      continued_(false), behind_(false),
+      continued_(false), behind_(false), hold_sfx_(false),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
 
@@ -64,6 +64,13 @@ static void play_sfx_cue(SceneLibrary* lib, const char* op, const Json& path) {
     cue.set("op", Json::make_string(op));
     cue.set("path", path);
     lib->audio()->cue(cue);
+}
+
+void EventScreen::room_shown() {
+    if (!hold_sfx_) return;
+    hold_sfx_ = false;
+    if (!held_sfx_.is_null()) play_sfx_cue(lib_, "play", held_sfx_);
+    held_sfx_ = Json();
 }
 
 void EventScreen::play_room_steps(const Json& steps, bool losing) {
@@ -461,8 +468,9 @@ void EventScreen::show_line(int i) {
         num = ln->position.y + ln->size.y;
         Node* icon = ln->find_unique(dl[(size_t)i]["speaker"].str() != "Character" ? "AncientIcon" : "CharacterIcon");
         set_visible(icon, true);
-        /* NAncientDialogueLine.PlaySfx */
-        play_sfx_cue(lib_, "play", dl[(size_t)i]["sfx"]);
+        /* NAncientDialogueLine.PlaySfx; the room's first, once it shows */
+        if (hold_sfx_) held_sfx_ = dl[(size_t)i]["sfx"];
+        else play_sfx_cue(lib_, "play", dl[(size_t)i]["sfx"]);
     }
     if (last) {
         set_visible(next_button_, false);

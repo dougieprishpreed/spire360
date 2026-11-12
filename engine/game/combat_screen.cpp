@@ -3870,11 +3870,17 @@ void CombatScreen::update_beast_bg() {
     }
     for (size_t i = 0; i < beast_bg_.size(); ++i) set_visible(beast_bg_[i], shown || next == 3);
     if (lib_->audio()) {
+        /* At every change, as the game's UpdateState does, whether or not
+         * the value changed: the music's own command sets
+         * ceremonial_beast_progress back to 0 as its second phase begins,
+         * and the next change's 1 takes it on to the third; sent once, it
+         * stayed in the second, and a later reset could undo the death's 5
+         * (rp110: the victory cut short, the fight's music back). */
         const char* names[2] = { "ringing", "ceremonial_beast_progress" };
         float values[2] = { ringing, progress };
         float* last[2] = { &beast_ringing_, &beast_progress_ };
         for (int k = 0; k < 2; ++k) {
-            if (values[k] < 0 || values[k] == *last[k]) continue;
+            if (values[k] < 0) continue;
             *last[k] = values[k];
             Json cue, args = Json::make_array();
             cue.set("t", Json::make_string("ui"));

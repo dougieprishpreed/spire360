@@ -3,3 +3,5 @@ Pillow>=10
 texture2ddecoder>=1.0.5
 etcpak>=0.9.8
 zstandard>=0.22
+# tools/build_logic.py's C stage: the logic's data segments in logic.dat
+lz4>=4.0

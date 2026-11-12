@@ -284,8 +284,13 @@ int main(int argc, char** argv) {
             if (!comma) break;
             p = comma + 1;
         }
-        audio.global_parameter("Progress", seq[0].first);
+        /* SPIRE_HOLD_PARAM=<name>: the sequence sets the event's own
+         * parameter (a boss's ceremonial_beast_progress) instead */
+        const char* own = getenv("SPIRE_HOLD_PARAM");
+        if (getenv("SPIRE_HOLD_TRACE")) audio.set_trace(true);
+        if (!own) audio.global_parameter("Progress", seq[0].first);
         u32 id = audio.play(argv[3]);
+        if (own) audio.parameter(id, own, seq[0].first);
         int seconds = atoi(argv[5]);
         size_t seq_at = 0;
         int seq_until = seq[0].second;
@@ -294,8 +299,9 @@ int main(int argc, char** argv) {
         for (int s = 0; s < seconds; ++s) {
             if (seq_until > 0 && s >= seq_until && seq_at + 1 < seq.size()) {
                 seq_until += seq[++seq_at].second;
-                audio.global_parameter("Progress", seq[seq_at].first);
-                printf("%4d s: Progress %.0f\n", s, seq[seq_at].first);
+                if (own) audio.parameter(id, own, seq[seq_at].first);
+                else audio.global_parameter("Progress", seq[seq_at].first);
+                printf("%4d s: %s %.0f\n", s, own ? own : "Progress", seq[seq_at].first);
             }
             /* a second in eighths, each slept (Windows sleeps in 15.6 ms ticks) */
             double energy = 0;

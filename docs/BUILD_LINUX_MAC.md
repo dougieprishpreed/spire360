@@ -78,12 +78,13 @@ more is quicker if it has the cores: it keeps to 1 GB of memory for each).
 **Success** is the `##spire done` line and, in the output folder:
 
 ```
-ls -la ~/spire360-out/default.xex ~/spire360-out/spire/pack.s3p ~/spire360-out/spire360.ini
+ls -la ~/spire360-out/default.xex ~/spire360-out/logic.dat ~/spire360-out/spire/pack.s3p ~/spire360-out/spire360.ini
 cat ~/spire360-out/build.json
 ```
 
-`default.xex` (about 90 MB), `spire/pack.s3p` (about 1 GB), `spire360.ini`, `spire/data/`, and `build.json` naming
-the source commit and the game version.
+`default.xex` (about 50 MB), `logic.dat` (about 7 MB: the logic's data, which `default.xex` reads at start and
+which must come from the same build), `spire/pack.s3p` (about 1 GB), `spire360.ini`, `spire/data/`, and
+`build.json` naming the source commit and the game version.
 
 **On failure** the script stops with `##spire fail <stage> <log>` and the log's last 40 lines. The full log is
 `~/spire360-build/logs/<stage>.log`. Fix what it names and run the same command again: finished stages are quick to

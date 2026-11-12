@@ -25,19 +25,36 @@ set(CMAKE_CXX_COMPILER_LAUNCHER python3 "${CMAKE_CURRENT_LIST_DIR}/record_forms.
 
 # char is signed, as with the XDK; no strict aliasing, as with the XDK's
 # compiler; no fused multiply-adds, which would change the logic's floats
-# against the PC's (the seeded traces).
-set(COMMON_FLAGS -O2 -g -fsigned-char -fno-strict-aliasing -ffp-contract=off -ffunction-sections -fdata-sections)
+# against the PC's (the seeded traces). No counted loops (mtctr/bdnz): GCC
+# 15.3 guards some of them with a check that sets the count to 1 when it
+# thinks the loop runs once, and gets that check wrong for some loops, which
+# then run once whatever the count (found in Cuphead360's copy and compaction
+# loops; the PC builds have no such instruction). This build had the guard
+# in 86 functions, the engine's Vorbis decoder among them.
+set(COMMON_FLAGS -O2 -g -fsigned-char -fno-strict-aliasing -ffp-contract=off -ffunction-sections -fdata-sections
+    -fno-branch-count-reg)
 
 # The translated logic and its runtime (w2c2's C, the wasm runtime on xsdk's
 # POSIX calls), started by logic_glue.c.
 file(GLOB LOGIC_SOURCES "${SPIRE_LOGIC_C}/*.c")
 add_library(spire_logic STATIC ${LOGIC_SOURCES}
     "${ROOT}/runtime/src/srt_core.c" "${ROOT}/runtime/src/srt_wasi.c" "${ROOT}/runtime/src/srt_wasi_p2.c"
-    "${ROOT}/runtime/src/srt_plat_posix.c" "${ROOT}/xdk/spire360/logic_glue.c")
+    "${ROOT}/runtime/src/srt_data.c" "${ROOT}/runtime/src/srt_plat_posix.c" "${ROOT}/xdk/spire360/logic_glue.c")
 target_include_directories(spire_logic PRIVATE
     "${ROOT}/runtime/include" "${ROOT}/runtime/src" "${ROOT}/third_party/w2c2/w2c2" "${SPIRE_LOGIC_C}")
 target_compile_definitions(spire_logic PRIVATE W2C2_HOST_MEMORY)
-target_compile_options(spire_logic PRIVATE ${COMMON_FLAGS} -std=gnu99 -w)
+# No unwind tables for the C: nothing unwinds through it (the runtime leaves
+# the guest with longjmp, and the engine has no exceptions to catch), and they
+# were 8.7 MB of the image the console keeps in memory.
+target_compile_options(spire_logic PRIVATE ${COMMON_FLAGS} -std=gnu99 -w -fno-asynchronous-unwind-tables -fno-unwind-tables)
+# The logic's functions that rarely run (the C stage's split: logic/hot_functions.txt names those that ran
+# often when sampled over runs, scenarios and every card, relic, event and encounter; the rest are in
+# <file>_cold.c) compiled for size: the console keeps all code resident.
+file(GLOB LOGIC_COLD "${SPIRE_LOGIC_C}/*_cold.c")
+set(SPIRE_COLD_OPTIONS "-Os" CACHE STRING "the rarely-run logic files' options")
+if(LOGIC_COLD)
+    set_source_files_properties(${LOGIC_COLD} PROPERTIES COMPILE_OPTIONS "${SPIRE_COLD_OPTIONS}")
+endif()
 
 file(GLOB ENGINE_SOURCES "${ROOT}/engine/*/*.cpp")
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "/(d3d9_renderer|sw_renderer)\\.cpp$")

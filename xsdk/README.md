@@ -57,7 +57,8 @@ tools/xsdk/build.sh
 The translated logic comes from `out/logic/c` (`tools/build_logic.py`, as for the XDK build).
 Spire360 follows the latest xsdk and vulkan4xenon: `build.sh` builds on whatever the checkouts
 hold and says when their origin has moved on. Output: `/opt/spire360-xsdk/output/default.xex`
-(`SPIRE_XSDK_BUILD` moves it), with the licences it ships under in `licenses/`. `JOBS` compilers
+(`SPIRE_XSDK_BUILD` moves it) and `logic.dat` beside it (the logic's data segments, which the C
+stage writes and the XEX reads at start), with the licences it ships under in `licenses/`. `JOBS` compilers
 run at once, 2 by default (GCC takes about 1 GB on each of the logic's large files). The first
 build compiles the logic (the longest part); later builds compile what changed, a minute or so.
 
@@ -84,8 +85,10 @@ validation layer, `SPIRE_VK_TRACE=1` logs each render pass and draw.
 
 ## Run
 
-Copy `default.xex` beside the `spire\` folder on the console's drive (where the XDK build's was),
-with `spire360.ini` if you want its options, and start it from the dashboard. The first line of
+Copy `default.xex` and `logic.dat` beside the `spire\` folder on the console's drive (where the
+XDK build's was), with `spire360.ini` if you want its options, and start it from the dashboard.
+The two go together: an XEX with another build's `logic.dat` (or none) stops at start, and
+`spire360.txt` says so. The first line of
 `spire360.txt` names the source commit.
 
 With `profile=1` in `spire360.ini` the log has, every 600 frames: the frames' GPU time by the

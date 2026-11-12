@@ -28,6 +28,10 @@ if [ ! -f "$LOGIC/logic.h" ]; then
   echo "No translated logic in $LOGIC: run tools/build_logic.py first (or set SPIRE_LOGIC_C)" >&2
   exit 1
 fi
+if [ ! -f "$LOGIC/logic.dat" ]; then
+  echo "No logic.dat in $LOGIC: the translated logic is from an older C stage; run tools/build_logic.py's c stage again" >&2
+  exit 1
+fi
 
 for dep in XSDK VULKAN4XENON; do
   dir="${!dep}"
@@ -61,6 +65,8 @@ cmake -S "$ROOT/xsdk" -B "$OUT/cmake" -G Ninja \
 cmake --build "$OUT/cmake" -j"$JOBS"
 
 cp "$OUT/cmake/spire360.xex" "$OUT/default.xex"
+# the logic's data segments, which the XEX reads at start (game:\logic.dat)
+cp "$LOGIC/logic.dat" "$OUT/logic.dat"
 mkdir -p "$OUT/licenses"
 cp "$XSDK/LICENSE" "$OUT/licenses/xsdk.txt"
 cp "$XSDK/THIRD_PARTY_NOTICES.md" "$OUT/licenses/xsdk-third-party.md"

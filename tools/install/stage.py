@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Puts the console folder together: default.xex (and its licenses), spire360.ini (the release
+"""Puts the console folder together: default.xex (with logic.dat, its logic's data, and its licenses), spire360.ini (the release
 options), spire/pack.s3p and spire/data (the pack's localization), checked
 for FATX's 42-character names, and build.json (what it was made from).
 
@@ -70,6 +70,13 @@ def main():
             sys.exit("no default.xex in " + a.out)
     else:
         copy_checked(a.xex, xex)
+        # the logic's data segments, which the XEX reads at start (it stops
+        # with a log line when they are another build's), from beside it
+        dat = os.path.join(os.path.dirname(os.path.abspath(a.xex)), "logic.dat")
+        if os.path.exists(dat):
+            copy_checked(dat, os.path.join(a.out, "logic.dat"))
+        elif os.path.exists(os.path.join(a.out, "logic.dat")):
+            os.remove(os.path.join(a.out, "logic.dat"))
         # the licenses the XEX ships under (GCC's runtime, newlib, xsdk,
         # vulkan4xenon), from beside it
         lic = os.path.join(os.path.dirname(os.path.abspath(a.xex)), "licenses")
@@ -107,6 +114,10 @@ def main():
     if not a.keep_xex:
         info["source"] = git_commit()
         info["xex_md5"] = md5(xex)
+        if os.path.exists(os.path.join(a.out, "logic.dat")):
+            info["logic_dat_md5"] = md5(os.path.join(a.out, "logic.dat"))
+        else:
+            info.pop("logic_dat_md5", None)
         # the XEX holds the game's code: a game update needs a new one
         manifest = os.path.join(ROOT, "logic", "lib", "game", "manifest.json")
         if os.path.exists(manifest):

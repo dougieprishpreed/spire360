@@ -91,7 +91,7 @@ How the port works and how to build each part by hand: [docs/DEVELOPING.md](docs
 
 ## Keep your build to yourself
 
-The build is made from your copy of the game: `default.xex` holds the game's own code, translated, and the pack its
+The build is made from your copy of the game: `default.xex` and `logic.dat` hold the game's own code, translated, and the pack its
 art, sound and text. That's why nothing from the game is in this repository and why everyone builds their own:
 don't share your `spire360` folder or anything the build makes. This project is not affiliated with or endorsed by
 Mega Crit.
