@@ -13,7 +13,7 @@ bool is_audio_call(const std::string& call) {
 }
 }
 GameAudio::GameAudio(const Pack* pack) : pack_(pack), events_(pack), music_id_(0), ambience_id_(0), rng_(0x39ba1u),
-    floor_(-1), context_progress_(-1), game_over_(false), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
+    floor_(-1), context_progress_(-1), expected_progress_(-1), game_over_(false), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
     stopping_(false), mix_worst_(0), mix_total_(0), slow_logged_(-1e9), mix_count_(0), dry_(false) {
     /* The banks every screen uses, parsed before the first sound (sfx.bank
      * alone is a long parse, a hitch at the first attack otherwise). */
@@ -180,7 +180,7 @@ void GameAudio::ambience(const std::string& path) {
 }
 void GameAudio::menu() {
     GameLock lock(this);
-    stop_room_loops(); pending_.clear(); floor_ = -1; context_progress_ = -1; act_track_.clear();
+    stop_room_loops(); pending_.clear(); floor_ = -1; context_progress_ = -1; expected_progress_ = -1; act_track_.clear();
     ambience(""); events_.global_parameter("Progress", 0);
     music("event:/music/menu_update");
 }
@@ -246,6 +246,19 @@ void GameAudio::cue(const Json& cue) {
             else events_.parameter(music_id_, path, a[1].f());
             return;
         } else if (method == "TriggerEliteSecondPhase") { events_.global_parameter("Progress", 8); return; }
+        else if (method == "UpdateTrack") {
+            /* GetTrack(CombatEnd) at the fight's end: its music turns as
+             * the blow lands; held for the rewards screen it came the
+             * death's animation and a second late (ShowRewards' wait),
+             * then the transition's own bars (rp111) */
+            if (expected_progress_ >= 0 && expected_progress_ != context_progress_) {
+                log_info("music progress: %d (the combat's end)", expected_progress_);
+                events_.global_parameter("Progress", (float)expected_progress_);
+                context_progress_ = expected_progress_;
+            }
+            expected_progress_ = -1;
+            return;
+        }
         else if (method == "TriggerCampfireGoingOut") { events_.parameter(ambience_id_, "Campfire", 1); return; }
         else { CueLedger::retract(cue); return; }
     } else if (kind != "sfx") return;
@@ -323,7 +336,17 @@ void GameAudio::prepare(const Json& d) {
     events_.preload_for(a["ambience"].str());
 }
 
+void GameAudio::expect(const Json& d) {
+    GameLock lock(this);
+    const Json& a = d["context"]["audio"];
+    expected_progress_ = a.is_null() ? -1 : a["progress"].i(-1);
+}
+
 void GameAudio::decision(const Json& d) {
+    {
+        GameLock lock(this);
+        expected_progress_ = -1;
+    }
     /* the run's end: at once if the death before it did not play it (the
      * act's track must not start again) */
     if (d["decision"].str() == "game_over") {

@@ -63,6 +63,7 @@ CombatScreen::CombatScreen(SceneLibrary* lib)
     encounter_slots_ = NULL;
     beast_bg_state_ = 0;
     beast_ringing_ = beast_progress_ = -1;
+    beast_dead_ = false;
     end_glow_t_ = 0;
     creature_focus_ = NULL;
     creature_tips_ = NULL;
@@ -2208,6 +2209,7 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
     beast_bg_.clear();
     beast_bg_state_ = 0;
     beast_ringing_ = beast_progress_ = -1;
+    beast_dead_ = false;
     if (view["has_scene"].b() && view["encounter"].is_string()) {
         Node* s = instance(lib_, "scenes/encounters/" + lower(view["encounter"].str()) + ".tscn");
         if (s && s->is_control()) {
@@ -3824,7 +3826,7 @@ void CombatScreen::refresh_end_glow() {
     bool playable = false;
     const Json& hand = state_["hand"];
     for (size_t i = 0; i < hand.size(); ++i)
-        if (hand[i]["can_play"].b() && hand[i]["cost"].i() <= state_["energy"].i()) playable = true;
+        if (hand[i]["can_play"].b()) playable = true;
     bool shiny = !playable && end_state_ == 1 && !sel_mode_;
     if (shiny == end_shiny_) return;
     end_shiny_ = shiny;
@@ -3856,7 +3858,7 @@ void CombatScreen::update_beast_bg() {
     int next = 0;
     float progress = beast_progress_;
     bool shown = true;
-    if (!beast || (*beast)["hp"].i() <= 0) {
+    if (!beast || (*beast)["hp"].i() <= 0 || beast_dead_) {
         next = 3;
         progress = 5;
     } else if (!(*beast)["second_phase"].b()) {
@@ -4116,6 +4118,14 @@ void CombatScreen::fire(const Cue& c) {
              * stays (StartDeathAnim(false): a knocked out Waterfall Giant, a
              * Decimillipede segment) keeps them, frozen, for its revive */
             if (!c.data["keep"].b()) hide(cr->node->find_unique("Intents"));
+            /* NCeremonialBeastBgVfx.UpdateState after its death: the
+             * flowers and the music's outro (progress 5). The fight's state
+             * keeps it alive through the killing blow, so its music went on
+             * through the rewards (rp111). */
+            if (cr->data["id"].str() == "CEREMONIAL_BEAST" && !c.data["keep"].b()) {
+                beast_dead_ = true;
+                update_beast_bg();
+            }
         }
         /* the creature's CreatureAnimator (the logic ran it) */
         if (c.data["play"].is_array()) {
@@ -5173,9 +5183,16 @@ void CombatScreen::sel_filter() {
     const Json& cs = sel_["cards"];
     for (size_t i = 0; i < holders_.size(); ++i) {
         bool ok = peek_.peeking();
-        for (size_t k = 0; k < cs.size() && !ok; ++k)
-            if (cs[k]["instance_id"].i(-1) == holders_[i].id) ok = true;
-        holders_[i].node->visible = ok;
+        const Json* option = NULL;
+        for (size_t k = 0; k < cs.size() && !option; ++k)
+            if (cs[k]["instance_id"].i(-1) == holders_[i].id) option = &cs[k];
+        holders_[i].node->visible = ok || option;
+        /* NHandCardHolder.ShouldGlowGold under the hand's
+         * SelectModeGoldGlowOverride (FromHandForDiscard: a Sly card that
+         * could be played or only lacks energy), red still first */
+        const std::string& glow = holders_[i].data["glow"].str();
+        if (option && (*option)["select_glow"].str() == "gold" && glow != "red")
+            set_card_glow(holders_[i].card_node, "gold");
     }
 }
 
@@ -5185,7 +5202,10 @@ void CombatScreen::end_hand_select() {
     peek_.set_peeking(false);
     /* OnSelectModeSourceFinished: the picked cards go back to the hand */
     while (!selected_.empty()) sel_unpick((int)selected_.size() - 1);
-    for (size_t i = 0; i < holders_.size(); ++i) holders_[i].node->visible = true;
+    for (size_t i = 0; i < holders_.size(); ++i) {
+        holders_[i].node->visible = true;
+        set_card_glow(holders_[i].card_node, holders_[i].data["glow"].str());
+    }
     Node* ui = root_ ? find_named(root_, "CombatUi") : NULL;
     Node* hand = ui ? find_named(ui, "Hand") : NULL;
     if (hand) {

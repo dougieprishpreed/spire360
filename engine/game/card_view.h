@@ -20,6 +20,7 @@ Node* make_card(SceneLibrary* lib, const Json& card);
 /* NCardHighlight.AnimShow / AnimHide in its default (cyan) colour: a card
  * picked on a selection screen. */
 void set_card_highlight(Node* card, bool on);
+void set_card_glow(Node* card, const std::string& glow);
 
 /* NCard.ActivateRewardScreenGlow (the card reward and choose-a-card screens,
  * the timeline's card unlocks): a rare card sparkles with NCardRareGlow

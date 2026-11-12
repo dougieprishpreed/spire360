@@ -288,17 +288,19 @@ Node* make_card(SceneLibrary* lib, const Json& c) {
         set_material(lib, item(card, "AncientPortrait"), "scenes/cards/card_portrait_blur_material.tres");
     }
 
-    /* The hand's glow (NCardHighlight): playable cyan, gold, red. */
-    CanvasItem* glow = item(card, "Highlight");
-    if (glow) {
-        const std::string g = c["glow"].str();
-        glow->visible = g == "playable" || g == "gold" || g == "red";
-        glow->shader_params["width"] = glow->visible ? 0.075f : 0.0f; /* AnimShow's end value */
-        if (g == "gold") glow->modulate = Color(1, 0.784f, 0, 0.98f);
-        else if (g == "red") glow->modulate = Color(0.83f, 0, 0.33f, 0.98f);
-        else glow->modulate = Color(0, 0.957f, 0.988f, 0.98f);
-    }
+    set_card_glow(card, c["glow"].str());
     return card;
+}
+
+/* The hand's glow (NCardHighlight): playable cyan, gold, red, or none. */
+void set_card_glow(Node* card, const std::string& g) {
+    CanvasItem* glow = card ? item(card, "Highlight") : NULL;
+    if (!glow) return;
+    glow->visible = g == "playable" || g == "gold" || g == "red";
+    glow->shader_params["width"] = glow->visible ? 0.075f : 0.0f; /* AnimShow's end value */
+    if (g == "gold") glow->modulate = Color(1, 0.784f, 0, 0.98f);
+    else if (g == "red") glow->modulate = Color(0.83f, 0, 0.33f, 0.98f);
+    else glow->modulate = Color(0, 0.957f, 0.988f, 0.98f);
 }
 
 void set_card_highlight(Node* card, bool on) {

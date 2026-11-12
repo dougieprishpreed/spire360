@@ -392,12 +392,15 @@ struct AudioEvents::Impl {
             const Json& q = tr["quantization"];
             const std::string& unit = q["unit"].str();
             if (unit == "None" || unit.empty()) return pos;
-            double bpm = 120, origin = 0;
+            double bpm = 120, origin = 0, bar = 4;
             const Json& tempos = (*def)["tempos"];
             for (size_t i = 0; i < tempos.size(); ++i) if (tempos[i]["at"].num() <= pos + EPS) {
-                bpm = tempos[i]["bpm"].num(120); origin = tempos[i]["at"].num();
+                bpm = tempos[i]["bpm"].num(120); origin = tempos[i]["at"].num(); bar = tempos[i]["bar"].num(4);
             }
-            double beats = unit == "Bar" ? 4 : unit == "HalfNote" ? 2 : unit == "EighthNote" ? 0.5 : unit == "SixteenthNote" ? 0.25 : 1;
+            /* the banks' units: Bar and EighthNote (FModBankParser's
+             * EQuantizationUnit), times the multiplier; a bar is its time
+             * signature's (The Insatiable's 3/4 bars were 4 beats long) */
+            double beats = unit == "Bar" ? bar : unit == "HalfNote" ? 2 : unit == "EighthNote" ? 0.5 : unit == "SixteenthNote" ? 0.25 : 1;
             double interval = 60 / bpm * beats * q["multiplier"].num(1);
             if (interval <= 0) return pos;
             /* Within an output frame of a point counts as on it: the
@@ -466,7 +469,7 @@ struct AudioEvents::Impl {
                 if (system->random() * 100 >= t["chance"].num(100)) continue;
                 double destination = t["to"].num();
                 if (fabs(destination - pos) < EPS) continue;
-                if (g_trace_plays) log_info("audio jump %s at %.2f s -> %.2f s", id.c_str(), pos, destination);
+                if (g_trace_plays) log_info("audio jump %s at %.2f s -> %.2f s (%s)", id.c_str(), pos, destination, key.c_str());
                 /* A jump into the region of an async (unlocked) instrument
                  * that is playing leaves it playing (menu_update loops its
                  * playhead inside the box of the theme it picked) */
@@ -609,6 +612,7 @@ struct AudioEvents::Impl {
                         children.push_back(Child(p, -1, id));
                     } else { ++system->errors; done = true; }
                 } else if (kind == K_COMMAND) {
+                    if (g_trace_plays) log_info("audio command %d %s = %g", (*def)["command"].i(), (*def)["target"].str().c_str(), (*def)["value"].num());
                     if ((*def)["command"].i() == 2 && context) context->set_parameter((*def)["target"].str(), (*def)["value"].f());
                     done = true;
                 }
@@ -921,6 +925,7 @@ u32 AudioEvents::play(const std::string& path, float volume, const Json& params)
 }
 void AudioEvents::parameter(u32 id, const std::string& name, float value) {
     ScopedLock lock(impl_->lock);
+    if (g_trace_plays) log_info("audio param %s = %g (event %u%s)", name.c_str(), value, id, impl_->roots.count(id) ? "" : ", not playing");
     if (impl_->roots.count(id)) impl_->roots[id]->set_parameter(name, value);
 }
 void AudioEvents::parameter_label(u32 id, const std::string& name, const std::string& label) {

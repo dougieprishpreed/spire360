@@ -1846,6 +1846,8 @@ public partial class RunDriver
                     ["transform_preview"] = transform.preview,
                     ["transform_options"] = transform.options,
                     ["enchant_preview"] = _cardSelector.PendingKind == "enchant" ? EnchantPreviewView(card) : null,
+                    // the hand's gold glow while it selects (a discard's Sly cards)
+                    ["select_glow"] = SelectGlow(card),
                 });
             }).ToList();
 
@@ -2584,6 +2586,16 @@ public partial class RunDriver
             ["icon_base"] = RelicIconBase(r),
         }).ToList();
         return list.Count > 0 ? list : null;
+    }
+
+    /// <summary>NHandCardHolder.ShouldGlowGold while the hand selects: the
+    /// selection's CardSelectorPrefs.ShouldGlowGold (FromHandForDiscard: a
+    /// Sly card that can be played or lacks only energy or stars).</summary>
+    private string? SelectGlow(CardModel card)
+    {
+        var gold = _cardSelector.PendingGoldGlow;
+        if (gold == null || _cardSelector.PendingKind is not ("hand" or "hand_upgrade")) return null;
+        try { return gold(card) ? "gold" : null; } catch { return null; }
     }
 
     private Dictionary<string, object?>? SelectionFight(Player player)

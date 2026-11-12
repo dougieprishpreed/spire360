@@ -31,6 +31,11 @@ public:
     /* A decision's banks parsed (its tracks' and ambience's) without
      * playing them: decision() follows once the room shows. */
     void prepare(const Json& decision);
+    /* The decision after a fight's last steps (its rewards): its Progress
+     * goes with NRunMusicController.UpdateTrack as the steps play it, when
+     * the game ends the combat (CombatManager.EndCombatInternal), not when
+     * the rewards show after the deaths. */
+    void expect(const Json& decision);
     /* CreatureCmd.Kill once every player is dead: StopMusic, the
      * game_over stinger; at the player's death in the fight's last steps
      * (the game_over decision after them plays nothing more). */
@@ -68,7 +73,7 @@ private:
     std::vector<Scheduled> pending_;
     std::string track_, ambience_, act_track_;
     u32 music_id_, ambience_id_, rng_;
-    int floor_, context_progress_;
+    int floor_, context_progress_, expected_progress_;
     bool game_over_; /* game_over() played, until the next run's decision */
     double clock_, remainder_;
     FILE* recording_;

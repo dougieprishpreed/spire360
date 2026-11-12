@@ -199,10 +199,13 @@ internal static partial class Hooks
         // The saves after the response (Deferred): the progress file, then
         // the run's snapshot as the call took it
         Spire.HookBridge.Hooks.RegisterDefer("save.defer.progress", a =>
-            a[0] is MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager m && Deferred.Offer("progress", m.SaveProgress));
+            a[0] is MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager m &&
+            Deferred.Offer("progress", m.SaveProgress, MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager.fileName));
         Spire.HookBridge.Hooks.RegisterDefer("save.defer.run", a =>
             a[0] is MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager m && a[1] is MegaCrit.Sts2.Core.Saves.SerializableRun save &&
-            a[2] is bool mp && Deferred.Offer(mp ? "run.multiplayer" : "run", () => Deferred.Finish(m.SaveRun(save, mp), "run save")));
+            a[2] is bool mp && Deferred.Offer(mp ? "run.multiplayer" : "run", () => Deferred.Finish(m.SaveRun(save, mp), "run save"),
+                mp ? MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager.multiplayerRunSaveFileName
+                   : MegaCrit.Sts2.Core.Saves.Managers.RunSaveManager.runSaveFileName));
         // ForgeCmd.PreviewSovereignBlade: the blades in the hand hammered
         // where they are, the others shown and sent back to their piles
         Spire.HookBridge.Hooks.RegisterBefore("forge.preview", a =>

@@ -453,6 +453,7 @@ private:
     std::vector<class SpineSprite*> beast_bg_;
     int beast_bg_state_; /* 0 none, 1 glow, 2 skulls, 3 flowers */
     float beast_ringing_, beast_progress_;
+    bool beast_dead_; /* its Dead cue played: the fight's state still has it alive until the next decision */
     void update_beast_bg();
     /* PositionCreaturesWithSlots: an enemy at its slot's marker */
     bool slot_position(const Json& enemy, Vec2* out) const;

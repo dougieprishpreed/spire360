@@ -242,12 +242,11 @@ std::vector<Choice> GameClient::choices(const Json& d) {
     std::vector<Choice> out;
     const std::string& kind = d["decision"].str();
     if (kind == "combat_play") {
-        int energy = d["energy"].i();
         const Json& hand = d["hand"];
         const Json& enemies = d["enemies"];
         for (size_t i = 0; i < hand.size(); ++i) {
             const Json& c = hand[i];
-            if (!c["can_play"].b() || c["cost"].i() > energy) continue;
+            if (!c["can_play"].b()) continue;
             int idx = c["index"].i();
             if (c["target_type"].str() == "AnyEnemy") {
                 for (size_t t = 0; t < enemies.size(); ++t)
@@ -1165,6 +1164,7 @@ void GameClient::show(const Json& d) {
          * caused by powers and orbs. Open the overlay after playback; an
          * event's fight (the Battleworn Dummy) then fades back to its
          * event (ResumePreviousRoom): its blow was cut by the fade. */
+        if (kind != "game_over" && lib_->audio()) lib_->audio()->expect(d);
         combat_->update_decision(d, true);
         finishing_ = d;
         fade_after_finishing_ = kind == "event_choice" && d["context"]["room_type"].str() == "Event";
@@ -1812,8 +1812,12 @@ void GameClient::combat_input(const PadState& pad) {
          * stays in the hand (NCardPlay.CannotPlayThisCardFtueCheck: too
          * costly, the FTUE) and the player says why (1 s). */
         if (lib_->audio()) lib_->audio()->ui("card_select.mp3");
-        if (!card["can_play"].b() || card["cost"].i() > decision_["energy"].i()) {
-            if (card["cost"].i() > decision_["energy"].i() && ftue_pending("cannot_play_card_ftue"))
+        /* can_play is CardModel.CanPlay (the energy and stars included):
+         * an X card's cost is the X it was last played for
+         * (CardEnergyCost.GetResolved), more than the energy after an
+         * Energy Potion's turn, and Skewer could not be chosen (rp111) */
+        if (!card["can_play"].b()) {
+            if (card["unplayable_reason"].str() == "EnergyCostTooHigh" && ftue_pending("cannot_play_card_ftue"))
                 open_ftue("cannot_play_card_ftue", std::vector<CanvasItem*>(1, screen_item("EndTurnButton")));
             if (card["unplayable_line"].is_string()) combat_->think(card["unplayable_line"].str(), 1.0);
             return;
@@ -2468,7 +2472,7 @@ bool GameClient::ftue_instead(const std::string& command) {
         const Json& hand = decision_["hand"];
         bool playable = false;
         for (size_t i = 0; i < hand.size(); ++i)
-            if (hand[i]["can_play"].b() && hand[i]["cost"].i() <= decision_["energy"].i()) playable = true;
+            if (hand[i]["can_play"].b()) playable = true;
         if (playable) {
             open_ftue("can_play_cards_ftue", std::vector<CanvasItem*>(1, screen_item("EnergyCounterContainer")));
             return true;

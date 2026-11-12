@@ -206,7 +206,12 @@ def compile_bank(bank, sources):
             'triggered': e['eventTriggeredInstruments'], 'boxes': boxes, 'transitions': trans,
             'parameters': [names[layouts[p]['parameterGuid']] for p in e['parameterLayouts']],
             'parameter_instruments': list(dict.fromkeys(i for p in e['parameterLayouts'] for i in layouts[p]['instruments'])),
-            'tempos': [{'at': p['position'] / 48000, 'bpm': p['tempo']} for p in t['timelineTempoMarkers']],
+            # a marker's time signature: its numerator in the low word, the note value in the high; its tempo
+            # counts quarter notes (the Queen's 7/8 and 9/8 markers fall on whole bars only so), and 'bar'
+            # is a bar in quarter notes (3/4: 3, 6/8: 3, 7/8: 3.5)
+            'tempos': [{'at': p['position'] / 48000, 'bpm': p['tempo'],
+                        'bar': (p['timeSignature'] & 0xffffffff) * 4 / ((p['timeSignature'] >> 32) or 4)}
+                       for p in t['timelineTempoMarkers']],
             'end': max([0] + [b['at'] + b['length'] for b in boxes] +
                        [m['position'] / 48000 for m in markers.values()]),
             'polyphony': e['maximumPolyphony'], 'cooldown': e['triggerCooldown'] / 1000}

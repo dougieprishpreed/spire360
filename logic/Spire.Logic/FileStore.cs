@@ -11,9 +11,9 @@ namespace Spire.Logic;
 /// Writes go to a temporary file first and are then moved into place, so a
 /// power cut mid-save leaves the previous save intact.
 ///
-/// The game's saves come after the command's response (Deferred): every
-/// other operation makes the queued ones first, so it sees the files as
-/// they would be.
+/// The game's saves come after the command's response (Deferred): an
+/// operation on a queued save's file, or on a folder, makes the queued ones
+/// first, so it sees the files as they would be.
 /// </summary>
 public sealed class FileStore : ISaveStore
 {
@@ -49,7 +49,7 @@ public sealed class FileStore : ISaveStore
 
     public void DeleteFile(string path)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(path);
         var p = GetFullPath(path);
         if (File.Exists(p)) File.Delete(p);
     }
@@ -70,7 +70,7 @@ public sealed class FileStore : ISaveStore
 
     public bool FileExists(string path)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(path);
         return File.Exists(GetFullPath(path));
     }
 
@@ -90,26 +90,26 @@ public sealed class FileStore : ISaveStore
 
     public int GetFileSize(string path)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(path);
         return (int)new FileInfo(GetFullPath(path)).Length;
     }
 
     public DateTimeOffset GetLastModifiedTime(string path)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(path);
         return File.GetLastWriteTimeUtc(GetFullPath(path));
     }
 
     public void SetLastModifiedTime(string path, DateTimeOffset time)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(path);
         try { File.SetLastWriteTimeUtc(GetFullPath(path), time.UtcDateTime); }
         catch (Exception ex) { Log.Debug($"SetLastModifiedTime {path}: {ex.Message}"); }
     }
 
     public string ReadFile(string path)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(path);
         var p = GetFullPath(path);
         return File.Exists(p) ? File.ReadAllText(p) : null!;
     }
@@ -118,7 +118,8 @@ public sealed class FileStore : ISaveStore
 
     public void RenameFile(string sourcePath, string destinationPath)
     {
-        Deferred.RunAll();
+        Deferred.RunFor(sourcePath);
+        Deferred.RunFor(destinationPath);
         File.Move(GetFullPath(sourcePath), GetFullPath(destinationPath), overwrite: true);
     }
 

@@ -62,6 +62,10 @@ public partial class RunDriver
         // card, CardTransformation(original))
         public Func<CardModel, CardTransformation>? PendingTransform { get; private set; }
         private Func<CardModel, CardTransformation>? _nextTransform;
+        // CardSelectorPrefs.ShouldGlowGold (FromHandForDiscard: the Sly cards),
+        // NPlayerHand.SelectModeGoldGlowOverride while the hand selects
+        public Func<CardModel, bool>? PendingGoldGlow { get; private set; }
+        private Func<CardModel, bool>? _nextGoldGlow;
         private bool _nextMustPick;
 
         /// <summary>
@@ -73,6 +77,7 @@ public partial class RunDriver
         {
             string? prompt = null;
             bool cancelable = false, manual = false;
+            Func<CardModel, bool>? goldGlow = null;
             foreach (var a in args)
             {
                 if (a is CardSelectorPrefs prefs)
@@ -80,6 +85,7 @@ public partial class RunDriver
                     try { prompt = prefs.Prompt?.GetFormattedText(); } catch { }
                     cancelable = prefs.Cancelable;
                     manual = prefs.RequireManualConfirmation;
+                    goldGlow = prefs.ShouldGlowGold;
                     break;
                 }
             }
@@ -119,6 +125,7 @@ public partial class RunDriver
                 PendingManualConfirm = manual;
                 PendingEnchantment = enchantment;
                 PendingTransform = transform;
+                PendingGoldGlow = goldGlow;
                 if (mustPick && PendingOptions?.Count > 0) PendingMinSelect = Math.Max(PendingMinSelect, 1);
             }
             else if (result is Task t && !t.IsCompleted)
@@ -126,6 +133,7 @@ public partial class RunDriver
                 _next = (kind, prompt, cancelable, manual);
                 _nextEnchantment = enchantment;
                 _nextTransform = transform;
+                _nextGoldGlow = goldGlow;
                 _nextMustPick = mustPick;
             }
         }
@@ -150,9 +158,11 @@ public partial class RunDriver
             PendingManualConfirm = _next?.manual ?? false;
             PendingEnchantment = _nextEnchantment;
             PendingTransform = _nextTransform;
+            PendingGoldGlow = _nextGoldGlow;
             _next = null;
             _nextEnchantment = null;
             _nextTransform = null;
+            _nextGoldGlow = null;
             if (_nextMustPick) PendingMinSelect = Math.Max(minSelect, 1);
             _nextMustPick = false;
             _pendingTcs = new TaskCompletionSource<IEnumerable<CardModel>>();
