@@ -406,8 +406,14 @@ internal static class Steps
         if (now == null)
         {
             // The fight just ended: the enemies alive at its last moment died
-            // with it (the snapshot that would show it is gone).
-            if (_last != null)
+            // with it (the snapshot that would show it is gone). Not when it
+            // was lost: CombatManager.ProcessPendingLoss only ends it, the
+            // enemies stand over the fallen player (a Spiny Toad's last
+            // explosion showed it dying with the player).
+            bool lost = false;
+            try { lost = _player()?.Creature?.IsDead == true; }
+            catch { }
+            if (_last != null && !lost)
                 foreach (var c in _last.Creatures.Values)
                     if (c.Alive && c.Who.StartsWith("e", StringComparison.Ordinal))
                         _pendingUi.Add(new Dictionary<string, object?> { ["t"] = "death", ["who"] = c.Who });

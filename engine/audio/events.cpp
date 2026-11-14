@@ -131,6 +131,12 @@ struct AudioEvents::Impl {
         bool chain_ready;
         bool untriggered; /* its conditions stopped holding (untrigger) */
         bool locked;      /* in a timeline's box (or under one): its long sounds keep to it */
+        /* under the event set_logged named (the music): its changes noted */
+        bool logged() const {
+            const Player* p = this;
+            while (p->context) p = p->context;
+            return system->logged_root && p == system->logged_root;
+        }
         Player(Impl* s, Bank* b, const Json* d, bool e, Player* ctx, const std::string& k)
             : system(s), bank(b), def(d), context(ctx), event(e), started(false), done(false), first(true), releasing(false),
               voice(0), age(0), pos(0), delay(0), cutoff(-1), release_at(0), release_time(0), next_spawn(0), volume(1), pitch(1),
@@ -470,6 +476,10 @@ struct AudioEvents::Impl {
                 double destination = t["to"].num();
                 if (fabs(destination - pos) < EPS) continue;
                 if (g_trace_plays) log_info("audio jump %s at %.2f s -> %.2f s (%s)", id.c_str(), pos, destination, key.c_str());
+                /* the music's turns a parameter made (not its loops) */
+                if (t["conditions"].size() && logged())
+                    system->note(format("music: %s %.2f s -> %.2f s%s", context ? "its layer at" : "at", pos, destination,
+                                        t["length"].num() > EPS ? format(" through a %.1f s transition", t["length"].num()).c_str() : ""));
                 /* A jump into the region of an async (unlocked) instrument
                  * that is playing leaves it playing (menu_update loops its
                  * playhead inside the box of the theme it picked) */
@@ -613,6 +623,7 @@ struct AudioEvents::Impl {
                     } else { ++system->errors; done = true; }
                 } else if (kind == K_COMMAND) {
                     if (g_trace_plays) log_info("audio command %d %s = %g", (*def)["command"].i(), (*def)["target"].str().c_str(), (*def)["value"].num());
+                    if (logged()) system->note(format("music: its timeline sets %s = %g", (*def)["target"].str().c_str(), (*def)["value"].num()));
                     if ((*def)["command"].i() == 2 && context) context->set_parameter((*def)["target"].str(), (*def)["value"].f());
                     done = true;
                 }
@@ -714,6 +725,11 @@ struct AudioEvents::Impl {
     std::map<std::string, int> selections;
     std::map<std::string, float> globals, volumes;
     std::string preferred;
+    /* the music (set_logged): its changes for the game's thread to log */
+    Player* logged_root;
+    std::vector<std::string> notes;
+    std::map<std::string, float> logged_values;
+    void note(const std::string& s) { if (notes.size() < 64) notes.push_back(s); }
     u32 rng, next_id;
     unsigned errors;
     unsigned missing;
@@ -722,7 +738,7 @@ struct AudioEvents::Impl {
     bool described; /* the voices listed once they ran out */
     /* the game's thread (cues) and the audio thread (render) */
     Mutex lock;
-    Impl(const Pack* p, u32 rate) : pack(p), mixer(p, rate), rng(0x3a97bc25u), next_id(1), errors(0), missing(0), voices_started(0), described(false) {
+    Impl(const Pack* p, u32 rate) : pack(p), mixer(p, rate), logged_root(NULL), rng(0x3a97bc25u), next_id(1), errors(0), missing(0), voices_started(0), described(false) {
         read_json(pack, "audio/runtime.json", index);
     }
     ~Impl() { stop_all(0); for (std::map<std::string, Bank*>::iterator i = banks.begin(); i != banks.end(); ++i) delete i->second; }
@@ -759,6 +775,7 @@ struct AudioEvents::Impl {
     void stop_all(double fade) {
         for (std::map<u32, Player*>::iterator i = roots.begin(); i != roots.end(); ++i) { i->second->detach(fade); delete i->second; }
         roots.clear();
+        logged_root = NULL;
         if (fade <= 0) mixer.stop_all();
     }
     /* The act's music banks stay together (act1_a1, act1_a2, act1_b1: the
@@ -815,11 +832,17 @@ void AudioEvents::preload_for(const std::string& path) {
 }
 /* The samples a definition reaches: its own, and those of the nodes its
  * strings name (an event's tracks, instruments, nested events). */
+/* An event's sounds: its instruments' samples, through its nested events
+ * (an event instrument's "event": in its bank's events, else another
+ * bank's, left in `elsewhere`). Without the nested ones an act's music
+ * kept its short pieces and its ambience only: the long stems under every
+ * room of it (nested events) were read at each fight's start, half a
+ * second late, and the music skipped (rp113). */
 static void collect_samples(const Json& doc, const Json& n, std::vector<std::string>& out, std::set<std::string>& seen,
-                            int depth) {
-    if (depth > 16) return;
+                            int depth, std::vector<std::string>* elsewhere) {
+    if (depth > 24) return;
     if (n.is_array()) {
-        for (size_t i = 0; i < n.size(); ++i) collect_samples(doc, n[i], out, seen, depth + 1);
+        for (size_t i = 0; i < n.size(); ++i) collect_samples(doc, n[i], out, seen, depth + 1, elsewhere);
         return;
     }
     if (!n.is_object()) return;
@@ -831,9 +854,15 @@ static void collect_samples(const Json& doc, const Json& n, std::vector<std::str
         const Json& v = n.get(keys[k]);
         if (v.is_string()) {
             const Json& node = doc["nodes"].get(v.str());
-            if (node.is_object() && seen.insert(v.str()).second) collect_samples(doc, node, out, seen, depth + 1);
+            if (node.is_object()) {
+                if (seen.insert(v.str()).second) collect_samples(doc, node, out, seen, depth + 1, elsewhere);
+            } else if (keys[k] == "event" && seen.insert("event " + v.str()).second) {
+                const Json& nested = doc["events"].get(v.str());
+                if (nested.is_object()) collect_samples(doc, nested, out, seen, depth + 1, elsewhere);
+                else if (elsewhere) elsewhere->push_back(v.str());
+            }
         } else if (v.is_object() || v.is_array()) {
-            collect_samples(doc, v, out, seen, depth + 1);
+            collect_samples(doc, v, out, seen, depth + 1, elsewhere);
         }
     }
 }
@@ -848,7 +877,12 @@ void AudioEvents::samples_of(const std::string& path, std::vector<std::string>& 
     for (size_t i = 0; i < choices.size(); ++i)
         if (choices[i][(size_t)0].str() == bank->name) guid = choices[i][1].str();
     std::set<std::string> seen(out.begin(), out.end());
-    collect_samples(bank->doc, bank->doc["events"].get(guid), out, seen, 0);
+    std::vector<std::string> elsewhere;
+    collect_samples(bank->doc, bank->doc["events"].get(guid), out, seen, 0, &elsewhere);
+    for (size_t i = 0; i < elsewhere.size() && i < 64; ++i) {
+        Impl::Bank* other = impl_->bank_for(elsewhere[i]);
+        if (other) collect_samples(other->doc, other->doc["events"].get(elsewhere[i]), out, seen, 1, &elsewhere);
+    }
 }
 
 void AudioEvents::warm(const std::string& path) {
@@ -929,7 +963,32 @@ u32 AudioEvents::play(const std::string& path, float volume, const Json& params)
 void AudioEvents::parameter(u32 id, const std::string& name, float value) {
     ScopedLock lock(impl_->lock);
     if (g_trace_plays) log_info("audio param %s = %g (event %u%s)", name.c_str(), value, id, impl_->roots.count(id) ? "" : ", not playing");
-    if (impl_->roots.count(id)) impl_->roots[id]->set_parameter(name, value);
+    if (!impl_->roots.count(id)) return;
+    Impl::Player* p = impl_->roots[id];
+    /* the music's: each change of what the game sets (a boss's progress
+     * comes again at every change of the fight) */
+    if (p == impl_->logged_root) {
+        std::map<std::string, float>::iterator was = impl_->logged_values.find(name);
+        if (was == impl_->logged_values.end() || was->second != value)
+            impl_->note(format("music: the game sets %s = %g", name.c_str(), value));
+        impl_->logged_values[name] = value;
+    }
+    p->set_parameter(name, value);
+}
+void AudioEvents::set_logged(u32 id) {
+    ScopedLock lock(impl_->lock);
+    impl_->logged_root = impl_->roots.count(id) ? impl_->roots[id] : NULL;
+    impl_->logged_values.clear();
+}
+void AudioEvents::take_notes(std::vector<std::string>& out) {
+    ScopedLock lock(impl_->lock);
+    out.swap(impl_->notes);
+    impl_->notes.clear();
+}
+void AudioEvents::release_banks() {
+    ScopedLock lock(impl_->lock);
+    impl_->preferred.clear();
+    impl_->collect_banks();
 }
 void AudioEvents::parameter_label(u32 id, const std::string& name, const std::string& label) {
     ScopedLock lock(impl_->lock);
@@ -949,7 +1008,9 @@ void AudioEvents::pitch(u32 id, float ratio) {
 void AudioEvents::stop(u32 id, double fade) {
     ScopedLock lock(impl_->lock);
     if (!impl_->roots.count(id)) return;
-    Impl::Player* p = impl_->roots[id]; p->detach(fade); delete p; impl_->roots.erase(id);
+    Impl::Player* p = impl_->roots[id];
+    if (p == impl_->logged_root) impl_->logged_root = NULL;
+    p->detach(fade); delete p; impl_->roots.erase(id);
 }
 void AudioEvents::stop_all(double fade) {
     ScopedLock lock(impl_->lock);

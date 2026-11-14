@@ -562,6 +562,21 @@ void SceneLibrary::trim_skeletons() {
     }
 }
 
+/* The run's end: the skeletons no node uses and (warm_scenes) the warm-up's
+ * parses nothing used go now instead of at their budgets' edge; what the
+ * menus or the next run use is read again. */
+void SceneLibrary::release_run(bool warm_scenes) {
+    size_t skeletons = skeleton_budget_;
+    skeleton_budget_ = 0;
+    trim_skeletons();
+    skeleton_budget_ = skeletons;
+    if (!warm_scenes) return;
+    size_t parses = warm_scene_budget_;
+    warm_scene_budget_ = 0;
+    trim_warm_scenes();
+    warm_scene_budget_ = parses;
+}
+
 void SceneLibrary::warm_first(const std::vector<std::string>& paths) {
     if (!warm_enabled_) return;
     /* what an earlier run warmed may have been evicted since */

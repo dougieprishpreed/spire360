@@ -87,8 +87,14 @@ private:
     int embark_wait_;
     /* the warm-up's share per frame before the embark's black raised it */
     double embark_share_;
-    enum { EMBARK_WAIT_FRAMES = 30 };
+    enum { EMBARK_WAIT_FRAMES = 600, EMBARK_WAIT_MS = 8000 };
     static const double EMBARK_WARM_MS;
+    /* clock_ms() as the run's first screen came behind the black, -1 before */
+    double embark_black_at_;
+    /* the run's caches let go (its game over), the menus read again */
+    bool run_released_, menus_warmed_;
+    void release_run(bool warm_scenes);
+    static Json menu_files();
     bool embarking_;
     bool starting_, in_run_, quit_, leaving_run_;
     /* NGame.LaunchMainMenu reads the profile before the menu shows: the

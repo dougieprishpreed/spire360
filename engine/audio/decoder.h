@@ -67,6 +67,12 @@ public:
     static void set_pinned(const Pack& pack, const std::vector<std::string>& paths);
     /* Bytes the pinned sounds hold now. */
     static size_t pinned_bytes();
+    /* The pinned sounds not read yet (a run's or act's first screen waits
+     * for its music behind the black). */
+    static int pinned_pending();
+    /* The least recently played that no voice reads go until the unpinned
+     * ones hold `keep` bytes at most, the budget as it was (a run's end). */
+    static void let_go(size_t keep);
     /* A Vorbis decoder set up on the loader's thread at the frame a voice
      * of the sound will start from (a music timeline's jump, known ahead):
      * that voice takes it at once, neither waiting for the loader nor

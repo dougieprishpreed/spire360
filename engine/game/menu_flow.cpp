@@ -19,8 +19,9 @@
 
 namespace spire {
 
-/* the warm-up's share of each frame behind the embark's black (ms) */
-const double MenuFlow::EMBARK_WARM_MS = 40.0;
+/* the warm-up's share of each frame behind the embark's black (ms): nothing
+ * moves there (the room under it draws, and the mix has its own thread) */
+const double MenuFlow::EMBARK_WARM_MS = 80.0;
 
 /* a character's portrait scene on the character select */
 static std::string char_select_bg(const std::string& id) {
@@ -41,6 +42,9 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
       chars_(new CharacterSelectScreen(lib)), confirm_(NULL), timeline_(NULL), profiles_(NULL), settings_(NULL), settings_seen_(0), language_seen_(0), compendium_(NULL), screen_node_(NULL),
       screen_(TITLE), chars_version_(0), decisions_seen_(0), embark_wait_(0), embark_share_(-1), embarking_(false), starting_(false), in_run_(false),
       quit_(false), leaving_run_(false), menu_ready_(false), title_waiting_(false) {
+    run_released_ = false;
+    menus_warmed_ = false;
+    embark_black_at_ = -1;
     tutorials_ = NULL;
     tutorials_node_ = NULL;
     ascension_ = NULL;
@@ -65,8 +69,17 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
         }
     }
     if (!logo_) title_waiting_ = true;
-    /* The menus' scene files and textures read while the logo plays, so the
-     * title does not stop to read them as it first shows. */
+    lib_->warm(menu_files());
+    /* The game data loads while the logo plays; the last profile is read
+     * as the game does at start-up, before the menu shows. */
+    game_->request_characters();
+    game_->request("{\"cmd\":\"select_profile\",\"profile\":0}");
+}
+
+/* The menus' scene files and textures read while the logo plays, so the
+ * title does not stop to read them as it first shows; again on a run's game
+ * over screen, whose run's own took their room (release_run). */
+Json MenuFlow::menu_files() {
     Json first = Json::make_array();
     first.append(Json::make_string("scenes/screens/main_menu.tscn"));
     first.append(Json::make_string("scenes/screens/character_select_screen.tscn"));
@@ -105,11 +118,31 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
     }
     std::vector<std::string> run_start = GameClient::run_start_files();
     for (size_t i = 0; i < run_start.size(); ++i) first.append(Json::make_string(run_start[i]));
-    lib_->warm(first);
-    /* The game data loads while the logo plays; the last profile is read
-     * as the game does at start-up, before the menu shows. */
-    game_->request_characters();
-    game_->request("{\"cmd\":\"select_profile\",\"profile\":0}");
+    return first;
+}
+
+/* A run over (its game over screen, then back at the menu; Save and Quit):
+ * its caches let go (the unused skeletons, the warm-up's unused parses, its
+ * sounds and kept music), then the menus' pages read again. The console's
+ * memory free fell to 21 MB as the title came back after a game over, and
+ * the character select, whose pages the run had pushed out, made each again
+ * as it was used (0.3-0.75 s frames, rp113). */
+void MenuFlow::release_run(bool warm_scenes) {
+    SceneLibrary::MemoryStats was = lib_->memory_stats();
+    lib_->release_run(warm_scenes);
+    if (lib_->audio()) lib_->audio()->release_run();
+    SceneLibrary::MemoryStats now = lib_->memory_stats();
+    log_info("run end: skeletons %.1f -> %.1f MB, parsed scenes %.1f -> %.1f MB, the sounds kept let go%s",
+             was.skeleton_bytes / 1048576.0, now.skeleton_bytes / 1048576.0, was.scene_bytes / 1048576.0,
+             now.scene_bytes / 1048576.0, menus_warmed_ ? "" : "; the menus read again");
+    if (!menus_warmed_) {
+        menus_warmed_ = true;
+        lib_->warm(menu_files());
+        const Json& cs = game_->characters()["characters"];
+        Json bgs = Json::make_array();
+        for (size_t i = 0; i < cs.size(); ++i) bgs.append(Json::make_string(char_select_bg(cs[i]["id"].str())));
+        lib_->warm(bgs);
+    }
 }
 
 MenuFlow::~MenuFlow() {
@@ -244,6 +277,9 @@ void MenuFlow::close_screen() {
 
 void MenuFlow::begin_run() {
     starting_ = true;
+    run_released_ = false;
+    menus_warmed_ = false;
+    embark_black_at_ = -1;
     if (screen_ == CHARACTERS) chars_->set_starting();
     title_->set_covered(true);
     decisions_seen_ = game_->decision_count();
@@ -350,6 +386,11 @@ bool MenuFlow::update(const PadState& in) {
 
     if (in_run_) {
         game_->update(pad);
+        /* the game over screen: the run's caches go, the menus read meanwhile */
+        if (game_->game_over() && !run_released_) {
+            run_released_ = true;
+            release_run(true);
+        }
         if (game_->menu_requested()) {
             /* Back to the main menu: after a game over the run is let go
              * here (Save and Quit has done it already). */
@@ -359,6 +400,10 @@ bool MenuFlow::update(const PadState& in) {
             bool timeline = over && game_->decision()["progress"]["discovered_epochs"].size() > 0;
             game_->clear_screen();
             in_run_ = false;
+            /* the room's skeletons are free now; Save and Quit's run is let
+             * go here (the parses the menus' warm-up just made stay) */
+            release_run(!run_released_);
+            run_released_ = true;
             if (over) game_->request("{\"cmd\":\"return_to_menu\"}");
             close_screen();
             /* the profile's menu comes again (return_to_menu's answer, or
@@ -587,16 +632,24 @@ bool MenuFlow::update(const PadState& in) {
         lib_->set_warm_share(EMBARK_WARM_MS);
         if (game_->decision_count() == decisions_seen_) game_->warm_run_start();
     }
-    if (starting_ && embarking_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping() &&
-        game_->warming() && ++embark_wait_ < EMBARK_WAIT_FRAMES)
-        return !quit_;
+    /* The run's first screen behind the black until the run's sets
+     * (PreloadManager.LoadRunAssets) and its act's music are read: it faded
+     * in as they were read, each texture's making a long frame of Neow's
+     * room (2.9 s of them over 250 frames, rp113). EMBARK_WAIT_MS at most;
+     * the frames' count for the tools that never draw. */
+    if (starting_ && embarking_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
+        if (embark_black_at_ < 0) embark_black_at_ = clock_ms();
+        bool busy = game_->warming() || game_->music_reading();
+        double held = clock_ms() - embark_black_at_;
+        if (busy && ++embark_wait_ < EMBARK_WAIT_FRAMES && held < EMBARK_WAIT_MS) return !quit_;
+        log_info("run start: the black held %.0f ms after the first screen came%s", held,
+                 busy ? " (still reading: shown at the limit)" : "");
+    }
     if (starting_ && game_->decision_count() != decisions_seen_ && !game_->embark_wiping()) {
         /* The run's first screen (once the embark wipe is black and the
          * run's assets are read: NCharacterSelectScreen awaits
-         * PreloadManager.LoadRunAssets): the menus go, the room fades in.
-         * A short wait at most: the console's black lasted seconds (the
-         * logic's run, the first screen's reads, then this wait), so the
-         * rest is read in the background meanwhile. */
+         * PreloadManager.LoadRunAssets): the menus go, the room fades in,
+         * its sounds (Neow's welcome) and music with it. */
         embark_wait_ = 0;
         if (embark_share_ >= 0) lib_->set_warm_share(embark_share_);
         embark_share_ = -1;

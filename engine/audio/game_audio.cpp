@@ -170,6 +170,7 @@ void GameAudio::music(const std::string& path) {
     if (track_ == path && (music_id_ || path.empty())) return;
     log_info("music: %s%s", path.empty() ? "(none)" : path.c_str(), track_ == path && !path.empty() ? " (again)" : "");
     events_.stop(music_id_, 0.4); track_ = path; music_id_ = path.empty() ? 0 : events_.play(path);
+    events_.set_logged(music_id_);
 }
 void GameAudio::ambience(const std::string& path) {
     /* as music(): the same ambience is not started over once it ended */
@@ -364,6 +365,25 @@ void GameAudio::pin_music(const Json& a) {
     log_info("music kept: %u files (%s)", (unsigned)samples.size(), key.c_str());
 }
 
+/* The run's end (its game over, Save and Quit): its music kept no longer,
+ * the effects kept let go but for a few MB, the act's parsed banks dropped
+ * (a whole run's sounds held 53 MB as it ended, and the menus' pages had
+ * no room: the character select made them again as it was used, rp113).
+ * A sound a voice plays stays. */
+void GameAudio::release_run() {
+    {
+        GameLock lock(this);
+        pinned_key_.clear();
+        boss_music_.clear();
+        pinned_act_.clear();
+    }
+    if (pack_) AudioDecoder::set_pinned(*pack_, std::vector<std::string>());
+    AudioDecoder::let_go(RELEASED_KEEP);
+    events_.release_banks();
+}
+
+bool GameAudio::music_reading() const { return AudioDecoder::pinned_pending() > 0; }
+
 void GameAudio::boss_ahead(const std::string& music) {
     if (music.empty() || music == boss_music_) return;
     boss_music_ = music;
@@ -437,6 +457,10 @@ void GameAudio::render(float* out, int count) {
     }
 }
 void GameAudio::update(double dt) {
+    /* the music's changes the mix made (its thread writes no log) */
+    std::vector<std::string> notes;
+    events_.take_notes(notes);
+    for (size_t i = 0; i < notes.size(); ++i) log_info("%s", notes[i].c_str());
     if (thread_.started()) return;
     GameLock lock(this);
     float samples[512];

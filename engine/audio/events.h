@@ -17,6 +17,14 @@ public:
     /* A bank parsed now (its first event would parse it mid-game), read
      * and parsed without the lock, so the mixer keeps playing meanwhile. */
     void preload(const std::string& bank);
+    /* The event whose changes are noted (the music: a jump a parameter
+     * made, its timeline's commands, a parameter the game changed), for
+     * take_notes on the game's thread (the mix's thread writes no log). */
+    void set_logged(u32 id);
+    void take_notes(std::vector<std::string>& out);
+    /* The act's banks no longer preferred: the parsed ones nothing plays
+     * go (a run's end). */
+    void release_banks();
     /* The bank an event would play from, parsed the same way. */
     void preload_for(const std::string& path);
     /* An event's samples read ahead (AudioDecoder::prefetch), for sounds

@@ -55,7 +55,8 @@ static std::string anim_path(const std::string& parent, Node* n, size_t index);
 class RoomTransition : public Control {
 public:
     explicit RoomTransition(SceneLibrary* lib)
-        : phase(0), elapsed(0), held(0), last_ms(0), drawn(0), fast(false), initial_y(-2564), gradient_height(2280) {
+        : phase(0), elapsed(0), held(0), last_ms(0), drawn(0), fast(false), hold(NULL), hold_owner(NULL),
+          black_held(0), initial_y(-2564), gradient_height(2280) {
         flags |= NF_PROCESS;
         name = "RoomTransition";
         z_index = 4096;
@@ -81,11 +82,30 @@ public:
     double last_ms; /* clock_ms() at the last process */
     int drawn;      /* the new room's frames before its reveal */
     bool fast;
+    /* the new room stays black while hold(hold_owner) says so (an act's
+     * first screen while its sets and music are read: GameClient::act_black),
+     * asked as it processes: a loop that processes frames without the
+     * client's update in between (spire_play's settle) holds it too; it is
+     * told how long (the frames' dt) it has held, the limit kept in the
+     * tools' time too (spire_check's frames outrun the clock: its checks'
+     * 60 simulated seconds passed first, rp113) */
+    bool (*hold)(void*, double);
+    void* hold_owner;
+    double black_held;
     float initial_y, gradient_height;
     Vec2 fill_from, fill_to;
     GradientData gradient;
     void start_out() { phase = 1; elapsed = 0; visible = true; fast = fast_mode(); }
-    void start_in() { phase = 2; elapsed = 0; held = 0; last_ms = clock_ms(); drawn = 0; visible = true; fast = fast_mode(); }
+    void start_in() {
+        phase = 2;
+        elapsed = 0;
+        held = 0;
+        black_held = 0;
+        last_ms = clock_ms();
+        drawn = 0;
+        visible = true;
+        fast = fast_mode();
+    }
     bool ready() const { return phase == 1 && elapsed >= (fast ? 0.6 : 1.1); }
     virtual void process(double dt) {
         if (phase == 0) return;
@@ -101,6 +121,10 @@ public:
          * clock). */
         double now = clock_ms(), gap = now - last_ms;
         last_ms = now;
+        if (phase == 2 && elapsed == 0 && hold && hold(hold_owner, black_held)) {
+            black_held += dt;
+            return;
+        }
         if (phase == 2 && elapsed == 0 && held < 0.5 && (drawn < 2 || Canvas::textures_waiting() || gap > 70)) {
             ++drawn;
             held += dt;
@@ -353,6 +377,8 @@ GameClient::GameClient(SceneLibrary* lib, SceneTree* tree, LogicLink* link)
       settings_version_(0), language_version_(0), settings_screen_(NULL), settings_node_(NULL), compendium_(NULL), compendium_node_(NULL),
       piles_button_(0), piles_asked_(false),
       confirm_(NULL), confirm_node_(NULL), quitting_(false), plain_(false) {
+    act_hold_at_ = -1;
+    act_share_ = -1;
     phase_at_ = -1;
     shop_hand_ = false;
     shop_hand_t_ = 0;
@@ -516,6 +542,34 @@ void GameClient::warm_run_start() {
 
 bool GameClient::embark_wiping() const { return wipe_ && !wipe_->done(); }
 
+bool GameClient::music_reading() const { return lib_->audio() && lib_->audio()->music_reading(); }
+
+/* An act's first screen stays black (its fade's) while the act's sets are
+ * read ahead and its music is read, ACT_WAIT_MS from its decision at most:
+ * the warm-up takes a larger share meanwhile, as behind the embark's. */
+bool GameClient::act_black_thunk(void* self, double held) { return ((GameClient*)self)->act_black(held); }
+
+bool GameClient::act_black(double held) {
+    if (act_hold_at_ < 0) return false;
+    double waited = clock_ms() - act_hold_at_;
+    bool busy = warming() || music_reading();
+    if (busy && waited < ACT_WAIT_MS && held * 1000 < ACT_WAIT_MS) {
+        if (act_share_ < 0) {
+            act_share_ = lib_->warm_share();
+            lib_->set_warm_share(ACT_WARM_MS);
+        }
+        return true;
+    }
+    log_info("act start: the black held %.0f ms after its decision%s", waited,
+             busy ? " (still reading: shown at the limit)" : "");
+    act_hold_at_ = -1;
+    if (act_share_ >= 0) {
+        lib_->set_warm_share(act_share_);
+        act_share_ = -1;
+    }
+    return false;
+}
+
 bool GameClient::warming() const { return lib_->warming(); }
 
 void GameClient::end_embark_wipe() {
@@ -551,6 +605,8 @@ void GameClient::play_step_sounds(const Json& steps) {
 
 void GameClient::start_room_transition() {
     if (!transition_) transition_ = new RoomTransition(lib_);
+    transition_->hold = act_black_thunk;
+    transition_->hold_owner = this;
     if (!transition_->parent) tree_->root()->add_child(transition_);
     transition_->start_out();
 }
@@ -641,7 +697,14 @@ void GameClient::update(const PadState& pad) {
              * back to the event comes after them (show's finishing) */
             if (back_to_event && combat_ && decision_["decision"].str() == "combat_play" && msg["steps"].size() > 0)
                 back_to_event = false;
-            if ((!transition_ || transition_->phase == 0) && (changed_room || event_fight || back_to_event))
+            /* An act's first screen (its PreloadManager set with it):
+             * RunManager.EnterAct fades out, reads the act's assets behind
+             * the black (SetActInternal), then fades in; it was a cut to
+             * the new act's map, its first frames reading them (rp113).
+             * Not the run's first: the embark's black is over it. */
+            bool act_start = msg["preload"].size() > 0 && !decision_.is_null() && !wipe_;
+            if (act_start) act_hold_at_ = clock_ms();
+            if ((!transition_ || transition_->phase == 0) && (changed_room || event_fight || back_to_event || act_start))
                 start_room_transition();
             if (transition_ && transition_->phase == 1) transition_pending_ = msg;
             else {

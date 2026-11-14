@@ -109,6 +109,9 @@ public:
     void set_skeleton_budget(size_t bytes) { skeleton_budget_ = bytes; }
     void trim_skeletons();
     void set_warm_scene_budget(size_t bytes) { warm_scene_budget_ = bytes; }
+    /* The run's end: unused skeletons (and the warm-up's unused parses
+     * with warm_scenes) let go at once. */
+    void release_run(bool warm_scenes);
 
 private:
     Resource* build(const std::string& cls, const Json& props, const SceneFile* ctx, const std::string& path);

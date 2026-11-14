@@ -39,6 +39,12 @@ public:
     /* The boss's music while the map offers its room (the logic's upcoming
      * boss): read and kept from then on, with the act's. */
     void boss_ahead(const std::string& music);
+    /* The run's sounds let go as it ends (release_run); the act's music
+     * still being read ahead (a run's or act's first screen waits for it
+     * behind the black). */
+    void release_run();
+    bool music_reading() const;
+    enum { RELEASED_KEEP = 4 << 20 };
     /* CreatureCmd.Kill once every player is dead: StopMusic, the
      * game_over stinger; at the player's death in the fight's last steps
      * (the game_over decision after them plays nothing more). */

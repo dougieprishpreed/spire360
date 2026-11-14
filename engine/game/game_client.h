@@ -94,6 +94,8 @@ public:
     /* The run's assets still being read ahead (SceneLibrary::warm): the
      * menus keep the screen as it is (PreloadManager's WaitForCompletion) */
     bool warming() const;
+    /* The act's music still being read ahead (GameAudio::music_reading). */
+    bool music_reading() const;
     /* Plays by itself (tests): choices picked by a seeded generator. */
     void set_auto_play(unsigned seed) { auto_ = true; rng_ = seed ? seed : 1; }
     /* Auto play answers each screen with the next of these commands (a
@@ -301,6 +303,13 @@ public:
 private:
     void drop_held_particles();
     Json transition_pending_;
+    /* an act's first screen held black (act_black, asked by the fade): its decision's
+     * clock_ms(), -1 when none; the warm-up's share before the hold */
+    double act_hold_at_, act_share_;
+    bool act_black(double held);
+    static bool act_black_thunk(void* self, double held);
+    enum { ACT_WAIT_MS = 5000 };
+    static const int ACT_WARM_MS = 80;
     /* A new room's step sounds (Neow's heal) until its reveal begins: the
      * game's start as its room fades in, and ours took longer to build
      * (rp107: the heal in the black before Neow showed). */

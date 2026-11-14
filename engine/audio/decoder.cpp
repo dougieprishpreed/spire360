@@ -522,6 +522,19 @@ void AudioDecoder::set_pinned(const Pack& pack, const std::vector<std::string>& 
     make_room(0, g_kept_budget);
 }
 
+void AudioDecoder::let_go(size_t keep) {
+    ScopedLock lock(g_kept_lock);
+    make_room(0, keep);
+}
+
+int AudioDecoder::pinned_pending() {
+    ScopedLock lock(g_kept_lock);
+    int pending = 0;
+    for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
+        if (k->second->pinned && k->second->state == KEPT_LOADING) ++pending;
+    return pending;
+}
+
 size_t AudioDecoder::pinned_bytes() {
     ScopedLock lock(g_kept_lock);
     size_t bytes = 0;
