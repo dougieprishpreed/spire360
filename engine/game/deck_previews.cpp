@@ -347,8 +347,8 @@ void Preview::start_flight() {
     ftime_ = 0;
     from_ = global_origin(card_);
     /* NCardFlyVfx takes the card from where it sat: in a container (the
-     * smith's and the transform's CardContainer) the layout put it back
-     * each frame, dark and small at the start, while its trail flew on */
+     * smith's and the transform's CardContainer) its next sort would put
+     * it back, dark and small at the start, while its trail flew on */
     Node* holder = card_->parent;
     if (holder && holder->is_container() && root_ && root_ != holder && root_->is_canvas_item() &&
         !root_->is_container()) {

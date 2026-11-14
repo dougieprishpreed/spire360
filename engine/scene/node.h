@@ -56,6 +56,9 @@ public:
     std::map<std::string, const Json*> extra; /* properties without a native field (script exports, metadata) */
     std::vector<class Resource*> owned_resources; /* resources bound to this node (deleted with it) */
     u32 flags;
+    /* add_child, add_child_before and remove_child count here (a container
+     * sorts its children again once they change: Container::sort_due) */
+    u32 child_changes;
 
     bool is_canvas_item() const { return (flags & NF_CANVAS_ITEM) != 0; }
     bool is_control() const { return (flags & NF_CONTROL) != 0; }

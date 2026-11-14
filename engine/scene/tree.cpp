@@ -75,7 +75,11 @@ void SceneTree::layout_node(Node* n) {
         if (!placed) c->update_rect();
         c->resized();
         if (c->behavior) c->behavior->resized(c);
-        if (c->is_container() && c->visible) c->sort_children();
+        if (c->is_container()) {
+            Container* k = (Container*)c;
+            if (!c->visible) k->forget_sort();
+            else if (k->sort_due()) c->sort_children();
+        }
     }
     for (size_t i = 0; i < n->children.size(); ++i) layout_node(n->children[i]);
 }

@@ -143,7 +143,8 @@ bool godot_is_a(const std::string& cls, const char* base) {
 
 int Node::frees_pending = 0;
 
-Node::Node() : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), flags(0), queued_free_(false) {}
+Node::Node()
+    : parent(NULL), owner(NULL), unique_name(false), behavior(NULL), flags(0), child_changes(0), queued_free_(false) {}
 
 Node::~Node() {
     delete behavior;
@@ -165,12 +166,14 @@ void Node::add_child(Node* child) {
     if (child->parent) child->parent->remove_child(child);
     child->parent = this;
     children.push_back(child);
+    ++child_changes;
 }
 
 void Node::add_child_before(Node* child, Node* sibling) {
     Control::forget_theme_below(child);
     if (child->parent) child->parent->remove_child(child);
     child->parent = this;
+    ++child_changes;
     for (size_t i = 0; i < children.size(); ++i)
         if (children[i] == sibling) {
             children.insert(children.begin() + (long)i, child);
@@ -185,6 +188,7 @@ void Node::remove_child(Node* child) {
         if (children[i] == child) {
             children.erase(children.begin() + i);
             child->parent = NULL;
+            ++child_changes;
             return;
         }
     }

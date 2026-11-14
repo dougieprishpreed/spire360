@@ -60,6 +60,24 @@ public:
     void fit_child_in_rect(Control* child, const Rect2& rect);
     /* Children a container lays out: visible Controls that are not top level. */
     static Control* sortable(Node* n);
+    /* Godot sorts a container's children when a sort is queued (a child
+     * added, moved or removed, a child's minimum size, size flags or
+     * visibility changed, the container resized or shown), not every
+     * frame: fit_child_in_rect sets a child's rotation and scale back, and
+     * what a tween did to a child in between stays until then (the
+     * smith's card swinging at each hammer blow, its grow-in: a sort every
+     * frame held them still, rp113). True when what the last sort laid out
+     * has changed since (then remembered). */
+    bool sort_due();
+    /* shown again: sorted again (NOTIFICATION_VISIBILITY_CHANGED) */
+    void forget_sort() { sort_key_.clear(); }
+
+protected:
+    /* the container's own settings its sort reads (columns, alignment) */
+    virtual void sort_params(std::vector<double>&) {}
+
+private:
+    std::vector<double> sort_key_;
 };
 
 class BoxContainer : public Container {
@@ -71,6 +89,12 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Vec2 get_minimum_size();
     virtual void sort_children();
+
+protected:
+    virtual void sort_params(std::vector<double>& out) {
+        out.push_back(vertical ? 1 : 0);
+        out.push_back(alignment);
+    }
 };
 
 class MarginContainer : public Container {
@@ -93,6 +117,9 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Vec2 get_minimum_size();
     virtual void sort_children();
+
+protected:
+    virtual void sort_params(std::vector<double>& out) { out.push_back(use_top_left ? 1 : 0); }
 };
 
 class GridContainer : public Container {
@@ -102,6 +129,9 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Vec2 get_minimum_size();
     virtual void sort_children();
+
+protected:
+    virtual void sort_params(std::vector<double>& out) { out.push_back(columns); }
 };
 
 class FlowContainer : public Container {
@@ -114,6 +144,14 @@ public:
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
     virtual Vec2 get_minimum_size();
     virtual void sort_children();
+
+protected:
+    virtual void sort_params(std::vector<double>& out) {
+        out.push_back(vertical ? 1 : 0);
+        out.push_back(alignment);
+        out.push_back(reverse_fill ? 1 : 0);
+    }
+
 private:
     float cached_size;
 };

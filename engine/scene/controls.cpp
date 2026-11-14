@@ -7,6 +7,7 @@
 #include "viewport.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 namespace spire {
@@ -134,6 +135,32 @@ Control* Container::sortable(Node* n) {
     Control* c = (Control*)n;
     if (c->top_level || !c->visible) return NULL;
     return c;
+}
+
+bool Container::sort_due() {
+    std::vector<double> key;
+    key.reserve(4 + children.size() * 6);
+    key.push_back(size.x);
+    key.push_back(size.y);
+    key.push_back(child_changes);
+    sort_params(key);
+    for (size_t i = 0; i < children.size(); ++i) {
+        key.push_back((double)(uintptr_t)children[i]);
+        Control* c = sortable(children[i]);
+        if (!c) {
+            key.push_back(-1);
+            continue;
+        }
+        Vec2 m = c->combined_minimum_size();
+        key.push_back(m.x);
+        key.push_back(m.y);
+        key.push_back(c->size_flags_h);
+        key.push_back(c->size_flags_v);
+        key.push_back(c->stretch_ratio);
+    }
+    if (key == sort_key_) return false;
+    sort_key_.swap(key);
+    return true;
 }
 
 void Container::fit_child_in_rect(Control* child, const Rect2& p_rect) {
