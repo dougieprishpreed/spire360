@@ -16,6 +16,8 @@
 
 #include "../core/base.h"
 #include <stdio.h>
+#include <string>
+#include <vector>
 
 namespace spire {
 class Pack;
@@ -57,6 +59,14 @@ public:
     /* A sound read ahead of its first play (kept, as recently played as
      * any); nothing without the loader. */
     static void prefetch(const Pack& pack, const std::string& path);
+    /* The sounds kept whatever the budget (an act's music and ambience while
+     * they are the run's: each read once, in the background behind any
+     * sound a voice waits on, not read again at each room's change); the
+     * set replaces the last one, whose sounds go back to the budget's
+     * least recently played order. The budget counts the others only. */
+    static void set_pinned(const Pack& pack, const std::vector<std::string>& paths);
+    /* Bytes the pinned sounds hold now. */
+    static size_t pinned_bytes();
     /* A Vorbis decoder set up on the loader's thread at the frame a voice
      * of the sound will start from (a music timeline's jump, known ahead):
      * that voice takes it at once, neither waiting for the loader nor
@@ -69,6 +79,10 @@ public:
         double longest_ms;    /* the longest from asked to its voices' start */
         double longest_queue_ms, longest_read_ms; /* of it: waiting for the loader, reading */
         const char* longest;  /* its pack name ("" none) */
+        /* while it waited for the loader, the loader's time (ms): decoding
+         * short sounds' parts, reading short sounds, opening voices'
+         * decoders, reading long sounds (the music) */
+        double longest_busy[4];
         size_t kept;          /* bytes kept now */
         int prepared, prepared_taken; /* decoders set up ahead (prepare), and taken by their voice */
     };

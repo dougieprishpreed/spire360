@@ -460,10 +460,11 @@ int main() {
     logf("logic: started in %.1f ms", now_ms() - t0);
     log_memory("with the logic");
     const unsigned free_with_logic = free_memory_mb();
-    /* trace_loads logs each load; profile keeps them for the long frames'
-     * lines */
+    /* trace_loads logs each load; otherwise they are kept for the long
+     * frames' lines (what a hitch read and made, and its update's phases:
+     * a clock read and a push per load, logged only past 250 ms) */
     if (g_trace_loads) set_load_trace(now_ms);
-    else if (g_profile) set_load_trace(now_ms, true);
+    else set_load_trace(now_ms, true);
     if (g_profile) {
         SceneTree::set_profile(now_ms);
         bool fast = false;
@@ -547,13 +548,30 @@ int main() {
      * sixteenth to the skeletons. The valve's steps stay as they were. */
     const unsigned spare = free_with_logic > 252 ? free_with_logic - 252 : 0;
     const int tex_budget = 80 + (int)(spare * 3 / 4 < 48 ? spare * 3 / 4 : 48);
-    const int snd_budget = 32 + (int)(spare / 8 < 8 ? spare / 8 : 8);
+    /* the effects' alone: the act's music and ambience are kept outside it
+     * (AudioDecoder::set_pinned, about 21 MB; they took 10-15 of the 37
+     * MB before and went again and again) */
+    const int snd_budget = 24 + (int)(spare / 8 < 8 ? spare / 8 : 8);
     const int skel_budget = 12 + (int)(spare / 16 < 4 ? spare / 16 : 4);
+    /* The textures' budget then follows the memory free (the valve's look,
+     * every quarter second): what is free past TEXTURE_FREE_MB goes to the
+     * textures, and they give it back as soon as anything else needs it,
+     * between tex_budget less 14 MB and TEXTURE_MAX_MB. Most of a run left
+     * 80-130 MB free with the cache full at 110 (the map's backdrops, a
+     * room's layers made again on each visit); a shop's entry took 33 MB
+     * at once (rp111: 59 -> 26 MB free), which the 72 MB kept free absorbs
+     * before the valve's steps (28 and 18 MB). Unused textures no longer go
+     * after a minute: the budget decides. */
+    const int TEXTURE_FREE_MB = 72, TEXTURE_MAX_MB = 176;
+    const int tex_floor = tex_budget - 14;
+    int tex_now = tex_budget;
     canvas->set_texture_budget((size_t)tex_budget * 1024 * 1024);
+    canvas->set_idle_expiry(false);
     AudioDecoder::set_budget((size_t)snd_budget * 1024 * 1024);
     lib->set_skeleton_budget((size_t)skel_budget * 1024 * 1024);
-    logf("memory: %u MB free with the logic: the textures' budget %d MB, the kept sounds' %d MB, the skeletons' %d MB",
-         free_with_logic, tex_budget, snd_budget, skel_budget);
+    logf("memory: %u MB free with the logic: the textures' budget %d MB (following the memory free, %d to %d MB), "
+         "the kept sounds' %d MB (the music kept apart), the skeletons' %d MB",
+         free_with_logic, tex_budget, tex_floor, TEXTURE_MAX_MB, snd_budget, skel_budget);
     double silent_at = -1e9;
     for (;;) {
         /* Any controller plays: on a console the pad can be signed in to
@@ -663,7 +681,7 @@ int main() {
                  f2 - f1);
         /* a frame long enough to see: where its time went, and with
          * profile=1 what it loaded */
-        if (g_profile && !g_trace_loads) take_held_loads(frame_loads);
+        if (!g_trace_loads) take_held_loads(frame_loads);
         if (work > 250) {
             logf("long frame %u: %.0f ms (update %.0f, process + layout %.0f, draw %.0f), decision %d", g_frame, work,
                  update_ms, f1 - f0, f2 - f1, game->decision_count());
@@ -720,7 +738,8 @@ int main() {
                 /* short of memory, the steps the valve was tuned with (the
                  * grown budgets only while there is room) */
                 int textures = level == 2 ? 60 : level == 1 ? 72 : tex_budget;
-                int sounds = level == 2 ? 16 : level == 1 ? 24 : snd_budget;
+                int sounds = level == 2 ? 12 : level == 1 ? 18 : snd_budget;
+                tex_now = textures;
                 int skeletons = level == 2 ? 6 : level == 1 ? 9 : skel_budget;
                 int scenes = level == 2 ? 2 : level == 1 ? 4 : 8;
                 canvas->set_texture_budget((size_t)textures * 1024 * 1024);
@@ -730,6 +749,18 @@ int main() {
                 logf("memory: %u MB free, the textures' budget %d MB, the kept sounds' %d MB, the skeletons' %d MB, "
                      "the warm-up's parsed files' %d MB",
                      free_mb, textures, sounds, skeletons, scenes);
+            } else if (level == 0) {
+                /* the textures' share of what is free: down at once, up 8
+                 * MB a look at most (a room's textures come in a few frames) */
+                int held = (int)(canvas->texture_bytes() >> 20);
+                int want = held + (int)free_mb - TEXTURE_FREE_MB;
+                if (want > tex_now + 8) want = tex_now + 8;
+                if (want < tex_floor) want = tex_floor;
+                if (want > TEXTURE_MAX_MB) want = TEXTURE_MAX_MB;
+                if (want < tex_now - 2 || want > tex_now + 2) {
+                    tex_now = want;
+                    canvas->set_texture_budget((size_t)tex_now * 1024 * 1024);
+                }
             }
         }
         AudioOutput::Stats as;
@@ -764,6 +795,11 @@ int main() {
                      loads.bytes / 1048576.0, loads.longest_ms, loads.longest_queue_ms, loads.longest_read_ms,
                      loads.longest && *loads.longest ? loads.longest + (strrchr(loads.longest, '/') ? strrchr(loads.longest, '/') - loads.longest + 1 : 0) : "-",
                      loads.kept / 1048576.0, loads.prepared, loads.prepared_taken);
+            /* a sound that waited for the loader: what the loader did meanwhile */
+            if (loads.longest_queue_ms > 100)
+                logf("  while it waited, the loader: %.0f ms decoding short sounds, %.0f reading them, %.0f opening "
+                     "decoders, %.0f reading music",
+                     loads.longest_busy[0], loads.longest_busy[1], loads.longest_busy[2], loads.longest_busy[3]);
             SceneLibrary::MemoryStats ms = lib->memory_stats();
             logf("heap: %.1f MB in use of %.1f MB held, big blocks %.1f MB; parsed scenes %.1f MB (%u files; "
                  "%.1f MB the warm-up's alone, %u let go), "

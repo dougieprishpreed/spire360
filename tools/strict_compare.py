@@ -1,6 +1,7 @@
 """Strict comparison of two trees of .jsonl traces (the .NET logic against the
 console's translated logic): every line, steps and all, except values that
-are wall-clock or host specific. Usage: strict_compare.py A B"""
+are wall-clock or host specific. Usage: strict_compare.py A B [--ignore k1,k2]
+(--ignore: keys left out too, a field one side's logic does not have yet)"""
 import json
 import os
 import sys
@@ -57,7 +58,12 @@ def lines(p):
 
 
 def main():
-    a, b = sys.argv[1], sys.argv[2]
+    args = sys.argv[1:]
+    if "--ignore" in args:
+        i = args.index("--ignore")
+        IGNORE.update(k for k in args[i + 1].split(",") if k)
+        del args[i:i + 2]
+    a, b = args[0], args[1]
     files = differ = same = 0
     for root, _, names in os.walk(a):
         for n in sorted(names):

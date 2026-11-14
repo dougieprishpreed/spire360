@@ -2158,7 +2158,80 @@ public partial class RunDriver
             ["act"] = _runState.CurrentActIndex + 1,
             ["act_name"] = _loc.Act(_runState.Act?.Id.Entry ?? "OVERGROWTH"),
             ["floor"] = _runState.ActFloor,
+            ["upcoming"] = Upcoming(choices),
         };
+    }
+
+    /// <summary>
+    /// The fights the map leads to (RoomSet's next encounters, pure lookups;
+    /// RunManager pulls the same one as the room is entered): their monsters'
+    /// and scenes' files (PreloadManager.LoadRoomCombatAssets reads them as a
+    /// combat room opens, the console from its USB drive at the fight's first
+    /// frame) for the client to read while the map is shown, and the boss's
+    /// music. Wrong only when a hook changes the next encounter: then nothing
+    /// worse than a read for nothing.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.DynamicDependency("GetBackgroundAssets", typeof(EncounterModel))]
+    private Dictionary<string, object?>? Upcoming(List<Dictionary<string, object?>> choices)
+    {
+        var act = _runState?.Act;
+        if (act == null) return null;
+        var result = new Dictionary<string, object?>();
+        EnsureResFiles(); // the background picker lists the act's folders
+        var getBackground = typeof(EncounterModel).GetMethod("GetBackgroundAssets", BindingFlags.NonPublic | BindingFlags.Instance);
+        foreach (var (key, type, point) in new[] { ("monster", RoomType.Monster, "Monster"), ("elite", RoomType.Elite, "Elite"),
+                                                   ("boss", RoomType.Boss, "Boss") })
+        {
+            try
+            {
+                var encounter = act.PullNextEncounter(type);
+                // a copy as RunManager makes for the room (the background's
+                // picker refuses the canonical model)
+                EncounterModel? room = null;
+                var paths = new HashSet<string>(StringComparer.Ordinal);
+                // the background each offered room of the kind would pick
+                // (NCombatRoom.GenerateBackgroundRngForCurrentPoint: the
+                // run's seed and the point's place, as CombatView)
+                foreach (var choice in choices)
+                {
+                    if ((choice["type"] as string) != point || getBackground == null) continue;
+                    try
+                    {
+                        uint mix = (uint)((int)choice["row"]! + (int)choice["col"]! * 747);
+                        var rng = new MegaCrit.Sts2.Core.Random.Rng(_runState!.Rng.Seed + mix);
+                        room ??= encounter.ToMutable();
+                        if (getBackground.Invoke(room, new object[] { act, rng }) is BackgroundAssets bg)
+                            paths.UnionWith(bg.AssetPaths);
+                    }
+                    catch (Exception ex) { Log($"upcoming {key} background: {(ex.InnerException ?? ex).Message}"); }
+                }
+                if (encounter.HasScene)
+                    paths.Add(MegaCrit.Sts2.Core.Helpers.SceneHelper.GetScenePath("encounters/" + encounter.Id.Entry.ToLowerInvariant()));
+                try { paths.UnionWith(encounter.ExtraAssetPaths); } catch { }
+                foreach (var monster in encounter.AllPossibleMonsters)
+                {
+                    try { paths.UnionWith(monster.AssetPaths); }
+                    catch
+                    {
+                        // a canonical monster's intents may want its moves: its visuals alone
+                        paths.Add(MegaCrit.Sts2.Core.Helpers.SceneHelper.GetScenePath("creature_visuals/" + monster.Id.Entry.ToLowerInvariant()));
+                    }
+                }
+                result[key] = new Dictionary<string, object?>
+                {
+                    ["id"] = encounter.Id.Entry,
+                    ["monsters"] = encounter.AllPossibleMonsters.Select(m => m.Id.Entry).Distinct().ToList(),
+                    ["assets"] = paths.Select(p => p.StartsWith("res://", StringComparison.Ordinal) ? p[6..] : p)
+                        .OrderBy(p => p, StringComparer.Ordinal).ToList(),
+                    ["music"] = encounter.HasBgm ? encounter.CustomBgm : null,
+                };
+            }
+            catch (Exception ex)
+            {
+                Log($"upcoming {key}: {ex.GetBaseException().Message}");
+            }
+        }
+        return result.Count > 0 ? result : null;
     }
 
     // res:// folder listings for the game code that reads folders (the

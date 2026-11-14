@@ -334,6 +334,45 @@ void GameAudio::prepare(const Json& d) {
     events_.preload(bank);
     events_.preload_for(a["custom"].str().empty() ? a["track"].str() : a["custom"].str());
     events_.preload_for(a["ambience"].str());
+    pin_music(a);
+}
+
+/* An act's music is a few long stems (3 MB each, minutes long) under every
+ * room of it; in the sounds' budget the effects pushed them out, and each
+ * fight, event or victory read them again from the USB drive, starting up
+ * to 0.7 s late, the sounds asked for meanwhile waiting behind them (rp112).
+ * The act's track (or a fight's own: a boss), its ambience and the boss's
+ * ahead stay kept, read in the background from the run's first screen. */
+void GameAudio::pin_music(const Json& a) {
+    const std::string& track = a["track"].str();
+    const std::string& custom = a["custom"].str();
+    if (track != pinned_act_) {
+        pinned_act_ = track;
+        boss_music_.clear();
+    }
+    std::string key = (custom.empty() ? track : custom) + "|" + a["ambience"].str() + "|" + (custom.empty() ? boss_music_ : "");
+    if (key == pinned_key_ || !pack_) return;
+    pinned_key_ = key;
+    std::vector<std::string> samples;
+    events_.samples_of(custom.empty() ? track : custom, samples);
+    events_.samples_of(a["ambience"].str(), samples);
+    if (custom.empty() && !boss_music_.empty()) {
+        events_.preload_for(boss_music_);
+        events_.samples_of(boss_music_, samples);
+    }
+    AudioDecoder::set_pinned(*pack_, samples);
+    log_info("music kept: %u files (%s)", (unsigned)samples.size(), key.c_str());
+}
+
+void GameAudio::boss_ahead(const std::string& music) {
+    if (music.empty() || music == boss_music_) return;
+    boss_music_ = music;
+    /* the key changes with it: the next decision's prepare pins it; the
+     * map's own (this one) at once */
+    Json a;
+    a.set("track", Json::make_string(pinned_act_));
+    a.set("ambience", Json::make_string(ambience_));
+    pin_music(a);
 }
 
 void GameAudio::expect(const Json& d) {

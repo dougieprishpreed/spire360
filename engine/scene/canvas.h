@@ -25,6 +25,10 @@ public:
     void begin_frame();
     void end_frame();
     void set_texture_budget(size_t bytes) { texture_budget_ = bytes; }
+    /* Off: a texture within the budget stays however long it is unused (a
+     * budget that follows the memory free gives it back when it is needed;
+     * the map's backdrops were made again at each visit a minute apart) */
+    void set_idle_expiry(bool on) { idle_expiry_ = on; }
     size_t texture_budget() const { return texture_budget_; }
     size_t texture_bytes() const { return texture_bytes_; }
     size_t texture_count() const;
@@ -163,6 +167,7 @@ private:
     unsigned serial_; /* this canvas among all (ImageTextureRes::gpu_canvas) */
     unsigned epoch_;  /* textures_' erasures: an image's remembered entry is stale */
     size_t texture_bytes_, texture_budget_;
+    bool idle_expiry_;
     /* bytes end_frame releases beyond the budget's (a texture not made for
      * want of memory) */
     size_t want_free_;

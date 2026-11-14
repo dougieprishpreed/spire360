@@ -36,6 +36,9 @@ public:
      * the game ends the combat (CombatManager.EndCombatInternal), not when
      * the rewards show after the deaths. */
     void expect(const Json& decision);
+    /* The boss's music while the map offers its room (the logic's upcoming
+     * boss): read and kept from then on, with the act's. */
+    void boss_ahead(const std::string& music);
     /* CreatureCmd.Kill once every player is dead: StopMusic, the
      * game_over stinger; at the player's death in the fight's last steps
      * (the game_over decision after them plays nothing more). */
@@ -60,6 +63,7 @@ private:
     struct Loop { u32 id; std::string parameter, owner; float stop_value; };
     struct Scheduled { double at; Json cue; };
     void music(const std::string& path);
+    void pin_music(const Json& audio);
     void ambience(const std::string& path);
     void render(float* out, int count);
     std::string stream(const std::string& path);
@@ -72,6 +76,9 @@ private:
     std::map<int, u32> debug_voices_;
     std::vector<Scheduled> pending_;
     std::string track_, ambience_, act_track_;
+    /* The music kept whatever the sounds' budget (AudioDecoder::set_pinned):
+     * the act's track or the fight's own, the ambience, the boss's ahead */
+    std::string pinned_key_, boss_music_, pinned_act_;
     u32 music_id_, ambience_id_, rng_;
     int floor_, context_progress_, expected_progress_;
     bool game_over_; /* game_over() played, until the next run's decision */

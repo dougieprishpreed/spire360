@@ -476,6 +476,39 @@ void GameClient::embark_wipe(const std::string& character) {
     tree_->root()->add_child(wipe_);
 }
 
+/* The fights the map leads to (the logic's upcoming: the act's next normal
+ * and elite encounters, the boss once its room is offered): their monsters'
+ * scenes, skeletons and pages, and their sounds, read and made while the
+ * map is shown. Each fight's first frame read and made them (0.3-1 s on the
+ * console, rp112), the game's own PreloadManager.LoadRoomCombatAssets
+ * reading them as the room opens. */
+void GameClient::warm_upcoming(const Json& d) {
+    const Json& up = d["upcoming"];
+    if (!up.is_object()) return;
+    bool boss_next = false;
+    const Json& choices = d["choices"];
+    for (size_t i = 0; i < choices.size(); ++i)
+        if (choices[i]["type"].str() == "Boss") boss_next = true;
+    Json paths = Json::make_array();
+    std::vector<std::string> monsters;
+    static const char* const kinds[] = { "monster", "elite", "boss" };
+    for (int k = 0; k < 3; ++k) {
+        if (k == 2 && !boss_next) continue;
+        const Json& e = up[kinds[k]];
+        for (size_t i = 0; i < e["assets"].size(); ++i) paths.append(e["assets"][i]);
+        for (size_t i = 0; i < e["monsters"].size(); ++i) monsters.push_back(e["monsters"][i].str());
+    }
+    if (paths.size()) lib_->warm(paths);
+    if (lib_->audio()) {
+        if (!monsters.empty()) lib_->audio()->warm_monsters(monsters);
+        if (boss_next) lib_->audio()->boss_ahead(up["boss"]["music"].str());
+    }
+}
+
+std::vector<std::string> GameClient::run_start_files() {
+    return std::vector<std::string>(RUN_START_FILES, RUN_START_FILES + sizeof(RUN_START_FILES) / sizeof(RUN_START_FILES[0]));
+}
+
 void GameClient::warm_run_start() {
     lib_->warm_first(std::vector<std::string>(RUN_START_FILES,
                                               RUN_START_FILES + sizeof(RUN_START_FILES) / sizeof(RUN_START_FILES[0])));
@@ -586,6 +619,7 @@ void GameClient::update(const PadState& pad) {
             waiting_ = false;
             /* PreloadManager's sets of a run or an act starting */
             if (msg["preload"].size()) lib_->warm(msg["preload"]);
+            if (msg["decision"].str() == "map_select") warm_upcoming(msg);
             bool changed_room = !decision_.is_null() && msg["decision"].str() != "map_select" &&
                 msg["context"]["total_floor"].i() != decision_["context"]["total_floor"].i();
             /* the same floor's room changes the game fades through black

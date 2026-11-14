@@ -22,6 +22,9 @@ public:
     /* An event's samples read ahead (AudioDecoder::prefetch), for sounds
      * met soon; warm_monsters: the events under enemy_attacks/<folder>/ of
      * each monster id (lower case) that starts with the folder. */
+    /* The samples an event reaches (its instruments', its nested events'),
+     * added to out (its bank parsed first: preload_for) */
+    void samples_of(const std::string& path, std::vector<std::string>& out);
     void warm(const std::string& path);
     void warm_monsters(const std::vector<std::string>& ids);
     u32 play(const std::string& path, float volume = 1, const Json& parameters = Json());

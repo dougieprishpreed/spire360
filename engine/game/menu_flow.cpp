@@ -78,6 +78,33 @@ MenuFlow::MenuFlow(SceneLibrary* lib, SceneTree* tree, GameClient* game, const s
     first.append(Json::make_string("images/atlases/relic_outline_atlas.png"));
     first.append(Json::make_string("fonts/spectral_bold.ttf#page0"));
     first.append(Json::make_string("fonts/spectral_bold.ttf#page1"));
+    /* The logo and the logic's first answer leave 15 s or more with little
+     * to draw and 250 MB free: every menu's pages made then, not when they
+     * first show. The title's text (its first frame made 12 of these
+     * pages, 55-60 ms each on the console: 1 s), the title's backdrop,
+     * every character's portrait and skeleton for the character select
+     * (each made as it was first picked: 0.36-0.8 s frames, rp112), then
+     * the new run's Neow. A texture's making cannot be split (the GPU's
+     * tiling copies a whole level at once), so each is one long frame of
+     * the logo instead of one of the menus; the textures' budget follows
+     * the memory free and keeps them. */
+    static const char* const MENU_FILES[] = {
+        "scenes/backgrounds/main_menu_bg.tscn",
+        "scenes/screens/char_select/char_select_bg_silent.tscn",
+        "scenes/screens/char_select/char_select_bg_defect.tscn",
+        "scenes/screens/char_select/char_select_bg_regent.tscn",
+        "scenes/screens/char_select/char_select_bg_necrobinder.tscn",
+        "scenes/screens/char_select/char_select_bg_random_character.tscn",
+        "fonts/spectral_bold.ttf#page2", "fonts/spectral_bold.ttf#page3",
+    };
+    for (size_t i = 0; i < sizeof(MENU_FILES) / sizeof(MENU_FILES[0]); ++i)
+        first.append(Json::make_string(MENU_FILES[i]));
+    for (int page = 0; page < 8; ++page) {
+        first.append(Json::make_string(format("fonts/kreon_regular.ttf#page%d", page)));
+        first.append(Json::make_string(format("fonts/kreon_bold.ttf#page%d", page)));
+    }
+    std::vector<std::string> run_start = GameClient::run_start_files();
+    for (size_t i = 0; i < run_start.size(); ++i) first.append(Json::make_string(run_start[i]));
     lib_->warm(first);
     /* The game data loads while the logo plays; the last profile is read
      * as the game does at start-up, before the menu shows. */

@@ -133,6 +133,9 @@ private:
     bool warm_enabled_;
     LoadClock warm_clock_;
     double warm_share_, warm_spent_;
+    int warm_rest_; /* frames left of the rest after a long one */
+    enum { WARM_REST_FRAMES = 10 };
+    static const double WARM_HEAVY_MS;
     int warm_files_, warm_textures_, warm_frames_;
     size_t scene_bytes_, skeleton_bytes_, skeleton_budget_;
     /* the warm-up's own parses, the oldest first, and what they hold */

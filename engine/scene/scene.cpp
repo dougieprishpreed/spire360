@@ -66,7 +66,7 @@ static SceneLibrary* g_library = NULL;
 SceneLibrary* SceneLibrary::current() { return g_library; }
 
 SceneLibrary::SceneLibrary(const Pack* pack)
-    : pack_(pack), audio_(NULL), warm_enabled_(true), warm_clock_(NULL), warm_share_(0), warm_spent_(0), warm_files_(0),
+    : pack_(pack), audio_(NULL), warm_enabled_(true), warm_clock_(NULL), warm_share_(0), warm_spent_(0), warm_rest_(0), warm_files_(0),
       warm_textures_(0), warm_frames_(0), scene_bytes_(0), skeleton_bytes_(0), skeleton_budget_(12u << 20),
       warm_scene_bytes_(0), warm_scene_budget_(8u << 20), scenes_evicted_(0), skeletons_evicted_(0),
       default_theme_(NULL), default_font_(NULL) {
@@ -569,10 +569,19 @@ void SceneLibrary::warm_first(const std::vector<std::string>& paths) {
     for (size_t i = 0; i < paths.size(); ++i) warm_first_.push_back(paths[i]);
 }
 
+const double SceneLibrary::WARM_HEAVY_MS = 30.0;
+
 void SceneLibrary::warm_step(Canvas& canvas) {
     if (skeleton_bytes_ > skeleton_budget_) trim_skeletons();
     if (warm_scene_bytes_ > warm_scene_budget_) trim_warm_scenes();
     if (warm_queue_.empty() && warm_first_.empty() && warm_reading_.empty()) return;
+    /* after a frame a texture's making made long, a few frames' rest: the
+     * makings come apart instead of one long frame after another (the
+     * map's look ahead at the next fights, the logo's at the menus) */
+    if (warm_rest_ > 0) {
+        --warm_rest_;
+        return;
+    }
     /* a frame's share: a time with a clock (the console reads a texture in
      * tens of ms), else 24 files and 4 textures */
     int files = 0, textures = 0;
@@ -622,7 +631,12 @@ void SceneLibrary::warm_step(Canvas& canvas) {
     }
     warm_files_ += files;
     warm_textures_ += textures;
-    if (warm_clock_) warm_spent_ += warm_clock_() - start;
+    if (warm_clock_) {
+        double spent = warm_clock_() - start;
+        warm_spent_ += spent;
+        /* not behind a black screen (its larger share) */
+        if (spent > WARM_HEAVY_MS && warm_share_ < WARM_HEAVY_MS) warm_rest_ = WARM_REST_FRAMES;
+    }
     if (warm_queue_.empty() && warm_first_.empty() && warm_reading_.empty()) {
         if (warm_clock_)
             log_info("warm: %d files, %d textures in %.0f ms over %d frames", warm_files_, warm_textures_, warm_spent_,

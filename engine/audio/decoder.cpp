@@ -5,6 +5,7 @@
 
 #include <deque>
 #include <map>
+#include <set>
 
 #define STB_VORBIS_NO_PUSHDATA_API
 #define STB_VORBIS_NO_INTEGER_CONVERSION
@@ -55,6 +56,7 @@ struct KeptSound {
     volatile int state;
     const PackEntry* entry;
     double asked;    /* clock_ms() as it was asked for */
+    double busy_at_ask[4]; /* g_busy as it was asked for */
     double ready_at; /* clock_ms() as its voices could start */
     size_t bytes;    /* counted in g_kept_bytes */
     bool pcm;
@@ -64,10 +66,11 @@ struct KeptSound {
     u32 read_pos;         /* a long one's bytes read so far */
     void* decoding;       /* (pcm) the loader's decoder until all are */
     void* spare;          /* the decoder the loader opened to measure it: the first voice's */
+    bool pinned;          /* one of set_pinned's: out of the budget, never let go */
     std::vector<OpenJob*> prepared; /* decoders set up ahead (prepare), no voice's yet */
     KeptSound()
         : users(0), used(0), state(KEPT_READY), entry(NULL), asked(0), ready_at(0), bytes(0), pcm(false), channels(0),
-          rate(0), frames(0), decoded(0), read_pos(0), decoding(NULL), spare(NULL) {}
+          rate(0), frames(0), decoded(0), read_pos(0), decoding(NULL), spare(NULL), pinned(false) {}
     ~KeptSound() {
         if (spare) stb_vorbis_close((stb_vorbis*)spare);
         if (decoding) stb_vorbis_close((stb_vorbis*)decoding);
@@ -101,18 +104,34 @@ static Thread g_loader;
 static volatile bool g_loader_stop = false;
 static AudioDecoder::LoadStats g_load_stats;
 static double g_read_started, g_read_ms; /* the loader's: the read opened() follows */
+/* The loader's time by kind of work (ms, a running total): decoding short
+ * sounds' parts, reading short sounds, opening decoders, long reads; a
+ * sound's wait for the loader is told by what these did meanwhile */
+enum { BUSY_DECODE, BUSY_READ, BUSY_OPEN, BUSY_LONG };
+static double g_busy[4] = { 0, 0, 0, 0 };
+static double g_busy_at_start[4]; /* g_busy as the read opened() follows began */
 
 /* The least recently played that no voice reads go while the budget has
  * no room for `more` bytes; false if those in use leave none. */
+static std::set<std::string> g_pinned; /* set_pinned's paths */
+static size_t loose_bytes() {
+    size_t bytes = 0;
+    for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
+        if (!k->second->pinned) bytes += k->second->bytes;
+    return bytes;
+}
 static bool make_room(size_t more, size_t budget) {
-    while (g_kept_bytes + more > budget) {
+    /* the budget is the unpinned sounds' (the pinned ones are the act's) */
+    size_t loose = loose_bytes();
+    while (loose + more > budget) {
         std::map<std::string, KeptSound*>::iterator oldest = g_kept.end();
         for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
-            if (!k->second->users && k->second->state != KEPT_LOADING && !k->second->decoding &&
+            if (!k->second->pinned && !k->second->users && k->second->state != KEPT_LOADING && !k->second->decoding &&
                 (oldest == g_kept.end() || k->second->used < oldest->second->used))
                 oldest = k;
         if (oldest == g_kept.end()) return false;
         g_kept_bytes -= oldest->second->bytes;
+        loose -= oldest->second->bytes;
         delete oldest->second;
         g_kept.erase(oldest);
     }
@@ -130,15 +149,21 @@ static KeptSound* kept_sound(const Pack& pack, const PackEntry* entry, const std
         return it->second;
     }
     /* with the loader, one past the budget is read all the same while twice
-     * the budget holds it (an act's track crossing over to the next) */
-    if (!make_room(entry->size, g_kept_budget) && (!loader || g_kept_bytes + entry->size > 2 * g_kept_budget)) return NULL;
+     * the budget holds it (an act's track crossing over to the next); a
+     * pinned one is read whatever the budget */
+    bool pinned = loader && g_pinned.count(path) != 0;
+    if (!pinned && !make_room(entry->size, g_kept_budget) &&
+        (!loader || loose_bytes() + entry->size > 2 * g_kept_budget))
+        return NULL;
     KeptSound* k = new KeptSound();
+    k->pinned = pinned;
     k->entry = entry;
     k->users = 1;
     k->used = ++g_kept_clock;
     if (loader) {
         k->state = KEPT_LOADING;
         k->asked = clock_ms();
+        for (int i = 0; i < 4; ++i) k->busy_at_ask[i] = g_busy[i];
         g_load_queue.push_back(k);
     } else if (!pack.read(entry, k->data) || k->data.size() < 12) {
         delete k;
@@ -303,6 +328,7 @@ static void opened(KeptSound* k, std::vector<u8>& data, bool ok) {
         g_load_stats.longest_queue_ms = g_read_started - k->asked;
         g_load_stats.longest_read_ms = g_read_ms;
         g_load_stats.longest = g_load_pack->name_of(k->entry);
+        for (int i = 0; i < 4; ++i) g_load_stats.longest_busy[i] = g_busy_at_start[i] - k->busy_at_ask[i];
     }
 }
 
@@ -417,31 +443,42 @@ static void loader_main(void*) {
                 if (!longer && !g_decoding.empty()) more = g_decoding.front();
             }
         }
-        if (urgent) decode_part(urgent);
-        else if (load) {
+        double busy0 = clock_ms();
+        if (urgent) {
+            decode_part(urgent);
+            g_busy[BUSY_DECODE] += clock_ms() - busy0;
+        } else if (load) {
             std::vector<u8> data;
-            g_read_started = clock_ms();
+            g_read_started = busy0;
+            for (int i = 0; i < 4; ++i) g_busy_at_start[i] = g_busy[i];
             bool ok = g_load_pack->read_urgent(load->entry, data);
             g_read_ms = clock_ms() - g_read_started;
+            g_busy[BUSY_READ] += g_read_ms;
             opened(load, data, ok);
-        } else if (job) open_job(job);
-        else if (longer) {
+        } else if (job) {
+            open_job(job);
+            g_busy[BUSY_OPEN] += clock_ms() - busy0;
+        } else if (longer) {
             bool ok = true;
-            double t0 = clock_ms();
+            double t0 = busy0;
             if (!longer->read_pos) {
                 g_read_started = t0;
                 g_read_ms = 0;
+                for (int i = 0; i < 4; ++i) g_busy_at_start[i] = g_busy[i];
             }
             bool done = read_piece(longer, &ok);
             g_read_ms += clock_ms() - t0;
+            g_busy[BUSY_LONG] += clock_ms() - t0;
             if (done) {
                 g_reading = NULL;
                 std::vector<u8> data;
                 data.swap(longer->data);
                 opened(longer, data, ok);
             }
-        } else if (more) decode_part(more);
-        else sleep_ms(1);
+        } else if (more) {
+            decode_part(more);
+            g_busy[BUSY_DECODE] += clock_ms() - busy0;
+        } else sleep_ms(1);
     }
 }
 
@@ -468,6 +505,31 @@ void AudioDecoder::prefetch(const Pack& pack, const std::string& path) {
     if (k) unkeep(k);
 }
 
+void AudioDecoder::set_pinned(const Pack& pack, const std::vector<std::string>& paths) {
+    if (!g_loader.started()) return;
+    {
+        ScopedLock lock(g_kept_lock);
+        g_pinned.clear();
+        for (size_t i = 0; i < paths.size(); ++i) g_pinned.insert(paths[i]);
+        for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
+            k->second->pinned = g_pinned.count(k->first) != 0;
+    }
+    /* the ones not kept yet read in the background (a long one's pieces
+     * come after every short sound and voice's decoder) */
+    for (size_t i = 0; i < paths.size(); ++i) prefetch(pack, paths[i]);
+    /* the ones let go back under the budget */
+    ScopedLock lock(g_kept_lock);
+    make_room(0, g_kept_budget);
+}
+
+size_t AudioDecoder::pinned_bytes() {
+    ScopedLock lock(g_kept_lock);
+    size_t bytes = 0;
+    for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
+        if (k->second->pinned) bytes += k->second->bytes;
+    return bytes;
+}
+
 void AudioDecoder::stop_loader() {
     g_loader_stop = true;
     g_loader.join();
@@ -482,6 +544,7 @@ AudioDecoder::LoadStats AudioDecoder::load_stats() {
     g_load_stats.longest_ms = 0;
     g_load_stats.longest_queue_ms = g_load_stats.longest_read_ms = 0;
     g_load_stats.longest = "";
+    for (int i = 0; i < 4; ++i) g_load_stats.longest_busy[i] = 0;
     g_load_stats.prepared = g_load_stats.prepared_taken = 0;
     return s;
 }

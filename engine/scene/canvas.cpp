@@ -13,7 +13,7 @@ static unsigned next_serial() {
 }
 
 Canvas::Canvas(Renderer* r, const Pack* pack)
-    : serial_(next_serial()), epoch_(0), texture_bytes_(0), texture_budget_(80 * 1024 * 1024), want_free_(0), texture_clock_(0), frame_(0), console_sizes_(false),
+    : serial_(next_serial()), epoch_(0), texture_bytes_(0), texture_budget_(80 * 1024 * 1024), idle_expiry_(true), want_free_(0), texture_clock_(0), frame_(0), console_sizes_(false),
       dump_pending_(false), dumping_(false), dump_draws_(0), dump_glyphs_(0), dump_what_(NULL),
       decoded_w_(0), decoded_h_(0), glyphs_held_(false),
       r_(r), pack_(pack), reader_(NULL), blend_(BLEND_MIX), tex_flags_(0), calls_(0), count_only_(false), wind_on_(false), wind_(0),
@@ -96,7 +96,7 @@ void Canvas::end_frame() {
     /* Within the budget only idle textures go (TEXTURE_IDLE_FRAMES unused):
      * a look once a second is enough (the walk through the cache's tree,
      * every node a cache miss on the console, was every frame). */
-    else if (frame_ % 60 != 0 && !want_free_) return;
+    else if ((frame_ % 60 != 0 || !idle_expiry_) && !want_free_) return;
     /* A texture the GPU's memory had no room for (the console's memory
      * nearly gone after a long session): the least recently drawn go too,
      * up to its size, and it is made again a few frames on (no_room: the
@@ -107,8 +107,8 @@ void Canvas::end_frame() {
         bool over = texture_bytes_ > texture_budget_ || freed < want_free_;
         for (std::map<std::string, CachedTexture>::iterator it = textures_.begin(); it != textures_.end(); ++it) {
             if (!it->second.texture) continue;
-            bool expired =
-                !it->second.kept && frame_ > it->second.frame && frame_ - it->second.frame > TEXTURE_IDLE_FRAMES;
+            bool expired = idle_expiry_ && !it->second.kept && frame_ > it->second.frame &&
+                           frame_ - it->second.frame > TEXTURE_IDLE_FRAMES;
             if (!over && !expired) continue;
             if (!expired && it->second.frame == frame_) continue;
             if (oldest == textures_.end() || it->second.touched < oldest->second.touched) oldest = it;

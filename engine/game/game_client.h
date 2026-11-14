@@ -88,6 +88,9 @@ public:
     /* The new run's first screen (Neow) read ahead, behind the wipe's
      * black while the logic makes the run (SceneLibrary::warm_first). */
     void warm_run_start();
+    /* Its files (the menus' warm-up reads them while the logo plays) */
+    static std::vector<std::string> run_start_files();
+    void warm_upcoming(const Json& decision);
     /* The run's assets still being read ahead (SceneLibrary::warm): the
      * menus keep the screen as it is (PreloadManager's WaitForCompletion) */
     bool warming() const;

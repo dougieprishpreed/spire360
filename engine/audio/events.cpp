@@ -838,19 +838,22 @@ static void collect_samples(const Json& doc, const Json& n, std::vector<std::str
     }
 }
 
+void AudioEvents::samples_of(const std::string& path, std::vector<std::string>& out) {
+    ScopedLock lock(impl_->lock);
+    if (path.empty()) return;
+    Impl::Bank* bank = impl_->bank_for(path);
+    if (!bank || !impl_->pack) return;
+    std::string guid = path;
+    const Json& choices = impl_->index["events"].get(path);
+    for (size_t i = 0; i < choices.size(); ++i)
+        if (choices[i][(size_t)0].str() == bank->name) guid = choices[i][1].str();
+    std::set<std::string> seen(out.begin(), out.end());
+    collect_samples(bank->doc, bank->doc["events"].get(guid), out, seen, 0);
+}
+
 void AudioEvents::warm(const std::string& path) {
     std::vector<std::string> samples;
-    {
-        ScopedLock lock(impl_->lock);
-        Impl::Bank* bank = impl_->bank_for(path);
-        if (!bank || !impl_->pack) return;
-        std::string guid = path;
-        const Json& choices = impl_->index["events"].get(path);
-        for (size_t i = 0; i < choices.size(); ++i)
-            if (choices[i][(size_t)0].str() == bank->name) guid = choices[i][1].str();
-        std::set<std::string> seen;
-        collect_samples(bank->doc, bank->doc["events"].get(guid), samples, seen, 0);
-    }
+    samples_of(path, samples);
     for (size_t i = 0; i < samples.size(); ++i) AudioDecoder::prefetch(*impl_->pack, samples[i]);
 }
 
