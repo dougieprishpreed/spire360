@@ -43,6 +43,10 @@ public:
      * still being read ahead (a run's or act's first screen waits for it
      * behind the black). */
     void release_run();
+    /* NAudioManager.StopMusic: the menu's music stops as a run is embarked
+     * (NCharacterSelectScreen.BeginRun), before the character's
+     * transition; the run's first room starts its own. */
+    void stop_music();
     bool music_reading() const;
     enum { RELEASED_KEEP = 4 << 20 };
     /* CreatureCmd.Kill once every player is dead: StopMusic, the

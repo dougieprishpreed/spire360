@@ -311,7 +311,17 @@ struct AudioEvents::Impl {
                 float bus_db = step.volume, bus_pitch = step.pitch;
                 if (step.props) properties(*step.bus, chain[i].randoms, bus_db, bus_pitch);
                 db += bus_db; st += bus_pitch;
-                if (fade && fade->fade_owner) {
+                /* a transition's fade curve is its track's: on the
+                 * instruments on that track, not on the tracks mixed
+                 * through it. The event's master track has one too (a
+                 * step at the transition's end); through every track it
+                 * cut the source at once instead of its tracks' fade over
+                 * a second and held the destination silent through the
+                 * lead-out (the Ceremonial Beast's stun: 4.8 s of the
+                 * transition's own sounds, then everything at once;
+                 * Underdocks' first fight going quiet for five seconds,
+                 * rp114) */
+                if (i == 0 && fade && fade->fade_owner) {
                     const Json& points = fade->fade_curves->get(step.id);
                     if (points.size()) {
                         float gain = curve_value(points, fade->fade_owner->age - fade->fade_start, 1);
@@ -463,10 +473,20 @@ struct AudioEvents::Impl {
                 if (elapsed + EPS >= (*bridge)["length"].num()) bridge = NULL;
                 else if (!destination_started) return;
             }
+            /* In a transition timeline's lead-out the destination plays: its
+             * own loops hold its playhead (an act's fight is a one-second
+             * loop over its async stems, Underdocks' 5-6 s; the 11 s
+             * transition into it has a 6.2 s lead-out). Without them the
+             * playhead ran on into the fight's end, whose fades took the
+             * stems to silence for five seconds before a jump brought them
+             * back (rp114). A parameter's turns wait for the transition's
+             * end. */
+            bool lead_out = !allow_transitions && bridge && destination_started;
             /* Jump once at each source crossing. Destination boxes are sought
              * at their exact timeline offset, including pickups and tails. */
-            for (size_t i = 0; allow_transitions && i < trans.size(); ++i) {
+            for (size_t i = 0; (allow_transitions || lead_out) && i < trans.size(); ++i) {
                 const Json& t = trans[i];
+                if (lead_out && (t["conditions"].size() || t["length"].num() > EPS)) continue;
                 const std::string& id = tr_keys[i];
                 bool inside = pos + EPS >= tr_at[i] && pos <= tr_end[i] + EPS && matches(t["conditions"]);
                 if (!inside) { transitions[id] = false; continue; }

@@ -646,7 +646,11 @@ void GameClient::update(const PadState& pad) {
     set_phase_mark(phase_at_ >= 0 ? mark_phase : NULL);
     Json msg;
     std::string err;
-    while (link_->poll_message(line, msg, err)) {
+    /* NCharacterSelectScreen awaits its FadeOut before StartNewSingleplayer-
+     * Run: the run's first answer waits for the embark's wipe to end (its
+     * first screen made mid-wipe, a 2 s frame on the console, stopped the
+     * wipe halfway, rp114) */
+    while (!embark_wiping() && link_->poll_message(line, msg, err)) {
         phase("read and parse");
         if (!err.empty()) {
             log_warn("logic: unreadable line (%s)", err.c_str());

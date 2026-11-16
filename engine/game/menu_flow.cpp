@@ -116,6 +116,12 @@ Json MenuFlow::menu_files() {
         first.append(Json::make_string(format("fonts/kreon_regular.ttf#page%d", page)));
         first.append(Json::make_string(format("fonts/kreon_bold.ttf#page%d", page)));
     }
+    /* every character's embark transition (NCharacterSelectScreen's
+     * FadeOut with CharacterSelectTransitionPath): its shader's textures
+     * made at its first frame stopped it partway (rp114) */
+    static const char* const TRANSITIONS[] = { "ironclad", "silent", "defect", "regent", "necrobinder" };
+    for (size_t i = 0; i < sizeof(TRANSITIONS) / sizeof(TRANSITIONS[0]); ++i)
+        first.append(Json::make_string(format("materials/transitions/%s_transition_mat.tres", TRANSITIONS[i])));
     std::vector<std::string> run_start = GameClient::run_start_files();
     for (size_t i = 0; i < run_start.size(); ++i) first.append(Json::make_string(run_start[i]));
     return first;
@@ -233,6 +239,10 @@ void MenuFlow::close_ascension() {
 
 void MenuFlow::embark() {
     last_character_ = chars_->selected();
+    /* NCharacterSelectScreen.BeginRun: NAudioManager.StopMusic, then the
+     * character's transition sound and FadeOut (the menu's music played on
+     * through the transition and the black, rp114) */
+    if (lib_->audio()) lib_->audio()->stop_music();
     game_->embark_wipe(chars_->character());
     note(format("run: %s, ascension %d", chars_->character().c_str(), chars_->ascension()));
     if (menu_.is_null()) game_->start_run(chars_->character(), format("%08X", chaotic_rand()));

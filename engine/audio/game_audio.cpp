@@ -382,6 +382,11 @@ void GameAudio::release_run() {
     events_.release_banks();
 }
 
+void GameAudio::stop_music() {
+    GameLock lock(this);
+    music("");
+}
+
 bool GameAudio::music_reading() const { return AudioDecoder::pinned_pending() > 0; }
 
 void GameAudio::boss_ahead(const std::string& music) {
