@@ -129,6 +129,9 @@ public:
     std::string sub_emitter; /* GPUParticles2D.sub_emitter's path */
 
     virtual bool set(const std::string& key, const Json& v, const PropCtx& ctx);
+    /* After a scene's properties: the console's cut of a heavy scene's
+     * particles (the Insatiable's sand dots, rp115). */
+    void thin_for(const std::string& scene);
     virtual void process(double dt);
     virtual void draw(Canvas& c);
     void restart();

@@ -2242,9 +2242,12 @@ Node* CombatScreen::build(const Json& d, std::string* error) {
         enemies_.push_back(c);
     }
     if (lib_->audio()) {
-        std::vector<std::string> ids;
-        for (size_t i = 0; i < es.size(); ++i) ids.push_back(es[i]["id"].str());
-        lib_->audio()->warm_monsters(ids);
+        std::vector<std::string> ids, sfx;
+        for (size_t i = 0; i < es.size(); ++i) {
+            ids.push_back(es[i]["id"].str());
+            for (size_t k = 0; k < es[i]["sfx"].size(); ++k) sfx.push_back(es[i]["sfx"][k].str());
+        }
+        lib_->audio()->warm_monsters(ids, sfx);
     }
     /* The enemies of the decision before that are gone now: they stay
      * where they stood while their death plays (play_steps). */

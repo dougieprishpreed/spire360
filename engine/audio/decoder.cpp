@@ -67,10 +67,11 @@ struct KeptSound {
     void* decoding;       /* (pcm) the loader's decoder until all are */
     void* spare;          /* the decoder the loader opened to measure it: the first voice's */
     bool pinned;          /* one of set_pinned's: out of the budget, never let go */
+    bool held;            /* one of set_held's: in the budget, not let go meanwhile */
     std::vector<OpenJob*> prepared; /* decoders set up ahead (prepare), no voice's yet */
     KeptSound()
         : users(0), used(0), state(KEPT_READY), entry(NULL), asked(0), ready_at(0), bytes(0), pcm(false), channels(0),
-          rate(0), frames(0), decoded(0), read_pos(0), decoding(NULL), spare(NULL), pinned(false) {}
+          rate(0), frames(0), decoded(0), read_pos(0), decoding(NULL), spare(NULL), pinned(false), held(false) {}
     ~KeptSound() {
         if (spare) stb_vorbis_close((stb_vorbis*)spare);
         if (decoding) stb_vorbis_close((stb_vorbis*)decoding);
@@ -114,6 +115,7 @@ static double g_busy_at_start[4]; /* g_busy as the read opened() follows began *
 /* The least recently played that no voice reads go while the budget has
  * no room for `more` bytes; false if those in use leave none. */
 static std::set<std::string> g_pinned; /* set_pinned's paths */
+static std::set<std::string> g_held;   /* set_held's paths */
 static size_t loose_bytes() {
     size_t bytes = 0;
     for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
@@ -126,7 +128,7 @@ static bool make_room(size_t more, size_t budget) {
     while (loose + more > budget) {
         std::map<std::string, KeptSound*>::iterator oldest = g_kept.end();
         for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
-            if (!k->second->pinned && !k->second->users && k->second->state != KEPT_LOADING && !k->second->decoding &&
+            if (!k->second->pinned && !k->second->held && !k->second->users && k->second->state != KEPT_LOADING && !k->second->decoding &&
                 (oldest == g_kept.end() || k->second->used < oldest->second->used))
                 oldest = k;
         if (oldest == g_kept.end()) return false;
@@ -157,6 +159,7 @@ static KeptSound* kept_sound(const Pack& pack, const PackEntry* entry, const std
         return NULL;
     KeptSound* k = new KeptSound();
     k->pinned = pinned;
+    k->held = g_held.count(path) != 0;
     k->entry = entry;
     k->users = 1;
     k->used = ++g_kept_clock;
@@ -390,8 +393,9 @@ static void open_job(OpenJob* j) {
 
 /* The loader's thread, one thing at a time, the most pressing first: the
  * next part of a sound whose voices are about to run out of samples; a short
- * sound to read (its first part decoded with it); a voice's decoder to open;
- * a piece of a long sound; the next part of any being decoded. */
+ * sound a voice waits on (its first part decoded with it); a voice's decoder
+ * to open; a piece of a long sound; a short sound read ahead; the next part
+ * of any being decoded. */
 static void loader_main(void*) {
     /* under the mix on its hardware thread */
     lower_priority();
@@ -418,9 +422,13 @@ static void loader_main(void*) {
                     urgent = k;
                 }
             }
+            /* a short sound a voice waits on, in the order asked (the
+             * sounds read ahead come last: a fight's monsters' held ones, 100
+             * and more, queued before them, kept the act's music and the
+             * sounds played meanwhile waiting, rp115) */
             if (!urgent) {
                 for (std::deque<KeptSound*>::iterator it = g_load_queue.begin(); it != g_load_queue.end(); ++it)
-                    if ((*it)->entry->size <= KEPT_MAX) {
+                    if ((*it)->entry->size <= KEPT_MAX && (*it)->users) {
                         load = *it;
                         g_load_queue.erase(it);
                         break;
@@ -435,12 +443,25 @@ static void loader_main(void*) {
                     }
             }
             if (!urgent && !load && !job) {
-                if (!g_reading && !g_load_queue.empty()) {
-                    g_reading = g_load_queue.front();
-                    g_load_queue.pop_front();
-                }
+                /* the next long one (an act's music, pinned: the run's and
+                 * an act's first screen wait for it behind the black) */
+                if (!g_reading)
+                    for (std::deque<KeptSound*>::iterator it = g_load_queue.begin(); it != g_load_queue.end(); ++it)
+                        if ((*it)->entry->size > KEPT_MAX) {
+                            g_reading = *it;
+                            g_load_queue.erase(it);
+                            break;
+                        }
                 longer = g_reading;
-                if (!longer && !g_decoding.empty()) more = g_decoding.front();
+                /* then the short ones read ahead */
+                if (!longer)
+                    for (std::deque<KeptSound*>::iterator it = g_load_queue.begin(); it != g_load_queue.end(); ++it)
+                        if ((*it)->entry->size <= KEPT_MAX) {
+                            load = *it;
+                            g_load_queue.erase(it);
+                            break;
+                        }
+                if (!longer && !load && !g_decoding.empty()) more = g_decoding.front();
             }
         }
         double busy0 = clock_ms();
@@ -518,6 +539,20 @@ void AudioDecoder::set_pinned(const Pack& pack, const std::vector<std::string>& 
      * come after every short sound and voice's decoder) */
     for (size_t i = 0; i < paths.size(); ++i) prefetch(pack, paths[i]);
     /* the ones let go back under the budget */
+    ScopedLock lock(g_kept_lock);
+    make_room(0, g_kept_budget);
+}
+
+void AudioDecoder::set_held(const Pack& pack, const std::vector<std::string>& paths) {
+    if (!g_loader.started()) return;
+    {
+        ScopedLock lock(g_kept_lock);
+        g_held.clear();
+        for (size_t i = 0; i < paths.size(); ++i) g_held.insert(paths[i]);
+        for (std::map<std::string, KeptSound*>::iterator k = g_kept.begin(); k != g_kept.end(); ++k)
+            k->second->held = g_held.count(k->first) != 0;
+    }
+    for (size_t i = 0; i < paths.size(); ++i) prefetch(pack, paths[i]);
     ScopedLock lock(g_kept_lock);
     make_room(0, g_kept_budget);
 }

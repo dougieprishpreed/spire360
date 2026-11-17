@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 #if defined(_XBOX)
 #include <ppcintrinsics.h> /* __fsel */
@@ -392,6 +393,23 @@ Particles2D::Material::Material()
         ring_axis[i] = i == 2 ? 1.0f : 0.0f;
     }
     turb_scale = turbulence_scale(9);
+}
+
+/* The Insatiable's background is the heaviest scene of the game: 15,200
+ * sand dots (images/vfx/dot.png) in 23 systems over nine sandfalls and the
+ * ground, 46 ms a frame on the console (14 simulating, 29 drawing; rp115).
+ * They are cut to a third, emitted as often per particle (the amount over
+ * the same lifetime): sparser sparkles, the clouds, fog and dragged sand as
+ * they were. */
+void Particles2D::thin_for(const std::string& scene) {
+    static const char BACKGROUND[] = "scenes/backgrounds/the_insatiable_boss/";
+    if (scene.compare(0, sizeof(BACKGROUND) - 1, BACKGROUND) != 0) return;
+#if !defined(_XBOX)
+    /* the PC tools' A/B (the full count) */
+    if (getenv("SPIRE_THIN_OFF")) return;
+#endif
+    if (!texture || texture->path != "images/vfx/dot.png" || amount < 30) return;
+    amount = (amount + 2) / 3;
 }
 
 bool Particles2D::set(const std::string& key, const Json& v, const PropCtx& ctx) {

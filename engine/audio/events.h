@@ -34,7 +34,10 @@ public:
      * added to out (its bank parsed first: preload_for) */
     void samples_of(const std::string& path, std::vector<std::string>& out);
     void warm(const std::string& path);
-    void warm_monsters(const std::vector<std::string>& ids);
+    /* sfx: the monsters' own sounds as the logic names them (death, hurt,
+     * impact): their folders' events too (a Calcified Cultist's are under
+     * cultists/); all of them held (AudioDecoder::set_held) */
+    void warm_monsters(const std::vector<std::string>& ids, const std::vector<std::string>& sfx = std::vector<std::string>());
     u32 play(const std::string& path, float volume = 1, const Json& parameters = Json());
     /* A test aid (spire_play --audio-trace): every play logged with its
      * path. */

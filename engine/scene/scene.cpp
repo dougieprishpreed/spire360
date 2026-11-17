@@ -758,6 +758,9 @@ Node* SceneLibrary::instantiate_file(const SceneFile* f, int depth, std::string*
             const Json& v = props[key.c_str()];
             if (!node->set(key, v, ctx)) node->extra[key] = &v;
         }
+        /* once, with the scene that set its amount */
+        if ((node->type == "GPUParticles2D" || node->type == "CPUParticles2D") && props.has("amount"))
+            ((Particles2D*)node)->thin_for(f->name);
         /* a particle system's place in the scenes (its preprocess's cache) */
         if (node->type == "GPUParticles2D" || node->type == "CPUParticles2D") {
             Particles2D* p = (Particles2D*)node;

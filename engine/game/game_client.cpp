@@ -494,10 +494,12 @@ bool GameClient::busy() const {
 
 void GameClient::embark_wipe(const std::string& character) {
     end_embark_wipe();
-    /* CharacterModel.CharacterTransitionSfx: wipe_<id> (the Defect and the
-     * Necrobinder use the Ironclad's) */
+    /* CharacterModel.CharacterTransitionSfx: wipe_<id> (the Defect, the
+     * Necrobinder and the Regent use the Ironclad's: the Regent's has no
+     * event, its embark was silent, rp115) */
     std::string id = lower(character);
-    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/wipe_" + (id == "defect" || id == "necrobinder" ? std::string("ironclad") : id));
+    bool own = id == "ironclad" || id == "silent";
+    if (lib_->audio()) lib_->audio()->ui("event:/sfx/ui/wipe_" + (own ? id : std::string("ironclad")));
     wipe_ = new EmbarkWipe(lib_, character);
     tree_->root()->add_child(wipe_);
 }
@@ -516,17 +518,18 @@ void GameClient::warm_upcoming(const Json& d) {
     for (size_t i = 0; i < choices.size(); ++i)
         if (choices[i]["type"].str() == "Boss") boss_next = true;
     Json paths = Json::make_array();
-    std::vector<std::string> monsters;
+    std::vector<std::string> monsters, sfx;
     static const char* const kinds[] = { "monster", "elite", "boss" };
     for (int k = 0; k < 3; ++k) {
         if (k == 2 && !boss_next) continue;
         const Json& e = up[kinds[k]];
         for (size_t i = 0; i < e["assets"].size(); ++i) paths.append(e["assets"][i]);
         for (size_t i = 0; i < e["monsters"].size(); ++i) monsters.push_back(e["monsters"][i].str());
+        for (size_t i = 0; i < e["sfx"].size(); ++i) sfx.push_back(e["sfx"][i].str());
     }
     if (paths.size()) lib_->warm(paths);
     if (lib_->audio()) {
-        if (!monsters.empty()) lib_->audio()->warm_monsters(monsters);
+        if (!monsters.empty()) lib_->audio()->warm_monsters(monsters, sfx);
         if (boss_next) lib_->audio()->boss_ahead(up["boss"]["music"].str());
     }
 }
@@ -1298,6 +1301,7 @@ void GameClient::show(const Json& d) {
             held_audio_ = Json();
         } else {
             lib_->audio()->prepare(d);
+            lib_->audio()->hold(d);
             held_audio_ = d;
         }
         if (kind != "combat_play") play_step_sounds(d["steps"]);

@@ -65,6 +65,12 @@ public:
      * set replaces the last one, whose sounds go back to the budget's
      * least recently played order. The budget counts the others only. */
     static void set_pinned(const Pack& pack, const std::vector<std::string>& paths);
+    /* A fight's monsters' sounds (their attacks, deaths, impacts), read
+     * ahead and held: counted in the budget but never the least recently
+     * played that goes (a long fight's other sounds pushed a death's out
+     * before its blow, read late from the drive behind the autosave,
+     * rp115). The set replaces the last one. */
+    static void set_held(const Pack& pack, const std::vector<std::string>& paths);
     /* Bytes the pinned sounds hold now. */
     static size_t pinned_bytes();
     /* The pinned sounds not read yet (a run's or act's first screen waits

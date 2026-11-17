@@ -2221,6 +2221,7 @@ public partial class RunDriver
                 {
                     ["id"] = encounter.Id.Entry,
                     ["monsters"] = encounter.AllPossibleMonsters.Select(m => m.Id.Entry).Distinct().ToList(),
+                    ["sfx"] = encounter.AllPossibleMonsters.SelectMany(m => MonsterSfx(m) ?? new List<string>()).Distinct().ToList(),
                     ["assets"] = paths.Select(p => p.StartsWith("res://", StringComparison.Ordinal) ? p[6..] : p)
                         .OrderBy(p => p, StringComparer.Ordinal).ToList(),
                     ["music"] = encounter.HasBgm ? encounter.CustomBgm : null,
@@ -2515,9 +2516,27 @@ public partial class RunDriver
             ["intents"] = intents.Count > 0 ? intents : null,
             ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
             ["powers"] = ePowers?.Count > 0 ? ePowers : null,
+            // its death, hurt and impact sounds: the client reads them (and
+            // their folders' attacks) ahead, held for the fight
+            ["sfx"] = MonsterSfx(e.Monster),
             // NCreature.ShowHoverTips: its intents' and powers' tips
             ["tips"] = Tips(() => e.HoverTips),
         }.WithCreatureView(e);
+    }
+
+    /// <summary>
+    /// A monster's own sounds (MonsterModel.DeathSfx, HurtSfx, TakeDamageSfx:
+    /// CreatureCmd.Damage's and the death's), for the client's read-ahead;
+    /// their folders lead it to the monster's attacks.
+    /// </summary>
+    internal static List<string>? MonsterSfx(MonsterModel? m)
+    {
+        if (m == null) return null;
+        var list = new List<string>();
+        try { if (!string.IsNullOrEmpty(m.DeathSfx)) list.Add(m.DeathSfx); } catch { }
+        try { if (m.HasHurtSfx && !string.IsNullOrEmpty(m.HurtSfx)) list.Add(m.HurtSfx!); } catch { }
+        try { if (!string.IsNullOrEmpty(m.TakeDamageSfx)) list.Add(m.TakeDamageSfx); } catch { }
+        return list.Count > 0 ? list : null;
     }
 
     internal static List<Dictionary<string, object?>> IntentsView(Creature e, List<Creature>? playerCreatures)

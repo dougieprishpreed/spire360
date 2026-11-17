@@ -29,6 +29,10 @@ public:
     virtual std::string input(const PadState& pad);
     virtual bool own_ui_sounds() const { return true; }
     virtual void frame(double dt);
+    /* An act's opening (NMapRoom / StartOfActAnim, its banner) starts as
+     * the room shows: held behind the act start's black, the banner had
+     * faded before it lifted (rp115). */
+    virtual void room_shown();
     bool busy() const {
         return opening_ < 0.45 || travel_t_ >= 0 || (act_anim_ >= 0 && act_anim_ < act_delay_ + act_duration_ * 0.25);
     }
@@ -124,6 +128,7 @@ private:
     double travel_time_; /* TravelToMapCoord's ticks: 0.8 s, Fast mode 0.3 s */
     Node* banner_;
     double banner_end_;
+    bool reveal_wait_; /* the act's opening waits for room_shown() */
     Vec2 marker_to_;
 };
 

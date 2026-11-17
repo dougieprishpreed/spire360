@@ -523,6 +523,15 @@ struct AudioEvents::Impl {
                                 source->transition_release = true;
                             }
                             source->release(t["lead_in"].num()); ++k;
+                        } else if (!box_locked[(size_t)children[k].box] && children[k].player->release_length() > EPS) {
+                            /* An async instrument the playhead jumped out
+                             * of plays out its envelope's release (Studio's
+                             * untrigger table; a sync one stops at once): an
+                             * act's stems over 2 s as an elite's jump leaves
+                             * them (rp115). */
+                            Player* gone = children[k].player;
+                            children[k].box = -3;
+                            gone->release(gone->release_length()); ++k;
                         } else {
                             children[k].player->detach(0);
                             delete children[k].player; children.erase(children.begin() + k);
@@ -657,7 +666,11 @@ struct AudioEvents::Impl {
                 Child& c = children[i];
                 if (event && c.box >= 0) {
                     size_t b = (size_t)c.box;
-                    if (pos + EPS >= box_end[b] && (box_locked[b] || (*c.player->def)["flags"].i() & 1))
+                    /* past its box's end: a sync instrument or a cut one
+                     * stops, an async one with an envelope plays out its
+                     * release (Studio's untrigger table), else to its end */
+                    if (pos + EPS >= box_end[b] &&
+                        (box_locked[b] || (*c.player->def)["flags"].i() & 1 || c.player->release_length() > EPS))
                         c.player->release(c.player->release_length());
                 }
                 c.player->tick(depth + 1);
@@ -862,7 +875,15 @@ static void collect_samples(const Json& doc, const Json& n, std::vector<std::str
                             int depth, std::vector<std::string>* elsewhere) {
     if (depth > 24) return;
     if (n.is_array()) {
-        for (size_t i = 0; i < n.size(); ++i) collect_samples(doc, n[i], out, seen, depth + 1, elsewhere);
+        /* an event's "triggered" and "parameter_instruments" list node ids
+         * as plain strings: an effect's sounds were never found (its read
+         * ahead read nothing, rp115) */
+        for (size_t i = 0; i < n.size(); ++i) {
+            if (n[i].is_string()) {
+                const Json& node = doc["nodes"].get(n[i].str());
+                if (node.is_object() && seen.insert(n[i].str()).second) collect_samples(doc, node, out, seen, depth + 1, elsewhere);
+            } else collect_samples(doc, n[i], out, seen, depth + 1, elsewhere);
+        }
         return;
     }
     if (!n.is_object()) return;
@@ -911,9 +932,15 @@ void AudioEvents::warm(const std::string& path) {
     for (size_t i = 0; i < samples.size(); ++i) AudioDecoder::prefetch(*impl_->pack, samples[i]);
 }
 
-void AudioEvents::warm_monsters(const std::vector<std::string>& ids) {
+void AudioEvents::warm_monsters(const std::vector<std::string>& ids, const std::vector<std::string>& sfx) {
     static const std::string root = "event:/sfx/enemy/enemy_attacks/";
-    std::vector<std::string> events;
+    std::vector<std::string> events(sfx);
+    std::set<std::string> folders;
+    for (size_t i = 0; i < sfx.size(); ++i) {
+        if (sfx[i].compare(0, root.size(), root) != 0) continue;
+        size_t slash = sfx[i].find('/', root.size());
+        if (slash != std::string::npos) folders.insert(sfx[i].substr(root.size(), slash - root.size()));
+    }
     {
         ScopedLock lock(impl_->lock);
         const Json& all = impl_->index["events"];
@@ -924,14 +951,22 @@ void AudioEvents::warm_monsters(const std::vector<std::string>& ids) {
             size_t slash = name.find('/', root.size());
             if (slash == std::string::npos || slash == root.size()) continue;
             std::string folder = name.substr(root.size(), slash - root.size());
-            for (size_t k = 0; k < ids.size(); ++k)
-                if (ids[k].compare(0, folder.size(), folder) == 0) {
-                    events.push_back(name);
-                    break;
-                }
+            bool wanted = folders.count(folder) != 0;
+            for (size_t k = 0; !wanted && k < ids.size(); ++k) wanted = ids[k].compare(0, folder.size(), folder) == 0;
+            if (wanted) events.push_back(name);
         }
     }
-    for (size_t i = 0; i < events.size(); ++i) warm(events[i]);
+    std::vector<std::string> samples;
+    for (size_t i = 0; i < events.size(); ++i) samples_of(events[i], samples);
+    if (!impl_->pack) return;
+    size_t bytes = 0;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        const PackEntry* e = impl_->pack->find(samples[i].c_str());
+        if (e) bytes += e->size;
+    }
+    log_info("monster sounds held: %u events, %u files, %.1f MB", (unsigned)events.size(), (unsigned)samples.size(),
+             bytes / 1048576.0);
+    AudioDecoder::set_held(*impl_->pack, samples);
 }
 
 void AudioEvents::prefer_bank(const std::string& bank) {

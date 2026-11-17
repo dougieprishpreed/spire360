@@ -13,7 +13,7 @@ bool is_audio_call(const std::string& call) {
 }
 }
 GameAudio::GameAudio(const Pack* pack) : pack_(pack), events_(pack), music_id_(0), ambience_id_(0), rng_(0x39ba1u),
-    floor_(-1), context_progress_(-1), expected_progress_(-1), game_over_(false), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
+    floor_(-1), context_progress_(-1), expected_progress_(-1), held_floor_(-2), game_over_(false), clock_(0), remainder_(0), recording_(NULL), recorded_frames_(0), waiting_(0),
     stopping_(false), mix_worst_(0), mix_total_(0), slow_logged_(-1e9), mix_count_(0), dry_(false) {
     /* The banks every screen uses, parsed before the first sound (sfx.bank
      * alone is a long parse, a hitch at the first attack otherwise). */
@@ -144,7 +144,7 @@ void GameAudio::ui(const std::string& path, float volume) { GameLock lock(this);
  * music (the Decimillipede's second and third segments hit in silence,
  * 462 ms late, rp106); read in the background, behind any sound a voice
  * waits on. */
-void GameAudio::warm_monsters(const std::vector<std::string>& ids) {
+void GameAudio::warm_monsters(const std::vector<std::string>& ids, const std::vector<std::string>& sfx) {
     std::vector<std::string> names;
     for (size_t i = 0; i < ids.size(); ++i) {
         std::string id = ids[i];
@@ -153,7 +153,7 @@ void GameAudio::warm_monsters(const std::vector<std::string>& ids) {
         for (size_t k = 0; k < id.size(); ++k) id[k] = (char)tolower((unsigned char)id[k]);
         names.push_back(id);
     }
-    events_.warm_monsters(names);
+    events_.warm_monsters(names, sfx);
 }
 
 void GameAudio::prefetch(const std::string& path) {
@@ -181,7 +181,7 @@ void GameAudio::ambience(const std::string& path) {
 }
 void GameAudio::menu() {
     GameLock lock(this);
-    stop_room_loops(); pending_.clear(); floor_ = -1; context_progress_ = -1; expected_progress_ = -1; act_track_.clear();
+    stop_room_loops(); pending_.clear(); floor_ = -1; held_floor_ = -2; context_progress_ = -1; expected_progress_ = -1; act_track_.clear();
     ambience(""); events_.global_parameter("Progress", 0);
     music("event:/music/menu_update");
 }
@@ -378,6 +378,7 @@ void GameAudio::release_run() {
         pinned_act_.clear();
     }
     if (pack_) AudioDecoder::set_pinned(*pack_, std::vector<std::string>());
+    if (pack_) AudioDecoder::set_held(*pack_, std::vector<std::string>());
     AudioDecoder::let_go(RELEASED_KEEP);
     events_.release_banks();
 }
@@ -406,6 +407,15 @@ void GameAudio::expect(const Json& d) {
     expected_progress_ = a.is_null() ? -1 : a["progress"].i(-1);
 }
 
+void GameAudio::hold(const Json& d) {
+    GameLock lock(this);
+    if (d["context"]["audio"].is_null()) return;
+    int floor = d["context"]["total_floor"].i();
+    if (floor == floor_ || floor == held_floor_) return;
+    for (std::map<std::string, Loop>::iterator i = loops_.begin(); i != loops_.end(); ++i) i->second.left = true;
+    held_floor_ = floor;
+}
+
 void GameAudio::decision(const Json& d) {
     {
         GameLock lock(this);
@@ -423,7 +433,18 @@ void GameAudio::decision(const Json& d) {
     prepare(d);
     GameLock lock(this);
     int floor = d["context"]["total_floor"].i();
-    if (floor_ != floor) { stop_room_loops(); floor_ = floor; }
+    if (floor_ != floor) {
+        /* the floor left: its loops stop (held: only those playing before
+         * the new room was built, not the ones it started) */
+        if (held_floor_ == floor) {
+            for (std::map<std::string, Loop>::iterator i = loops_.begin(); i != loops_.end();) {
+                if (i->second.left) { events_.stop(i->second.id, 0.1); loops_.erase(i++); }
+                else ++i;
+            }
+        } else stop_room_loops();
+        floor_ = floor;
+    }
+    held_floor_ = -2;
     act_track_ = a["track"].str();
     music(a["custom"].str().empty() ? act_track_ : a["custom"].str());
     ambience(a["ambience"].str());

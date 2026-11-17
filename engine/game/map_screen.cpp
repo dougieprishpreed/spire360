@@ -217,7 +217,7 @@ MapScreen::MapScreen(SceneLibrary* lib) : tools_(NULL), tool_tip_(NULL), tool_fo
     next_tick_(0), current_col_(-1), current_row_(-1),
     opening_(0), travel_t_(-1), marker_(NULL), map_ctl_(NULL), scroll_(0), scroll_to_(0), scroll_lo_(0), scroll_hi_(0),
     scroll_step_(1), act_anim_(-1), act_delay_(1), act_duration_(3), map_ftue_seen_(false), travel_time_(0.8), banner_(NULL),
-    banner_end_(0) {
+    banner_end_(0), reveal_wait_(false) {
     start_point_ = NULL;
     tool_icons_[0] = tool_icons_[1] = tool_icons_[2] = NULL;
 }
@@ -792,6 +792,7 @@ Node* MapScreen::build(const Json& d, std::string* error) {
      * banner. The first act begins after Neow, at floor 1. */
     act_anim_ = -1;
     banner_ = NULL;
+    reveal_wait_ = false;
     bool view = d["type"].str() == "map_view";
     bool neow = d["act"].i(1) == 1 && d["context"]["ancient"].str() == "NEOW";
     if (!view && d["floor"].i(-1) == (neow ? 1 : 0)) {
@@ -841,6 +842,7 @@ Node* MapScreen::build(const Json& d, std::string* error) {
             if (banner->is_canvas_item())
                 tweens_.tween(&((CanvasItem*)banner)->modulate.a, 0.0f, 1.0f, TRANS_QUAD, EASE_OUT, 1.75f + hold);
         }
+        reveal_wait_ = true;
     }
     return root;
 }
@@ -950,7 +952,14 @@ void MapScreen::begin_travel(int col, int row) {
 
 /* NNormalMapPoint._Process: a travelable point's icon pulses
  * (sin(t) * 0.25 + 1.2, t += 4 dt) unless it has the focus. */
+void MapScreen::room_shown() {
+    if (!reveal_wait_) return;
+    reveal_wait_ = false;
+    log_info("map: the act's opening as its room shows");
+}
+
 void MapScreen::frame(double dt) {
+    if (reveal_wait_) return;
     tweens_.update(dt);
     opening_ += dt;
     if (cursor_ && (cursor_dir_.x != 0 || cursor_dir_.y != 0)) {

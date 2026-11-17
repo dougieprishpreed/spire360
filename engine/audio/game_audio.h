@@ -31,6 +31,10 @@ public:
     /* A decision's banks parsed (its tracks' and ambience's) without
      * playing them: decision() follows once the room shows. */
     void prepare(const Json& decision);
+    /* A held decision's room, built before it shows: the loops playing now
+     * are the floor's it leaves (they stop as it shows, decision()); those
+     * its screen starts as it is built stay (Neow's water, rp115). */
+    void hold(const Json& decision);
     /* The decision after a fight's last steps (its rewards): its Progress
      * goes with NRunMusicController.UpdateTrack as the steps play it, when
      * the game ends the combat (CombatManager.EndCombatInternal), not when
@@ -63,14 +67,14 @@ public:
     void prefetch(const std::string& path);
     /* A fight's monsters' sounds read ahead as it starts (AudioEvents::
      * warm_monsters): ids as the logic names them (MONSTER.X or X). */
-    void warm_monsters(const std::vector<std::string>& ids);
+    void warm_monsters(const std::vector<std::string>& ids, const std::vector<std::string>& sfx = std::vector<std::string>());
     /* Cues run on the clock as ever but nothing is decoded or mixed (a tool
      * sweeping traces: spire_gaps --fast). */
     void set_dry(bool dry) { dry_ = dry; }
     void stop_room_loops(const std::string& owner = std::string());
     AudioEvents& events() { return events_; }
 private:
-    struct Loop { u32 id; std::string parameter, owner; float stop_value; };
+    struct Loop { u32 id; std::string parameter, owner; float stop_value; bool left; Loop() : id(0), stop_value(1), left(false) {} };
     struct Scheduled { double at; Json cue; };
     void music(const std::string& path);
     void pin_music(const Json& audio);
@@ -91,6 +95,7 @@ private:
     std::string pinned_key_, boss_music_, pinned_act_;
     u32 music_id_, ambience_id_, rng_;
     int floor_, context_progress_, expected_progress_;
+    int held_floor_; /* hold()'s floor, its loops marked left */
     bool game_over_; /* game_over() played, until the next run's decision */
     double clock_, remainder_;
     FILE* recording_;
