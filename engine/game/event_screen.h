@@ -116,6 +116,12 @@ private:
     bool behind_;
     bool hold_sfx_;
     Json held_sfx_;
+    /* The name banner's timeline (AnimateVfx) runs from the room's reveal
+     * (room_shown): from the screen's first frame it played out behind the
+     * run's and the act's black, the title seen only on the next page,
+     * settled (rp116). */
+    bool revealed_, banner_started_;
+    float banner_time_;
     Control* content_container_;
     Control* content_;
     Control* options_box_;

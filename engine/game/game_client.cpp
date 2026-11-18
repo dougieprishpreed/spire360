@@ -1480,10 +1480,16 @@ void GameClient::show(const Json& d) {
         event_portrait_ = Json();
     }
     if (kind == "event_choice") {
+        /* the same room's next page, after a card selection over it too
+         * (Neow's relic): the ancient's banner stays settled, as the game's
+         * room does under the overlay (it played its entrance again, rp116) */
+        bool same_room = !last_event_.is_null() && !d["event_id"].str().empty() &&
+                         last_event_["event_id"].str() == d["event_id"].str() &&
+                         last_event_["context"]["total_floor"].i() == d["context"]["total_floor"].i();
         last_event_ = d;
         EventScreen* event = new EventScreen(lib_);
         event->set_room_portrait(event_portrait_);
-        event->set_continued(prev_kind == "event_choice" && !prev_event.empty() && prev_event == d["event_id"].str());
+        event->set_continued((prev_kind == "event_choice" && !prev_event.empty() && prev_event == d["event_id"].str()) || same_room);
         if (!room_showing()) event->hold_entry_sfx();
         if (event_room) { event->set_combat(room_); room_ = NULL; }
         ported_ = event;

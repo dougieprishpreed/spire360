@@ -50,7 +50,7 @@ static std::string option_text(const Json& o) {
 EventScreen::EventScreen(SceneLibrary* lib)
     : lib_(lib), combat_(NULL), focus_(-1), enabled_(false), enable_at_(0), time_(0), sparring_(false), spar_at_(0),
       steps_options_(NULL), root_(NULL), combat_layout_(false), ancient_(false), line_(0), laid_out_(false),
-      continued_(false), behind_(false), hold_sfx_(false),
+      continued_(false), behind_(false), hold_sfx_(false), revealed_(false), banner_started_(false), banner_time_(0),
       content_container_(NULL), content_(NULL), options_box_(NULL), next_button_(NULL), content_y_(0),
       container_h_(0), banner_(NULL), banner_title_(NULL), banner_epithet_(NULL) {}
 
@@ -67,6 +67,7 @@ static void play_sfx_cue(SceneLibrary* lib, const char* op, const Json& path) {
 }
 
 void EventScreen::room_shown() {
+    revealed_ = true;
     if (!hold_sfx_) return;
     hold_sfx_ = false;
     if (!held_sfx_.is_null()) play_sfx_cue(lib_, "play", held_sfx_);
@@ -102,6 +103,8 @@ Node* EventScreen::build(const Json& d, std::string* error) {
     line_ = 0;
     laid_out_ = false;
     banner_ = NULL;
+    revealed_ = banner_started_ = false;
+    banner_time_ = 0;
     ancient_ = d["layout"].str() == "Ancient";
 
     Control* root = full_rect_control("EventRoom");
@@ -540,7 +543,6 @@ static Json spar_steps() {
 }
 
 void EventScreen::frame(double dt) {
-    float before = time_;
     time_ += (float)dt;
     /* behind an overlay: every entrance at its end at once */
     tweens_.update(behind_ ? 600.0 : dt);
@@ -590,11 +592,20 @@ void EventScreen::frame(double dt) {
 
     /* The name banner's timeline (AnimateVfx), simplified: the glyph
      * spacing effect is a fade in. */
-    if (banner_) {
+    if (banner_ && !revealed_ && !banner_started_ && !continued_) {
+        /* behind the black: not yet (nothing of it drawn meanwhile) */
+        banner_->modulate.a = 0;
+    } else if (banner_) {
         Control* ep = banner_epithet_ && banner_epithet_->is_control() ? (Control*)banner_epithet_ : NULL;
-        if (before == 0 && continued_) {
+        float bbefore = banner_time_;
+        if (banner_started_) banner_time_ += (float)dt;
+        if (!banner_started_ && continued_) {
+            banner_started_ = true;
             settle_banner(false);
-        } else if (before == 0) {
+        } else if (!banner_started_) {
+            banner_started_ = true;
+            banner_->modulate.a = 1;
+            log_info("ancient: the name banner as the room shows");
             banner_->offset[SIDE_TOP] = banner_->offset[SIDE_BOTTOM] = -200;
             tweens_.tween(&banner_->offset[SIDE_TOP], -100, 4.0f, TRANS_CIRC, EASE_OUT);
             tweens_.tween(&banner_->offset[SIDE_BOTTOM], -100, 4.0f, TRANS_CIRC, EASE_OUT);
@@ -606,7 +617,7 @@ void EventScreen::frame(double dt) {
                 tweens_.tween(&ep->offset[SIDE_BOTTOM], 42, 2.0f, TRANS_CUBIC, EASE_OUT, 1.0f);
                 tweens_.tween(&ep->modulate.a, 1, 1.0f, TRANS_LINEAR, EASE_IN_OUT, 1.5f);
             }
-        } else if (!continued_ && before < 4.5f && time_ >= 4.5f) {
+        } else if (!continued_ && bbefore < 4.5f && banner_time_ >= 4.5f) {
             /* Red, then gone (one tween per property: these start now). */
             CanvasItem* both[2] = { banner_title_, banner_epithet_ };
             for (int k = 0; k < 2; ++k) {
@@ -615,7 +626,7 @@ void EventScreen::frame(double dt) {
                 tweens_.tween(&both[k]->modulate.b, 0, 1.0f, TRANS_EXPO, EASE_OUT);
                 tweens_.tween(&both[k]->modulate.a, 0, 1.0f, TRANS_CUBIC, EASE_OUT);
             }
-        } else if (!continued_ && before < 5.5f && time_ >= 5.5f) {
+        } else if (!continued_ && bbefore < 5.5f && banner_time_ >= 5.5f) {
             settle_banner(true);
         }
     }
